@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import hmac
 import json
 import logging
-import os
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Sequence, cast
-from urllib import request
 
 from env import Executables
 from Qt.QtCore import QRegExp
@@ -37,6 +34,8 @@ except TypeError:
 
 log = logging.getLogger(__name__)
 ASSET_BUILDER_SCRIPT = get_pipe_path() / "pipe/h/assetbuilder.py"
+# Temporary switch: disable Houdini component builds until HDAs/tooling are ready.
+ENABLE_HOUDINI_ASSET_BUILD = False
 
 
 class HoudiniBuildError(RuntimeError):
@@ -286,6 +285,22 @@ class AssetPublisher(Publisher):
         return True
 
     def _postpublish(self) -> None:
+        if not ENABLE_HOUDINI_ASSET_BUILD:
+            log.info("Skipping Houdini component publish (disabled)")
+            self._houdini_result = {
+                "status": "skipped",
+                "mode": "disabled",
+                "hip_path": str(self._component_hip_path or ""),
+                "usd_path": str(getattr(self, "_publish_path", "")),
+                "export_dir": str(self._component_export_dir or ""),
+                "export_performed": False,
+                "variant": self._geo_variant,
+                "changed_usd_reference": False,
+                "warnings": [],
+                "errors": [],
+            }
+            return
+
         if self._is_substance_only:
             log.info("Skipping Houdini component publish for substance-only export")
             return
