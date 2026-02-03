@@ -1,10 +1,8 @@
 # import substance painter-specific scripts
-from . import channels
-from . import export
-from . import local
-from . import reload
+from . import assetfile, channels, export, local, reload
 
 __all__ = [
+    "assetfile",
     "channels",
     "export",
     "local",
