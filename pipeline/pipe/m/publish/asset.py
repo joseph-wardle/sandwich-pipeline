@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Sequence, cast
 from urllib import request
 
-from env import PIPEBOT_SECRET, PIPEBOT_URL, Executables
+from env import Executables
 from Qt.QtCore import QRegExp
 from Qt.QtGui import QRegExpValidator, QTextCursor
 from Qt.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QWidget
@@ -283,25 +283,6 @@ class AssetPublisher(Publisher):
         return f"{message}\n\n" + "\n".join(details)
 
     def _presave(self) -> bool:
-        # notify webhook of override
-        if self._override:
-            asset = cast(Asset, self._entity)
-            override_info = {
-                "user": os.getlogin(),
-                "asset": asset.display_name,
-                "path": str(self._publish_path),
-            }
-            data = bytes(json.dumps(override_info), encoding="utf-8")
-            hashcheck = (
-                "sha1=" + hmac.new(PIPEBOT_SECRET.encode(), data, "sha1").hexdigest()
-            )
-
-            req = request.Request(
-                url=PIPEBOT_URL + "/model_checker",
-                data=data,
-            )
-            req.add_header("x-pipebot-signature", hashcheck)
-            request.urlopen(req)
         return True
 
     def _postpublish(self) -> None:
