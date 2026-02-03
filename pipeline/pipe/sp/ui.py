@@ -3,38 +3,42 @@ from __future__ import annotations
 import logging
 import os
 from math import log2
-from Qt import QtCore, QtWidgets
-from Qt.QtGui import QIcon, QPixmap, QRegExpValidator
-from Qt.QtCore import QRegExp
+from re import findall
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QEventLoop  # type: ignore[import-not-found]
+from Qt import QtCore, QtWidgets
+from Qt.QtCore import QRegExp
+from Qt.QtGui import QIcon, QPixmap, QRegExpValidator
 from Qt.QtWidgets import (
     QComboBox,
     QLabel,
     QLayout,
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
-    QScrollArea,
-    QPushButton,
     QLineEdit,
+    QMainWindow,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
-from re import findall
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import typing
 
 import substance_painter as sp
+from env_sg import DB_Config
 
 from pipe.db import DB
 from pipe.glui.dialogs import ButtonPair, MessageDialog
+from pipe.sp.assetfile import (
+    get_asset_selection_metadata,
+    store_asset_selection_metadata,
+)
 from pipe.sp.export import Exporter, TexSetExportSettings
 from pipe.sp.local import get_main_qt_window
 from pipe.struct.db import Asset
 from pipe.struct.material import DisplacementSource, NormalSource, NormalType
 from pipe.util import checkbox_callback_helper, dict_index
-
-from env_sg import DB_Config
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +94,18 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         # Get asset names (assumed sorted)
         asset_names = self._conn.get_asset_name_list(sorted=True)
 
+        selection_metadata = get_asset_selection_metadata()
+        metadata_map = selection_metadata.get("asset_map") or {}
+        default_asset = selection_metadata.get("last_asset")
+
+        if default_asset and default_asset in asset_names:
+            metadata_label = QLabel(
+                f"Defaulting selection to {default_asset} from project metadata."
+            )
+            metadata_label.setWordWrap(True)
+            metadata_label.setStyleSheet("color: #9fb4ff;")
+            self._main_layout.addWidget(metadata_label)
+
         # Add widgets for each texture set
         for ts in sp.textureset.all_texture_sets():
             ts_label = QLabel(ts.name())
@@ -107,6 +123,9 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             # Dropdown to select asset
             asset_dropdown = QComboBox()
             asset_dropdown.addItems(asset_names)
+            preferred = metadata_map.get(ts.name(), default_asset)
+            if preferred and preferred in asset_names:
+                asset_dropdown.setCurrentText(preferred)
 
             # Store dropdown in a dictionary
             self._tex_set_dropdowns[ts] = asset_dropdown
@@ -158,6 +177,13 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 self._tex_set_asset_dict[selected_asset] = []
 
             self._tex_set_asset_dict[selected_asset].append(ts)
+
+        asset_map = {
+            ts.name(): asset_name
+            for asset_name, tex_sets in self._tex_set_asset_dict.items()
+            for ts in tex_sets
+        }
+        store_asset_selection_metadata(asset_map)
 
         self.clear_layout()
         self._setup_asset_ui()

@@ -1,26 +1,29 @@
 from __future__ import annotations
 
-from Qt import QtWidgets
-
-import substance_painter as sp
-
 import pipe.sp
-from pipe.sp.ui import SubstanceExportWindow
+import substance_painter as sp
 from pipe.glui.dialogs import MessageDialog
-
+from pipe.sp.ui import SubstanceExportWindow
+from Qt import QtWidgets
 
 plugin_widgets: list[QtWidgets.QWidget] = []
 
 
 def start_plugin():
+    # Create text widget for menu (Open Asset)
+    open_action = QtWidgets.QAction("Bobo — Open Asset")
+    open_action.triggered.connect(launch_asset_opener)
+
     # Create text widget for menu
     action = QtWidgets.QAction("Bobo — Publish Textures")
     action.triggered.connect(launch_exporter)
 
     # Add widget to the File menu
+    sp.ui.add_action(sp.ui.ApplicationMenu.File, open_action)
     sp.ui.add_action(sp.ui.ApplicationMenu.File, action)
 
     # Store the widget for proper cleanup later
+    plugin_widgets.append(open_action)
     plugin_widgets.append(action)
 
 
@@ -58,3 +61,9 @@ def launch_exporter():
     window.show()
 
     print("Launching Substance Exporter")
+
+
+def launch_asset_opener():
+    from pipe.sp.assetfile import launch_open_asset_textures
+
+    launch_open_asset_textures()
