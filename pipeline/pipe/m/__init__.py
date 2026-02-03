@@ -1,4 +1,4 @@
 # Import nested modules
-from . import local, picker, reload, rig_publish, symmetry
+from . import assetfile, local, picker, reload, rig_publish, symmetry
 
-__all__ = ["local", "picker", "reload", "rig_publish", "symmetry"]
+__all__ = ["assetfile", "local", "picker", "reload", "rig_publish", "symmetry"]

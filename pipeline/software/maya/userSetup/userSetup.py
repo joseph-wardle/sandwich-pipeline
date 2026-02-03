@@ -1,4 +1,6 @@
-"""Initialize Maya environment on startup"""
+"""Initialize Maya environment on startup."""
+
+import os
 
 import maya.cmds as mc
 
@@ -28,6 +30,12 @@ def main():
     from pipe.m.publish import ExportChaser
 
     mayaUsdLib.ExportChaser.Register(ExportChaser, ExportChaser.ID)
+
+    # Optional pipeline menu entries
+    if os.getenv("PIPE_MAYA_ASSET_MENU", "0") == "1":
+        from pipe.m.assetfile import install_asset_menu
+
+        install_asset_menu(create_menu=os.getenv("PIPE_MAYA_CREATE_MENU", "0") == "1")
 
 
 if not mc.about(batch=True):
