@@ -14,28 +14,28 @@ global proc shelf_Bobo_Assets () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Model Checker" 
+        -annotation "Model Checker"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Model Chcker" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Model Chcker"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -imageOverlayLabel "Checker" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "monocle.png" 
-        -image1 "monocle.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -imageOverlayLabel "Checker"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "monocle.png"
+        -image1 "monocle.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.publish import ModelChecker; chck = ModelChecker.get(); chck.configure(); chck.show_UI();" 
-        -sourceType "python" 
+        -command "from pipe.m.publish import ModelChecker; chck = ModelChecker.get(); chck.configure(); chck.show_UI();"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -49,28 +49,28 @@ global proc shelf_Bobo_Assets () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Tool for L&D asset publishing" 
+        -annotation "Open or create an asset model file"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Publish" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Open Asset"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -imageOverlayLabel "Publish Asset" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "createContainer.png" 
-        -image1 "createContainer.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -imageOverlayLabel "Open Asset"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "fileOpen.png"
+        -image1 "fileOpen.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.publish import AssetPublisher; AssetPublisher().publish();" 
-        -sourceType "python" 
+        -command "from pipe.m.assetfile import MAssetFileManager; MAssetFileManager().open_file()"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -84,28 +84,28 @@ global proc shelf_Bobo_Assets () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Rig Export" 
+        -annotation "Tool for L&D asset publishing"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Rig Export" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Publish"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -imageOverlayLabel "Rig Export" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "createContainer.png" 
-        -image1 "createContainer.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -imageOverlayLabel "Publish Asset"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "createContainer.png"
+        -image1 "createContainer.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.publish import RigPublisher; RigPublisher().publish();" 
-        -sourceType "python" 
+        -command "from pipe.m.publish import AssetPublisher; AssetPublisher().publish();"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -119,28 +119,63 @@ global proc shelf_Bobo_Assets () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Turnaround" 
+        -annotation "Rig Export"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Turnaround" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Rig Export"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -imageOverlayLabel "Turnaround" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "createContainer.png" 
-        -image1 "createContainer.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -imageOverlayLabel "Rig Export"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "createContainer.png"
+        -image1 "createContainer.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.turnaround import Turnaround; Turnaround()" 
-        -sourceType "python" 
+        -command "from pipe.m.publish import RigPublisher; RigPublisher().publish();"
+        -sourceType "python"
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "Turnaround"
+        -enableBackground 0
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Turnaround"
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -font "plainLabelFont"
+        -imageOverlayLabel "Turnaround"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "createContainer.png"
+        -image1 "createContainer.png"
+        -style "iconOnly"
+        -marginWidth 0
+        -marginHeight 1
+        -command "from pipe.m.turnaround import Turnaround; Turnaround()"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -154,29 +189,29 @@ global proc shelf_Bobo_Assets () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Symmetry Heatmap" 
+        -annotation "Symmetry Heatmap"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Symmetry Heatmap" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Symmetry Heatmap"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -overlayLabelColor 0.8 0.8 0.8 
-        -overlayLabelBackColor 0 0 0 0.5 
-        -image "symmetry-check.png" 
-        -image1 "symmetry-check.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "symmetry-check.png"
+        -image1 "symmetry-check.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.symmetry import visualize_symmetry_of_selected\nvisualize_symmetry_of_selected()" 
-        -sourceType "python" 
+        -command "from pipe.m.symmetry import visualize_symmetry_of_selected\nvisualize_symmetry_of_selected()"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
 
-} 
+}
