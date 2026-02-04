@@ -124,6 +124,10 @@ class AssetPaths:
     def publish_source_model_usd(self) -> Path:
         return self.publish_source_dir / PUBLISH_SOURCE_MODEL_FILENAME
 
+    def publish_source_variant_usd(self, variant: str) -> Path:
+        """Return the publish/_src USD path for a named variant."""
+        return self.publish_source_dir / f"{variant.strip()}.usd"
+
     @property
     def publish_asset_usd(self) -> Path:
         return self.publish_dir / PUBLISH_ASSET_USD_FILENAME
