@@ -10,9 +10,10 @@ from env import Executables
 from Qt.QtCore import QRegExp
 from Qt.QtGui import QRegExpValidator, QTextCursor
 from Qt.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QWidget
-from shared.util import get_pipe_path, get_production_path
+from shared.util import get_pipe_path
 from software.houdini.dcc import HoudiniDCC
 
+from pipe.asset.paths import paths_for_asset
 from pipe.db import DB
 from pipe.glui.dialogs import (
     FilteredListDialog,
@@ -246,10 +247,10 @@ class AssetPublisher(Publisher):
         name, basename = self._compute_component_basename(
             asset, variant_name, self._is_substance_only
         )
-        publish_dir = get_production_path() / asset.path
+        asset_paths = paths_for_asset(asset)
         self._asset_name = name
         self._component_basename = basename
-        return publish_dir / f"{basename}.usd"
+        return asset_paths.publish_source_variant_usd(variant_name)
 
     def _get_confirm_message(self) -> str:
         message = super()._get_confirm_message()
