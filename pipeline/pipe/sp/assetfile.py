@@ -190,20 +190,17 @@ class SubstanceAssetDialog(FilteredListDialog):
         self._info_label.setText(f"Textures project: {paths.textures_path} ({status})")
 
 
-class SubstanceAssetActionDialog(QtWidgets.QDialog, DialogFilteredList):
-    """Select an asset and choose how to open or create its textures project."""
+class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
+    """Select an asset and choose to open or create its textures project."""
 
     ACTION_OPEN_EXISTING = "open_existing"
-    ACTION_SAVE_CURRENT = "save_current_as"
-    ACTION_CREATE_DEFAULT = "create_default"
+    ACTION_CREATE_PROJECT = "create_project"
 
     _conn: DB
     _info_label: QtWidgets.QLabel
-    _mesh_status_label: QtWidgets.QLabel
     _action: str | None
     _asset: Asset | None
     _paths: AssetPaths | None
-    _resolved_mesh_path: Path | None
 
     def __init__(
         self, parent: QtWidgets.QWidget | None, items: list[str], conn: DB
@@ -213,7 +210,6 @@ class SubstanceAssetActionDialog(QtWidgets.QDialog, DialogFilteredList):
         self._action = None
         self._asset = None
         self._paths = None
-        self._resolved_mesh_path = None
 
         self._init_filtered_list(
             items,
@@ -222,9 +218,9 @@ class SubstanceAssetActionDialog(QtWidgets.QDialog, DialogFilteredList):
         )
 
         self.setParent(parent)
-        self.setWindowTitle("Open Asset Textures")
+        self.setWindowTitle("Open Asset")
         self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
-        self.resize(600, 720)
+        self.resize(560, 640)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.addLayout(self.filtered_list)
@@ -238,74 +234,24 @@ class SubstanceAssetActionDialog(QtWidgets.QDialog, DialogFilteredList):
         self._info_label.setWordWrap(True)
         self._info_label.setTextFormat(QtCore.Qt.PlainText)
         info_layout.addWidget(self._info_label)
-
         layout.addWidget(info_widget)
 
-        create_widget = QtWidgets.QWidget(self)
-        create_layout = QtWidgets.QVBoxLayout(create_widget)
-        create_layout.setContentsMargins(0, 0, 0, 0)
-        create_layout.setSpacing(6)
-
-        create_title = QtWidgets.QLabel("Create Default Options")
-        create_layout.addWidget(create_title)
-
-        variant_row = QtWidgets.QHBoxLayout()
-        self._geo_variant_radio = QtWidgets.QRadioButton("Geometry Variant")
-        self._geo_variant_radio.setChecked(True)
-        self._geo_variant_dropdown = QtWidgets.QComboBox()
-        variant_row.addWidget(self._geo_variant_radio, 30)
-        variant_row.addWidget(self._geo_variant_dropdown, 70)
-        create_layout.addLayout(variant_row)
-
-        custom_row = QtWidgets.QHBoxLayout()
-        self._custom_mesh_radio = QtWidgets.QRadioButton("Custom Mesh")
-        self._custom_mesh_field = QtWidgets.QLineEdit()
-        self._custom_mesh_field.setPlaceholderText("Select a custom mesh...")
-        self._custom_mesh_browse = QtWidgets.QPushButton("Browse...")
-        custom_row.addWidget(self._custom_mesh_radio, 30)
-        custom_row.addWidget(self._custom_mesh_field, 55)
-        custom_row.addWidget(self._custom_mesh_browse, 15)
-        create_layout.addLayout(custom_row)
-
-        self._mesh_status_label = QtWidgets.QLabel("Mesh source: --")
-        self._mesh_status_label.setWordWrap(True)
-        self._mesh_status_label.setTextFormat(QtCore.Qt.PlainText)
-        create_layout.addWidget(self._mesh_status_label)
-
-        layout.addWidget(create_widget)
-
         buttons_layout = QtWidgets.QHBoxLayout()
-        self._open_existing_btn = QtWidgets.QPushButton("Open Existing")
-        self._save_current_btn = QtWidgets.QPushButton("Save Current As")
-        self._create_default_btn = QtWidgets.QPushButton("Create Default")
-        self._cancel_btn = QtWidgets.QPushButton("Cancel")
-
+        self._open_existing_btn = QtWidgets.QPushButton("Open Asset Project")
+        self._create_project_btn = QtWidgets.QPushButton("Create Asset Project")
         buttons_layout.addWidget(self._open_existing_btn)
-        buttons_layout.addWidget(self._save_current_btn)
-        buttons_layout.addWidget(self._create_default_btn)
+        buttons_layout.addWidget(self._create_project_btn)
         buttons_layout.addStretch(1)
-        buttons_layout.addWidget(self._cancel_btn)
         layout.addLayout(buttons_layout)
 
         self._list_widget.itemSelectionChanged.connect(self._on_item_selected)
-        self._geo_variant_dropdown.currentTextChanged.connect(self._update_mesh_status)
-        self._custom_mesh_field.textChanged.connect(self._update_mesh_status)
-        self._geo_variant_radio.toggled.connect(self._update_create_mode)
-        self._custom_mesh_radio.toggled.connect(self._update_create_mode)
-        self._custom_mesh_browse.clicked.connect(self._browse_custom_mesh)
-
         self._open_existing_btn.clicked.connect(
             lambda: self._set_action_and_accept(self.ACTION_OPEN_EXISTING)
         )
-        self._save_current_btn.clicked.connect(
-            lambda: self._set_action_and_accept(self.ACTION_SAVE_CURRENT)
+        self._create_project_btn.clicked.connect(
+            lambda: self._set_action_and_accept(self.ACTION_CREATE_PROJECT)
         )
-        self._create_default_btn.clicked.connect(
-            lambda: self._set_action_and_accept(self.ACTION_CREATE_DEFAULT)
-        )
-        self._cancel_btn.clicked.connect(self.reject)
-
-        self._update_create_mode()
+        self._update_state()
 
     def _set_action_and_accept(self, action: str) -> None:
         self._action = action
@@ -316,6 +262,183 @@ class SubstanceAssetActionDialog(QtWidgets.QDialog, DialogFilteredList):
 
     def get_selected_asset(self) -> Asset | None:
         return self._asset
+
+    def _on_item_selected(self) -> None:
+        selected = self.get_selected_item()
+        if not selected:
+            self._asset = None
+            self._paths = None
+            self._info_label.setText("Select an asset to see details.")
+            self._update_state()
+            return
+
+        asset = self._conn.get_asset_by_name(selected)
+        if not asset or not asset.path:
+            self._asset = None
+            self._paths = None
+            self._info_label.setText("Asset path not set in ShotGrid.")
+            self._update_state()
+            return
+
+        self._asset = asset
+        self._paths = paths_for_asset(asset)
+        project_exists = self._paths.textures_path.exists()
+        status = "exists" if project_exists else "missing"
+        self._info_label.setText(
+            f"Textures project: {self._paths.textures_path} ({status})"
+        )
+        self._update_state()
+
+    def _update_state(self) -> None:
+        has_asset = bool(self._asset)
+        project_exists = False
+        if self._paths:
+            project_exists = self._paths.textures_path.exists()
+        self._open_existing_btn.setEnabled(project_exists)
+        self._create_project_btn.setEnabled(has_asset)
+
+
+class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
+    """Choose how to create the textures project for an asset."""
+
+    ACTION_CREATE_DEFAULT = "create_default"
+    ACTION_USE_CURRENT = "use_current"
+
+    _action: str | None
+
+    def __init__(
+        self, parent: QtWidgets.QWidget | None, asset: Asset, paths: AssetPaths
+    ) -> None:
+        super().__init__(parent)
+        self._action = None
+
+        self.setParent(parent)
+        self.setWindowTitle("Create Asset Project")
+        self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
+        self.resize(480, 320)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        asset_label = asset.name or asset.disp_name or "Asset"
+        title = QtWidgets.QLabel(f"Create textures project for {asset_label}")
+        title.setTextFormat(QtCore.Qt.PlainText)
+        title.setWordWrap(True)
+        layout.addWidget(title)
+
+        project_exists = paths.textures_path.exists()
+        status = "exists" if project_exists else "missing"
+        details = QtWidgets.QLabel(
+            f"Textures project: {paths.textures_path} ({status})"
+        )
+        details.setWordWrap(True)
+        details.setTextFormat(QtCore.Qt.PlainText)
+        layout.addWidget(details)
+
+        current_path = _current_project_path()
+        if current_path:
+            current_label = QtWidgets.QLabel(f"Current project: {current_path}")
+        else:
+            current_label = QtWidgets.QLabel(
+                "Current project: none (open a project to enable using it)"
+            )
+        current_label.setWordWrap(True)
+        current_label.setTextFormat(QtCore.Qt.PlainText)
+        layout.addWidget(current_label)
+
+        layout.addStretch(1)
+
+        buttons_layout = QtWidgets.QHBoxLayout()
+        self._create_default_btn = QtWidgets.QPushButton("Create Default Project")
+        self._use_current_btn = QtWidgets.QPushButton("Use Currently Open Project")
+        buttons_layout.addWidget(self._create_default_btn)
+        buttons_layout.addWidget(self._use_current_btn)
+        buttons_layout.addStretch(1)
+        layout.addLayout(buttons_layout)
+
+        self._create_default_btn.clicked.connect(
+            lambda: self._set_action_and_accept(self.ACTION_CREATE_DEFAULT)
+        )
+        self._use_current_btn.clicked.connect(
+            lambda: self._set_action_and_accept(self.ACTION_USE_CURRENT)
+        )
+        self._use_current_btn.setEnabled(sp.project.is_open())
+
+    def _set_action_and_accept(self, action: str) -> None:
+        self._action = action
+        self.accept()
+
+    def get_selected_action(self) -> str | None:
+        return self._action
+
+
+class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
+    """Pick a geometry source to create a default textures project."""
+
+    _asset: Asset
+    _paths: AssetPaths
+    _mesh_status_label: QtWidgets.QLabel
+    _resolved_mesh_path: Path | None
+
+    def __init__(
+        self, parent: QtWidgets.QWidget | None, asset: Asset, paths: AssetPaths
+    ) -> None:
+        super().__init__(parent)
+        self._asset = asset
+        self._paths = paths
+        self._resolved_mesh_path = None
+
+        self.setParent(parent)
+        self.setWindowTitle("Create Default Project")
+        self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
+        self.resize(560, 360)
+
+        layout = QtWidgets.QVBoxLayout(self)
+
+        info_label = QtWidgets.QLabel(
+            "Choose the mesh source for the default textures project."
+        )
+        info_label.setWordWrap(True)
+        info_label.setTextFormat(QtCore.Qt.PlainText)
+        layout.addWidget(info_label)
+
+        variant_row = QtWidgets.QHBoxLayout()
+        self._geo_variant_radio = QtWidgets.QRadioButton("Geometry Variant")
+        self._geo_variant_radio.setChecked(True)
+        self._geo_variant_dropdown = QtWidgets.QComboBox()
+        variant_row.addWidget(self._geo_variant_radio, 30)
+        variant_row.addWidget(self._geo_variant_dropdown, 70)
+        layout.addLayout(variant_row)
+
+        custom_row = QtWidgets.QHBoxLayout()
+        self._custom_mesh_radio = QtWidgets.QRadioButton("Custom Mesh")
+        self._custom_mesh_field = QtWidgets.QLineEdit()
+        self._custom_mesh_field.setPlaceholderText("Select a custom mesh...")
+        self._custom_mesh_browse = QtWidgets.QPushButton("Browse...")
+        custom_row.addWidget(self._custom_mesh_radio, 30)
+        custom_row.addWidget(self._custom_mesh_field, 55)
+        custom_row.addWidget(self._custom_mesh_browse, 15)
+        layout.addLayout(custom_row)
+
+        self._mesh_status_label = QtWidgets.QLabel("Mesh source: --")
+        self._mesh_status_label.setWordWrap(True)
+        self._mesh_status_label.setTextFormat(QtCore.Qt.PlainText)
+        layout.addWidget(self._mesh_status_label)
+
+        buttons_layout = QtWidgets.QHBoxLayout()
+        self._create_default_btn = QtWidgets.QPushButton("Create Default Project")
+        buttons_layout.addWidget(self._create_default_btn)
+        buttons_layout.addStretch(1)
+        layout.addLayout(buttons_layout)
+
+        self._geo_variant_dropdown.currentTextChanged.connect(self._update_mesh_status)
+        self._custom_mesh_field.textChanged.connect(self._update_mesh_status)
+        self._geo_variant_radio.toggled.connect(self._update_create_mode)
+        self._custom_mesh_radio.toggled.connect(self._update_create_mode)
+        self._custom_mesh_browse.clicked.connect(self._browse_custom_mesh)
+        self._create_default_btn.clicked.connect(self.accept)
+        self._populate_geo_variants()
+        self._update_create_mode()
 
     def use_custom_mesh(self) -> bool:
         return self._custom_mesh_radio.isChecked()
@@ -332,40 +455,10 @@ class SubstanceAssetActionDialog(QtWidgets.QDialog, DialogFilteredList):
     def get_resolved_mesh_path(self) -> Path | None:
         return self._resolved_mesh_path
 
-    def _on_item_selected(self) -> None:
-        selected = self.get_selected_item()
-        if not selected:
-            self._asset = None
-            self._paths = None
-            self._info_label.setText("Select an asset to see details.")
-            self._populate_geo_variants(None)
-            self._update_create_mode()
-            return
-
-        asset = self._conn.get_asset_by_name(selected)
-        if not asset or not asset.path:
-            self._asset = None
-            self._paths = None
-            self._info_label.setText("Asset path not set in ShotGrid.")
-            self._populate_geo_variants(None)
-            self._update_create_mode()
-            return
-
-        self._asset = asset
-        self._paths = paths_for_asset(asset)
-        project_exists = self._paths.textures_path.exists()
-        status = "exists" if project_exists else "missing"
-        self._info_label.setText(
-            f"Textures project: {self._paths.textures_path} ({status})"
-        )
-
-        self._populate_geo_variants(asset)
-        self._update_create_mode()
-
-    def _populate_geo_variants(self, asset: Asset | None) -> None:
+    def _populate_geo_variants(self) -> None:
         variants = set()
-        if asset and hasattr(asset, "geometry_variants"):
-            variants.update(asset.geometry_variants)
+        if hasattr(self._asset, "geometry_variants"):
+            variants.update(self._asset.geometry_variants)
         variants.add("main")
         ordered = sorted(v for v in variants if v)
         self._geo_variant_dropdown.clear()
@@ -374,19 +467,14 @@ class SubstanceAssetActionDialog(QtWidgets.QDialog, DialogFilteredList):
             self._geo_variant_dropdown.setCurrentText("main")
 
     def _update_create_mode(self) -> None:
-        has_asset = bool(self._asset)
         use_variant = self._geo_variant_radio.isChecked()
-        self._geo_variant_radio.setEnabled(has_asset)
-        self._custom_mesh_radio.setEnabled(has_asset)
-        self._geo_variant_dropdown.setEnabled(has_asset and use_variant)
-        self._custom_mesh_field.setEnabled(has_asset and not use_variant)
-        self._custom_mesh_browse.setEnabled(has_asset and not use_variant)
+        self._geo_variant_dropdown.setEnabled(use_variant)
+        self._custom_mesh_field.setEnabled(not use_variant)
+        self._custom_mesh_browse.setEnabled(not use_variant)
         self._update_mesh_status()
 
     def _browse_custom_mesh(self) -> None:
-        base_dir = ""
-        if self._paths:
-            base_dir = str(self._paths.publish_source_dir)
+        base_dir = str(self._paths.publish_source_dir)
         selection, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             "Select Mesh File",
@@ -399,11 +487,6 @@ class SubstanceAssetActionDialog(QtWidgets.QDialog, DialogFilteredList):
 
     def _update_mesh_status(self) -> None:
         self._resolved_mesh_path = None
-
-        if not self._paths or not self._asset:
-            self._mesh_status_label.setText("Mesh source: --")
-            self._update_state()
-            return
 
         use_custom = self._custom_mesh_radio.isChecked()
         variant = self.get_selected_variant()
@@ -437,21 +520,8 @@ class SubstanceAssetActionDialog(QtWidgets.QDialog, DialogFilteredList):
             else:
                 self._mesh_status_label.setText(f"Mesh source: {resolved} (missing)")
 
-        self._update_state()
-
-    def _update_state(self) -> None:
-        project_open = sp.project.is_open()
-        project_exists = False
-        if self._paths:
-            project_exists = self._paths.textures_path.exists()
-
-        mesh_ready = (
-            self._resolved_mesh_path is not None and self._resolved_mesh_path.exists()
-        )
-
-        self._open_existing_btn.setEnabled(project_exists)
-        self._save_current_btn.setEnabled(bool(self._asset) and project_open)
-        self._create_default_btn.setEnabled(bool(self._asset) and mesh_ready)
+        mesh_ready = resolved is not None and resolved.exists()
+        self._create_default_btn.setEnabled(mesh_ready)
 
 
 def _confirm_discard_unsaved(parent: QtWidgets.QWidget | None) -> bool:
@@ -649,36 +719,6 @@ def _create_default_project_for_asset(
         finalize_save()
 
 
-def _dispatch_textures_action(
-    asset: Asset,
-    action: str,
-    *,
-    use_custom_mesh: bool,
-    variant: str,
-    custom_mesh_path: Path | None,
-) -> None:
-    paths = paths_for_asset(asset)
-    project_path = paths.textures_path
-
-    if action == SubstanceAssetActionDialog.ACTION_OPEN_EXISTING:
-        _open_existing_project_for_asset(asset, project_path)
-        return
-    if action == SubstanceAssetActionDialog.ACTION_SAVE_CURRENT:
-        _save_current_project_as_asset(asset, project_path)
-        return
-    if action == SubstanceAssetActionDialog.ACTION_CREATE_DEFAULT:
-        _create_default_project_for_asset(
-            asset,
-            project_path,
-            use_custom_mesh=use_custom_mesh,
-            variant=variant,
-            custom_mesh_path=custom_mesh_path,
-        )
-        return
-
-    log.warning("Unknown textures action requested: %s", action)
-
-
 def launch_open_asset_textures() -> None:
     """Open or create the textures project for a selected asset."""
 
@@ -689,15 +729,16 @@ def launch_open_asset_textures() -> None:
     conn = DB.Get(DB_Config)
     asset_names = conn.get_asset_name_list(sorted=True)
     parent = get_main_qt_window()
-    dialog = SubstanceAssetActionDialog(parent, asset_names, conn)
-    if not dialog.exec_():
+
+    select_dialog = SubstanceAssetSelectDialog(parent, asset_names, conn)
+    if not select_dialog.exec_():
         return
 
-    action = dialog.get_selected_action()
-    asset = dialog.get_selected_asset()
+    asset = select_dialog.get_selected_asset()
+    action = select_dialog.get_selected_action()
     if not action or not asset:
         return
-    if not asset or not asset.path:
+    if not asset.path:
         MessageDialog(
             parent,
             "The selected asset does not have a valid path in ShotGrid.",
@@ -705,13 +746,35 @@ def launch_open_asset_textures() -> None:
         ).exec_()
         return
 
-    _dispatch_textures_action(
-        asset,
-        action,
-        use_custom_mesh=dialog.use_custom_mesh(),
-        variant=dialog.get_selected_variant(),
-        custom_mesh_path=dialog.get_custom_mesh_path(),
-    )
+    paths = paths_for_asset(asset)
+
+    if action == SubstanceAssetSelectDialog.ACTION_OPEN_EXISTING:
+        _open_existing_project_for_asset(asset, paths.textures_path)
+        return
+
+    create_dialog = SubstanceAssetCreateModeDialog(parent, asset, paths)
+    if not create_dialog.exec_():
+        return
+
+    create_action = create_dialog.get_selected_action()
+    if not create_action:
+        return
+
+    if create_action == SubstanceAssetCreateModeDialog.ACTION_USE_CURRENT:
+        _save_current_project_as_asset(asset, paths.textures_path)
+        return
+
+    if create_action == SubstanceAssetCreateModeDialog.ACTION_CREATE_DEFAULT:
+        default_dialog = SubstanceAssetDefaultProjectDialog(parent, asset, paths)
+        if not default_dialog.exec_():
+            return
+        _create_default_project_for_asset(
+            asset,
+            paths.textures_path,
+            use_custom_mesh=default_dialog.use_custom_mesh(),
+            variant=default_dialog.get_selected_variant(),
+            custom_mesh_path=default_dialog.get_custom_mesh_path(),
+        )
 
 
 __all__ = [
