@@ -326,26 +326,6 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
         title.setWordWrap(True)
         layout.addWidget(title)
 
-        project_exists = paths.textures_path.exists()
-        status = "exists" if project_exists else "missing"
-        details = QtWidgets.QLabel(
-            f"Textures project: {paths.textures_path} ({status})"
-        )
-        details.setWordWrap(True)
-        details.setTextFormat(QtCore.Qt.PlainText)
-        layout.addWidget(details)
-
-        current_path = _current_project_path()
-        if current_path:
-            current_label = QtWidgets.QLabel(f"Current project: {current_path}")
-        else:
-            current_label = QtWidgets.QLabel(
-                "Current project: none (open a project to enable using it)"
-            )
-        current_label.setWordWrap(True)
-        current_label.setTextFormat(QtCore.Qt.PlainText)
-        layout.addWidget(current_label)
-
         layout.addStretch(1)
 
         buttons_layout = QtWidgets.QHBoxLayout()
