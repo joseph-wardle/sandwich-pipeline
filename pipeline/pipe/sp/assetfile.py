@@ -14,7 +14,7 @@ from typing import Any, Optional
 import substance_painter as sp
 from env_sg import DB_Config
 from Qt import QtCore, QtWidgets
-from shared.util import get_production_path, resolve_mapped_path
+from shared.util import get_documentation_path, get_production_path, resolve_mapped_path
 
 from pipe.asset.paths import DCC_SUBSTANCE, AssetPaths, paths_for_asset
 from pipe.db import DB
@@ -35,6 +35,18 @@ PIPE_SP_METADATA_KEY = "asset_selection"
 PIPE_SP_METADATA_SCHEMA_VERSION = 1
 PIPE_SP_PROJECT_TEMPLATE_NAME = "sandwich_default.spt"
 PIPE_SP_PROJECT_TEMPLATE_DIR = Path("painter_assets") / "templates"
+PIPE_SP_DOCS_PAGE = "Asset-Pipeline#substance-painter"
+
+
+def _substance_docs_url() -> str:
+    return get_documentation_path(PIPE_SP_DOCS_PAGE)
+
+
+def _docs_link_html() -> str:
+    url = _substance_docs_url()
+    if "://" not in url:
+        url = QtCore.QUrl.fromLocalFile(url).toString()
+    return f'<a href="{url}">the documentation</a>'
 
 
 def _utc_now_iso() -> str:
@@ -187,7 +199,9 @@ class SubstanceAssetDialog(FilteredListDialog):
 
         paths = paths_for_asset(asset)
         status = "exists" if paths.textures_path.exists() else "missing"
-        self._info_label.setText(f"Substance Painter project: {paths.textures_path} ({status})")
+        self._info_label.setText(
+            f"Substance Painter project: {paths.textures_path} ({status})"
+        )
 
 
 class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
@@ -251,10 +265,13 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         layout.addLayout(buttons_layout)
 
         footer = QtWidgets.QLabel(
-            "Tip: Select an asset, then open its Substance Painter project or create a new one."
+            "Tip: Select an asset, then open its Substance Painter project or create a new one.<br>"
+            f"For more information, see {_docs_link_html()}."
         )
         footer.setWordWrap(True)
-        footer.setTextFormat(QtCore.Qt.PlainText)
+        footer.setTextFormat(QtCore.Qt.RichText)
+        footer.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
+        footer.setOpenExternalLinks(True)
         footer.setStyleSheet("color: #8a8a8a;")
         layout.addWidget(footer)
 
@@ -335,7 +352,9 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
         layout.setSpacing(10)
 
         asset_label = asset.name or asset.disp_name or "Asset"
-        title = QtWidgets.QLabel(f"Create new Substance Painter project for {asset_label}")
+        title = QtWidgets.QLabel(
+            f"Create new Substance Painter project for {asset_label}"
+        )
         title.setTextFormat(QtCore.Qt.PlainText)
         title.setWordWrap(True)
         layout.addWidget(title)
@@ -357,10 +376,13 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
         layout.addLayout(buttons_layout)
 
         footer = QtWidgets.QLabel(
-            'Tip: use "Create Default Project" unless you have talked with your team lead'
+            'Tip: use "Create Default Project" unless you have talked with your team lead.<br>'
+            f"For more information, see {_docs_link_html()}."
         )
         footer.setWordWrap(True)
-        footer.setTextFormat(QtCore.Qt.PlainText)
+        footer.setTextFormat(QtCore.Qt.RichText)
+        footer.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
+        footer.setOpenExternalLinks(True)
         footer.setStyleSheet("color: #8a8a8a;")
         layout.addWidget(footer)
 
@@ -429,7 +451,9 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         self._custom_mesh_field = QtWidgets.QLineEdit()
         self._custom_mesh_field.setPlaceholderText("Select a custom mesh...")
         self._custom_mesh_browse = QtWidgets.QPushButton("Browse...")
-        self._custom_mesh_radio.setToolTip("Use a custom mesh file instead of the published variant.")
+        self._custom_mesh_radio.setToolTip(
+            "Use a custom mesh file instead of the published variant."
+        )
         self._custom_mesh_field.setToolTip("Path to a custom mesh file.")
         self._custom_mesh_browse.setToolTip("Browse for a custom mesh file.")
         custom_row.addWidget(self._custom_mesh_radio, 30)
@@ -445,17 +469,22 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
 
         buttons_layout = QtWidgets.QHBoxLayout()
         self._create_default_btn = QtWidgets.QPushButton("Create Default Project")
-        self._create_default_btn.setToolTip("Create a new project using the selected mesh source.")
+        self._create_default_btn.setToolTip(
+            "Create a new project using the selected mesh source."
+        )
         buttons_layout.addWidget(self._create_default_btn)
         buttons_layout.addStretch(1)
         layout.addLayout(buttons_layout)
 
         footer = QtWidgets.QLabel(
             "Tip: Geometry variants come from publish/_src. "
-            "Use Custom Mesh to browse for any file."
+            "Use Custom Mesh to browse for any file.<br>"
+            f"For more information, see {_docs_link_html()}."
         )
         footer.setWordWrap(True)
-        footer.setTextFormat(QtCore.Qt.PlainText)
+        footer.setTextFormat(QtCore.Qt.RichText)
+        footer.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
+        footer.setOpenExternalLinks(True)
         footer.setStyleSheet("color: #8a8a8a;")
         layout.addWidget(footer)
 

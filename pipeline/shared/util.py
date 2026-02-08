@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import os
 import platform
 import subprocess
-
 from inspect import getmembers, isabstract, isclass
 from pathlib import Path
 
 from env import production_path as _prp
+
+_DOCUMENTATION_ENV_VAR = "PIPELINE_DOCUMENTATION_URL"
+_DEFAULT_DOCUMENTATION_URL = "https://github.com/joseph-wardle/sandwich-pipeline/wiki/"
 
 
 def find_implementation(cls: type, module: str, package: str | None = None) -> type:
@@ -91,6 +94,26 @@ def get_pipe_path() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def get_documentation_path(page: str | None = None) -> str:
+    """Return the documentation root or a page URL/path.
+
+    Override the default by setting PIPELINE_DOCUMENTATION_URL to a URL or local
+    path. If the override contains "{page}", it is formatted with the page
+    value directly.
+    """
+    override = os.environ.get(_DOCUMENTATION_ENV_VAR, "").strip()
+    base = override or _DEFAULT_DOCUMENTATION_URL
+    if "{page}" in base:
+        return base.format(page=page or "")
+
+    root = _normalize_documentation_root(base)
+    if not page:
+        return root
+    if "://" in root:
+        return f"{root.rstrip('/')}/{page.lstrip('/')}"
+    return str(Path(root) / page)
+
+
 def get_previs_path() -> Path:
     return get_production_path().parent / "previs"
 
@@ -118,3 +141,16 @@ def resolve_mapped_path(path: str | Path) -> Path:
         except (ValueError, OSError):
             pass
     return min(mapped_paths, key=lambda x: len(str(x)), default=path)
+
+
+def _normalize_documentation_root(value: str) -> str:
+    value = value.strip()
+    if not value:
+        return _DEFAULT_DOCUMENTATION_URL
+    if "://" in value:
+        return value.rstrip("/") + "/"
+
+    doc_path = Path(value).expanduser()
+    if not doc_path.is_absolute():
+        doc_path = get_pipe_path().parent / doc_path
+    return str(doc_path.resolve())
