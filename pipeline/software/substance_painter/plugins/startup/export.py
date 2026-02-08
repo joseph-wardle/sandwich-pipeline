@@ -11,11 +11,11 @@ plugin_widgets: list[QtWidgets.QWidget] = []
 
 def start_plugin():
     # Create text widget for menu (Open Asset)
-    open_action = QtWidgets.QAction("Bobo — Open Asset")
+    open_action = QtWidgets.QAction("SKD — Open Asset")
     open_action.triggered.connect(launch_asset_opener)
 
     # Create text widget for menu
-    action = QtWidgets.QAction("Bobo — Publish Textures")
+    action = QtWidgets.QAction("SKD — Publish Textures")
     action.triggered.connect(launch_exporter)
 
     # Add widget to the File menu

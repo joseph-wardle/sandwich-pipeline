@@ -30,7 +30,7 @@ from pipe.struct.db import Asset
 log = logging.getLogger(__name__)
 
 # Metadata context + keys (easy to grep)
-PIPE_SP_METADATA_CONTEXT = "bobo_asset_pipeline"
+PIPE_SP_METADATA_CONTEXT = "skd_asset_pipeline"
 PIPE_SP_METADATA_KEY = "asset_selection"
 PIPE_SP_METADATA_SCHEMA_VERSION = 1
 PIPE_SP_PROJECT_TEMPLATE_NAME = "sandwich_default.spt"
