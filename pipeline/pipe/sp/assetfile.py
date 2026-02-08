@@ -14,7 +14,7 @@ from typing import Any, Optional
 import substance_painter as sp
 from env_sg import DB_Config
 from Qt import QtCore, QtWidgets
-from shared.util import resolve_mapped_path
+from shared.util import get_production_path, resolve_mapped_path
 
 from pipe.asset.paths import DCC_SUBSTANCE, AssetPaths, paths_for_asset
 from pipe.db import DB
@@ -33,9 +33,8 @@ log = logging.getLogger(__name__)
 PIPE_SP_METADATA_CONTEXT = "bobo_asset_pipeline"
 PIPE_SP_METADATA_KEY = "asset_selection"
 PIPE_SP_METADATA_SCHEMA_VERSION = 1
-# Project defaults for new Painter projects. Keys must match ProjectSettings
-# attributes. Values can be literal values, callables, or ("Enum", "Member") tuples.
-PIPE_SP_PROJECT_DEFAULTS: dict[str, Any] = {}
+PIPE_SP_PROJECT_TEMPLATE_NAME = "sandwich_default.spt"
+PIPE_SP_PROJECT_TEMPLATE_DIR = Path("painter_assets") / "templates"
 
 
 def _utc_now_iso() -> str:
@@ -136,64 +135,13 @@ def _resolve_default_mesh_paths(
     return variant_path, variant_path, fallback_path
 
 
-def _set_project_mesh_path(settings: Any, mesh_path: Path) -> bool:
-    """Assign the mesh path to a ProjectSettings object safely."""
-    mesh_path_str = str(mesh_path)
-    for attr_name in ("import_document", "mesh_path", "mesh_file"):
-        if hasattr(settings, attr_name):
-            setattr(settings, attr_name, mesh_path_str)
-            return True
-    log.error("ProjectSettings has no known mesh path attribute.")
-    return False
-
-
-_SKIP_PROJECT_DEFAULT = object()
-
-
-def _resolve_project_default_value(value: Any) -> Any:
-    if isinstance(value, tuple) and len(value) == 2:
-        enum_name, member_name = value
-        enum_type = getattr(sp.project, enum_name, None)
-        if enum_type is None:
-            log.debug("Unknown project enum: %s", enum_name)
-            return _SKIP_PROJECT_DEFAULT
-        enum_value = getattr(enum_type, member_name, None)
-        if enum_value is None:
-            log.debug("Unknown project enum member: %s.%s", enum_name, member_name)
-            return _SKIP_PROJECT_DEFAULT
-        return enum_value
-    if callable(value):
-        try:
-            return value()
-        except Exception:
-            log.exception("Failed to evaluate project default.")
-            return _SKIP_PROJECT_DEFAULT
-    return value
-
-
-def build_project_settings(
-    mesh_path: Path, defaults: dict[str, Any] | None = None
-) -> sp.project.ProjectSettings | None:
-    """Build ProjectSettings with pipeline defaults applied."""
-    if not hasattr(sp.project, "ProjectSettings"):
-        log.error("substance_painter.project.ProjectSettings is unavailable.")
-        return None
-
-    settings = sp.project.ProjectSettings()
-    for key, value in (defaults or {}).items():
-        if not hasattr(settings, key):
-            log.debug("Skipping unknown ProjectSettings attribute: %s", key)
-            continue
-        resolved = _resolve_project_default_value(value)
-        if resolved is _SKIP_PROJECT_DEFAULT:
-            continue
-        setattr(settings, key, resolved)
-
-    resolved_mesh = resolve_mapped_path(mesh_path)
-    if not _set_project_mesh_path(settings, resolved_mesh):
-        return None
-
-    return settings
+def _project_template_path() -> Path:
+    """Return the expected template path in the production painter assets."""
+    return (
+        get_production_path()
+        / PIPE_SP_PROJECT_TEMPLATE_DIR
+        / PIPE_SP_PROJECT_TEMPLATE_NAME
+    )
 
 
 class SubstanceAssetDialog(FilteredListDialog):
@@ -660,17 +608,34 @@ def _create_default_project_for_asset(
     if project_path.exists() and not _confirm_overwrite_project(parent, project_path):
         return
 
-    settings = build_project_settings(mesh_path, PIPE_SP_PROJECT_DEFAULTS)
-    if settings is None:
+    template_path = _project_template_path()
+    if not template_path.exists():
         MessageDialog(
             parent,
-            "Unable to build project settings. Check the Painter configuration.",
-            "Create Default",
+            "The default Painter template is missing:\n"
+            f"{template_path}\n"
+            "Contact production to restore the template.",
+            "Missing Template",
         ).exec_()
         return
 
     project_path.parent.mkdir(parents=True, exist_ok=True)
-    sp.project.create(settings)
+    resolved_mesh = resolve_mapped_path(mesh_path)
+    resolved_template = resolve_mapped_path(template_path)
+    try:
+        sp.project.create(
+            mesh_file_path=str(resolved_mesh),
+            template_file_path=str(resolved_template),
+        )
+    except Exception:
+        log.exception("Failed to create Painter project from template.")
+        MessageDialog(
+            parent,
+            "Failed to create the project from the default template. "
+            "Check the template and mesh file, then try again.",
+            "Create Default",
+        ).exec_()
+        return
 
     resolved_project_path = resolve_mapped_path(project_path)
 
