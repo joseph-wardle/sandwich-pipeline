@@ -430,6 +430,34 @@ def _confirm_save_as(parent: QtWidgets.QWidget | None, path: Path) -> bool:
     return bool(dialog.exec_())
 
 
+def _confirm_overwrite_project(parent: QtWidgets.QWidget | None, path: Path) -> bool:
+    dialog = MessageDialogCustomButtons(
+        parent,
+        f"A textures project already exists at {path}. Overwrite it?",
+        "Overwrite Textures Project",
+        has_cancel_button=True,
+        ok_name="Overwrite",
+        cancel_name="Cancel",
+    )
+    return bool(dialog.exec_())
+
+
+def _current_project_path() -> Path | None:
+    try:
+        current_path = sp.project.file_path()
+    except Exception:
+        return None
+    if not current_path:
+        return None
+    return Path(current_path)
+
+
+def _store_asset_metadata_when_ready(asset: Asset) -> None:
+    if not sp.project.is_open():
+        return
+    sp.project.execute_when_not_busy(lambda: store_asset_metadata_for_project(asset))
+
+
 def _open_existing_project(path: Path) -> None:
     sp.project.open(str(path))
 
@@ -438,57 +466,100 @@ def _save_current_project_as(path: Path) -> None:
     sp.project.save_as(str(path))
 
 
-def _open_or_create_textures_project(asset: Asset) -> None:
-    paths = paths_for_asset(asset)
-    project_path = paths.textures_path
-    project_exists = project_path.exists()
-
+def _open_existing_project_for_asset(asset: Asset, project_path: Path) -> None:
     parent = get_main_qt_window()
-
-    if sp.project.is_open():
-        current_path = None
-        try:
-            current_path = sp.project.file_path()
-        except Exception:
-            current_path = None
-
-        if current_path and Path(current_path).resolve() == project_path.resolve():
-            sp.project.execute_when_not_busy(
-                lambda: store_asset_metadata_for_project(asset)
-            )
-            return
-
-        if project_exists:
-            if sp.project.needs_saving() and not _confirm_discard_unsaved(parent):
-                return
-            sp.project.close()
-            _open_existing_project(project_path)
-            sp.project.execute_when_not_busy(
-                lambda: store_asset_metadata_for_project(asset)
-            )
-            return
-
-        if _confirm_save_as(parent, project_path):
-            project_path.parent.mkdir(parents=True, exist_ok=True)
-            _save_current_project_as(project_path)
-            sp.project.execute_when_not_busy(
-                lambda: store_asset_metadata_for_project(asset)
-            )
+    if not project_path.exists():
+        MessageDialog(
+            parent,
+            "No textures project exists yet. Use Save Current As or Create Default.",
+            "Missing Textures Project",
+        ).exec_()
         return
 
-    if project_exists:
-        _open_existing_project(project_path)
-        sp.project.execute_when_not_busy(
-            lambda: store_asset_metadata_for_project(asset)
-        )
+    current_path = _current_project_path()
+    if current_path and current_path.resolve() == project_path.resolve():
+        if sp.project.needs_saving():
+            _save_current_project_as(project_path)
+        _store_asset_metadata_when_ready(asset)
+        return
+
+    if sp.project.is_open():
+        if sp.project.needs_saving() and not _confirm_discard_unsaved(parent):
+            return
+        sp.project.close()
+
+    _open_existing_project(project_path)
+    _store_asset_metadata_when_ready(asset)
+
+
+def _save_current_project_as_asset(asset: Asset, project_path: Path) -> None:
+    parent = get_main_qt_window()
+    if not sp.project.is_open():
+        MessageDialog(
+            parent,
+            "No project is currently open. Open or create a project before saving.",
+            "No Project Open",
+        ).exec_()
+        return
+
+    current_path = _current_project_path()
+    if current_path and current_path.resolve() == project_path.resolve():
+        _store_asset_metadata_when_ready(asset)
+        return
+
+    if project_path.exists() and not _confirm_overwrite_project(parent, project_path):
+        return
+
+    project_path.parent.mkdir(parents=True, exist_ok=True)
+    _save_current_project_as(project_path)
+    _store_asset_metadata_when_ready(asset)
+
+
+def _create_default_project_for_asset(
+    asset: Asset, project_path: Path, mesh_path: Path | None
+) -> None:
+    parent = get_main_qt_window()
+    if not mesh_path or not mesh_path.exists():
+        MessageDialog(
+            parent,
+            "The selected mesh source is missing. Choose a valid mesh to proceed.",
+            "Missing Mesh Source",
+        ).exec_()
+        return
+
+    if sp.project.is_open():
+        if sp.project.needs_saving() and not _confirm_discard_unsaved(parent):
+            return
+        sp.project.close()
+
+    if project_path.exists() and not _confirm_overwrite_project(parent, project_path):
         return
 
     MessageDialog(
         parent,
-        "No textures project exists yet. Create a new project (File > New), "
-        "then run this action again to save it into the pipeline.",
-        "No Project Open",
+        "Default project creation is not configured yet. "
+        "Use Save Current As for now.",
+        "Create Default",
     ).exec_()
+
+
+def _dispatch_textures_action(
+    asset: Asset, action: str, mesh_path: Path | None = None
+) -> None:
+    paths = paths_for_asset(asset)
+    project_path = paths.textures_path
+
+    if action == SubstanceAssetActionDialog.ACTION_OPEN_EXISTING:
+        _open_existing_project_for_asset(asset, project_path)
+        return
+    if action == SubstanceAssetActionDialog.ACTION_SAVE_CURRENT:
+        _save_current_project_as_asset(asset, project_path)
+        return
+    if action == SubstanceAssetActionDialog.ACTION_CREATE_DEFAULT:
+        _create_default_project_for_asset(asset, project_path, mesh_path)
+        return
+
+    log.warning("Unknown textures action requested: %s", action)
 
 
 def launch_open_asset_textures() -> None:
@@ -500,24 +571,24 @@ def launch_open_asset_textures() -> None:
 
     conn = DB.Get(DB_Config)
     asset_names = conn.get_asset_name_list(sorted=True)
-    dialog = SubstanceAssetDialog(get_main_qt_window(), asset_names, conn)
+    parent = get_main_qt_window()
+    dialog = SubstanceAssetActionDialog(parent, asset_names, conn)
     if not dialog.exec_():
         return
 
-    selection = dialog.get_selected_item()
-    if not selection:
+    action = dialog.get_selected_action()
+    asset = dialog.get_selected_asset()
+    if not action or not asset:
         return
-
-    asset = conn.get_asset_by_name(selection)
     if not asset or not asset.path:
         MessageDialog(
-            get_main_qt_window(),
+            parent,
             "The selected asset does not have a valid path in ShotGrid.",
             "Missing Asset Path",
         ).exec_()
         return
 
-    _open_or_create_textures_project(asset)
+    _dispatch_textures_action(asset, action, mesh_path=dialog.get_resolved_mesh_path())
 
 
 __all__ = [
