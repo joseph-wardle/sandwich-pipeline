@@ -157,7 +157,7 @@ class SubstanceAssetDialog(FilteredListDialog):
             parent,
             items,
             "Open Asset Textures",
-            "Select the asset to open its textures project.",
+            "Select the asset to open its Substance Painter project.",
             accept_button_name="Open",
         )
         self._conn = conn
@@ -187,11 +187,11 @@ class SubstanceAssetDialog(FilteredListDialog):
 
         paths = paths_for_asset(asset)
         status = "exists" if paths.textures_path.exists() else "missing"
-        self._info_label.setText(f"Textures project: {paths.textures_path} ({status})")
+        self._info_label.setText(f"Substance Painter project: {paths.textures_path} ({status})")
 
 
 class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
-    """Select an asset and choose to open or create its textures project."""
+    """Select an asset and choose to open or create its Substance Painter project."""
 
     ACTION_OPEN_EXISTING = "open_existing"
     ACTION_CREATE_PROJECT = "create_project"
@@ -213,7 +213,7 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
 
         self._init_filtered_list(
             items,
-            list_label="Select an asset to open or create its textures project.",
+            list_label="Select an asset to open or create its Substance Painter project.",
             include_filter_field=True,
         )
 
@@ -239,10 +239,24 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         buttons_layout = QtWidgets.QHBoxLayout()
         self._open_existing_btn = QtWidgets.QPushButton("Open Asset Project")
         self._create_project_btn = QtWidgets.QPushButton("Create Asset Project")
+        self._open_existing_btn.setToolTip(
+            "Open the existing Substance Painter project for the selected asset."
+        )
+        self._create_project_btn.setToolTip(
+            "Create a new Substance Painter Project for the selected asset."
+        )
         buttons_layout.addWidget(self._open_existing_btn)
         buttons_layout.addWidget(self._create_project_btn)
         buttons_layout.addStretch(1)
         layout.addLayout(buttons_layout)
+
+        footer = QtWidgets.QLabel(
+            "Tip: Select an asset, then open its Substance Painter project or create a new one."
+        )
+        footer.setWordWrap(True)
+        footer.setTextFormat(QtCore.Qt.PlainText)
+        footer.setStyleSheet("color: #8a8a8a;")
+        layout.addWidget(footer)
 
         self._list_widget.itemSelectionChanged.connect(self._on_item_selected)
         self._open_existing_btn.clicked.connect(
@@ -285,7 +299,7 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         project_exists = self._paths.textures_path.exists()
         status = "exists" if project_exists else "missing"
         self._info_label.setText(
-            f"Textures project: {self._paths.textures_path} ({status})"
+            f"Substance Painter project: {self._paths.textures_path} ({status})"
         )
         self._update_state()
 
@@ -299,7 +313,7 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
 
 
 class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
-    """Choose how to create the textures project for an asset."""
+    """Choose how to create the Substance Painter project for an asset."""
 
     ACTION_CREATE_DEFAULT = "create_default"
     ACTION_USE_CURRENT = "use_current"
@@ -321,7 +335,7 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
         layout.setSpacing(10)
 
         asset_label = asset.name or asset.disp_name or "Asset"
-        title = QtWidgets.QLabel(f"Create textures project for {asset_label}")
+        title = QtWidgets.QLabel(f"Create new Substance Painter project for {asset_label}")
         title.setTextFormat(QtCore.Qt.PlainText)
         title.setWordWrap(True)
         layout.addWidget(title)
@@ -331,10 +345,24 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
         buttons_layout = QtWidgets.QHBoxLayout()
         self._create_default_btn = QtWidgets.QPushButton("Create Default Project")
         self._use_current_btn = QtWidgets.QPushButton("Use Currently Open Project")
+        self._create_default_btn.setToolTip(
+            "Create a new project using the published mesh."
+        )
+        self._use_current_btn.setToolTip(
+            "Save the currently open project to this asset."
+        )
         buttons_layout.addWidget(self._create_default_btn)
         buttons_layout.addWidget(self._use_current_btn)
         buttons_layout.addStretch(1)
         layout.addLayout(buttons_layout)
+
+        footer = QtWidgets.QLabel(
+            'Tip: use "Create Default Project" unless you have talked with your team lead'
+        )
+        footer.setWordWrap(True)
+        footer.setTextFormat(QtCore.Qt.PlainText)
+        footer.setStyleSheet("color: #8a8a8a;")
+        layout.addWidget(footer)
 
         self._create_default_btn.clicked.connect(
             lambda: self._set_action_and_accept(self.ACTION_CREATE_DEFAULT)
@@ -353,7 +381,7 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
 
 
 class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
-    """Pick a geometry source to create a default textures project."""
+    """Pick a geometry source to create a default Substance Painter project."""
 
     _asset: Asset
     _paths: AssetPaths
@@ -376,7 +404,7 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
 
         info_label = QtWidgets.QLabel(
-            "Choose the mesh source for the default textures project."
+            "Choose the mesh source for the default Substance Painter project."
         )
         info_label.setWordWrap(True)
         info_label.setTextFormat(QtCore.Qt.PlainText)
@@ -386,6 +414,12 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         self._geo_variant_radio = QtWidgets.QRadioButton("Geometry Variant")
         self._geo_variant_radio.setChecked(True)
         self._geo_variant_dropdown = QtWidgets.QComboBox()
+        self._geo_variant_radio.setToolTip(
+            "Use a published geometry variant from the asset's _src folder."
+        )
+        self._geo_variant_dropdown.setToolTip(
+            "Select the geometry variant to use for this assets Substance Project."
+        )
         variant_row.addWidget(self._geo_variant_radio, 30)
         variant_row.addWidget(self._geo_variant_dropdown, 70)
         layout.addLayout(variant_row)
@@ -395,6 +429,9 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         self._custom_mesh_field = QtWidgets.QLineEdit()
         self._custom_mesh_field.setPlaceholderText("Select a custom mesh...")
         self._custom_mesh_browse = QtWidgets.QPushButton("Browse...")
+        self._custom_mesh_radio.setToolTip("Use a custom mesh file instead of the published variant.")
+        self._custom_mesh_field.setToolTip("Path to a custom mesh file.")
+        self._custom_mesh_browse.setToolTip("Browse for a custom mesh file.")
         custom_row.addWidget(self._custom_mesh_radio, 30)
         custom_row.addWidget(self._custom_mesh_field, 55)
         custom_row.addWidget(self._custom_mesh_browse, 15)
@@ -403,13 +440,24 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         self._mesh_status_label = QtWidgets.QLabel("Mesh source: --")
         self._mesh_status_label.setWordWrap(True)
         self._mesh_status_label.setTextFormat(QtCore.Qt.PlainText)
+        self._mesh_status_label.setStyleSheet("color: #8a8a8a;")
         layout.addWidget(self._mesh_status_label)
 
         buttons_layout = QtWidgets.QHBoxLayout()
         self._create_default_btn = QtWidgets.QPushButton("Create Default Project")
+        self._create_default_btn.setToolTip("Create a new project using the selected mesh source.")
         buttons_layout.addWidget(self._create_default_btn)
         buttons_layout.addStretch(1)
         layout.addLayout(buttons_layout)
+
+        footer = QtWidgets.QLabel(
+            "Tip: Geometry variants come from publish/_src. "
+            "Use Custom Mesh to browse for any file."
+        )
+        footer.setWordWrap(True)
+        footer.setTextFormat(QtCore.Qt.PlainText)
+        footer.setStyleSheet("color: #8a8a8a;")
+        layout.addWidget(footer)
 
         self._geo_variant_dropdown.currentTextChanged.connect(self._update_mesh_status)
         self._custom_mesh_field.textChanged.connect(self._update_mesh_status)
@@ -520,7 +568,7 @@ def _confirm_save_as(parent: QtWidgets.QWidget | None, path: Path) -> bool:
     dialog = MessageDialogCustomButtons(
         parent,
         f"No project exists at {path}. Save the current project there?",
-        "Create Textures Project",
+        "Create Substance Painter Project",
         has_cancel_button=True,
         ok_name="Save As",
         cancel_name="Cancel",
@@ -531,8 +579,8 @@ def _confirm_save_as(parent: QtWidgets.QWidget | None, path: Path) -> bool:
 def _confirm_overwrite_project(parent: QtWidgets.QWidget | None, path: Path) -> bool:
     dialog = MessageDialogCustomButtons(
         parent,
-        f"A textures project already exists at {path}. Overwrite it?",
-        "Overwrite Textures Project",
+        f"A Substance Painter project already exists at {path}. Overwrite it?",
+        "Overwrite Substance Painter Project",
         has_cancel_button=True,
         ok_name="Overwrite",
         cancel_name="Cancel",
@@ -569,8 +617,8 @@ def _open_existing_project_for_asset(asset: Asset, project_path: Path) -> None:
     if not project_path.exists():
         MessageDialog(
             parent,
-            "No textures project exists yet. Use Save Current As or Create Default.",
-            "Missing Textures Project",
+            "No Substance Painter project exists yet. Use Save Current As or Create Default.",
+            "Missing Substance Painter Project",
         ).exec_()
         return
 
@@ -700,7 +748,7 @@ def _create_default_project_for_asset(
 
 
 def launch_open_asset_textures() -> None:
-    """Open or create the textures project for a selected asset."""
+    """Open or create the Substance Painter project for a selected asset."""
 
     if sp.project.is_busy():
         sp.project.execute_when_not_busy(launch_open_asset_textures)
