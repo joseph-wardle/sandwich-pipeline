@@ -14,6 +14,7 @@ from typing import Any, Optional
 import substance_painter as sp
 from env_sg import DB_Config
 from Qt import QtCore, QtWidgets
+from shared.util import resolve_mapped_path
 
 from pipe.asset.paths import DCC_SUBSTANCE, AssetPaths, paths_for_asset
 from pipe.db import DB
@@ -360,7 +361,8 @@ class SubstanceAssetActionDialog(QtWidgets.QDialog, DialogFilteredList):
             "Mesh Files (*.usd *.usda *.usdc *.obj *.fbx *.abc);;All Files (*)",
         )
         if selection:
-            self._custom_mesh_field.setText(selection)
+            resolved = resolve_mapped_path(Path(selection))
+            self._custom_mesh_field.setText(str(resolved))
 
     def _update_mesh_status(self) -> None:
         self._resolved_mesh_path = None
