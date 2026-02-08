@@ -33,6 +33,9 @@ log = logging.getLogger(__name__)
 PIPE_SP_METADATA_CONTEXT = "bobo_asset_pipeline"
 PIPE_SP_METADATA_KEY = "asset_selection"
 PIPE_SP_METADATA_SCHEMA_VERSION = 1
+# Project defaults for new Painter projects. Keys must match ProjectSettings
+# attributes. Values can be literal values, callables, or ("Enum", "Member") tuples.
+PIPE_SP_PROJECT_DEFAULTS: dict[str, Any] = {}
 
 
 def _utc_now_iso() -> str:
@@ -109,6 +112,88 @@ def store_asset_metadata_for_project(asset: Asset) -> None:
         texset.name(): asset_name for texset in sp.textureset.all_texture_sets()
     }
     store_asset_selection_metadata(asset_map)
+
+
+def _resolve_default_mesh_paths(
+    paths: AssetPaths,
+    *,
+    use_custom_mesh: bool,
+    custom_mesh_path: Path | None,
+    variant: str,
+) -> tuple[Path | None, Path | None, Path | None]:
+    """Return (selected_path, variant_path, fallback_path) for default projects."""
+    if use_custom_mesh:
+        return custom_mesh_path, None, None
+
+    variant_name = variant.strip() or "main"
+    variant_path = paths.publish_source_variant_usd(variant_name)
+    fallback_path = paths.publish_source_model_usd if variant_name == "main" else None
+
+    if variant_path.exists():
+        return variant_path, variant_path, fallback_path
+    if fallback_path and fallback_path.exists():
+        return fallback_path, variant_path, fallback_path
+    return variant_path, variant_path, fallback_path
+
+
+def _set_project_mesh_path(settings: Any, mesh_path: Path) -> bool:
+    """Assign the mesh path to a ProjectSettings object safely."""
+    mesh_path_str = str(mesh_path)
+    for attr_name in ("import_document", "mesh_path", "mesh_file"):
+        if hasattr(settings, attr_name):
+            setattr(settings, attr_name, mesh_path_str)
+            return True
+    log.error("ProjectSettings has no known mesh path attribute.")
+    return False
+
+
+_SKIP_PROJECT_DEFAULT = object()
+
+
+def _resolve_project_default_value(value: Any) -> Any:
+    if isinstance(value, tuple) and len(value) == 2:
+        enum_name, member_name = value
+        enum_type = getattr(sp.project, enum_name, None)
+        if enum_type is None:
+            log.debug("Unknown project enum: %s", enum_name)
+            return _SKIP_PROJECT_DEFAULT
+        enum_value = getattr(enum_type, member_name, None)
+        if enum_value is None:
+            log.debug("Unknown project enum member: %s.%s", enum_name, member_name)
+            return _SKIP_PROJECT_DEFAULT
+        return enum_value
+    if callable(value):
+        try:
+            return value()
+        except Exception:
+            log.exception("Failed to evaluate project default.")
+            return _SKIP_PROJECT_DEFAULT
+    return value
+
+
+def build_project_settings(
+    mesh_path: Path, defaults: dict[str, Any] | None = None
+) -> sp.project.ProjectSettings | None:
+    """Build ProjectSettings with pipeline defaults applied."""
+    if not hasattr(sp.project, "ProjectSettings"):
+        log.error("substance_painter.project.ProjectSettings is unavailable.")
+        return None
+
+    settings = sp.project.ProjectSettings()
+    for key, value in (defaults or {}).items():
+        if not hasattr(settings, key):
+            log.debug("Skipping unknown ProjectSettings attribute: %s", key)
+            continue
+        resolved = _resolve_project_default_value(value)
+        if resolved is _SKIP_PROJECT_DEFAULT:
+            continue
+        setattr(settings, key, resolved)
+
+    resolved_mesh = resolve_mapped_path(mesh_path)
+    if not _set_project_mesh_path(settings, resolved_mesh):
+        return None
+
+    return settings
 
 
 class SubstanceAssetDialog(FilteredListDialog):
@@ -372,22 +457,37 @@ class SubstanceAssetActionDialog(QtWidgets.QDialog, DialogFilteredList):
             self._update_state()
             return
 
-        if self._geo_variant_radio.isChecked():
-            variant = self.get_selected_variant()
-            if variant:
-                self._resolved_mesh_path = self._paths.publish_source_variant_usd(
-                    variant
-                )
-        else:
-            self._resolved_mesh_path = self.get_custom_mesh_path()
+        use_custom = self._custom_mesh_radio.isChecked()
+        variant = self.get_selected_variant()
+        custom_mesh = self.get_custom_mesh_path()
 
-        if self._resolved_mesh_path:
-            status = "exists" if self._resolved_mesh_path.exists() else "missing"
-            self._mesh_status_label.setText(
-                f"Mesh source: {self._resolved_mesh_path} ({status})"
-            )
-        else:
+        resolved, variant_path, fallback_path = _resolve_default_mesh_paths(
+            self._paths,
+            use_custom_mesh=use_custom,
+            custom_mesh_path=custom_mesh,
+            variant=variant,
+        )
+
+        self._resolved_mesh_path = resolved
+
+        if not resolved:
             self._mesh_status_label.setText("Mesh source: --")
+        elif resolved.exists():
+            if fallback_path and resolved == fallback_path and variant_path:
+                self._mesh_status_label.setText(
+                    f"Mesh source: {resolved} (fallback from {variant_path.name})"
+                )
+            else:
+                self._mesh_status_label.setText(f"Mesh source: {resolved} (exists)")
+        else:
+            if fallback_path and variant_path and fallback_path != resolved:
+                self._mesh_status_label.setText(
+                    "Mesh source: {} (missing; fallback {} missing)".format(
+                        variant_path, fallback_path
+                    )
+                )
+            else:
+                self._mesh_status_label.setText(f"Mesh source: {resolved} (missing)")
 
         self._update_state()
 
@@ -516,15 +616,40 @@ def _save_current_project_as_asset(asset: Asset, project_path: Path) -> None:
 
 
 def _create_default_project_for_asset(
-    asset: Asset, project_path: Path, mesh_path: Path | None
+    asset: Asset,
+    project_path: Path,
+    *,
+    use_custom_mesh: bool,
+    variant: str,
+    custom_mesh_path: Path | None,
 ) -> None:
     parent = get_main_qt_window()
+    paths = paths_for_asset(asset)
+
+    mesh_path, variant_path, fallback_path = _resolve_default_mesh_paths(
+        paths,
+        use_custom_mesh=use_custom_mesh,
+        custom_mesh_path=custom_mesh_path,
+        variant=variant,
+    )
+
     if not mesh_path or not mesh_path.exists():
-        MessageDialog(
-            parent,
-            "The selected mesh source is missing. Choose a valid mesh to proceed.",
-            "Missing Mesh Source",
-        ).exec_()
+        if use_custom_mesh:
+            message = (
+                "The selected custom mesh is missing. "
+                "Choose a valid mesh to proceed."
+            )
+        elif fallback_path and variant_path and variant_path != fallback_path:
+            message = (
+                "No published mesh was found for the selected variant.\n"
+                f"Expected: {variant_path}\nFallback: {fallback_path}"
+            )
+        else:
+            message = (
+                "No published mesh was found for the selected variant.\n"
+                f"Expected: {variant_path}"
+            )
+        MessageDialog(parent, message, "Missing Mesh Source").exec_()
         return
 
     if sp.project.is_open():
@@ -535,16 +660,37 @@ def _create_default_project_for_asset(
     if project_path.exists() and not _confirm_overwrite_project(parent, project_path):
         return
 
-    MessageDialog(
-        parent,
-        "Default project creation is not configured yet. "
-        "Use Save Current As for now.",
-        "Create Default",
-    ).exec_()
+    settings = build_project_settings(mesh_path, PIPE_SP_PROJECT_DEFAULTS)
+    if settings is None:
+        MessageDialog(
+            parent,
+            "Unable to build project settings. Check the Painter configuration.",
+            "Create Default",
+        ).exec_()
+        return
+
+    project_path.parent.mkdir(parents=True, exist_ok=True)
+    sp.project.create(settings)
+
+    resolved_project_path = resolve_mapped_path(project_path)
+
+    def finalize_save() -> None:
+        _save_current_project_as(resolved_project_path)
+        _store_asset_metadata_when_ready(asset)
+
+    if sp.project.is_busy():
+        sp.project.execute_when_not_busy(finalize_save)
+    else:
+        finalize_save()
 
 
 def _dispatch_textures_action(
-    asset: Asset, action: str, mesh_path: Path | None = None
+    asset: Asset,
+    action: str,
+    *,
+    use_custom_mesh: bool,
+    variant: str,
+    custom_mesh_path: Path | None,
 ) -> None:
     paths = paths_for_asset(asset)
     project_path = paths.textures_path
@@ -556,7 +702,13 @@ def _dispatch_textures_action(
         _save_current_project_as_asset(asset, project_path)
         return
     if action == SubstanceAssetActionDialog.ACTION_CREATE_DEFAULT:
-        _create_default_project_for_asset(asset, project_path, mesh_path)
+        _create_default_project_for_asset(
+            asset,
+            project_path,
+            use_custom_mesh=use_custom_mesh,
+            variant=variant,
+            custom_mesh_path=custom_mesh_path,
+        )
         return
 
     log.warning("Unknown textures action requested: %s", action)
@@ -588,7 +740,13 @@ def launch_open_asset_textures() -> None:
         ).exec_()
         return
 
-    _dispatch_textures_action(asset, action, mesh_path=dialog.get_resolved_mesh_path())
+    _dispatch_textures_action(
+        asset,
+        action,
+        use_custom_mesh=dialog.use_custom_mesh(),
+        variant=dialog.get_selected_variant(),
+        custom_mesh_path=dialog.get_custom_mesh_path(),
+    )
 
 
 __all__ = [
