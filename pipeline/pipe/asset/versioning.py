@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import datetime
 import getpass
+import hashlib
 import json
 import logging
 import os
 import platform
 import re
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
@@ -18,6 +20,23 @@ from .paths import MANIFEST_FILENAME
 log = logging.getLogger(__name__)
 
 _VERSION_RE_TEMPLATE = r"^{stem}\.v(?P<ver>\d+)\.{ext}$"
+_SIGNATURE_KEY = "signature"
+_SIGNATURE_HASH_KEY = "hash"
+_SIGNATURE_HASH_ALGO_KEY = "hash_algo"
+_SIGNATURE_SIZE_KEY = "size"
+_SIGNATURE_MTIME_NS_KEY = "mtime_ns"
+_EXTRA_CHANGED_KEY = "changed"
+_EXTRA_VARIANT_KEY = "variant"
+_EXTRA_PUBLISH_PATH_KEY = "publish_path"
+
+
+@dataclass(frozen=True)
+class BackupResult:
+    changed: bool
+    signature: dict[str, Any]
+    backup_path: Optional[Path]
+    version: Optional[int]
+    manifest: dict[str, Any]
 
 
 def _utc_now_iso() -> str:
@@ -134,6 +153,46 @@ def versioned_filename(stem: str, ext: str, version: int, padding: int = 3) -> s
     return f"{stem}.v{version:0{padding}d}.{ext}"
 
 
+def compute_signature(
+    path: Path,
+    *,
+    use_hash: bool = False,
+    hash_algo: str = "sha256",
+    chunk_size: int = 1024 * 1024,
+) -> dict[str, Any]:
+    """Return a file signature for copy-on-write checks."""
+    stat = path.stat()
+    signature: dict[str, Any] = {
+        _SIGNATURE_SIZE_KEY: stat.st_size,
+        _SIGNATURE_MTIME_NS_KEY: stat.st_mtime_ns,
+    }
+
+    if use_hash:
+        hasher = hashlib.new(hash_algo)
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(chunk_size), b""):
+                hasher.update(chunk)
+        signature[_SIGNATURE_HASH_KEY] = hasher.hexdigest()
+        signature[_SIGNATURE_HASH_ALGO_KEY] = hash_algo
+
+    return signature
+
+
+def _signature_matches(
+    a: Optional[dict[str, Any]], b: Optional[dict[str, Any]]
+) -> bool:
+    if not a or not b:
+        return False
+    for key in (_SIGNATURE_SIZE_KEY, _SIGNATURE_MTIME_NS_KEY):
+        if a.get(key) != b.get(key):
+            return False
+    if _SIGNATURE_HASH_KEY in a or _SIGNATURE_HASH_KEY in b:
+        return a.get(_SIGNATURE_HASH_KEY) == b.get(_SIGNATURE_HASH_KEY) and a.get(
+            _SIGNATURE_HASH_ALGO_KEY
+        ) == b.get(_SIGNATURE_HASH_ALGO_KEY)
+    return True
+
+
 def backup_file(
     source_path: Path,
     backup_dir: Path,
@@ -165,6 +224,98 @@ def backup_file(
     shutil.copy2(source_path, temp_path)
     os.replace(temp_path, target_path)
     return target_path
+
+
+def backup_if_changed(
+    source_path: Path,
+    backup_dir: Path,
+    manifest_path: Path,
+    *,
+    dcc: str,
+    stem: Optional[str] = None,
+    ext: Optional[str] = None,
+    version: Optional[int] = None,
+    padding: int = 3,
+    ensure_exists: bool = True,
+    use_hash: bool = False,
+    note: Optional[str] = None,
+    tool_version: Optional[str] = None,
+    asset_name: Optional[str] = None,
+    asset_path: Optional[str] = None,
+    asset_id: Optional[int] = None,
+    variant: Optional[str] = None,
+    publish_path: Optional[Path] = None,
+    extra: Optional[dict[str, Any]] = None,
+) -> Optional[BackupResult]:
+    """Copy a file into .backup only if the signature changed.
+
+    Records a publish entry in the manifest with signature + metadata.
+    Returns None if the source is missing and ensure_exists is True.
+    """
+    if ensure_exists and not source_path.exists():
+        log.warning("Backup skipped; source missing: %s", source_path)
+        return None
+
+    signature = compute_signature(source_path, use_hash=use_hash)
+    manifest = load_manifest(manifest_path)
+    dcc_block = manifest.get("dcc", {}).get(dcc, {})
+    current = dcc_block.get("current") or {}
+    previous_signature = (current.get("extra") or {}).get(_SIGNATURE_KEY)
+
+    changed = not _signature_matches(previous_signature, signature)
+    backup_path: Optional[Path] = None
+    resolved_version: Optional[int] = current.get("version")
+
+    resolved_stem = stem or source_path.stem
+    resolved_ext = (ext or source_path.suffix.lstrip(".")) or "dat"
+
+    if changed:
+        resolved_version = version or next_version(
+            backup_dir, resolved_stem, resolved_ext
+        )
+        backup_path = backup_file(
+            source_path,
+            backup_dir,
+            stem=resolved_stem,
+            ext=resolved_ext,
+            version=resolved_version,
+            padding=padding,
+            ensure_exists=False,
+        )
+    else:
+        existing_backup = current.get("backup_file")
+        if existing_backup:
+            backup_path = Path(existing_backup)
+
+    extra_payload = dict(extra or {})
+    extra_payload[_SIGNATURE_KEY] = signature
+    extra_payload[_EXTRA_CHANGED_KEY] = changed
+    if variant:
+        extra_payload[_EXTRA_VARIANT_KEY] = variant
+    if publish_path:
+        extra_payload[_EXTRA_PUBLISH_PATH_KEY] = str(publish_path)
+
+    manifest = record_publish(
+        manifest_path,
+        dcc=dcc,
+        source_path=source_path,
+        backup_path=backup_path,
+        version=resolved_version,
+        note=note,
+        tool_version=tool_version,
+        extra=extra_payload,
+        asset_name=asset_name,
+        asset_path=asset_path,
+        asset_id=asset_id,
+    )
+
+    return BackupResult(
+        changed=changed,
+        signature=signature,
+        backup_path=backup_path,
+        version=resolved_version,
+        manifest=manifest,
+    )
 
 
 def record_publish(
@@ -215,6 +366,9 @@ def record_publish(
 
 __all__ = [
     "backup_file",
+    "backup_if_changed",
+    "compute_signature",
+    "BackupResult",
     "build_manifest",
     "get_manifest_path",
     "list_versions",
