@@ -11,8 +11,9 @@ import maya.cmds as mc
 import maya.mel as mel
 from env_sg import DB_Config
 from Qt import QtCore, QtWidgets
+from shared.util import get_production_path
 
-from pipe.asset.paths import DCC_MAYA, AssetPaths, paths_for_asset
+from pipe.asset.paths import BACKUP_DIRNAME, DCC_MAYA, AssetPaths, paths_for_asset
 from pipe.asset.versioning import (
     get_manifest_path,
     list_versions,
@@ -112,6 +113,40 @@ def read_asset_metadata(conn: DB | None = None) -> AssetMetadata:
         path=asset_path,
         asset=resolved,
     )
+
+
+def _asset_root_from_scene_path(scene_path: Path) -> Optional[Path]:
+    if not scene_path:
+        return None
+    parent = scene_path.parent
+    if parent.name == BACKUP_DIRNAME:
+        return parent.parent
+    return parent
+
+
+def _asset_path_from_root(asset_root: Path) -> Optional[str]:
+    if not asset_root:
+        return None
+    prod_root = get_production_path()
+    try:
+        rel_path = asset_root.relative_to(prod_root)
+    except ValueError:
+        rel_path = asset_root
+    return rel_path.as_posix()
+
+
+def _resolve_asset_from_scene_path(conn: DB, scene_path: Path) -> Optional[Asset]:
+    asset_root = _asset_root_from_scene_path(scene_path)
+    if not asset_root:
+        return None
+    asset_path = _asset_path_from_root(asset_root)
+    if not asset_path:
+        return None
+    try:
+        return conn.get_asset_by_attr("path", asset_path)
+    except Exception as exc:
+        log.debug("No asset found for scene path %s: %s", scene_path, exc)
+        return None
 
 
 class AssetOpenDialog(FilteredListDialog):
@@ -233,6 +268,31 @@ class MAssetFileManager(FileManager):
         mc.file(new=True, force=True)
         mc.file(rename=str(path))
         mc.file(save=True, type="mayaBinary")
+        asset = entity if isinstance(entity, Asset) else None
+        if asset:
+            write_asset_metadata(asset)
+
+    def _ensure_scene_asset_metadata(self, scene_path: Optional[Path] = None) -> None:
+        meta = read_asset_metadata(self._conn)
+        if meta.asset:
+            if (
+                meta.id is None
+                or not meta.name
+                or not meta.display_name
+                or not meta.path
+            ):
+                write_asset_metadata(meta.asset)
+            return
+
+        if scene_path is None:
+            raw_path = mc.file(query=True, sn=True) or ""
+            if not raw_path:
+                return
+            scene_path = Path(raw_path)
+
+        asset = _resolve_asset_from_scene_path(self._conn, scene_path)
+        if asset:
+            write_asset_metadata(asset)
 
     def _prompt_backup_version(self, paths: AssetPaths) -> Optional[Path]:
         versions = list_versions(paths.backup_dir, "model", "mb")
@@ -293,6 +353,7 @@ class MAssetFileManager(FileManager):
             backup_path = self._prompt_backup_version(paths)
             if backup_path:
                 self._open_file(backup_path)
+                self._ensure_scene_asset_metadata(backup_path)
             return
 
         if not self._prompt_create_if_not_exist(paths.root):
@@ -301,6 +362,7 @@ class MAssetFileManager(FileManager):
         model_path = paths.model_path
         if model_path.is_file():
             self._open_file(model_path)
+            self._ensure_scene_asset_metadata(model_path)
         else:
             self._setup_file(model_path, asset)
 
