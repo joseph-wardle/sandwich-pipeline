@@ -1,8 +1,9 @@
-"""Maya asset file manager and UI for opening model files with version info."""
+"""Maya asset file manager and scene asset metadata helpers."""
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -25,6 +26,94 @@ from pipe.struct.db import Asset, SGEntity
 from pipe.util import FileManager
 
 log = logging.getLogger(__name__)
+
+FILEINFO_PREFIX = "pipe_asset"
+FILEINFO_ASSET_ID = f"{FILEINFO_PREFIX}_id"
+FILEINFO_ASSET_NAME = f"{FILEINFO_PREFIX}_name"
+FILEINFO_ASSET_DISPLAY_NAME = f"{FILEINFO_PREFIX}_display_name"
+FILEINFO_ASSET_PATH = f"{FILEINFO_PREFIX}_path"
+
+
+@dataclass(frozen=True)
+class AssetMetadata:
+    id: Optional[int]
+    name: Optional[str]
+    display_name: Optional[str]
+    path: Optional[str]
+    asset: Optional[Asset]
+
+
+def _normalize_value(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    value = str(value).strip()
+    return value or None
+
+
+def _get_file_info_value(key: str) -> Optional[str]:
+    try:
+        value = mc.fileInfo(key, query=True)
+    except Exception:
+        return None
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    return _normalize_value(value)
+
+
+def _set_file_info_value(key: str, value: Optional[str]) -> None:
+    mc.fileInfo(key, value or "")
+
+
+def write_asset_metadata(asset: Asset) -> None:
+    """Write asset metadata to the current Maya scene fileInfo."""
+    _set_file_info_value(FILEINFO_ASSET_ID, str(asset.id) if asset.id else "")
+    _set_file_info_value(FILEINFO_ASSET_NAME, _normalize_value(asset.name))
+    _set_file_info_value(
+        FILEINFO_ASSET_DISPLAY_NAME, _normalize_value(asset.display_name)
+    )
+    _set_file_info_value(FILEINFO_ASSET_PATH, _normalize_value(asset.path))
+
+
+def read_asset_metadata(conn: DB | None = None) -> AssetMetadata:
+    """Read asset metadata from fileInfo and resolve to an Asset when possible."""
+    asset_id_raw = _get_file_info_value(FILEINFO_ASSET_ID)
+    asset_name = _get_file_info_value(FILEINFO_ASSET_NAME)
+    asset_display_name = _get_file_info_value(FILEINFO_ASSET_DISPLAY_NAME)
+    asset_path = _get_file_info_value(FILEINFO_ASSET_PATH)
+
+    asset_id: Optional[int]
+    if asset_id_raw:
+        try:
+            asset_id = int(asset_id_raw)
+        except Exception:
+            log.warning("Invalid asset id in fileInfo: %s", asset_id_raw)
+            asset_id = None
+    else:
+        asset_id = None
+
+    resolved: Asset | None = None
+    conn = conn or DB.Get(DB_Config)
+    if conn:
+        if asset_id is not None:
+            try:
+                resolved = conn.get_asset_by_id(asset_id)
+            except Exception as exc:
+                log.warning("Failed to resolve asset by id %s: %s", asset_id, exc)
+        if resolved is None and asset_path:
+            try:
+                resolved = conn.get_asset_by_attr("path", asset_path)
+            except Exception as exc:
+                log.warning(
+                    "Failed to resolve asset by path %s: %s", asset_path, exc
+                )
+
+    return AssetMetadata(
+        id=asset_id,
+        name=asset_name,
+        display_name=asset_display_name,
+        path=asset_path,
+        asset=resolved,
+    )
 
 
 class AssetOpenDialog(FilteredListDialog):
@@ -251,4 +340,16 @@ def install_asset_menu(
     )
 
 
-__all__ = ["MAssetFileManager", "install_asset_menu"]
+__all__ = [
+    "FILEINFO_PREFIX",
+    "FILEINFO_ASSET_ID",
+    "FILEINFO_ASSET_NAME",
+    "FILEINFO_ASSET_DISPLAY_NAME",
+    "FILEINFO_ASSET_PATH",
+    "AssetMetadata",
+    "write_asset_metadata",
+    "read_asset_metadata",
+    "AssetOpenDialog",
+    "MAssetFileManager",
+    "install_asset_menu",
+]
