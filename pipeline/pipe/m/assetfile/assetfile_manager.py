@@ -103,9 +103,7 @@ def read_asset_metadata(conn: DB | None = None) -> AssetMetadata:
             try:
                 resolved = conn.get_asset_by_attr("path", asset_path)
             except Exception as exc:
-                log.warning(
-                    "Failed to resolve asset by path %s: %s", asset_path, exc
-                )
+                log.warning("Failed to resolve asset by path %s: %s", asset_path, exc)
 
     return AssetMetadata(
         id=asset_id,
@@ -186,7 +184,7 @@ class AssetOpenDialog(FilteredListDialog):
                 parts.append(f"at {timestamp}")
             publish_summary = " ".join(parts)
 
-        backup_versions = list_versions(paths.backup_dir, "model", "ma")
+        backup_versions = list_versions(paths.backup_dir, "model", "mb")
         if backup_versions:
             backup_label = ", ".join(f"v{v:03d}" for v in backup_versions)
         else:
@@ -226,7 +224,7 @@ class MAssetFileManager(FileManager):
         return True
 
     def _generate_filename_ext(self, entity: SGEntity) -> tuple[str, str]:
-        return "model", "ma"
+        return "model", "mb"
 
     def _open_file(self, path: Path) -> None:
         mc.file(str(path), open=True, force=True)
@@ -234,10 +232,10 @@ class MAssetFileManager(FileManager):
     def _setup_file(self, path: Path, entity: SGEntity) -> None:
         mc.file(new=True, force=True)
         mc.file(rename=str(path))
-        mc.file(save=True, type="mayaAscii")
+        mc.file(save=True, type="mayaBinary")
 
     def _prompt_backup_version(self, paths: AssetPaths) -> Optional[Path]:
-        versions = list_versions(paths.backup_dir, "model", "ma")
+        versions = list_versions(paths.backup_dir, "model", "mb")
         if not versions:
             MessageDialog(
                 self._main_window,
@@ -247,7 +245,7 @@ class MAssetFileManager(FileManager):
             return None
 
         version_files = [
-            versioned_filename("model", "ma", version)
+            versioned_filename("model", "mb", version)
             for version in sorted(versions, reverse=True)
         ]
         dialog = FilteredListDialog(
