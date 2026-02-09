@@ -23,7 +23,7 @@ DCC_HOUDINI = "houdini"
 DCC_SUBSTANCE = "substance_painter"
 
 # Asset root-level filenames
-MODEL_FILENAME = "model.ma"
+MODEL_FILENAME = "model.mb"
 TEXTURES_FILENAME = "textures.spp"
 ASSET_BUILDER_FILENAME = "asset_builder.hipnc"
 MANIFEST_FILENAME = "asset_manifest.json"
