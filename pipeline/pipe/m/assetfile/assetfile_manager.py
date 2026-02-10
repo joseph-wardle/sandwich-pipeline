@@ -65,6 +65,20 @@ def _set_file_info_value(key: str, value: Optional[str]) -> None:
     mc.fileInfo(key, value or "")
 
 
+def _set_dialog_button_tooltips(
+    dialog: QtWidgets.QDialog, *, ok_text: str, cancel_text: str
+) -> None:
+    buttons = getattr(dialog, "buttons", None)
+    if not buttons:
+        return
+    ok_btn = buttons.button(QtWidgets.QDialogButtonBox.Ok)
+    if ok_btn:
+        ok_btn.setToolTip(ok_text)
+    cancel_btn = buttons.button(QtWidgets.QDialogButtonBox.Cancel)
+    if cancel_btn:
+        cancel_btn.setToolTip(cancel_text)
+
+
 def write_asset_metadata(asset: Asset) -> None:
     """Write asset metadata to the current Maya scene fileInfo."""
     _set_file_info_value(FILEINFO_ASSET_ID, str(asset.id) if asset.id else "")
@@ -174,14 +188,28 @@ class AssetOpenDialog(FilteredListDialog):
         info_layout.setSpacing(6)
 
         self._open_backup_cb = QtWidgets.QCheckBox("Open backup version")
+        self._open_backup_cb.setToolTip(
+            "Open a versioned backup instead of the live asset model file."
+        )
         info_layout.addWidget(self._open_backup_cb)
 
         self._info_label = QtWidgets.QLabel("Select an asset to see details.")
         self._info_label.setWordWrap(True)
         self._info_label.setTextFormat(QtCore.Qt.PlainText)
+        self._info_label.setToolTip(
+            "Shows recent publish info and available backups for the selected asset."
+        )
         info_layout.addWidget(self._info_label)
 
         self._layout.insertWidget(1, info_widget)
+        if hasattr(self, "_filter_field"):
+            self._filter_field.setToolTip("Type to filter the asset list.")
+        self._list_widget.setToolTip("Select the asset model you want to open.")
+        _set_dialog_button_tooltips(
+            self,
+            ok_text="Open the selected asset model file.",
+            cancel_text="Close without opening a file.",
+        )
 
     @property
     def open_backup(self) -> bool:
@@ -316,6 +344,14 @@ class MAssetFileManager(FileManager):
             "Open Backup Version",
             "Select the backup version to open.",
             accept_button_name="Open",
+        )
+        if hasattr(dialog, "_filter_field"):
+            dialog._filter_field.setToolTip("Type to filter backup versions.")
+        dialog._list_widget.setToolTip("Select a backup version to open.")
+        _set_dialog_button_tooltips(
+            dialog,
+            ok_text="Open the selected backup version.",
+            cancel_text="Close without opening a backup.",
         )
         if not dialog.exec_():
             return None
