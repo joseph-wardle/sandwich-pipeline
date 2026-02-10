@@ -1,33 +1,34 @@
 from __future__ import annotations
 
-import substance_painter as sp
-
 import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import substance_painter as sp
+
 if TYPE_CHECKING:
     import typing
 
     RT = typing.TypeVar("RT")  # return type
 
-from pipe.sp.local import get_main_qt_window
+from env_sg import DB_Config
+from shared.util import resolve_mapped_path
+
+from pipe.asset.paths import paths_for_asset
 from pipe.db import DB
+from pipe.glui.dialogs import MessageDialog
+from pipe.sp.local import get_main_qt_window
 from pipe.struct.db import Asset
 from pipe.struct.material import (
     DisplacementSource,
+    MaterialInfo,
     NormalSource,
     NormalType,
     TexSetInfo,
-    MaterialInfo,
 )
-from pipe.glui.dialogs import MessageDialog
-from pipe.texconverter import TexConverter, TexConversionError
-from shared.util import get_production_path, resolve_mapped_path
-from env_sg import DB_Config
-
+from pipe.texconverter import TexConversionError, TexConverter
 
 lib_path = resolve_mapped_path(Path(__file__).parents[1] / "lib")
 log = logging.getLogger(__name__)
@@ -57,25 +58,21 @@ class Exporter:
         self._asset = asset
         self._conn = DB.Get(DB_Config)
 
-    def _init_paths(self, mat_var: str, geo_var: str, renderman_var: str) -> None:
-        # initialize paths, pulling from SG database
-        assert self._asset.tex_path is not None
-        base_path = (
-            get_production_path()
-            / self._asset.tex_path
-            / geo_var
-            / mat_var
-            / renderman_var
+    def _init_paths(self, mat_var: str, geo_var: str, shader_layer: str) -> None:
+        paths = paths_for_asset(self._asset)
+        layer_dir = paths.publish_textures_layer_dir(geo_var, mat_var, shader_layer)
+
+        self._out_path = resolve_mapped_path(layer_dir)
+        self._src_path = resolve_mapped_path(
+            paths.publish_textures_src_dir(geo_var, mat_var, shader_layer)
         )
+        self._preview_path = resolve_mapped_path(
+            paths.publish_textures_preview_dir(geo_var, mat_var, shader_layer)
+        )
+        self._tex_path = self._out_path
 
-        self._out_path = resolve_mapped_path(base_path)
-        self._src_path = self._out_path / "src"
-        self._tex_path = self._out_path / "tex"
-        self._preview_path = self._out_path / "preview"
-
-        # create paths if not exist
+        self._out_path.mkdir(parents=True, exist_ok=True)
         self._src_path.mkdir(parents=True, exist_ok=True)
-        self._tex_path.mkdir(parents=True, exist_ok=True)
         self._preview_path.mkdir(parents=True, exist_ok=True)
 
     def export(
@@ -83,10 +80,10 @@ class Exporter:
         exp_setting_arr: typing.Sequence[TexSetExportSettings],
         mat_var: str,
         geo_var: str,
-        renderman_var: str,
+        shader_layer: str,
     ) -> bool:
         """Export all the textures of the given Texture Sets"""
-        self._init_paths(mat_var, geo_var, renderman_var)
+        self._init_paths(mat_var, geo_var, shader_layer)
 
         try:
             [tss.tex_set.get_stack() for tss in exp_setting_arr]
@@ -166,10 +163,10 @@ class Exporter:
 
     @staticmethod
     def _generate_config(
-        asset_path: Path, export_settings_arr: typing.Iterable[TexSetExportSettings]
+        src_path: Path, export_settings_arr: typing.Iterable[TexSetExportSettings]
     ) -> dict:
         return {
-            "exportPath": str(asset_path),
+            "exportPath": str(src_path),
             "exportShaderParams": True,
             "exportPresets": [
                 {

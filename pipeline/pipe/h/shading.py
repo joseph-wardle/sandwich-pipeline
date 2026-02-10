@@ -143,25 +143,25 @@ class MatlibManager:
         color_file = color.parm("filename")
         if color_file is not None:
             color_file.set(
-                f'$HIP/tex/{self.geo_variant_name}/{self.mat_variant_name}/{layer_name}/tex/`chs("../../textureset")`_BaseColor_ACES - ACEScg.<UDIM>.tex'
+                f'$HIP/publish/tex/{self.geo_variant_name}/{self.mat_variant_name}/{layer_name}/`chs("../../textureset")`_BaseColor_ACES - ACEScg.<UDIM>.tex'
             )
 
         roughness_file = roughness.parm("filename")
         if roughness_file is not None:
             roughness_file.set(
-                f'$HIP/tex/{self.geo_variant_name}/{self.mat_variant_name}/{layer_name}/tex/`chs("../../textureset")`_SpecularRoughness_Utility - Raw.<UDIM>.tex'
+                f'$HIP/publish/tex/{self.geo_variant_name}/{self.mat_variant_name}/{layer_name}/`chs("../../textureset")`_SpecularRoughness_Utility - Raw.<UDIM>.tex'
             )
 
         normal_file = normal.parm("filename")
         if normal_file is not None:
             normal_file.set(
-                f'$HIP/tex/{self.geo_variant_name}/{self.mat_variant_name}/{layer_name}/tex/`chs("../../textureset")`_Normal_Utility - Raw.<UDIM>.tex'
+                f'$HIP/publish/tex/{self.geo_variant_name}/{self.mat_variant_name}/{layer_name}/`chs("../../textureset")`_Normal_Utility - Raw.<UDIM>.tex'
             )
 
         metallic_file = metallic.parm("filename")
         if metallic_file is not None:
             metallic_file.set(
-                f'$HIP/tex/{self.geo_variant_name}/{self.mat_variant_name}/{layer_name}/tex/`chs("../../textureset")`_Metallic_Utility - Raw.<UDIM>.tex'
+                f'$HIP/publish/tex/{self.geo_variant_name}/{self.mat_variant_name}/{layer_name}/`chs("../../textureset")`_Metallic_Utility - Raw.<UDIM>.tex'
             )
 
         color_space = color.parm("filename_colorspace")
@@ -200,9 +200,7 @@ class MatlibManager:
         if vopnet is None:
             return
 
-        tex_path = (
-            f"{houdini_filepath}/tex/{self.geo_variant_name}/{self.mat_variant_name}"
-        )
+        tex_path = f"{houdini_filepath}/publish/tex/{self.geo_variant_name}/{self.mat_variant_name}"
         if not os.path.exists(tex_path):
             print(f"Path does not exist: {tex_path}")
             return
