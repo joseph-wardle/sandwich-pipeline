@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
 import subprocess
+import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Sequence, cast
 
@@ -14,7 +17,8 @@ from Qt.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QWidget
 from shared.util import get_pipe_path
 from software.houdini.dcc import HoudiniDCC
 
-from pipe.asset.paths import paths_for_asset
+from pipe.asset.paths import DCC_MAYA, paths_for_asset
+from pipe.asset.versioning import BackupResult, backup_if_changed
 from pipe.db import DB
 from pipe.glui.dialogs import (
     FilteredListDialog,
@@ -26,6 +30,7 @@ from pipe.m.assetfile import (
     resolve_asset_from_scene_path,
     write_asset_metadata,
 )
+from pipe.m.util import maintain_selection
 from pipe.struct.db import Asset, SGEntity
 
 if TYPE_CHECKING:
@@ -60,6 +65,9 @@ class _PublishAssetVariantControls:
         self._substance_only = QCheckBox(
             "Export Substance-only file? ONLY USE IF INSTRUCTED BY A LEAD"
         )
+        self._substance_only.setToolTip(
+            "Exports a Substance-only USD; use only when instructed by a lead."
+        )
         self._layout.insertWidget(1, self._substance_only)  # type: ignore[attr-defined]
 
         geo_var_widget = QWidget(self)  # type: ignore[misc]
@@ -74,6 +82,9 @@ class _PublishAssetVariantControls:
         self._geo_var_dropdown = QComboBox()
         self._geo_var_dropdown.setEditable(True)
         self._geo_var_dropdown.setCurrentText("default")
+        self._geo_var_dropdown.setToolTip(
+            "Enter or select the geometry variant to publish."
+        )
         pattern = QRegExp("[a-z][a-z_\d]*")
         geo_var_validator = QRegExpValidator(pattern)
         self._geo_var_dropdown.setValidator(geo_var_validator)
@@ -125,6 +136,7 @@ class PublishAssetOptionsDialog(FilteredListDialog, _PublishAssetVariantControls
             f"Asset: {self._selected_asset_name or 'Unknown'}",
             parent=self,
         )
+        asset_label.setToolTip("Asset resolved from the current scene metadata.")
         self._layout.insertWidget(0, asset_label)
 
         self._init_variant_controls()
@@ -187,6 +199,8 @@ class AssetPublisher(Publisher):
         self._asset_name = None
         self._houdini_result = None
         self._scene_asset: Asset | None = None
+        self._backup_result: BackupResult | None = None
+        self._backup_status: str | None = None
 
     def _resolve_scene_asset(self) -> Asset | None:
         metadata = read_asset_metadata(self._conn)
@@ -201,6 +215,78 @@ class AssetPublisher(Publisher):
         if asset:
             write_asset_metadata(asset)
         return asset
+
+    def _ensure_scene_saved(self) -> bool:
+        scene_path = mc.file(query=True, sn=True) or ""
+        if not scene_path:
+            MessageDialog(
+                self._window,
+                "Scene must be saved before publishing. Please save the asset file and try again.",
+                "Save Required",
+            ).exec_()
+            return False
+
+        if not mc.file(query=True, modified=True):
+            return True
+
+        response = mc.confirmDialog(
+            title="Save Changes",
+            message="This scene has unsaved changes. Save before publishing?",
+            button=["Save", "Cancel"],
+            defaultButton="Save",
+            cancelButton="Cancel",
+            dismissString="Cancel",
+        )
+        if response != "Save":
+            return False
+
+        try:
+            mc.file(save=True, force=True)
+        except Exception:
+            MessageDialog(
+                self._window,
+                "Failed to save the current scene. Please resolve any file issues and try again.",
+                "Save Failed",
+            ).exec_()
+            return False
+
+        return True
+
+    def _run_backup(self, asset: Asset) -> None:
+        self._backup_result = None
+        self._backup_status = None
+
+        scene_path = mc.file(query=True, sn=True) or ""
+        if not scene_path:
+            self._backup_status = "Backup skipped: scene has no file path."
+            return
+
+        asset_paths = paths_for_asset(asset)
+        result = backup_if_changed(
+            source_path=Path(scene_path),
+            backup_dir=asset_paths.backup_dir,
+            manifest_path=asset_paths.manifest_path,
+            dcc=DCC_MAYA,
+            variant=self._geo_variant,
+            publish_path=self._publish_path,
+            extra={"substance_only": self._is_substance_only},
+            asset_name=asset.name,
+            asset_path=asset.path,
+            asset_id=asset.id,
+        )
+
+        if result is None:
+            self._backup_status = "Backup skipped: source file missing."
+            return
+
+        self._backup_result = result
+        if result.changed:
+            if result.backup_path:
+                self._backup_status = f"Backup created: {result.backup_path.name}"
+            else:
+                self._backup_status = "Backup created."
+        else:
+            self._backup_status = "Backup skipped: no changes detected."
 
     def _configure_dialog_for_scene(self) -> None:
         self._scene_asset = self._resolve_scene_asset()
@@ -309,6 +395,8 @@ class AssetPublisher(Publisher):
             ).exec_()
             return None
 
+        write_asset_metadata(asset)
+
         self._geo_variant = variant_name
         self._is_substance_only = cast(
             PublishAssetOptionsDialog, self._dialog
@@ -329,33 +417,143 @@ class AssetPublisher(Publisher):
 
     def _get_confirm_message(self) -> str:
         message = super()._get_confirm_message()
+
+        details: list[str] = []
+        if self._backup_status:
+            details.append(self._backup_status)
+
         if self._is_substance_only:
+            if details:
+                return f"{message}\n\n" + "\n".join(details)
             return message
 
         if self._houdini_result is None:
-            return f"{message}\n\nHoudini component publish failed or was skipped."
+            details.append("Houdini component publish failed or was skipped.")
+        else:
+            result = self._houdini_result
+            status = result.get("status", "unknown").capitalize()
+            mode = result.get("mode", "unknown")
 
-        result = self._houdini_result
-        status = result.get("status", "unknown").capitalize()
-        mode = result.get("mode", "unknown")
+            details.append(f"Houdini build status: {status} ({mode} mode)")
+            if result.get("changed_usd_reference"):
+                details.append("- Updated USD reference.")
+            if result.get("export_performed"):
+                details.append(f"- Exported to: {result.get('export_dir')}")
 
-        details = [f"Houdini build status: {status} ({mode} mode)"]
-        if result.get("changed_usd_reference"):
-            details.append("- Updated USD reference.")
-        if result.get("export_performed"):
-            details.append(f"- Exported to: {result.get('export_dir')}")
+            warnings = result.get("warnings")
+            if warnings:
+                details.append("")
+                details.append("Warnings:")
+                details.extend(f"- {w}" for w in warnings)
 
-        warnings = result.get("warnings")
-        if warnings:
-            details.append("\nWarnings:")
-            details.extend(f"- {w}" for w in warnings)
+            errors = result.get("errors")
+            if errors:
+                details.append("")
+                details.append("Errors:")
+                details.extend(f"- {e.get('code')}: {e.get('message')}" for e in errors)
 
-        errors = result.get("errors")
-        if errors:
-            details.append("\nErrors:")
-            details.extend(f"- {e.get('code')}: {e.get('message')}" for e in errors)
+        if details:
+            return f"{message}\n\n" + "\n".join(details)
+        return message
 
-        return f"{message}\n\n" + "\n".join(details)
+    def publish(self):
+        with maintain_selection():
+            self._backup_result = None
+            self._backup_status = None
+            if not self._ensure_scene_saved():
+                return
+
+            if not self._prepublish():
+                return
+
+            if entity_list := self._get_entity_list():
+                if self._dialog_T in (
+                    PublishAssetOptionsDialog,
+                    PublishAssetPickerDialog,
+                ):
+                    self._dialog = self._dialog_T(self._window, entity_list, self._conn)
+                else:
+                    self._dialog = self._dialog_T(self._window, entity_list)
+
+                if not self._dialog.exec_():
+                    return
+
+                self._selected_item = self._dialog.get_selected_item()
+                if self._selected_item is None:
+                    MessageDialog(
+                        self._window,
+                        "Error: Nothing selected. Nothing exported",
+                        "Error",
+                    ).exec_()
+                    return
+
+                if self._use_sg_entity:
+                    try:
+                        self._entity = self._get_entity_from_name(self._selected_item)
+                    except AssertionError:
+                        entity_label = Asset.__name__
+                        MessageDialog(
+                            self._window,
+                            "Error: The selected item did not correspond to a valid "
+                            f"{entity_label} in ShotGrid. Please "
+                            "report this error. Nothing exported",
+                            "Error",
+                        ).exec_()
+                        return
+
+            self._publish_path = self._get_save_path()
+            if not self._publish_path:
+                mc.error("No save path found!")
+                return
+
+            if not self._presave():
+                return
+
+            self._publish_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_publish_path = (
+                os.getenv("TEMP", "") + os.pathsep + self._publish_path.name
+            )
+
+            kwargs = {
+                "file": str(
+                    temp_publish_path if self._IS_WINDOWS else self._publish_path
+                ),
+                "selection": True,
+                "stripNamespaces": True,
+                **self._get_mayausd_kwargs(),
+            }
+
+            try:
+                mc.mayaUSDExport(**kwargs)  # type: ignore[attr-defined]
+            except Exception:
+                print(traceback.format_exc())
+                MessageDialog(
+                    self._window,
+                    "WARNING: Publish failed! Please check the console for more information",
+                    "Export Failed",
+                ).exec_()
+                return
+
+            if self._IS_WINDOWS:
+                shutil.move(temp_publish_path, self._publish_path)
+
+            self._postpublish()
+
+            asset = None
+            if getattr(self, "_entity", None):
+                asset = cast(Asset, self._entity)
+            if asset is None:
+                asset = self._scene_asset or self._resolve_scene_asset()
+            if asset:
+                self._run_backup(asset)
+            else:
+                self._backup_status = "Backup skipped: asset could not be resolved."
+
+            MessageDialog(
+                self._window,
+                self._get_confirm_message(),
+                "Export Complete",
+            ).exec_()
 
     def _presave(self) -> bool:
         return True
