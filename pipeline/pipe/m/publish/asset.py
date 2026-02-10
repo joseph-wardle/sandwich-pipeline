@@ -18,7 +18,11 @@ from shared.util import get_pipe_path
 from software.houdini.dcc import HoudiniDCC
 
 from pipe.asset.paths import DCC_MAYA, paths_for_asset
-from pipe.asset.versioning import BackupResult, backup_if_changed
+from pipe.asset.versioning import (
+    EXTRA_SUBSTANCE_ONLY_KEY,
+    BackupResult,
+    backup_if_changed,
+)
 from pipe.db import DB
 from pipe.glui.dialogs import (
     FilteredListDialog,
@@ -209,11 +213,15 @@ class AssetPublisher(Publisher):
 
         scene_path = mc.file(query=True, sn=True) or ""
         if not scene_path:
+            log.warning("No scene path; cannot resolve asset metadata.")
             return None
 
         asset = resolve_asset_from_scene_path(self._conn, Path(scene_path))
         if asset:
+            log.info("Resolved asset from scene path; writing file metadata.")
             write_asset_metadata(asset)
+        else:
+            log.warning("Failed to resolve asset from scene path: %s", scene_path)
         return asset
 
     def _ensure_scene_saved(self) -> bool:
@@ -224,6 +232,7 @@ class AssetPublisher(Publisher):
                 "Scene must be saved before publishing. Please save the asset file and try again.",
                 "Save Required",
             ).exec_()
+            log.warning("Publish canceled: scene has no file path.")
             return False
 
         if not mc.file(query=True, modified=True):
@@ -238,6 +247,7 @@ class AssetPublisher(Publisher):
             dismissString="Cancel",
         )
         if response != "Save":
+            log.info("Publish canceled: user declined to save scene.")
             return False
 
         try:
@@ -248,6 +258,7 @@ class AssetPublisher(Publisher):
                 "Failed to save the current scene. Please resolve any file issues and try again.",
                 "Save Failed",
             ).exec_()
+            log.exception("Failed to save scene before publish.")
             return False
 
         return True
@@ -259,6 +270,7 @@ class AssetPublisher(Publisher):
         scene_path = mc.file(query=True, sn=True) or ""
         if not scene_path:
             self._backup_status = "Backup skipped: scene has no file path."
+            log.warning("Backup skipped: scene has no file path.")
             return
 
         asset_paths = paths_for_asset(asset)
@@ -269,7 +281,7 @@ class AssetPublisher(Publisher):
             dcc=DCC_MAYA,
             variant=self._geo_variant,
             publish_path=self._publish_path,
-            extra={"substance_only": self._is_substance_only},
+            extra={EXTRA_SUBSTANCE_ONLY_KEY: self._is_substance_only},
             asset_name=asset.name,
             asset_path=asset.path,
             asset_id=asset.id,
@@ -277,16 +289,20 @@ class AssetPublisher(Publisher):
 
         if result is None:
             self._backup_status = "Backup skipped: source file missing."
+            log.warning("Backup skipped: source file missing.")
             return
 
         self._backup_result = result
         if result.changed:
             if result.backup_path:
                 self._backup_status = f"Backup created: {result.backup_path.name}"
+                log.info("Backup created at %s", result.backup_path)
             else:
                 self._backup_status = "Backup created."
+                log.info("Backup created for %s", scene_path)
         else:
             self._backup_status = "Backup skipped: no changes detected."
+            log.info("Backup skipped: no changes detected.")
 
     def _configure_dialog_for_scene(self) -> None:
         self._scene_asset = self._resolve_scene_asset()
@@ -301,6 +317,7 @@ class AssetPublisher(Publisher):
             "Please select the asset to publish.",
             "Asset Selection Required",
         ).exec_()
+        log.warning("Asset metadata missing; falling back to asset picker dialog.")
 
     @staticmethod
     def _compute_component_basename(
@@ -548,6 +565,7 @@ class AssetPublisher(Publisher):
                 self._run_backup(asset)
             else:
                 self._backup_status = "Backup skipped: asset could not be resolved."
+                log.warning("Backup skipped: asset could not be resolved.")
 
             MessageDialog(
                 self._window,
