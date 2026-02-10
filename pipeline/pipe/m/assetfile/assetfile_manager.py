@@ -227,11 +227,8 @@ class AssetOpenDialog(FilteredListDialog):
 
         manifest_state = "present" if manifest_path.exists() else "missing"
         info_lines = [
-            f"Root: {paths.root}",
-            f"Model: {paths.model_path}",
-            f"Manifest: {manifest_path} ({manifest_state})",
-            f"Last publish (manifest): {publish_summary}",
-            f"Available backups: {backup_label}",
+            f"Path: {paths.root}",
+            f"Last publish: {publish_summary}",
         ]
         self._info_label.setText("\n".join(info_lines))
 

@@ -81,7 +81,8 @@ class _PublishAssetVariantControls:
         self._geo_var_dropdown.setValidator(geo_var_validator)
         geo_var_settings_layout.addWidget(self._geo_var_dropdown, 70)
         geo_var_layout.addWidget(geo_var_settings_widget, 90)
-        self._layout.addWidget(geo_var_widget)  # type: ignore[attr-defined]
+        insert_at = max(self._layout.count() - 1, 0)  # type: ignore[attr-defined]
+        self._layout.insertWidget(insert_at, geo_var_widget)  # type: ignore[attr-defined]
 
     def get_selected_variant(self) -> str:
         return self._geo_var_dropdown.currentText()
@@ -130,7 +131,8 @@ class PublishAssetOptionsDialog(FilteredListDialog, _PublishAssetVariantControls
 
         self._init_variant_controls()
 
-        self._layout.addStretch(1)
+        insert_at = max(self._layout.count() - 1, 0)
+        self._layout.insertStretch(insert_at, 1)
         asset = None
         if self._conn and self._selected_asset_name:
             asset = self._conn.get_asset_by_display_name(self._selected_asset_name)
@@ -160,7 +162,8 @@ class PublishAssetPickerDialog(FilteredListDialog, _PublishAssetVariantControls)
         self.resize(520, 520)
         self._init_variant_controls()
         self._populate_geo_var(None)
-        self._layout.addStretch(1)
+        insert_at = max(self._layout.count() - 1, 0)
+        self._layout.insertStretch(insert_at, 1)
 
     def _on_item_selected(self) -> None:
         selected = self.get_selected_item()
