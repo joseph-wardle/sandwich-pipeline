@@ -13,7 +13,7 @@ import maya.cmds as mc
 from env import Executables
 from Qt.QtCore import QRegExp
 from Qt.QtGui import QRegExpValidator, QTextCursor
-from Qt.QtWidgets import QComboBox, QHBoxLayout, QLabel, QWidget
+from Qt.QtWidgets import QComboBox, QDialogButtonBox, QHBoxLayout, QLabel, QWidget
 from shared.util import get_pipe_path
 from software.houdini.dcc import HoudiniDCC
 
@@ -68,6 +68,7 @@ class _PublishAssetVariantControls:
         geo_var_settings_widget = QWidget()
         geo_var_settings_layout = QHBoxLayout(geo_var_settings_widget)
         geo_var_label = QLabel("Geometry Variant:")
+        geo_var_label.setToolTip("Choose the geometry variant to publish.")
         geo_var_settings_layout.addWidget(geo_var_label, 30)
 
         self._geo_var_dropdown = QComboBox()
@@ -138,6 +139,13 @@ class PublishAssetOptionsDialog(FilteredListDialog, _PublishAssetVariantControls
             asset = self._conn.get_asset_by_display_name(self._selected_asset_name)
         self._populate_geo_var(asset)
 
+        ok_btn = self.buttons.button(QDialogButtonBox.Ok)
+        if ok_btn:
+            ok_btn.setToolTip("Publish the selected geometry variant.")
+        cancel_btn = self.buttons.button(QDialogButtonBox.Cancel)
+        if cancel_btn:
+            cancel_btn.setToolTip("Cancel publishing and close this window.")
+
     def get_selected_item(self) -> str | None:
         return self._selected_asset_name
 
@@ -160,10 +168,20 @@ class PublishAssetPickerDialog(FilteredListDialog, _PublishAssetVariantControls)
         )
         self._conn = conn
         self.resize(520, 520)
+        if hasattr(self, "_filter_field"):
+            self._filter_field.setToolTip("Type to filter the asset list.")
+        self._list_widget.setToolTip("Select the asset to publish.")
         self._init_variant_controls()
         self._populate_geo_var(None)
         insert_at = max(self._layout.count() - 1, 0)
         self._layout.insertStretch(insert_at, 1)
+
+        ok_btn = self.buttons.button(QDialogButtonBox.Ok)
+        if ok_btn:
+            ok_btn.setToolTip("Publish the selected asset and variant.")
+        cancel_btn = self.buttons.button(QDialogButtonBox.Cancel)
+        if cancel_btn:
+            cancel_btn.setToolTip("Cancel publishing and close this window.")
 
     def _on_item_selected(self) -> None:
         selected = self.get_selected_item()
