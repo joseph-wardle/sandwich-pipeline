@@ -84,6 +84,7 @@ class Exporter:
     ) -> bool:
         """Export all the textures of the given Texture Sets"""
         self._init_paths(mat_var, geo_var, shader_layer)
+        log.info("Exporting textures to %s", self._out_path)
 
         try:
             [tss.tex_set.get_stack() for tss in exp_setting_arr]
@@ -100,8 +101,8 @@ class Exporter:
         export_result: sp.export.TextureExportResult
         try:
             export_result = sp.export.export_project_textures(config)
-        except Exception as e:
-            print(e)
+        except Exception:
+            log.exception("Texture export failed in Substance Painter.")
             return False
 
         self.write_mat_info(exp_setting_arr)
@@ -114,6 +115,7 @@ class Exporter:
             tex_converter.convert_tex()
             tex_converter.convert_previewsurface()
         except TexConversionError:
+            log.exception("Texture conversion failed.")
             MessageDialog(
                 get_main_qt_window(),
                 (
