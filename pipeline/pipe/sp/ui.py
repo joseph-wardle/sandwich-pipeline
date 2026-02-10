@@ -28,7 +28,7 @@ from shared.util import get_documentation_path
 from pipe.asset.paths import DCC_SUBSTANCE, paths_for_asset
 from pipe.asset.versioning import backup_if_changed
 from pipe.db import DB
-from pipe.glui.dialogs import ButtonPair, MessageDialog
+from pipe.glui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButtons
 from pipe.sp.assetfile import PIPE_SP_DOCS_PAGE, get_active_asset_from_project
 from pipe.sp.export import Exporter, TexSetExportSettings
 from pipe.sp.local import get_main_qt_window
@@ -257,6 +257,8 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     def do_export(self, isBatch: bool = False) -> None:
         if not self._curr_asset:
             return
+        if not self._ensure_project_saved():
+            return
 
         if self.mat_var not in self._curr_asset.material_variants:
             self._curr_asset.material_variants.add(self.mat_var)
@@ -350,6 +352,58 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                     "console for more information"
                 ),
             ).exec_()
+
+    def _ensure_project_saved(self) -> bool:
+        if not sp.project.is_open():
+            MessageDialog(
+                get_main_qt_window(),
+                "No Substance Painter project is open.",
+                "Publish Textures",
+            ).exec_()
+            return False
+
+        project_path = sp.project.file_path() or ""
+        if not project_path:
+            MessageDialog(
+                get_main_qt_window(),
+                "This project has no file path yet. Use Save As before publishing.",
+                "Save Required",
+            ).exec_()
+            return False
+
+        if sp.project.needs_saving():
+            dialog = MessageDialogCustomButtons(
+                get_main_qt_window(),
+                "The project has unsaved changes. Save before publishing?",
+                "Save Required",
+                has_cancel_button=True,
+                ok_name="Save",
+                cancel_name="Cancel",
+            )
+            if not dialog.exec_():
+                return False
+            try:
+                sp.project.save()
+            except Exception:
+                MessageDialog(
+                    get_main_qt_window(),
+                    "Failed to save the project. Resolve any file issues and try again.",
+                    "Save Failed",
+                ).exec_()
+                log.exception(
+                    "Failed to save Substance Painter project before publish."
+                )
+                return False
+
+            if sp.project.needs_saving():
+                MessageDialog(
+                    get_main_qt_window(),
+                    "The project still appears unsaved. Please save manually before publishing.",
+                    "Save Required",
+                ).exec_()
+                return False
+
+        return True
 
 
 class TexSetWidget(QtWidgets.QWidget):
