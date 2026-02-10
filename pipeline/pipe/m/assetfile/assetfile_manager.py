@@ -281,18 +281,23 @@ class MAssetFileManager(FileManager):
                 or not meta.display_name
                 or not meta.path
             ):
+                log.info("Backfilling incomplete asset metadata in fileInfo.")
                 write_asset_metadata(meta.asset)
             return
 
         if scene_path is None:
             raw_path = mc.file(query=True, sn=True) or ""
             if not raw_path:
+                log.debug("Scene has no file path; cannot infer asset metadata.")
                 return
             scene_path = Path(raw_path)
 
         asset = resolve_asset_from_scene_path(self._conn, scene_path)
         if asset:
+            log.info("Inferred asset metadata from scene path: %s", asset.path)
             write_asset_metadata(asset)
+        else:
+            log.debug("Unable to infer asset metadata from scene path: %s", scene_path)
 
     def _prompt_backup_version(self, paths: AssetPaths) -> Optional[Path]:
         versions = list_versions(paths.backup_dir, "model", "mb")
