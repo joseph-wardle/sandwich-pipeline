@@ -32,8 +32,9 @@ MANIFEST_FILENAME = "asset_manifest.json"
 BACKUP_DIRNAME = ".backup"
 PUBLISH_DIRNAME = "publish"
 PUBLISH_SOURCE_DIRNAME = "_src"
-PUBLISH_TEXTURES_DIRNAME = "textures"
+PUBLISH_TEXTURES_DIRNAME = "tex"
 PUBLISH_TEXTURES_SOURCE_DIRNAME = "_src"
+PUBLISH_TEXTURES_PREVIEW_DIRNAME = "_preview"
 
 # Publish filenames
 PUBLISH_SOURCE_MODEL_FILENAME = "model.usd"
@@ -100,9 +101,23 @@ class AssetPaths:
     def publish_textures_dir(self) -> Path:
         return self.publish_dir / PUBLISH_TEXTURES_DIRNAME
 
-    @property
-    def publish_textures_source_dir(self) -> Path:
-        return self.publish_textures_dir / PUBLISH_TEXTURES_SOURCE_DIRNAME
+    def publish_textures_layer_dir(self, geo: str, mat: str, layer: str) -> Path:
+        """Return publish/tex/<geo>/<material>/<layer>."""
+        return self.publish_textures_dir / geo.strip() / mat.strip() / layer.strip()
+
+    def publish_textures_src_dir(self, geo: str, mat: str, layer: str) -> Path:
+        """Return publish/tex/<geo>/<material>/<layer>/_src."""
+        return (
+            self.publish_textures_layer_dir(geo, mat, layer)
+            / PUBLISH_TEXTURES_SOURCE_DIRNAME
+        )
+
+    def publish_textures_preview_dir(self, geo: str, mat: str, layer: str) -> Path:
+        """Return publish/tex/<geo>/<material>/<layer>/_preview."""
+        return (
+            self.publish_textures_layer_dir(geo, mat, layer)
+            / PUBLISH_TEXTURES_PREVIEW_DIRNAME
+        )
 
     @property
     def manifest_path(self) -> Path:
@@ -170,6 +185,7 @@ __all__ = [
     "PUBLISH_SOURCE_DIRNAME",
     "PUBLISH_TEXTURES_DIRNAME",
     "PUBLISH_TEXTURES_SOURCE_DIRNAME",
+    "PUBLISH_TEXTURES_PREVIEW_DIRNAME",
     "PUBLISH_SOURCE_MODEL_FILENAME",
     "PUBLISH_ASSET_USD_FILENAME",
     "PUBLISH_GEO_USD_FILENAME",
