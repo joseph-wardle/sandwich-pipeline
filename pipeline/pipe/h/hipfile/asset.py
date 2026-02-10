@@ -24,7 +24,7 @@ class HAssetFileManager(HFileManager):
         asset = cast(Asset, entity)
         asset_name = (
             (asset.name or "").strip()
-            or (asset.disp_name or "").strip()
+            or (asset.display_name or "").strip()
             or (Path(asset.path).name if asset.path else "")
         )
 
