@@ -15,7 +15,6 @@ from Qt.QtWidgets import (
     QLabel,
     QLayout,
     QMainWindow,
-    QScrollArea,
 )
 
 if TYPE_CHECKING:
@@ -260,6 +259,17 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         if not self._ensure_project_saved():
             return
 
+        asset_label = (
+            self._curr_asset.display_name or self._curr_asset.name or "Unknown Asset"
+        )
+        log.info(
+            "Publishing textures for %s (geo=%s, mat=%s, layer=%s)",
+            asset_label,
+            self.geo_var,
+            self.mat_var,
+            self.shader_layer,
+        )
+
         if self.mat_var not in self._curr_asset.material_variants:
             self._curr_asset.material_variants.add(self.mat_var)
             log.info(f"Updating new material variant: {self.mat_var}")
@@ -290,6 +300,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 "No texture sets are enabled for export.",
             ).exec_()
             return
+        log.info("Exporting %d texture sets", len(export_settings))
 
         if exporter.export(
             export_settings,
@@ -345,6 +356,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 message,
             ).exec_()
         else:
+            log.error("Texture export failed for %s", asset_label)
             MessageDialog(
                 get_main_qt_window(),
                 (

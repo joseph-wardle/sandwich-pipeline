@@ -223,6 +223,7 @@ def store_asset_metadata_for_project(asset: Asset) -> None:
         asset_id=asset.id,
         asset_path=asset.path,
     )
+    log.info("Stored asset metadata for project: %s", asset_display_name)
 
 
 def _resolve_default_mesh_paths(
@@ -749,6 +750,7 @@ def _open_existing_project_for_asset(asset: Asset, project_path: Path) -> None:
             "No Substance Painter project exists yet. Use Save Current As or Create Default.",
             "Missing Substance Painter Project",
         ).exec_()
+        log.warning("Substance project missing at %s", project_path)
         return
 
     current_path = _current_project_path()
@@ -765,6 +767,7 @@ def _open_existing_project_for_asset(asset: Asset, project_path: Path) -> None:
 
     _open_existing_project(project_path)
     _store_asset_metadata_when_ready(asset)
+    log.info("Opened Substance project for asset %s", asset.display_name or asset.name)
 
 
 def _save_current_project_as_asset(asset: Asset, project_path: Path) -> None:
@@ -775,6 +778,7 @@ def _save_current_project_as_asset(asset: Asset, project_path: Path) -> None:
             "No project is currently open. Open or create a project before saving.",
             "No Project Open",
         ).exec_()
+        log.warning("Save current project requested with no project open.")
         return
 
     current_path = _current_project_path()
@@ -788,6 +792,7 @@ def _save_current_project_as_asset(asset: Asset, project_path: Path) -> None:
     project_path.parent.mkdir(parents=True, exist_ok=True)
     _save_current_project_as(project_path)
     _store_asset_metadata_when_ready(asset)
+    log.info("Saved Substance project to %s", project_path)
 
 
 def _create_default_project_for_asset(
@@ -800,6 +805,11 @@ def _create_default_project_for_asset(
 ) -> None:
     parent = get_main_qt_window()
     paths = paths_for_asset(asset)
+    log.info(
+        "Creating default Substance project for %s (variant=%s)",
+        asset.display_name or asset.name,
+        variant,
+    )
 
     mesh_path, variant_path, fallback_path = _resolve_default_mesh_paths(
         paths,
@@ -873,6 +883,7 @@ def _create_default_project_for_asset(
         sp.project.execute_when_not_busy(finalize_save)
     else:
         finalize_save()
+    log.info("Created Substance project at %s", project_path)
 
 
 def launch_open_asset_textures() -> None:
@@ -894,6 +905,11 @@ def launch_open_asset_textures() -> None:
     action = select_dialog.get_selected_action()
     if not action or not asset:
         return
+    log.info(
+        "Open Asset: selected %s (%s)",
+        asset.display_name or asset.name,
+        action,
+    )
     if not asset.path:
         MessageDialog(
             parent,
