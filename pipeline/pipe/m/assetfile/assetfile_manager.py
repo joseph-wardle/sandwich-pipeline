@@ -135,7 +135,7 @@ def _asset_path_from_root(asset_root: Path) -> Optional[str]:
     return rel_path.as_posix()
 
 
-def _resolve_asset_from_scene_path(conn: DB, scene_path: Path) -> Optional[Asset]:
+def resolve_asset_from_scene_path(conn: DB, scene_path: Path) -> Optional[Asset]:
     asset_root = _asset_root_from_scene_path(scene_path)
     if not asset_root:
         return None
@@ -290,7 +290,7 @@ class MAssetFileManager(FileManager):
                 return
             scene_path = Path(raw_path)
 
-        asset = _resolve_asset_from_scene_path(self._conn, scene_path)
+        asset = resolve_asset_from_scene_path(self._conn, scene_path)
         if asset:
             write_asset_metadata(asset)
 
@@ -409,6 +409,7 @@ __all__ = [
     "AssetMetadata",
     "write_asset_metadata",
     "read_asset_metadata",
+    "resolve_asset_from_scene_path",
     "AssetOpenDialog",
     "MAssetFileManager",
     "install_asset_menu",

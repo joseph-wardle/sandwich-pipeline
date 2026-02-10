@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Sequence, cast
 
+import maya.cmds as mc
 from env import Executables
 from Qt.QtCore import QRegExp
 from Qt.QtGui import QRegExpValidator, QTextCursor
@@ -19,6 +20,11 @@ from pipe.glui.dialogs import (
     FilteredListDialog,
     MessageDialog,
     MessageDialogCustomButtons,
+)
+from pipe.m.assetfile import (
+    read_asset_metadata,
+    resolve_asset_from_scene_path,
+    write_asset_metadata,
 )
 from pipe.struct.db import Asset, SGEntity
 
@@ -45,9 +51,98 @@ class HoudiniBuildError(RuntimeError):
     pass
 
 
-class PublishAssetDialog(FilteredListDialog):
+class _PublishAssetVariantControls:
     _substance_only: QCheckBox
-    _geo_var_widget: QWidget
+    _geo_var_dropdown: QComboBox
+    _conn: Optional[DB]
+
+    def _init_variant_controls(self) -> None:
+        self._substance_only = QCheckBox(
+            "Export Substance-only file? ONLY USE IF INSTRUCTED BY A LEAD"
+        )
+        self._layout.insertWidget(1, self._substance_only)  # type: ignore[attr-defined]
+
+        geo_var_widget = QWidget(self)  # type: ignore[misc]
+        geo_var_layout = QHBoxLayout(geo_var_widget)
+        geo_var_layout.setContentsMargins(0, 0, 0, 0)
+        geo_var_layout.setSpacing(0)
+        geo_var_settings_widget = QWidget()
+        geo_var_settings_layout = QHBoxLayout(geo_var_settings_widget)
+        geo_var_label = QLabel("Geometry Variant:")
+        geo_var_settings_layout.addWidget(geo_var_label, 30)
+
+        self._geo_var_dropdown = QComboBox()
+        self._geo_var_dropdown.setEditable(True)
+        self._geo_var_dropdown.setCurrentText("default")
+        pattern = QRegExp("[a-z][a-z_\d]*")
+        geo_var_validator = QRegExpValidator(pattern)
+        self._geo_var_dropdown.setValidator(geo_var_validator)
+        geo_var_settings_layout.addWidget(self._geo_var_dropdown, 70)
+        geo_var_layout.addWidget(geo_var_settings_widget, 90)
+        self._layout.addWidget(geo_var_widget)  # type: ignore[attr-defined]
+
+    def get_selected_variant(self) -> str:
+        return self._geo_var_dropdown.currentText()
+
+    @property
+    def is_substance_only(self) -> bool:
+        return self._substance_only.isChecked()
+
+    def _populate_geo_var(self, asset: Asset | None) -> None:
+        if asset and hasattr(asset, "geometry_variants"):
+            variants = sorted(set(asset.geometry_variants) | {"main"})
+        else:
+            variants = []
+        self._geo_var_dropdown.clear()
+        self._geo_var_dropdown.addItems(variants)
+
+
+class PublishAssetOptionsDialog(FilteredListDialog, _PublishAssetVariantControls):
+    """Publish dialog for the current scene asset (read-only asset name)."""
+
+    _selected_asset_name: Optional[str]
+
+    def __init__(
+        self, parent: QWidget | None, items: Sequence[str], conn: Optional[DB]
+    ) -> None:
+        super().__init__(
+            parent,
+            items,
+            "Publish Asset",
+            "Asset to publish",
+            accept_button_name="Publish",
+        )
+        self._conn = conn
+        self._selected_asset_name = items[0] if items else None
+
+        if hasattr(self, "_filter_field"):
+            self._filter_field.setVisible(False)
+        self._list_widget.setVisible(False)
+        if hasattr(self, "_list_label"):
+            self._list_label.setVisible(False)
+
+        asset_label = QLabel(
+            f"Asset: {self._selected_asset_name or 'Unknown'}",
+            parent=self,
+        )
+        self._layout.insertWidget(0, asset_label)
+
+        self._init_variant_controls()
+
+        asset = None
+        if self._conn and self._selected_asset_name:
+            asset = self._conn.get_asset_by_display_name(self._selected_asset_name)
+        self._populate_geo_var(asset)
+
+    def get_selected_item(self) -> str | None:
+        return self._selected_asset_name
+
+    def _on_item_selected(self) -> None:
+        return
+
+
+class PublishAssetPickerDialog(FilteredListDialog, _PublishAssetVariantControls):
+    """Fallback dialog that lets users choose the asset to publish."""
 
     def __init__(
         self, parent: QWidget | None, items: Sequence[str], conn: Optional[DB]
@@ -59,49 +154,9 @@ class PublishAssetDialog(FilteredListDialog):
             "Select asset to publish",
             accept_button_name="Publish",
         )
-
-        self._substance_only = QCheckBox(
-            "Export Substance-only file? ONLY USE IF INSTRUCTED BY A LEAD"
-        )
-        self._layout.insertWidget(1, self._substance_only)
-
         self._conn = conn
-
-        geo_var_widget = QWidget(self)
-        geo_var_layout = QHBoxLayout(geo_var_widget)
-        geo_var_layout.setContentsMargins(0, 0, 0, 0)
-        geo_var_layout.setSpacing(0)
-        geo_var_settings_widget = QWidget()
-        geo_var_settings_layout = QHBoxLayout(geo_var_settings_widget)
-        geo_var_label = QLabel("Geometry Variant:")
-        geo_var_settings_layout.addWidget(geo_var_label, 30)
-
-        # Editable combo box for geo variant
-        self._geo_var_dropdown = QComboBox()
-        self._geo_var_dropdown.setEditable(True)
-        self._geo_var_dropdown.setCurrentText("default")
-        pattern = QRegExp("[a-z][a-z_\d]*")
-        geo_var_validator = QRegExpValidator(pattern)
-        self._geo_var_dropdown.setValidator(geo_var_validator)
-        geo_var_settings_layout.addWidget(self._geo_var_dropdown, 70)
-        geo_var_layout.addWidget(geo_var_settings_widget, 90)
-        self._layout.addWidget(geo_var_widget)
-
+        self._init_variant_controls()
         self._populate_geo_var(None)
-
-    def get_selected_variant(self) -> str:
-        return self._geo_var_dropdown.currentText()
-
-    @property
-    def is_substance_only(self) -> bool:
-        """Return whether the substance-only option is checked."""
-        return self._substance_only.isChecked()
-
-    def get_selected_item(self) -> str | None:
-        selected_items = self._list_widget.selectedItems()
-        if selected_items:
-            return selected_items[0].text()
-        return None
 
     def _on_item_selected(self) -> None:
         selected = self.get_selected_item()
@@ -110,18 +165,6 @@ class PublishAssetDialog(FilteredListDialog):
         else:
             return
         self._populate_geo_var(asset)
-
-    def _populate_geo_var(self, asset: Asset | None) -> None:
-        """Populate the variant selector with variants from the selected asset."""
-        if asset and hasattr(asset, "geometry_variants"):
-            var_set = set(asset.geometry_variants)
-            var_set.add("main")
-            variants = list(var_set)
-        else:
-            variants = []
-
-        self._geo_var_dropdown.clear()
-        self._geo_var_dropdown.addItems(variants)
 
 
 class AssetPublisher(Publisher):
@@ -135,7 +178,7 @@ class AssetPublisher(Publisher):
     _houdini_result: dict[str, Any] | None
 
     def __init__(self) -> None:
-        super().__init__(PublishAssetDialog)
+        super().__init__(PublishAssetOptionsDialog)
         self._geo_variant = "main"
         self._is_substance_only = False
         self._component_export_dir = None
@@ -143,6 +186,35 @@ class AssetPublisher(Publisher):
         self._component_basename = None
         self._asset_name = None
         self._houdini_result = None
+        self._scene_asset: Asset | None = None
+
+    def _resolve_scene_asset(self) -> Asset | None:
+        metadata = read_asset_metadata(self._conn)
+        if metadata.asset:
+            return metadata.asset
+
+        scene_path = mc.file(query=True, sn=True) or ""
+        if not scene_path:
+            return None
+
+        asset = resolve_asset_from_scene_path(self._conn, Path(scene_path))
+        if asset:
+            write_asset_metadata(asset)
+        return asset
+
+    def _configure_dialog_for_scene(self) -> None:
+        self._scene_asset = self._resolve_scene_asset()
+        if self._scene_asset:
+            self._dialog_T = PublishAssetOptionsDialog
+            return
+
+        self._dialog_T = PublishAssetPickerDialog
+        MessageDialog(
+            self._window,
+            "Asset metadata is missing from this scene. "
+            "Please select the asset to publish.",
+            "Asset Selection Required",
+        ).exec_()
 
     @staticmethod
     def _compute_component_basename(
@@ -186,9 +258,12 @@ class AssetPublisher(Publisher):
                     "<h1>Asset not exported. Please resolve model checks.</h1>"
                 )
                 return False
+        self._configure_dialog_for_scene()
         return True
 
     def _get_entity_list(self) -> list[str]:
+        if self._scene_asset:
+            return [self._scene_asset.display_name]
         return self._conn.get_asset_display_name_list(sorted=True)
 
     def _get_entity_from_name(self, display_name: str) -> SGEntity | None:
@@ -196,7 +271,7 @@ class AssetPublisher(Publisher):
 
     def _get_asset(self) -> Asset | None:
         """Get the asset from the database."""
-        dialog = cast(PublishAssetDialog, self._dialog)
+        dialog = cast(PublishAssetOptionsDialog, self._dialog)
         asset_display_name = dialog.get_selected_item()
         if not asset_display_name:
             return None
@@ -204,7 +279,7 @@ class AssetPublisher(Publisher):
 
     def _get_variant_name(self) -> str | None:
         """Get the variant name from the dialog."""
-        dialog = cast(PublishAssetDialog, self._dialog)
+        dialog = cast(PublishAssetOptionsDialog, self._dialog)
         return dialog.get_selected_variant()
 
     def _get_save_path(self) -> Path | None:
@@ -236,7 +311,7 @@ class AssetPublisher(Publisher):
 
         self._geo_variant = variant_name
         self._is_substance_only = cast(
-            PublishAssetDialog, self._dialog
+            PublishAssetOptionsDialog, self._dialog
         ).is_substance_only
 
         if variant_name not in asset.geometry_variants:
