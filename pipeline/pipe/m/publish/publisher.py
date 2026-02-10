@@ -120,14 +120,18 @@ class Publisher:
                 return
 
             if entity_list := self._get_entity_list():
-                from pipe.m.publish.asset import PublishAssetDialog
+                from pipe.m.publish.asset import (
+                    PublishAssetOptionsDialog,
+                    PublishAssetPickerDialog,
+                )
                 from pipe.m.publish.previs_asset import PublishPrevisAssetDialog
 
-                if (
-                    self._dialog_T == PublishAssetDialog
-                    or self._dialog_T == PublishPrevisAssetDialog
+                if self._dialog_T in (
+                    PublishAssetOptionsDialog,
+                    PublishAssetPickerDialog,
+                    PublishPrevisAssetDialog,
                 ):
-                    # Pass extra parameter (conn) if it's PublishAssetDialog
+                    # Pass extra parameter (conn) if dialog needs DB access
                     self._dialog = self._dialog_T(self._window, entity_list, self._conn)
                 else:
                     # Otherwise, use the dialog normally
