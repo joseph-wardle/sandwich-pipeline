@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Optional, cast
 import maya.api.OpenMaya as om
 import maya.cmds as cmds
 from pxr import Gf, Sdf, Usd, UsdGeom, Vt
-from Qt.QtWidgets import QCheckBox, QWidget
+from Qt.QtWidgets import QWidget
 
 from pipe.db import DB
 
@@ -25,9 +25,6 @@ log = logging.getLogger(__name__)
 
 
 class PublishPrevisAssetDialog(FilteredListDialog):
-    _substance_only: QCheckBox
-    _geo_var_widget: QWidget
-
     def __init__(
         self, parent: QWidget | None, items: Sequence[str], conn: Optional[DB]
     ) -> None:

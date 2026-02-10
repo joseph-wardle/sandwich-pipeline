@@ -28,7 +28,6 @@ _SIGNATURE_MTIME_NS_KEY = "mtime_ns"
 _EXTRA_CHANGED_KEY = "changed"
 _EXTRA_VARIANT_KEY = "variant"
 _EXTRA_PUBLISH_PATH_KEY = "publish_path"
-EXTRA_SUBSTANCE_ONLY_KEY = "substance_only"
 
 
 @dataclass(frozen=True)
@@ -370,7 +369,6 @@ __all__ = [
     "backup_if_changed",
     "compute_signature",
     "BackupResult",
-    "EXTRA_SUBSTANCE_ONLY_KEY",
     "build_manifest",
     "get_manifest_path",
     "list_versions",

@@ -13,16 +13,12 @@ import maya.cmds as mc
 from env import Executables
 from Qt.QtCore import QRegExp
 from Qt.QtGui import QRegExpValidator, QTextCursor
-from Qt.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QWidget
+from Qt.QtWidgets import QComboBox, QHBoxLayout, QLabel, QWidget
 from shared.util import get_pipe_path
 from software.houdini.dcc import HoudiniDCC
 
 from pipe.asset.paths import DCC_MAYA, paths_for_asset
-from pipe.asset.versioning import (
-    EXTRA_SUBSTANCE_ONLY_KEY,
-    BackupResult,
-    backup_if_changed,
-)
+from pipe.asset.versioning import BackupResult, backup_if_changed
 from pipe.db import DB
 from pipe.glui.dialogs import (
     FilteredListDialog,
@@ -61,19 +57,10 @@ class HoudiniBuildError(RuntimeError):
 
 
 class _PublishAssetVariantControls:
-    _substance_only: QCheckBox
     _geo_var_dropdown: QComboBox
     _conn: Optional[DB]
 
     def _init_variant_controls(self) -> None:
-        self._substance_only = QCheckBox(
-            "Export Substance-only file? ONLY USE IF INSTRUCTED BY A LEAD"
-        )
-        self._substance_only.setToolTip(
-            "Exports a Substance-only USD; use only when instructed by a lead."
-        )
-        self._layout.insertWidget(1, self._substance_only)  # type: ignore[attr-defined]
-
         geo_var_widget = QWidget(self)  # type: ignore[misc]
         geo_var_layout = QHBoxLayout(geo_var_widget)
         geo_var_layout.setContentsMargins(0, 0, 0, 0)
@@ -98,10 +85,6 @@ class _PublishAssetVariantControls:
 
     def get_selected_variant(self) -> str:
         return self._geo_var_dropdown.currentText()
-
-    @property
-    def is_substance_only(self) -> bool:
-        return self._substance_only.isChecked()
 
     def _populate_geo_var(self, asset: Asset | None) -> None:
         if asset and hasattr(asset, "geometry_variants"):
@@ -130,6 +113,8 @@ class PublishAssetOptionsDialog(FilteredListDialog, _PublishAssetVariantControls
         self._conn = conn
         self._selected_asset_name = items[0] if items else None
 
+        self.resize(460, 240)
+
         if hasattr(self, "_filter_field"):
             self._filter_field.setVisible(False)
         self._list_widget.setVisible(False)
@@ -145,6 +130,7 @@ class PublishAssetOptionsDialog(FilteredListDialog, _PublishAssetVariantControls
 
         self._init_variant_controls()
 
+        self._layout.addStretch(1)
         asset = None
         if self._conn and self._selected_asset_name:
             asset = self._conn.get_asset_by_display_name(self._selected_asset_name)
@@ -171,8 +157,10 @@ class PublishAssetPickerDialog(FilteredListDialog, _PublishAssetVariantControls)
             accept_button_name="Publish",
         )
         self._conn = conn
+        self.resize(520, 520)
         self._init_variant_controls()
         self._populate_geo_var(None)
+        self._layout.addStretch(1)
 
     def _on_item_selected(self) -> None:
         selected = self.get_selected_item()
@@ -186,7 +174,6 @@ class PublishAssetPickerDialog(FilteredListDialog, _PublishAssetVariantControls)
 class AssetPublisher(Publisher):
     _override: bool
     _geo_variant: str
-    _is_substance_only: bool
     _component_export_dir: Path | None
     _component_hip_path: Path | None
     _component_basename: str | None
@@ -196,7 +183,6 @@ class AssetPublisher(Publisher):
     def __init__(self) -> None:
         super().__init__(PublishAssetOptionsDialog)
         self._geo_variant = "main"
-        self._is_substance_only = False
         self._component_export_dir = None
         self._component_hip_path = None
         self._component_basename = None
@@ -281,7 +267,6 @@ class AssetPublisher(Publisher):
             dcc=DCC_MAYA,
             variant=self._geo_variant,
             publish_path=self._publish_path,
-            extra={EXTRA_SUBSTANCE_ONLY_KEY: self._is_substance_only},
             asset_name=asset.name,
             asset_path=asset.path,
             asset_id=asset.id,
@@ -320,9 +305,7 @@ class AssetPublisher(Publisher):
         log.warning("Asset metadata missing; falling back to asset picker dialog.")
 
     @staticmethod
-    def _compute_component_basename(
-        asset: Asset, variant: str, is_substance: bool
-    ) -> tuple[str, str]:
+    def _compute_component_basename(asset: Asset, variant: str) -> tuple[str, str]:
         name = (asset.name or "").strip()
         if not name or name == "none":
             name = ""
@@ -334,9 +317,6 @@ class AssetPublisher(Publisher):
         base_name = name
         if variant and variant != "main":
             base_name = f"{base_name}_{variant}"
-        if is_substance:
-            base_name = f"{base_name}_SUBSTANCE"
-
         return name, base_name
 
     def _prepublish(self) -> bool:
@@ -415,18 +395,13 @@ class AssetPublisher(Publisher):
         write_asset_metadata(asset)
 
         self._geo_variant = variant_name
-        self._is_substance_only = cast(
-            PublishAssetOptionsDialog, self._dialog
-        ).is_substance_only
 
         if variant_name not in asset.geometry_variants:
             asset.geometry_variants.add(variant_name)
             log.info(f"Updating new geo variant: {variant_name}")
             self._conn.update_asset(asset)
 
-        name, basename = self._compute_component_basename(
-            asset, variant_name, self._is_substance_only
-        )
+        name, basename = self._compute_component_basename(asset, variant_name)
         asset_paths = paths_for_asset(asset)
         self._asset_name = name
         self._component_basename = basename
@@ -438,11 +413,6 @@ class AssetPublisher(Publisher):
         details: list[str] = []
         if self._backup_status:
             details.append(self._backup_status)
-
-        if self._is_substance_only:
-            if details:
-                return f"{message}\n\n" + "\n".join(details)
-            return message
 
         if self._houdini_result is None:
             details.append("Houdini component publish failed or was skipped.")
@@ -591,10 +561,6 @@ class AssetPublisher(Publisher):
                 "warnings": [],
                 "errors": [],
             }
-            return
-
-        if self._is_substance_only:
-            log.info("Skipping Houdini component publish for substance-only export")
             return
 
         asset = cast(Asset, self._entity)
