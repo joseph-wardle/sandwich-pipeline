@@ -70,8 +70,8 @@ def asset_root(
 
     fallback = (
         fallback_name
+        or getattr(asset, "display_name", None)
         or getattr(asset, "name", None)
-        or getattr(asset, "disp_name", None)
         or "asset"
     )
     log.warning("Asset path missing; falling back to %s", fallback)
