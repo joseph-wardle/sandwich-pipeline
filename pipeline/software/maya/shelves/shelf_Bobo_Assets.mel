@@ -99,8 +99,8 @@ global proc shelf_Bobo_Assets () {
         -imageOverlayLabel "Publish Asset"
         -overlayLabelColor 2.624876 0.801436 0.012446
         -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
-        -image "createContainer.png"
-        -image1 "createContainer.png"
+        -image "envelope.png"
+        -image1 "envelope.png"
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
