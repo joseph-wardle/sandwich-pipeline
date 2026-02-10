@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from math import log2
+from pathlib import Path
 from re import findall
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,8 @@ import substance_painter as sp
 from env_sg import DB_Config
 from shared.util import get_documentation_path
 
+from pipe.asset.paths import DCC_SUBSTANCE, paths_for_asset
+from pipe.asset.versioning import backup_if_changed
 from pipe.db import DB
 from pipe.glui.dialogs import ButtonPair, MessageDialog
 from pipe.sp.assetfile import PIPE_SP_DOCS_PAGE, get_active_asset_from_project
@@ -292,9 +295,52 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             self.geo_var,
             self.shader_layer,
         ):
+            backup_status = None
+            project_path = sp.project.file_path() or ""
+            if not project_path:
+                backup_status = "Backup skipped: project has no file path."
+                log.warning("Backup skipped: project has no file path.")
+            else:
+                asset_paths = paths_for_asset(self._curr_asset)
+                publish_path = asset_paths.publish_textures_layer_dir(
+                    self.geo_var, self.mat_var, self.shader_layer
+                )
+                result = backup_if_changed(
+                    source_path=Path(project_path),
+                    backup_dir=asset_paths.backup_dir,
+                    manifest_path=asset_paths.manifest_path,
+                    dcc=DCC_SUBSTANCE,
+                    publish_path=publish_path,
+                    extra={
+                        "geo": self.geo_var,
+                        "material": self.mat_var,
+                        "shader_layer": self.shader_layer,
+                    },
+                    asset_name=self._curr_asset.display_name or self._curr_asset.name,
+                    asset_path=self._curr_asset.path,
+                    asset_id=self._curr_asset.id,
+                )
+
+                if result is None:
+                    backup_status = "Backup skipped: source file missing."
+                    log.warning("Backup skipped: source file missing.")
+                elif result.changed:
+                    if result.backup_path:
+                        backup_status = f"Backup created: {result.backup_path.name}"
+                        log.info("Backup created at %s", result.backup_path)
+                    else:
+                        backup_status = "Backup created."
+                        log.info("Backup created for %s", project_path)
+                else:
+                    backup_status = "Backup skipped: no changes detected."
+                    log.info("Backup skipped: no changes detected.")
+
+            message = "Textures successfully exported!"
+            if backup_status:
+                message = f"{message}\n{backup_status}"
             MessageDialog(
                 get_main_qt_window(),
-                "Textures successfully exported!",
+                message,
             ).exec_()
         else:
             MessageDialog(
