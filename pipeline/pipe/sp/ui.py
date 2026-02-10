@@ -107,7 +107,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         self._main_layout.addWidget(title)
 
         asset_display_name = (
-            self._curr_asset.disp_name or self._curr_asset.name or "Unknown Asset"
+            self._curr_asset.display_name or self._curr_asset.name or "Unknown Asset"
         )
         asset_label = QLabel(f"Asset: {asset_display_name}")
         asset_label.setStyleSheet("font-size: 12px; font-weight: bold;")

@@ -77,7 +77,10 @@ def get_asset_selection_metadata() -> dict[str, Any]:
 
 
 def _build_asset_selection_payload(
-    asset_map: dict[str, str], last_asset: Optional[str] = None
+    asset_map: dict[str, str],
+    last_asset: Optional[str] = None,
+    asset_id: Optional[int] = None,
+    asset_path: Optional[str] = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": PIPE_SP_METADATA_SCHEMA_VERSION,
@@ -87,26 +90,46 @@ def _build_asset_selection_payload(
     }
     if last_asset:
         payload["last_asset"] = last_asset
+    if asset_id:
+        payload["asset_id"] = asset_id
+    if asset_path:
+        payload["asset_path"] = asset_path
     return payload
 
 
-def store_asset_selection_metadata(asset_map: dict[str, str]) -> None:
+def store_asset_selection_metadata(
+    asset_map: dict[str, str],
+    *,
+    last_asset: Optional[str] = None,
+    asset_id: Optional[int] = None,
+    asset_path: Optional[str] = None,
+) -> None:
     """Persist texture-set to asset mapping in the project metadata."""
     if not sp.project.is_open():
         return
     if sp.project.is_busy():
         sp.project.execute_when_not_busy(
-            lambda: store_asset_selection_metadata(asset_map)
+            lambda: store_asset_selection_metadata(
+                asset_map,
+                last_asset=last_asset,
+                asset_id=asset_id,
+                asset_path=asset_path,
+            )
         )
         return
 
-    last_asset = None
-    if asset_map:
+    resolved_last_asset = last_asset
+    if not resolved_last_asset and asset_map:
         unique = set(asset_map.values())
         if len(unique) == 1:
-            last_asset = next(iter(unique))
+            resolved_last_asset = next(iter(unique))
 
-    payload = _build_asset_selection_payload(asset_map, last_asset=last_asset)
+    payload = _build_asset_selection_payload(
+        asset_map,
+        last_asset=resolved_last_asset,
+        asset_id=asset_id,
+        asset_path=asset_path,
+    )
     _metadata().set(PIPE_SP_METADATA_KEY, payload)
 
 
@@ -120,7 +143,21 @@ def get_active_asset_from_project(conn: DB) -> Asset | None:
 
     selection_metadata = get_asset_selection_metadata()
     if not selection_metadata:
-        return None
+        return _asset_from_project_path(conn)
+
+    asset_id = selection_metadata.get("asset_id")
+    if asset_id:
+        try:
+            return conn.get_asset_by_id(asset_id)
+        except Exception as exc:
+            log.warning("Failed to resolve asset by id from metadata: %s", exc)
+
+    asset_path = selection_metadata.get("asset_path")
+    if asset_path:
+        try:
+            return conn.get_asset_by_attr("path", asset_path)
+        except Exception as exc:
+            log.warning("Failed to resolve asset by path from metadata: %s", exc)
 
     asset_name = selection_metadata.get("last_asset")
     if not asset_name:
@@ -130,12 +167,41 @@ def get_active_asset_from_project(conn: DB) -> Asset | None:
             asset_name = next(iter(unique_assets))
 
     if not asset_name:
-        return None
+        return _asset_from_project_path(conn)
 
     try:
         return conn.get_asset_by_display_name(asset_name)
+    except Exception:
+        pass
+
+    try:
+        return conn.get_asset_by_name(asset_name)
     except Exception as exc:
         log.warning("Failed to resolve asset from project metadata: %s", exc)
+
+    return _asset_from_project_path(conn)
+
+
+def _asset_from_project_path(conn: DB) -> Asset | None:
+    project_path = _current_project_path()
+    if not project_path:
+        return None
+
+    try:
+        prod_root = get_production_path().resolve()
+        project_path = project_path.resolve()
+        if prod_root not in project_path.parents and project_path != prod_root:
+            return None
+        asset_root = project_path.parent
+        rel_asset_path = asset_root.relative_to(prod_root)
+    except Exception:
+        return None
+
+    rel_path_str = rel_asset_path.as_posix()
+    try:
+        return conn.get_asset_by_attr("path", rel_path_str)
+    except Exception as exc:
+        log.warning("Failed to resolve asset from project path: %s", exc)
         return None
 
 
@@ -144,14 +210,19 @@ def store_asset_metadata_for_project(asset: Asset) -> None:
     if not sp.project.is_open():
         return
 
-    asset_name = asset.name or asset.disp_name
-    if not asset_name:
+    asset_display_name = asset.display_name or asset.code or asset.name
+    if not asset_display_name:
         return
 
     asset_map = {
-        texset.name(): asset_name for texset in sp.textureset.all_texture_sets()
+        texset.name(): asset_display_name for texset in sp.textureset.all_texture_sets()
     }
-    store_asset_selection_metadata(asset_map)
+    store_asset_selection_metadata(
+        asset_map,
+        last_asset=asset_display_name,
+        asset_id=asset.id,
+        asset_path=asset.path,
+    )
 
 
 def _resolve_default_mesh_paths(
@@ -380,7 +451,7 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(10)
 
-        asset_label = asset.name or asset.disp_name or "Asset"
+        asset_label = asset.display_name or asset.name or "Asset"
         title = QtWidgets.QLabel(
             f"Create new Substance Painter project for {asset_label}"
         )

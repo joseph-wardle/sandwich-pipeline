@@ -5,7 +5,6 @@ import os
 import re
 import subprocess
 import time
-
 from math import ceil, floor, log2, sqrt
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -15,10 +14,9 @@ if TYPE_CHECKING:
 
     RT = typing.TypeVar("RT")  # return type
 
-from pipe.util import silent_startupinfo
-
 from env import Executables
 
+from pipe.util import silent_startupinfo
 
 log = logging.getLogger(__name__)
 
@@ -54,16 +52,15 @@ class TexConverter:
 
         @self._debug_out
         def tex_cmd(img: str, is_color: bool = False) -> list[str]:
-            # currently using oiiotool so txmake doesn't freak out at the color space
-            # TODO: switch back to txmake for color in R26
+            # Use oiiotool for color maps. We intentionally avoid ACES conversions
+            # here; Substance exports should already be in sRGB for color maps.
             # fmt: off
             return [
                 str(Executables.oiiotool),
                 img,
                 *(
                     [
-                        #"--colorconvert", "ACEScg", "srgb-ap1",
-                        "-d", "uint8", 
+                        "-d", "uint8",
                         "--dither",
                     ] if is_color else []
                 ),
@@ -149,7 +146,7 @@ class TexConverter:
 
             img_name = re.search(r"^(.*_)(.+)$", root.name)
             assert img_name is not None
-            name_base, color_space = img_name.group(1, 2)
+            name_base, _color_space = img_name.group(1, 2)
 
             count = len(imgs)
             grid_height = int(floor(sqrt(count)))
@@ -157,11 +154,11 @@ class TexConverter:
 
             # fmt: off
             return [
-                str(Executables.oiiotool), 
+                str(Executables.oiiotool),
                 *imgs,
                 "--mosaic", f"{grid_base}x{grid_height}",
                 "--resize", f"{dimx}x{dimy}",
-                "-o", f"{str(self.preview_path / name_base)}{'sRGB' if color_space == 'sRGB-Texture' else 'Linear'}.jpeg",
+                "-o", f"{str(self.preview_path / name_base)}sRGB.jpeg",
             ]
             # fmt: on
 
