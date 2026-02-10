@@ -171,7 +171,9 @@ class Asset(SGEntity):
 
     @property
     def tex_path(self) -> Optional[str]:
-        return f"{self.path}/tex/"
+        if not self.path:
+            return None
+        return f"{self.path}/publish/tex/"
 
 
 @attrs.define
