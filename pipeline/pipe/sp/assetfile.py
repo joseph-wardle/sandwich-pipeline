@@ -110,6 +110,35 @@ def store_asset_selection_metadata(asset_map: dict[str, str]) -> None:
     _metadata().set(PIPE_SP_METADATA_KEY, payload)
 
 
+def get_active_asset_from_project(conn: DB) -> Asset | None:
+    """Resolve the active asset from the current Substance project metadata.
+
+    Returns None when no project is open or when metadata is missing.
+    """
+    if not sp.project.is_open():
+        return None
+
+    selection_metadata = get_asset_selection_metadata()
+    if not selection_metadata:
+        return None
+
+    asset_name = selection_metadata.get("last_asset")
+    if not asset_name:
+        asset_map = selection_metadata.get("asset_map") or {}
+        unique_assets = {name for name in asset_map.values() if name}
+        if len(unique_assets) == 1:
+            asset_name = next(iter(unique_assets))
+
+    if not asset_name:
+        return None
+
+    try:
+        return conn.get_asset_by_display_name(asset_name)
+    except Exception as exc:
+        log.warning("Failed to resolve asset from project metadata: %s", exc)
+        return None
+
+
 def store_asset_metadata_for_project(asset: Asset) -> None:
     """Store a single asset selection for all current texture sets."""
     if not sp.project.is_open():
@@ -711,8 +740,7 @@ def _create_default_project_for_asset(
     if not mesh_path or not mesh_path.exists():
         if use_custom_mesh:
             message = (
-                "The selected custom mesh is missing. "
-                "Choose a valid mesh to proceed."
+                "The selected custom mesh is missing. Choose a valid mesh to proceed."
             )
         elif fallback_path and variant_path and variant_path != fallback_path:
             message = (
@@ -838,6 +866,7 @@ __all__ = [
     "PIPE_SP_METADATA_CONTEXT",
     "PIPE_SP_METADATA_KEY",
     "PIPE_SP_METADATA_SCHEMA_VERSION",
+    "get_active_asset_from_project",
     "get_asset_selection_metadata",
     "store_asset_metadata_for_project",
     "store_asset_selection_metadata",
