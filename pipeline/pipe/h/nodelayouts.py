@@ -1,10 +1,10 @@
 from __future__ import annotations
-# mypy: disable-error-code="union-attr"
-
-import hou
-import loptoolutils  # type: ignore[import-not-found]
 
 from typing import TYPE_CHECKING
+
+# mypy: disable-error-code="union-attr"
+import hou
+import loptoolutils  # type: ignore[import-not-found]
 
 if TYPE_CHECKING:
     from typing import Optional
@@ -109,8 +109,10 @@ def lnd_componentmaterial(kwargs: dict, parent: Optional[hou.Node] = None) -> ho
     else:
         cmat = loptoolutils.genericTool(kwargs, "componentmaterial")
 
-    # configure component material node
-    cmat.parm("variantname").set("`chs(opinputpath('.', 1)/mat_var)`")
+    # Drive variant name directly from SKD_MatLib input 1.
+    cmat.parm("variantname").setExpression(
+        'chs(opinputpath(".",1)+"/mat_var")', hou.exprLanguage.Hscript
+    )
 
     # set up primvar-based material assignment
     edit = cmat.node("./edit")
