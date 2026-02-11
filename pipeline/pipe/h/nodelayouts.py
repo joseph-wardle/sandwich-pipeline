@@ -12,6 +12,40 @@ if TYPE_CHECKING:
 
 """Scripts for building node setups. Called by lnd_nodelayouts.hdanc in Interactive > Shelf Tools, also make sure to check a network context in the context tab"""
 
+SKD_LOOKDEV_TYPE = "skd::main::SKD_Lookdev::1.0"
+SKD_MATLIB_TYPE = "skd::main::SKD_MatLib::1.0"
+
+
+def _latest_skd_type(default_type: str) -> str:
+    """Return newest installed HDA matching default_type base, fallback to default."""
+    base = default_type.rsplit("::", 1)[0]
+    category = hou.lopNodeTypeCategory()
+    candidates = [
+        name for name in category.nodeTypes().keys() if name.startswith(base + "::")
+    ]
+    if not candidates:
+        return default_type
+
+    def version_key(type_name: str) -> tuple[int, ...]:
+        version = type_name[len(base) + 2 :]
+        return tuple(int(part) for part in version.split("."))
+
+    return max(candidates, key=version_key)
+
+
+def create_skd_matlib(parent: hou.Node, node_name: str | None = None) -> hou.Node:
+    node_type = _latest_skd_type(SKD_MATLIB_TYPE)
+    if node_name:
+        return parent.createNode(node_type, node_name)
+    return parent.createNode(node_type)
+
+
+def create_skd_lookdev(parent: hou.Node, node_name: str | None = None) -> hou.Node:
+    node_type = _latest_skd_type(SKD_LOOKDEV_TYPE)
+    if node_name:
+        return parent.createNode(node_type, node_name)
+    return parent.createNode(node_type)
+
 
 def lnd_clustersetup(kwargs: dict, parent: Optional[hou.Node] = None) -> hou.Node:
     out: hou.LopNode = loptoolutils.genericTool(kwargs, "componentoutput")
@@ -141,9 +175,9 @@ def bobo_componentsetup(kwargs: dict) -> hou.Node:
     p = out.parent()
     geo = bobo_componentgeometry(kwargs, parent=p)
     mtl = lnd_componentmaterial(kwargs, parent=p)
-    lib = p.createNode("dbclark::main::Bobo_MatLib")
+    lib = create_skd_matlib(p)
     cnf = p.createNode("sdm223::lnd_componentconfig")
-    ldv = p.createNode("dbclark::dev::Bobo_Lookdev")
+    ldv = create_skd_lookdev(p)
     env = p.createNode("fetch")
     out.setInput(0, cnf)
     out.setInput(1, env)
