@@ -4,16 +4,16 @@ import logging
 import os
 import platform
 import shutil
-
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import typing
 
-from ..baseclass import DCC
-from shared.util import get_production_path, get_rigging_path
 from env import Executables
+from shared.util import get_production_path, get_rigging_path
+
+from ..baseclass import DCC
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +36,8 @@ class MayaDCC(DCC):
             Path(os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))).resolve() / "shelves"
         )
         self.splash_path = str(
-            Path(os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))).resolve() / "maya_splash"
+            Path(os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))).resolve()
+            / "maya_splash"
         )
 
         env_vars: typing.Mapping[str, int | str | None] | None  #############
@@ -65,7 +66,7 @@ class MayaDCC(DCC):
                     str(this_path.parent / "scripts/studiolibrary/src"),
                 ]
             ),
-            "OCIO": str(pipe_path / "lib/ocio/love-v01/config.ocio"),
+            "OCIO": str(pipe_path / "lib/ocio/sandwich-v01/config.ocio"),
             "QT_FONT_DPI": os.getenv("MAYA_FONT_DPI") if system == "Linux" else None,
             "QT_PLUGIN_PATH": None,
             # Configure Asset Resolver
@@ -146,9 +147,7 @@ class MayaDCC(DCC):
             if extra_args:
                 launch_args = extra_args
 
-        super().__init__(
-            launch_command, launch_args, env_vars, self._pre_launch_tasks
-        )
+        super().__init__(launch_command, launch_args, env_vars, self._pre_launch_tasks)
 
     def _pre_launch_tasks(self) -> None:
         self.set_up_shelf_path()

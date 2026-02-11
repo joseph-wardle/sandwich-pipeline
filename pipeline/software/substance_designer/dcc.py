@@ -3,11 +3,11 @@ from __future__ import annotations
 import logging
 import os
 import platform
-
 from pathlib import Path
 
-from ..baseclass import DCC
 from env import Executables
+
+from ..baseclass import DCC
 
 log = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class SubstanceDesignerDCC(DCC):
 
         env_vars = {
             "DCC": str(this_path.parent.name),
-            "OCIO": str(pipe_path / "lib/ocio/love-v01/config.ocio"),
+            "OCIO": str(pipe_path / "lib/ocio/sandwich-v01/config.ocio"),
             "PYTHONPATH": os.pathsep.join(
                 [
                     str(pipe_path),
