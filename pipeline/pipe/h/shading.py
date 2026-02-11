@@ -17,9 +17,17 @@ log = logging.getLogger(__name__)
 _MATLIB_NAME = "Material_Library"
 _NO_TEXTURES = "NO_EXPORTED_TEXTURES"
 
-_AUTO_PREFIX = "SKD_AUTO"
 _AUTO_TAG_KEY = "skd_matlib_generated"
 _AUTO_TAG_VALUE = "1"
+_BUILDER_OUTPUT_NODE_NAMES = (
+    "output_collect",
+    "output_collect1",
+    "suboutput1",
+    "output1",
+    "OUT_material",
+    "OUT",
+)
+_MATERIAL_BUILDER_Y_STEP = 3.5
 
 _RENDER_MAPS = ("BaseColor", "SpecularRoughness", "Normal", "Metallic")
 _PREVIEW_MAPS = ("DiffuseColor", "ORM", "Emissive", "NormalDX")
@@ -356,6 +364,7 @@ class MatlibNodeBuilder:
 
     def rebuild(self, spec: MaterialLibrarySpec, *, build_preview: bool) -> None:
         self._clear_generated_nodes()
+        self._clear_generated_network_boxes()
         if not spec.materials:
             log.warning(
                 "No materials discovered for geo=%s mat=%s",
@@ -364,40 +373,92 @@ class MatlibNodeBuilder:
             )
             return
 
-        for index, material in enumerate(spec.materials):
-            rm_surface = self._build_renderman_graph(material, index)
-            preview_surface = (
-                self._build_preview_graph(material, index) if build_preview else None
+        y_cursor = 0
+        for material in spec.materials:
+            builder = self._create_material_builder(material, y=-y_cursor)
+            rm_surface, rm_nodes = self._build_renderman_graph(
+                builder, material, row_y=0
             )
-            self._build_material_collect(material, index, rm_surface, preview_surface)
+            preview_row_y = -(len(material.layers) * 8 + 6)
+            preview_surface, preview_nodes = (
+                self._build_preview_graph(builder, material, preview_row_y)
+                if build_preview
+                else (None, [])
+            )
+            collect = self._build_material_collect(
+                builder,
+                row_y=0,
+                rm_surface=rm_surface,
+                preview_surface=preview_surface,
+            )
+            if not self._is_builder_output_collect(collect):
+                self._wire_material_builder_output(builder, collect)
+            self._build_navigation_groups(
+                builder, material, rm_nodes + [collect], preview_nodes
+            )
+            y_cursor += _MATERIAL_BUILDER_Y_STEP
 
     def _clear_generated_nodes(self) -> None:
         generated = [
             child
             for child in self._matlib.children()
             if child.userData(_AUTO_TAG_KEY) == _AUTO_TAG_VALUE
-            or child.name().startswith(_AUTO_PREFIX)
         ]
         for node in generated:
             node.destroy()
 
-    def _build_renderman_graph(self, material: MaterialSpec, index: int) -> hou.Node:
+    def _clear_generated_network_boxes(self) -> None:
+        if not hasattr(self._matlib, "networkBoxes"):
+            return
+
+        for net_box in self._matlib.networkBoxes():
+            try:
+                marked = net_box.userData(_AUTO_TAG_KEY) == _AUTO_TAG_VALUE
+            except Exception:
+                marked = False
+            if marked:
+                net_box.destroy()
+
+    def _create_material_builder(self, material: MaterialSpec, *, y: int) -> hou.Node:
         tex_set_id = _sanitize_node_name(material.texture_set)
-        row_y = -14 * index
+        mat_name = f"MAT_{tex_set_id}"
+        builder = self._create_first_supported_node(
+            self._matlib,
+            ("pxrmaterialbuilder::3.0", "pxrmaterialbuilder"),
+            mat_name,
+        )
+        if builder is None:
+            log.warning(
+                "pxrmaterialbuilder unavailable; falling back to subnet for %s",
+                mat_name,
+            )
+            builder = self._create_node(self._matlib, "subnet", mat_name)
+
+        builder.setPosition(hou.Vector2(0, y))
+        self._set_material_flag(builder, True)
+        self._prune_material_builder(builder)
+        return builder
+
+    def _build_renderman_graph(
+        self, parent: hou.Node, material: MaterialSpec, row_y: int
+    ) -> tuple[hou.Node, list[hou.Node]]:
+        tex_set_id = _sanitize_node_name(material.texture_set)
         mixer = self._create_node(
-            "pxrlayermixer::3.0", f"{_AUTO_PREFIX}_{tex_set_id}_LayerMixer"
+            parent, "pxrlayermixer::3.0", f"{tex_set_id}_LayerMixer"
         )
         surface = self._create_node(
-            "pxrlayersurface::3.0", f"{_AUTO_PREFIX}_{tex_set_id}_RM_Surface"
+            parent, "pxrlayersurface::3.0", f"{tex_set_id}_PxrLayerSurface"
         )
         mixer.setPosition(hou.Vector2(8, row_y))
         surface.setPosition(hou.Vector2(11, row_y))
         surface.setInput(0, mixer, 0)
 
+        all_nodes: list[hou.Node] = [mixer, surface]
         for layer_index, layer_spec in enumerate(material.layers):
-            layer_node = self._build_layer(
-                material.texture_set, layer_spec, row_y, layer_index
+            layer_node, layer_nodes = self._build_layer(
+                parent, material.texture_set, layer_spec, row_y, layer_index
             )
+            all_nodes.extend(layer_nodes)
             if layer_index == 0:
                 mixer.setNamedInput("baselayer", layer_node, "pxrMaterialOut")
                 self._set_parm_if_exists(mixer, "layer1Enabled", False)
@@ -405,41 +466,39 @@ class MatlibNodeBuilder:
                 input_name = f"layer{layer_index}"
                 mixer.setNamedInput(input_name, layer_node, "pxrMaterialOut")
                 self._set_parm_if_exists(mixer, f"{input_name}Enabled", True)
-        return surface
+        return surface, all_nodes
 
     def _build_layer(
         self,
+        parent: hou.Node,
         tex_set_name: str,
         layer_spec: LayerMaterialSpec,
         row_y: int,
         layer_index: int,
-    ) -> hou.Node:
+    ) -> tuple[hou.Node, list[hou.Node]]:
         tex_set_id = _sanitize_node_name(tex_set_name)
         layer_id = _sanitize_node_name(layer_spec.name)
         layer_suffix = f"{tex_set_id}_{layer_id}"
-        y = row_y - layer_index * 7
+        y = row_y - layer_index * 8
 
         roughness = self._create_node(
-            "pxrtexture::3.0", f"{_AUTO_PREFIX}_{layer_suffix}_Roughness"
+            parent, "pxrtexture::3.0", f"Roughness_{layer_suffix}"
         )
         roughness_remap = self._create_node(
-            "pxrremap::3.0", f"{_AUTO_PREFIX}_{layer_suffix}_RoughnessRemap"
+            parent, "pxrremap::3.0", f"RoughnessRemap_{layer_suffix}"
         )
         color = self._create_node(
-            "pxrtexture::3.0", f"{_AUTO_PREFIX}_{layer_suffix}_BaseColor"
+            parent, "pxrtexture::3.0", f"BaseColor_{layer_suffix}"
         )
         normal = self._create_node(
-            "pxrnormalmap::3.0", f"{_AUTO_PREFIX}_{layer_suffix}_Normal"
+            parent, "pxrnormalmap::3.0", f"Normal_{layer_suffix}"
         )
-        layer = self._create_node(
-            "pxrlayer::3.0", f"{_AUTO_PREFIX}_{layer_suffix}_Layer"
-        )
+        layer = self._create_node(parent, "pxrlayer::3.0", f"Layer_{layer_suffix}")
         metallic_workflow = self._create_node(
-            "pxrmetallicworkflow::3.0",
-            f"{_AUTO_PREFIX}_{layer_suffix}_MetallicWorkflow",
+            parent, "pxrmetallicworkflow::3.0", f"MetallicWorkflow_{layer_suffix}"
         )
         metallic = self._create_node(
-            "pxrtexture::3.0", f"{_AUTO_PREFIX}_{layer_suffix}_Metallic"
+            parent, "pxrtexture::3.0", f"Metallic_{layer_suffix}"
         )
 
         roughness.setPosition(hou.Vector2(-8, y - 2))
@@ -478,50 +537,66 @@ class MatlibNodeBuilder:
 
         self._set_parm_if_exists(layer, "enableSpecular", True)
         self._set_parm_if_exists(layer, "specularGain", 1.0)
-        return layer
+        return layer, [
+            roughness,
+            roughness_remap,
+            color,
+            normal,
+            layer,
+            metallic_workflow,
+            metallic,
+        ]
 
     def _build_preview_graph(
-        self, material: MaterialSpec, index: int
-    ) -> hou.Node | None:
+        self, parent: hou.Node, material: MaterialSpec, row_y: int
+    ) -> tuple[hou.Node | None, list[hou.Node]]:
         if not material.preview_maps:
-            return None
+            return None, []
 
         tex_set_id = _sanitize_node_name(material.texture_set)
-        row_y = -14 * index
         preview_surface = self._create_first_supported_node(
+            parent,
             ("usdpreviewsurface", "usdpreviewsurface::2.0"),
-            f"{_AUTO_PREFIX}_{tex_set_id}_Preview",
+            f"{tex_set_id}_UsdPreviewSurface",
         )
         if preview_surface is None:
             log.warning(
                 "USD Preview Surface node type unavailable; skipping preview graph"
             )
-            return None
+            return None, []
 
-        preview_surface.setPosition(hou.Vector2(11, row_y - 5))
+        preview_surface.setPosition(hou.Vector2(11, row_y))
 
         diffuse = self._create_preview_texture(
+            parent,
             tex_set_id,
             "Diffuse",
             material.preview_maps.get("DiffuseColor"),
-            row_y - 3,
+            row_y + 2,
             color=True,
         )
         orm = self._create_preview_texture(
-            tex_set_id, "ORM", material.preview_maps.get("ORM"), row_y - 5, color=False
+            parent,
+            tex_set_id,
+            "ORM",
+            material.preview_maps.get("ORM"),
+            row_y + 0,
+            color=False,
         )
         emissive = self._create_preview_texture(
+            parent,
             tex_set_id,
             "Emissive",
             material.preview_maps.get("Emissive"),
-            row_y - 7,
+            row_y - 2,
             color=True,
         )
         normal = self._create_preview_texture(
+            parent,
             tex_set_id,
             "Normal",
             material.preview_maps.get("NormalDX"),
-            row_y - 9,
+            row_y - 4,
             color=False,
         )
 
@@ -550,38 +625,160 @@ class MatlibNodeBuilder:
             self._connect_named(
                 preview_surface, "normal", normal, ("rgb", "resultRGB", "result")
             )
-        return preview_surface
+        preview_nodes = [preview_surface]
+        preview_nodes.extend(
+            [node for node in (diffuse, orm, emissive, normal) if node]
+        )
+        return preview_surface, preview_nodes
 
     def _build_material_collect(
         self,
-        material: MaterialSpec,
-        index: int,
+        parent: hou.Node,
+        row_y: int,
         rm_surface: hou.Node,
         preview_surface: hou.Node | None,
-    ) -> None:
-        tex_set_id = _sanitize_node_name(material.texture_set)
-        row_y = -14 * index
-        mat_name = f"MAT_{tex_set_id}"
+    ) -> hou.Node:
+        existing_collect = self._find_builder_output_collect(parent)
+        if existing_collect is not None:
+            existing_collect.setPosition(hou.Vector2(14, row_y))
+            self._disconnect_inputs(existing_collect)
+            existing_collect.setInput(0, rm_surface, 0)
+            if preview_surface is not None:
+                existing_collect.setInput(1, preview_surface, 0)
+            return existing_collect
 
-        collect = self._create_first_supported_node(("collect",), mat_name)
+        collect = self._create_first_supported_node(
+            parent, ("collect",), "FinalCollect"
+        )
         if collect is None:
             # Fallback: if collect is unavailable, expose RenderMan surface directly.
-            rm_surface.setName(mat_name, unique_name=True)
             self._set_material_flag(rm_surface, True)
-            return
+            return rm_surface
 
         collect.setPosition(hou.Vector2(14, row_y))
         collect.setInput(0, rm_surface, 0)
         if preview_surface is not None:
             collect.setInput(1, preview_surface, 0)
 
-        self._set_material_flag(collect, True)
-        self._set_material_flag(rm_surface, False)
-        if preview_surface is not None:
-            self._set_material_flag(preview_surface, False)
+        return collect
+
+    def _find_builder_output_collect(self, builder: hou.Node) -> hou.Node | None:
+        for node_name in ("output_collect", "output_collect1"):
+            node = builder.node(node_name)
+            if node is not None:
+                return node
+        return None
+
+    def _is_builder_output_collect(self, node: hou.Node) -> bool:
+        return node.name() in {"output_collect", "output_collect1"}
+
+    def _build_navigation_groups(
+        self,
+        parent: hou.Node,
+        material: MaterialSpec,
+        rm_nodes: list[hou.Node],
+        preview_nodes: list[hou.Node],
+    ) -> None:
+        tex_set_id = _sanitize_node_name(material.texture_set)
+
+        rm_box = self._create_network_box(parent, f"{tex_set_id}_PxrSurface_Group")
+        if rm_box is not None:
+            rm_box.setColor(hou.Color((0.22, 0.40, 0.78)))
+            self._set_network_box_label(rm_box, "RenderMan Shader")
+            for node in rm_nodes:
+                rm_box.addItem(node)
+            self._fit_network_box(rm_box)
+
+        if preview_nodes:
+            preview_box = self._create_network_box(
+                parent, f"{tex_set_id}_UsdPreviewSurface_Group"
+            )
+            if preview_box is not None:
+                preview_box.setColor(hou.Color((0.86, 0.78, 0.28)))
+                self._set_network_box_label(preview_box, "USD Preview Shader")
+                for node in preview_nodes:
+                    preview_box.addItem(node)
+                self._fit_network_box(preview_box)
+
+    def _wire_material_builder_output(
+        self, builder: hou.Node, source_material: hou.Node
+    ) -> None:
+        # Typical pxrmaterialbuilder includes one or more output nodes.
+        wired = False
+        for output in self._builder_outputs(builder):
+            if output.path() == source_material.path():
+                continue
+            try:
+                output.setInput(0, source_material, 0)
+                wired = True
+                # Keep wiring all outputs we find so legacy and current outputs stay aligned.
+            except (hou.OperationFailed, hou.InvalidInput):
+                continue
+        if not wired:
+            log.warning(
+                "Could not find builder output node for %s; material may not export correctly",
+                builder.path(),
+            )
+
+    def _builder_outputs(self, builder: hou.Node) -> list[hou.Node]:
+        outputs: list[hou.Node] = []
+        seen: set[str] = set()
+
+        for output_name in _BUILDER_OUTPUT_NODE_NAMES:
+            output = builder.node(output_name)
+            if output is None:
+                continue
+            outputs.append(output)
+            seen.add(output.path())
+
+        # Fallback heuristic by node type/name.
+        for child in builder.children():
+            tname = child.type().name().lower()
+            nname = child.name().lower()
+            if (
+                "output" not in tname
+                and "suboutput" not in tname
+                and "output" not in nname
+            ):
+                continue
+            if child.path() in seen:
+                continue
+            outputs.append(child)
+            seen.add(child.path())
+
+        return outputs
+
+    def _prune_material_builder(self, builder: hou.Node) -> None:
+        outputs = {node.path() for node in self._builder_outputs(builder)}
+        for child in list(builder.children()):
+            if child.path() in outputs:
+                continue
+            try:
+                child.destroy()
+            except hou.OperationFailed:
+                log.debug("Could not prune default builder node: %s", child.path())
+            except Exception:
+                log.debug("Could not prune default builder node: %s", child.path())
+
+        if not hasattr(builder, "networkBoxes"):
+            return
+        for net_box in builder.networkBoxes():
+            try:
+                net_box.destroy()
+            except Exception:
+                continue
+
+    @staticmethod
+    def _disconnect_inputs(node: hou.Node) -> None:
+        for connection in node.inputConnections():
+            try:
+                node.setInput(connection.inputIndex(), None)
+            except (hou.OperationFailed, hou.InvalidInput):
+                continue
 
     def _create_preview_texture(
         self,
+        parent: hou.Node,
         tex_set_id: str,
         token: str,
         texture_path: str | None,
@@ -592,8 +789,9 @@ class MatlibNodeBuilder:
         if not texture_path:
             return None
         node = self._create_first_supported_node(
+            parent,
             ("usduvtexture::2.0", "usduvtexture"),
-            f"{_AUTO_PREFIX}_{tex_set_id}_{token}_PreviewTex",
+            f"{token}_{tex_set_id}_PreviewTex",
         )
         if node is None:
             log.warning(
@@ -640,20 +838,53 @@ class MatlibNodeBuilder:
         return False
 
     def _create_first_supported_node(
-        self, type_names: tuple[str, ...], name: str
+        self, parent: hou.Node, type_names: tuple[str, ...], name: str
     ) -> hou.Node | None:
         for node_type in type_names:
             try:
-                return self._create_node(node_type, name)
+                return self._create_node(parent, node_type, name)
             except hou.OperationFailed:
                 continue
         return None
 
-    def _create_node(self, node_type: str, name: str) -> hou.Node:
-        node = self._matlib.createNode(node_type)
+    def _create_node(self, parent: hou.Node, node_type: str, name: str) -> hou.Node:
+        node = parent.createNode(node_type)
         node.setName(name, unique_name=True)
         node.setUserData(_AUTO_TAG_KEY, _AUTO_TAG_VALUE)
         return node
+
+    def _create_network_box(self, parent: hou.Node, name: str):
+        try:
+            net_box = parent.createNetworkBox()
+        except Exception:
+            return None
+        net_box.setName(name, unique_name=True)
+        try:
+            net_box.setUserData(_AUTO_TAG_KEY, _AUTO_TAG_VALUE)
+        except Exception:
+            pass
+        return net_box
+
+    @staticmethod
+    def _fit_network_box(net_box) -> None:
+        try:
+            net_box.fitAroundContents()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _set_network_box_label(net_box, label: str) -> None:
+        if hasattr(net_box, "setComment"):
+            try:
+                net_box.setComment(label)
+                return
+            except Exception:
+                pass
+        if hasattr(net_box, "setLabel"):
+            try:
+                net_box.setLabel(label)
+            except Exception:
+                pass
 
     @staticmethod
     def _set_material_flag(node: hou.Node, state: bool) -> None:
@@ -850,7 +1081,13 @@ class MatlibErrorChecker:
     @staticmethod
     def CheckFilepathsRelative(matlib: hou.Node) -> int:
         """Returns 1 if there are any absolute filepaths in generated textures."""
-        for node in matlib.children():
+        nodes: list[hou.Node] = [matlib]
+        try:
+            nodes.extend(matlib.allSubChildren())
+        except Exception:
+            nodes.extend(matlib.children())
+
+        for node in nodes:
             if (fn := node.parm("filename")) is not None:
                 if not fn.unexpandedString().startswith("$"):
                     return 1
