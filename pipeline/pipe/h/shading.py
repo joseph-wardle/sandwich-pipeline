@@ -365,9 +365,11 @@ class MatlibNodeBuilder:
             return
 
         for index, material in enumerate(spec.materials):
-            self._build_renderman_graph(material, index)
-            if build_preview:
-                self._build_preview_graph(material, index)
+            rm_surface = self._build_renderman_graph(material, index)
+            preview_surface = (
+                self._build_preview_graph(material, index) if build_preview else None
+            )
+            self._build_material_collect(material, index, rm_surface, preview_surface)
 
     def _clear_generated_nodes(self) -> None:
         generated = [
@@ -379,13 +381,15 @@ class MatlibNodeBuilder:
         for node in generated:
             node.destroy()
 
-    def _build_renderman_graph(self, material: MaterialSpec, index: int) -> None:
+    def _build_renderman_graph(self, material: MaterialSpec, index: int) -> hou.Node:
         tex_set_id = _sanitize_node_name(material.texture_set)
         row_y = -14 * index
         mixer = self._create_node(
             "pxrlayermixer::3.0", f"{_AUTO_PREFIX}_{tex_set_id}_LayerMixer"
         )
-        surface = self._create_node("pxrlayersurface::3.0", tex_set_id)
+        surface = self._create_node(
+            "pxrlayersurface::3.0", f"{_AUTO_PREFIX}_{tex_set_id}_RM_Surface"
+        )
         mixer.setPosition(hou.Vector2(8, row_y))
         surface.setPosition(hou.Vector2(11, row_y))
         surface.setInput(0, mixer, 0)
@@ -401,6 +405,7 @@ class MatlibNodeBuilder:
                 input_name = f"layer{layer_index}"
                 mixer.setNamedInput(input_name, layer_node, "pxrMaterialOut")
                 self._set_parm_if_exists(mixer, f"{input_name}Enabled", True)
+        return surface
 
     def _build_layer(
         self,
@@ -475,9 +480,11 @@ class MatlibNodeBuilder:
         self._set_parm_if_exists(layer, "specularGain", 1.0)
         return layer
 
-    def _build_preview_graph(self, material: MaterialSpec, index: int) -> None:
+    def _build_preview_graph(
+        self, material: MaterialSpec, index: int
+    ) -> hou.Node | None:
         if not material.preview_maps:
-            return
+            return None
 
         tex_set_id = _sanitize_node_name(material.texture_set)
         row_y = -14 * index
@@ -489,7 +496,7 @@ class MatlibNodeBuilder:
             log.warning(
                 "USD Preview Surface node type unavailable; skipping preview graph"
             )
-            return
+            return None
 
         preview_surface.setPosition(hou.Vector2(11, row_y - 5))
 
@@ -543,6 +550,35 @@ class MatlibNodeBuilder:
             self._connect_named(
                 preview_surface, "normal", normal, ("rgb", "resultRGB", "result")
             )
+        return preview_surface
+
+    def _build_material_collect(
+        self,
+        material: MaterialSpec,
+        index: int,
+        rm_surface: hou.Node,
+        preview_surface: hou.Node | None,
+    ) -> None:
+        tex_set_id = _sanitize_node_name(material.texture_set)
+        row_y = -14 * index
+        mat_name = f"MAT_{tex_set_id}"
+
+        collect = self._create_first_supported_node(("collect",), mat_name)
+        if collect is None:
+            # Fallback: if collect is unavailable, expose RenderMan surface directly.
+            rm_surface.setName(mat_name, unique_name=True)
+            self._set_material_flag(rm_surface, True)
+            return
+
+        collect.setPosition(hou.Vector2(14, row_y))
+        collect.setInput(0, rm_surface, 0)
+        if preview_surface is not None:
+            collect.setInput(1, preview_surface, 0)
+
+        self._set_material_flag(collect, True)
+        self._set_material_flag(rm_surface, False)
+        if preview_surface is not None:
+            self._set_material_flag(preview_surface, False)
 
     def _create_preview_texture(
         self,
@@ -618,6 +654,14 @@ class MatlibNodeBuilder:
         node.setName(name, unique_name=True)
         node.setUserData(_AUTO_TAG_KEY, _AUTO_TAG_VALUE)
         return node
+
+    @staticmethod
+    def _set_material_flag(node: hou.Node, state: bool) -> None:
+        try:
+            if hasattr(node, "setMaterialFlag"):
+                node.setMaterialFlag(state)
+        except hou.OperationFailed:
+            pass
 
 
 class MatlibManager:
@@ -710,6 +754,18 @@ class MatlibManager:
                 return child
         return None
 
+    @staticmethod
+    def _configure_material_library(matlib: hou.Node) -> None:
+        # Component Material expects materials under /ASSET/mtl/MAT_<texset>.
+        for parm_name, value in (
+            ("matpathprefix", "/ASSET/mtl/"),
+            ("materialpathprefix", "/ASSET/mtl/"),
+            ("matnodepattern", "MAT_*"),
+        ):
+            parm = matlib.parm(parm_name)
+            if parm is not None:
+                parm.set(value)
+
     def _build_preview_toggle(self, node: hou.LopNode) -> bool:
         parm = node.parm("build_usd_preview")
         if parm is None:
@@ -747,6 +803,7 @@ class MatlibManager:
         if matlib is None:
             log.error("No materiallibrary node found inside %s", curr_node.path())
             return
+        self._configure_material_library(matlib)
 
         discovery = MatlibDiscovery(
             self._hip, self.geo_variant_name, self.mat_variant_name
