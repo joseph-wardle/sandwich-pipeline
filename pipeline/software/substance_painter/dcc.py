@@ -3,16 +3,16 @@ from __future__ import annotations
 import logging
 import os
 import platform
-
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import typing
 
-from shared.util import resolve_mapped_path
-from ..baseclass import DCC
 from env import Executables
+from shared.util import resolve_mapped_path
+
+from ..baseclass import DCC
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class SubstancePainterDCC(DCC):
         env_vars = {
             "DCC": str(this_path.parent.name),
             "OCIO": str(
-                resolve_mapped_path(pipe_path / "lib/ocio/love-v01/config.ocio")
+                resolve_mapped_path(pipe_path / "lib/ocio/sandwich-v01/config.ocio")
             ),
             "PIPE_LOG_LEVEL": log.getEffectiveLevel(),
             "PIPE_PATH": str(pipe_path),

@@ -94,7 +94,7 @@ class HoudiniDCC(DCC):
             # if platform.system() == "Linux"
             # else None,
             # Set project OCIO config
-            "OCIO": str(pipe_path / "lib/ocio/love-v01/config.ocio"),
+            "OCIO": str(pipe_path / "lib/ocio/sandwich-v01/config.ocio"),
             # Pass log level defined on commandline
             "PIPE_LOG_LEVEL": log.getEffectiveLevel(),
             "PIPE_PATH": str(pipe_path),
@@ -120,7 +120,7 @@ class HoudiniDCC(DCC):
                 ]
             ),
             # RenderMan color config json file
-            "RMAN_COLOR_CONFIG_DIR": str(pipe_path / "lib/ocio/love-v01"),
+            "RMAN_COLOR_CONFIG_DIR": str(pipe_path / "lib/ocio/sandwich-v01"),
             # Force Qt5 bindings in Houdini to avoid Qt6/PySide6 conflicts
             "QT_PREFERRED_BINDING": "PySide2",
             # Explicitly set Tractor location

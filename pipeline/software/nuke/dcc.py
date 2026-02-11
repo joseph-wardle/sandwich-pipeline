@@ -4,13 +4,12 @@ import logging
 import os
 import platform
 import sys
-
 from pathlib import Path
 
+from env import Executables
 from shared.util import get_production_path, resolve_mapped_path
 
 from ..baseclass import DCC
-from env import Executables
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ class NukeDCC(DCC):
 
         env_vars = {
             "NUKE_PATH": str(resolve_mapped_path(this_path.parent / "tools")),
-            "OCIO": str(pipe_path / "lib/ocio/love-v01/config.ocio"),
+            "OCIO": str(pipe_path / "lib/ocio/sandwich-v01/config.ocio"),
             "PYTHONPATH": os.pathsep.join(
                 [
                     str(pipe_path),
