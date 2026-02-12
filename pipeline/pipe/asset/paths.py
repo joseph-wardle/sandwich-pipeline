@@ -102,21 +102,30 @@ class AssetPaths:
     def publish_textures_dir(self) -> Path:
         return self.publish_dir / PUBLISH_TEXTURES_DIRNAME
 
-    def publish_textures_layer_dir(self, geo: str, mat: str, layer: str) -> Path:
-        """Return publish/tex/<geo>/<material>/<layer>."""
-        return self.publish_textures_dir / geo.strip() / mat.strip() / layer.strip()
-
-    def publish_textures_src_dir(self, geo: str, mat: str, layer: str) -> Path:
-        """Return publish/tex/<geo>/<material>/<layer>/_src."""
+    def publish_textures_layer_dir(
+        self, geo: str, mat: str, material_layer: str
+    ) -> Path:
+        """Return publish/tex/<geo>/<material>/<material_layer>."""
         return (
-            self.publish_textures_layer_dir(geo, mat, layer)
+            self.publish_textures_dir
+            / geo.strip()
+            / mat.strip()
+            / material_layer.strip()
+        )
+
+    def publish_textures_src_dir(self, geo: str, mat: str, material_layer: str) -> Path:
+        """Return publish/tex/<geo>/<material>/<material_layer>/_src."""
+        return (
+            self.publish_textures_layer_dir(geo, mat, material_layer)
             / PUBLISH_TEXTURES_SOURCE_DIRNAME
         )
 
-    def publish_textures_preview_dir(self, geo: str, mat: str, layer: str) -> Path:
-        """Return publish/tex/<geo>/<material>/<layer>/_preview."""
+    def publish_textures_preview_dir(
+        self, geo: str, mat: str, material_layer: str
+    ) -> Path:
+        """Return publish/tex/<geo>/<material>/<material_layer>/_preview."""
         return (
-            self.publish_textures_layer_dir(geo, mat, layer)
+            self.publish_textures_layer_dir(geo, mat, material_layer)
             / PUBLISH_TEXTURES_PREVIEW_DIRNAME
         )
 

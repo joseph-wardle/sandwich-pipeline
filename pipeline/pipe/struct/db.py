@@ -146,9 +146,9 @@ class Asset(SGEntity):
             _UNSTRUCT_HOOK: lambda mv, _: ",".join(mv) if mv else "",
         }
     )
-    render_variants: set[str] = field(
+    material_layers: set[str] = field(
         metadata={
-            _SG_NAME: "sg_render_variants",
+            _SG_NAME: "sg_material_layers",
             _STRUCT_HOOK: lambda mv, _: _split_csv_set(mv),
             _UNSTRUCT_HOOK: lambda mv, _: ",".join(mv) if mv else "",
         }

@@ -89,16 +89,18 @@ class Exporter:
         self._asset = asset
         self._conn = DB.Get(DB_Config)
 
-    def _init_paths(self, mat_var: str, geo_var: str, shader_layer: str) -> None:
+    def _init_paths(self, mat_var: str, geo_var: str, material_layer: str) -> None:
         paths = paths_for_asset(self._asset)
-        layer_dir = paths.publish_textures_layer_dir(geo_var, mat_var, shader_layer)
+        material_layer_dir = paths.publish_textures_layer_dir(
+            geo_var, mat_var, material_layer
+        )
 
-        self._out_path = resolve_mapped_path(layer_dir)
+        self._out_path = resolve_mapped_path(material_layer_dir)
         self._src_path = resolve_mapped_path(
-            paths.publish_textures_src_dir(geo_var, mat_var, shader_layer)
+            paths.publish_textures_src_dir(geo_var, mat_var, material_layer)
         )
         self._preview_path = resolve_mapped_path(
-            paths.publish_textures_preview_dir(geo_var, mat_var, shader_layer)
+            paths.publish_textures_preview_dir(geo_var, mat_var, material_layer)
         )
         self._tex_path = self._out_path
 
@@ -140,10 +142,10 @@ class Exporter:
         exp_setting_arr: typing.Sequence[TexSetExportSettings],
         mat_var: str,
         geo_var: str,
-        shader_layer: str,
+        material_layer: str,
     ) -> bool:
         """Export all the textures of the given Texture Sets"""
-        self._init_paths(mat_var, geo_var, shader_layer)
+        self._init_paths(mat_var, geo_var, material_layer)
         log.info("Exporting textures to %s", self._out_path)
 
         resolved_targets = self._resolve_export_targets(exp_setting_arr)

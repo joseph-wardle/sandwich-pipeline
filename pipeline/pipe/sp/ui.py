@@ -61,7 +61,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     _main_layout: QLayout
     _mat_var_dropdown: QComboBox
     _geo_var_dropdown: QComboBox
-    _shader_layer_dropdown: QComboBox
+    _material_layer_dropdown: QComboBox
 
     # _mat_var_enabled: QtWidgets.QCheckBox
     # _metadataManager: pipe.sp.metadata.MetadataUpdater
@@ -178,13 +178,17 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             editable=False,
         )
 
-        shader_items = self._variant_items(self._curr_asset.render_variants, "default")
-        shader_default = "default" if "default" in shader_items else shader_items[0]
-        self._shader_layer_dropdown = self._build_variant_dropdown(
-            label_text="Shader Layer:",
-            tooltip=("Shader layer name used for layered materials."),
-            items=shader_items,
-            default_value=shader_default,
+        material_layer_items = self._variant_items(
+            self._curr_asset.material_layers, "default"
+        )
+        material_layer_default = (
+            "default" if "default" in material_layer_items else material_layer_items[0]
+        )
+        self._material_layer_dropdown = self._build_variant_dropdown(
+            label_text="Material Layer:",
+            tooltip=("Material layer name used for layered materials."),
+            items=material_layer_items,
+            default_value=material_layer_default,
             editable=True,
             validator=QRegExpValidator(QRegExp("[a-z][a-z_\\d]*")),
         )
@@ -266,8 +270,8 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         return self._geo_var_dropdown.currentText()
 
     @property
-    def shader_layer(self) -> str:
-        return self._shader_layer_dropdown.currentText()
+    def material_layer(self) -> str:
+        return self._material_layer_dropdown.currentText()
 
     def do_export(self, isBatch: bool = False) -> None:
         if not self._curr_asset:
@@ -279,17 +283,17 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
         mat_var = self.mat_var.strip() or "default"
         geo_var = self.geo_var.strip() or "main"
-        shader_layer = self.shader_layer.strip() or "default"
+        material_layer = self.material_layer.strip() or "default"
 
         asset_label = (
             self._curr_asset.display_name or self._curr_asset.name or "Unknown Asset"
         )
         log.info(
-            "Publishing textures for %s (geo=%s, mat=%s, layer=%s)",
+            "Publishing textures for %s (geo=%s, mat=%s, material_layer=%s)",
             asset_label,
             geo_var,
             mat_var,
-            shader_layer,
+            material_layer,
         )
 
         asset_updated = False
@@ -298,9 +302,9 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             log.info("Updating new material variant: %s", mat_var)
             asset_updated = True
 
-        if shader_layer not in self._curr_asset.render_variants:
-            self._curr_asset.render_variants.add(shader_layer)
-            log.info("Updating new shader layer: %s", shader_layer)
+        if material_layer not in self._curr_asset.material_layers:
+            self._curr_asset.material_layers.add(material_layer)
+            log.info("Updating new material layer: %s", material_layer)
             asset_updated = True
 
         if asset_updated:
@@ -332,7 +336,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             export_settings,
             mat_var,
             geo_var,
-            shader_layer,
+            material_layer,
         ):
             backup_status = None
             project_path = sp.project.file_path() or ""
@@ -342,7 +346,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             else:
                 asset_paths = paths_for_asset(self._curr_asset)
                 publish_path = asset_paths.publish_textures_layer_dir(
-                    geo_var, mat_var, shader_layer
+                    geo_var, mat_var, material_layer
                 )
                 result = backup_if_changed(
                     source_path=Path(project_path),
@@ -353,7 +357,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                     extra={
                         "geo": geo_var,
                         "material": mat_var,
-                        "shader_layer": shader_layer,
+                        "material_layer": material_layer,
                     },
                     asset_name=self._curr_asset.display_name or self._curr_asset.name,
                     asset_path=self._curr_asset.path,
