@@ -25,6 +25,7 @@ DCC_SUBSTANCE = "substance_painter"
 # Asset root-level filenames
 MODEL_FILENAME = "model.mb"
 TEXTURES_FILENAME = "textures.spp"
+TEXTURES_VARIANT_TEMPLATE = "textures.{variant}.spp"
 ASSET_BUILDER_FILENAME = "asset_builder.hipnc"
 MANIFEST_FILENAME = "asset_manifest.json"
 
@@ -131,6 +132,11 @@ class AssetPaths:
     def textures_path(self) -> Path:
         return self.root / TEXTURES_FILENAME
 
+    def textures_variant_path(self, variant: str) -> Path:
+        """Return the variant-scoped Substance project path in the asset root."""
+        variant_name = variant.strip() or "main"
+        return self.root / TEXTURES_VARIANT_TEMPLATE.format(variant=variant_name)
+
     @property
     def asset_builder_path(self) -> Path:
         return self.root / ASSET_BUILDER_FILENAME
@@ -178,6 +184,7 @@ __all__ = [
     "DCC_SUBSTANCE",
     "MODEL_FILENAME",
     "TEXTURES_FILENAME",
+    "TEXTURES_VARIANT_TEMPLATE",
     "ASSET_BUILDER_FILENAME",
     "MANIFEST_FILENAME",
     "BACKUP_DIRNAME",

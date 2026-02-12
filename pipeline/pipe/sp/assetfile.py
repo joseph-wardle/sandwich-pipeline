@@ -81,6 +81,7 @@ def _build_asset_selection_payload(
     last_asset: Optional[str] = None,
     asset_id: Optional[int] = None,
     asset_path: Optional[str] = None,
+    geo_variant: Optional[str] = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": PIPE_SP_METADATA_SCHEMA_VERSION,
@@ -94,6 +95,8 @@ def _build_asset_selection_payload(
         payload["asset_id"] = asset_id
     if asset_path:
         payload["asset_path"] = asset_path
+    if geo_variant:
+        payload["geo_variant"] = geo_variant
     return payload
 
 
@@ -103,6 +106,7 @@ def store_asset_selection_metadata(
     last_asset: Optional[str] = None,
     asset_id: Optional[int] = None,
     asset_path: Optional[str] = None,
+    geo_variant: Optional[str] = None,
 ) -> None:
     """Persist texture-set to asset mapping in the project metadata."""
     if not sp.project.is_open():
@@ -114,6 +118,7 @@ def store_asset_selection_metadata(
                 last_asset=last_asset,
                 asset_id=asset_id,
                 asset_path=asset_path,
+                geo_variant=geo_variant,
             )
         )
         return
@@ -129,6 +134,7 @@ def store_asset_selection_metadata(
         last_asset=resolved_last_asset,
         asset_id=asset_id,
         asset_path=asset_path,
+        geo_variant=geo_variant,
     )
     _metadata().set(PIPE_SP_METADATA_KEY, payload)
 
@@ -205,7 +211,9 @@ def _asset_from_project_path(conn: DB) -> Asset | None:
         return None
 
 
-def store_asset_metadata_for_project(asset: Asset) -> None:
+def store_asset_metadata_for_project(
+    asset: Asset, *, geo_variant: Optional[str] = None
+) -> None:
     """Store a single asset selection for all current texture sets."""
     if not sp.project.is_open():
         return
@@ -222,6 +230,7 @@ def store_asset_metadata_for_project(asset: Asset) -> None:
         last_asset=asset_display_name,
         asset_id=asset.id,
         asset_path=asset.path,
+        geo_variant=geo_variant,
     )
     log.info("Stored asset metadata for project: %s", asset_display_name)
 
@@ -246,6 +255,17 @@ def _resolve_default_mesh_paths(
     if fallback_path and fallback_path.exists():
         return fallback_path, variant_path, fallback_path
     return variant_path, variant_path, fallback_path
+
+
+def _geo_variants_for_asset(asset: Asset) -> list[str]:
+    variants = sorted(v for v in asset.geometry_variants if v)
+    if variants:
+        return variants
+    return ["main"]
+
+
+def _project_path_for_variant(paths: AssetPaths, variant: str) -> Path:
+    return paths.textures_variant_path(variant)
 
 
 def _project_template_path() -> Path:
@@ -299,14 +319,15 @@ class SubstanceAssetDialog(FilteredListDialog):
             return
 
         paths = paths_for_asset(asset)
-        status = "exists" if paths.textures_path.exists() else "missing"
+        project_path = _project_path_for_variant(paths, "main")
+        status = "exists" if project_path.exists() else "missing"
         self._info_label.setText(
-            f"Substance Painter project: {paths.textures_path} ({status})"
+            f"Substance Painter project (main): {project_path} ({status})"
         )
 
 
 class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
-    """Select an asset and choose to open or create its Substance Painter project."""
+    """Select an asset + geometry variant, then open or create a project."""
 
     ACTION_OPEN_EXISTING = "open_existing"
     ACTION_CREATE_PROJECT = "create_project"
@@ -316,6 +337,7 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
     _action: str | None
     _asset: Asset | None
     _paths: AssetPaths | None
+    _geo_variant_dropdown: QtWidgets.QComboBox
 
     def __init__(
         self, parent: QtWidgets.QWidget | None, items: list[str], conn: DB
@@ -351,6 +373,22 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         info_layout.addWidget(self._info_label)
         layout.addWidget(info_widget)
 
+        variant_widget = QtWidgets.QWidget(self)
+        variant_layout = QtWidgets.QHBoxLayout(variant_widget)
+        variant_layout.setContentsMargins(0, 0, 0, 0)
+        variant_layout.setSpacing(6)
+        variant_label = QtWidgets.QLabel("Geometry Variant:")
+        variant_label.setToolTip(
+            "Choose which geometry variant project file to open or create."
+        )
+        self._geo_variant_dropdown = QtWidgets.QComboBox()
+        self._geo_variant_dropdown.setToolTip(
+            "Each variant uses its own Substance Painter project file."
+        )
+        variant_layout.addWidget(variant_label, 30)
+        variant_layout.addWidget(self._geo_variant_dropdown, 70)
+        layout.addWidget(variant_widget)
+
         buttons_layout = QtWidgets.QHBoxLayout()
         self._open_existing_btn = QtWidgets.QPushButton("Open Asset Project")
         self._create_project_btn = QtWidgets.QPushButton("Create Asset Project")
@@ -366,7 +404,8 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         layout.addLayout(buttons_layout)
 
         footer = QtWidgets.QLabel(
-            "Tip: Select an asset, then open its Substance Painter project or create a new one.<br>"
+            "Tip: Select an asset and geometry variant. "
+            "Each variant opens its own Substance Painter project file.<br>"
             f"For more information, see {_docs_link_html()}."
         )
         footer.setWordWrap(True)
@@ -377,6 +416,7 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         layout.addWidget(footer)
 
         self._list_widget.itemSelectionChanged.connect(self._on_item_selected)
+        self._geo_variant_dropdown.currentTextChanged.connect(self._on_variant_changed)
         self._open_existing_btn.clicked.connect(
             lambda: self._set_action_and_accept(self.ACTION_OPEN_EXISTING)
         )
@@ -395,11 +435,19 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
     def get_selected_asset(self) -> Asset | None:
         return self._asset
 
+    def get_selected_variant(self) -> str:
+        return self._geo_variant_dropdown.currentText().strip() or "main"
+
+    def _on_variant_changed(self, _text: str) -> None:
+        self._update_project_info()
+        self._update_state()
+
     def _on_item_selected(self) -> None:
         selected = self.get_selected_item()
         if not selected:
             self._asset = None
             self._paths = None
+            self._geo_variant_dropdown.clear()
             self._info_label.setText("Select an asset to see details.")
             self._update_state()
             return
@@ -408,24 +456,43 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         if not asset or not asset.path:
             self._asset = None
             self._paths = None
+            self._geo_variant_dropdown.clear()
             self._info_label.setText("Asset path not set in ShotGrid.")
             self._update_state()
             return
 
         self._asset = asset
         self._paths = paths_for_asset(asset)
-        project_exists = self._paths.textures_path.exists()
-        status = "exists" if project_exists else "missing"
-        self._info_label.setText(
-            f"Substance Painter project: {self._paths.textures_path} ({status})"
+        variants = _geo_variants_for_asset(asset)
+        self._geo_variant_dropdown.clear()
+        self._geo_variant_dropdown.addItems(variants)
+        self._geo_variant_dropdown.setCurrentText(
+            "main" if "main" in variants else variants[0]
         )
+        self._update_project_info()
         self._update_state()
+
+    def _selected_project_path(self) -> Path | None:
+        if not self._paths:
+            return None
+        return _project_path_for_variant(self._paths, self.get_selected_variant())
+
+    def _update_project_info(self) -> None:
+        project_path = self._selected_project_path()
+        if not project_path:
+            return
+        variant = self.get_selected_variant()
+        status = "exists" if project_path.exists() else "missing"
+        self._info_label.setText(
+            f"Geometry variant: {variant}\n"
+            f"Substance Painter project: {project_path} ({status})"
+        )
 
     def _update_state(self) -> None:
         has_asset = bool(self._asset)
-        project_exists = False
-        if self._paths:
-            project_exists = self._paths.textures_path.exists()
+        self._geo_variant_dropdown.setEnabled(has_asset)
+        project_path = self._selected_project_path()
+        project_exists = bool(project_path and project_path.exists())
         self._open_existing_btn.setEnabled(project_exists)
         self._create_project_btn.setEnabled(has_asset)
 
@@ -439,10 +506,11 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
     _action: str | None
 
     def __init__(
-        self, parent: QtWidgets.QWidget | None, asset: Asset, paths: AssetPaths
+        self, parent: QtWidgets.QWidget | None, asset: Asset, geo_variant: str
     ) -> None:
         super().__init__(parent)
         self._action = None
+        variant_name = geo_variant.strip() or "main"
 
         self.setParent(parent)
         self.setWindowTitle("Create Asset Project")
@@ -454,7 +522,7 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
 
         asset_label = asset.display_name or asset.name or "Asset"
         title = QtWidgets.QLabel(
-            f"Create new Substance Painter project for {asset_label}"
+            f"Create new Substance Painter project for {asset_label} ({variant_name})"
         )
         title.setTextFormat(QtCore.Qt.PlainText)
         title.setWordWrap(True)
@@ -477,7 +545,8 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
         layout.addLayout(buttons_layout)
 
         footer = QtWidgets.QLabel(
-            'Tip: use "Create Default Project" unless you have talked with your team lead.<br>'
+            'Tip: use "Create Default Project" unless you have talked with your team lead. '
+            "The project will be saved to the selected geometry variant file.<br>"
             f"For more information, see {_docs_link_html()}."
         )
         footer.setWordWrap(True)
@@ -508,15 +577,21 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
 
     _asset: Asset
     _paths: AssetPaths
+    _geo_variant: str
     _mesh_status_label: QtWidgets.QLabel
     _resolved_mesh_path: Path | None
 
     def __init__(
-        self, parent: QtWidgets.QWidget | None, asset: Asset, paths: AssetPaths
+        self,
+        parent: QtWidgets.QWidget | None,
+        asset: Asset,
+        paths: AssetPaths,
+        geo_variant: str,
     ) -> None:
         super().__init__(parent)
         self._asset = asset
         self._paths = paths
+        self._geo_variant = geo_variant.strip() or "main"
         self._resolved_mesh_path = None
 
         self.setParent(parent)
@@ -534,17 +609,16 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         layout.addWidget(info_label)
 
         variant_row = QtWidgets.QHBoxLayout()
-        self._geo_variant_radio = QtWidgets.QRadioButton("Geometry Variant")
+        self._geo_variant_radio = QtWidgets.QRadioButton("Published Variant Mesh")
         self._geo_variant_radio.setChecked(True)
-        self._geo_variant_dropdown = QtWidgets.QComboBox()
         self._geo_variant_radio.setToolTip(
             "Use a published geometry variant from the asset's _src folder."
         )
-        self._geo_variant_dropdown.setToolTip(
-            "Select the geometry variant to use for this assets Substance Project."
-        )
+        variant_value = QtWidgets.QLabel(self._geo_variant)
+        variant_value.setToolTip("Selected geometry variant for this project file.")
+        variant_value.setTextFormat(QtCore.Qt.PlainText)
         variant_row.addWidget(self._geo_variant_radio, 30)
-        variant_row.addWidget(self._geo_variant_dropdown, 70)
+        variant_row.addWidget(variant_value, 70)
         layout.addLayout(variant_row)
 
         custom_row = QtWidgets.QHBoxLayout()
@@ -578,7 +652,7 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         layout.addLayout(buttons_layout)
 
         footer = QtWidgets.QLabel(
-            "Tip: Geometry variants come from publish/_src. "
+            "Tip: The selected geometry variant is locked for this project file. "
             "Use Custom Mesh to browse for any file.<br>"
             f"For more information, see {_docs_link_html()}."
         )
@@ -589,20 +663,18 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         footer.setStyleSheet("color: #8a8a8a;")
         layout.addWidget(footer)
 
-        self._geo_variant_dropdown.currentTextChanged.connect(self._update_mesh_status)
         self._custom_mesh_field.textChanged.connect(self._update_mesh_status)
         self._geo_variant_radio.toggled.connect(self._update_create_mode)
         self._custom_mesh_radio.toggled.connect(self._update_create_mode)
         self._custom_mesh_browse.clicked.connect(self._browse_custom_mesh)
         self._create_default_btn.clicked.connect(self.accept)
-        self._populate_geo_variants()
         self._update_create_mode()
 
     def use_custom_mesh(self) -> bool:
         return self._custom_mesh_radio.isChecked()
 
     def get_selected_variant(self) -> str:
-        return self._geo_variant_dropdown.currentText().strip()
+        return self._geo_variant
 
     def get_custom_mesh_path(self) -> Path | None:
         text = self._custom_mesh_field.text().strip()
@@ -613,23 +685,8 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
     def get_resolved_mesh_path(self) -> Path | None:
         return self._resolved_mesh_path
 
-    def _populate_geo_variants(self) -> None:
-        variants = set()
-        if hasattr(self._asset, "geometry_variants"):
-            variants.update(v for v in self._asset.geometry_variants if v)
-        ordered = sorted(variants)
-        if not ordered:
-            ordered = ["main"]
-        self._geo_variant_dropdown.clear()
-        self._geo_variant_dropdown.addItems(ordered)
-        if "main" in ordered:
-            self._geo_variant_dropdown.setCurrentText("main")
-        else:
-            self._geo_variant_dropdown.setCurrentText(ordered[0])
-
     def _update_create_mode(self) -> None:
         use_variant = self._geo_variant_radio.isChecked()
-        self._geo_variant_dropdown.setEnabled(use_variant)
         self._custom_mesh_field.setEnabled(not use_variant)
         self._custom_mesh_browse.setEnabled(not use_variant)
         self._update_mesh_status()
@@ -650,7 +707,7 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         self._resolved_mesh_path = None
 
         use_custom = self._custom_mesh_radio.isChecked()
-        variant = self.get_selected_variant()
+        variant = self._geo_variant
         custom_mesh = self.get_custom_mesh_path()
 
         resolved, variant_path, fallback_path = _resolve_default_mesh_paths(
@@ -731,10 +788,14 @@ def _current_project_path() -> Path | None:
     return Path(current_path)
 
 
-def _store_asset_metadata_when_ready(asset: Asset) -> None:
+def _store_asset_metadata_when_ready(
+    asset: Asset, *, geo_variant: Optional[str] = None
+) -> None:
     if not sp.project.is_open():
         return
-    sp.project.execute_when_not_busy(lambda: store_asset_metadata_for_project(asset))
+    sp.project.execute_when_not_busy(
+        lambda: store_asset_metadata_for_project(asset, geo_variant=geo_variant)
+    )
 
 
 def _open_existing_project(path: Path) -> None:
@@ -745,7 +806,9 @@ def _save_current_project_as(path: Path) -> None:
     sp.project.save_as(str(path))
 
 
-def _open_existing_project_for_asset(asset: Asset, project_path: Path) -> None:
+def _open_existing_project_for_asset(
+    asset: Asset, project_path: Path, *, geo_variant: str
+) -> None:
     parent = get_main_qt_window()
     if not project_path.exists():
         MessageDialog(
@@ -760,7 +823,7 @@ def _open_existing_project_for_asset(asset: Asset, project_path: Path) -> None:
     if current_path and current_path.resolve() == project_path.resolve():
         if sp.project.needs_saving():
             _save_current_project_as(project_path)
-        _store_asset_metadata_when_ready(asset)
+        _store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
         return
 
     if sp.project.is_open():
@@ -769,11 +832,17 @@ def _open_existing_project_for_asset(asset: Asset, project_path: Path) -> None:
         sp.project.close()
 
     _open_existing_project(project_path)
-    _store_asset_metadata_when_ready(asset)
-    log.info("Opened Substance project for asset %s", asset.display_name or asset.name)
+    _store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
+    log.info(
+        "Opened Substance project for asset %s (variant=%s)",
+        asset.display_name or asset.name,
+        geo_variant,
+    )
 
 
-def _save_current_project_as_asset(asset: Asset, project_path: Path) -> None:
+def _save_current_project_as_asset(
+    asset: Asset, project_path: Path, *, geo_variant: str
+) -> None:
     parent = get_main_qt_window()
     if not sp.project.is_open():
         MessageDialog(
@@ -786,7 +855,7 @@ def _save_current_project_as_asset(asset: Asset, project_path: Path) -> None:
 
     current_path = _current_project_path()
     if current_path and current_path.resolve() == project_path.resolve():
-        _store_asset_metadata_when_ready(asset)
+        _store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
         return
 
     if project_path.exists() and not _confirm_overwrite_project(parent, project_path):
@@ -794,8 +863,8 @@ def _save_current_project_as_asset(asset: Asset, project_path: Path) -> None:
 
     project_path.parent.mkdir(parents=True, exist_ok=True)
     _save_current_project_as(project_path)
-    _store_asset_metadata_when_ready(asset)
-    log.info("Saved Substance project to %s", project_path)
+    _store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
+    log.info("Saved Substance project to %s (variant=%s)", project_path, geo_variant)
 
 
 def _create_default_project_for_asset(
@@ -880,7 +949,7 @@ def _create_default_project_for_asset(
 
     def finalize_save() -> None:
         _save_current_project_as(resolved_project_path)
-        _store_asset_metadata_when_ready(asset)
+        _store_asset_metadata_when_ready(asset, geo_variant=variant)
 
     if sp.project.is_busy():
         sp.project.execute_when_not_busy(finalize_save)
@@ -906,12 +975,14 @@ def launch_open_asset_textures() -> None:
 
     asset = select_dialog.get_selected_asset()
     action = select_dialog.get_selected_action()
+    geo_variant = select_dialog.get_selected_variant()
     if not action or not asset:
         return
     log.info(
-        "Open Asset: selected %s (%s)",
+        "Open Asset: selected %s (%s, variant=%s)",
         asset.display_name or asset.name,
         action,
+        geo_variant,
     )
     if not asset.path:
         MessageDialog(
@@ -922,12 +993,13 @@ def launch_open_asset_textures() -> None:
         return
 
     paths = paths_for_asset(asset)
+    project_path = _project_path_for_variant(paths, geo_variant)
 
     if action == SubstanceAssetSelectDialog.ACTION_OPEN_EXISTING:
-        _open_existing_project_for_asset(asset, paths.textures_path)
+        _open_existing_project_for_asset(asset, project_path, geo_variant=geo_variant)
         return
 
-    create_dialog = SubstanceAssetCreateModeDialog(parent, asset, paths)
+    create_dialog = SubstanceAssetCreateModeDialog(parent, asset, geo_variant)
     if not create_dialog.exec_():
         return
 
@@ -936,18 +1008,20 @@ def launch_open_asset_textures() -> None:
         return
 
     if create_action == SubstanceAssetCreateModeDialog.ACTION_USE_CURRENT:
-        _save_current_project_as_asset(asset, paths.textures_path)
+        _save_current_project_as_asset(asset, project_path, geo_variant=geo_variant)
         return
 
     if create_action == SubstanceAssetCreateModeDialog.ACTION_CREATE_DEFAULT:
-        default_dialog = SubstanceAssetDefaultProjectDialog(parent, asset, paths)
+        default_dialog = SubstanceAssetDefaultProjectDialog(
+            parent, asset, paths, geo_variant
+        )
         if not default_dialog.exec_():
             return
         _create_default_project_for_asset(
             asset,
-            paths.textures_path,
+            project_path,
             use_custom_mesh=default_dialog.use_custom_mesh(),
-            variant=default_dialog.get_selected_variant(),
+            variant=geo_variant,
             custom_mesh_path=default_dialog.get_custom_mesh_path(),
         )
 
