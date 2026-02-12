@@ -44,6 +44,37 @@ class TexSetExportSettings:
     normal_source: NormalSource
 
 
+@dataclass(frozen=True)
+class _ResolvedExportTarget:
+    settings: TexSetExportSettings
+    stack: sp.textureset.Stack
+    texture_set_name: str
+
+
+def _texture_set_name(tex_set: sp.textureset.TextureSet) -> str:
+    """Return texture set name across API versions."""
+    name_attr = getattr(tex_set, "name", None)
+    if callable(name_attr):
+        return name_attr()
+    if isinstance(name_attr, str):
+        return name_attr
+    return str(tex_set)
+
+
+def _channel_export_name(channel: sp.textureset.Channel) -> str:
+    label_attr = getattr(channel, "label", None)
+    label = label_attr() if callable(label_attr) else label_attr
+    if isinstance(label, str) and label:
+        return label.replace(" ", "")
+    return channel.type().name
+
+
+def _stack_root_path(stack: sp.textureset.Stack) -> str:
+    texture_set_name = _texture_set_name(stack.material())
+    stack_name = stack.name()
+    return f"{texture_set_name}/{stack_name}" if stack_name else texture_set_name
+
+
 class Exporter:
     """Class to manage exporting and converting textures"""
 
@@ -75,6 +106,35 @@ class Exporter:
         self._src_path.mkdir(parents=True, exist_ok=True)
         self._preview_path.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _resolve_export_targets(
+        exp_setting_arr: typing.Sequence[TexSetExportSettings],
+    ) -> list[_ResolvedExportTarget]:
+        targets: list[_ResolvedExportTarget] = []
+        for export_settings in exp_setting_arr:
+            texture_set_name = _texture_set_name(export_settings.tex_set)
+            try:
+                stack = export_settings.tex_set.get_stack()
+            except ValueError:
+                MessageDialog(
+                    get_main_qt_window(),
+                    (
+                        f'Texture Set "{texture_set_name}" uses material layering.\n'
+                        "This exporter currently supports non-layered texture sets only."
+                    ),
+                    "Unsupported Texture Set",
+                ).exec_()
+                return []
+
+            targets.append(
+                _ResolvedExportTarget(
+                    settings=export_settings,
+                    stack=stack,
+                    texture_set_name=texture_set_name,
+                )
+            )
+        return targets
+
     def export(
         self,
         exp_setting_arr: typing.Sequence[TexSetExportSettings],
@@ -86,17 +146,33 @@ class Exporter:
         self._init_paths(mat_var, geo_var, shader_layer)
         log.info("Exporting textures to %s", self._out_path)
 
+        resolved_targets = self._resolve_export_targets(exp_setting_arr)
+        if not resolved_targets:
+            return False
+
+        config = Exporter._generate_config(self._src_path, resolved_targets)
+        log.debug(config)
+
         try:
-            [tss.tex_set.get_stack() for tss in exp_setting_arr]
-        except ValueError:
+            planned_exports = sp.export.list_project_textures(config)
+        except Exception:
+            log.exception("Export configuration is invalid for this project.")
             MessageDialog(
                 get_main_qt_window(),
-                "Warning! Exporter could not get stack! You are doing something cool with material layering. Please show this to Dallin so he can fix it.",
+                "Export configuration is invalid for the current project. "
+                "Check enabled texture sets and channel settings, then try again.",
+                "Invalid Export Configuration",
             ).exec_()
             return False
 
-        config = Exporter._generate_config(self._src_path, exp_setting_arr)
-        log.debug(config)
+        if not any(planned_exports.values()):
+            MessageDialog(
+                get_main_qt_window(),
+                "No textures match the current export configuration.",
+                "Nothing To Export",
+            ).exec_()
+            log.warning("Export aborted: no matching textures in export configuration.")
+            return False
 
         export_result: sp.export.TextureExportResult
         try:
@@ -105,10 +181,33 @@ class Exporter:
             log.exception("Texture export failed in Substance Painter.")
             return False
 
-        self.write_mat_info(exp_setting_arr)
+        if export_result.status == sp.export.ExportStatus.Cancelled:
+            log.warning("Texture export was cancelled: %s", export_result.message)
+            MessageDialog(
+                get_main_qt_window(),
+                "Texture export was cancelled.",
+                "Export Cancelled",
+            ).exec_()
+            return False
+
+        if export_result.status == sp.export.ExportStatus.Warning:
+            log.warning(
+                "Texture export completed with warnings: %s", export_result.message
+            )
+        elif export_result.status != sp.export.ExportStatus.Success:
+            log.error("Texture export failed with status %s", export_result.status)
+            return False
+
+        if not export_result.textures:
+            log.error("Texture export produced no files.")
+            return False
+
+        self.write_mat_info([target.settings for target in resolved_targets])
 
         tex_converter = TexConverter(
-            self._tex_path, self._preview_path, export_result.textures.values()
+            self._tex_path,
+            self._preview_path,
+            list(export_result.textures.values()),
         )
 
         try:
@@ -140,7 +239,9 @@ class Exporter:
         else:
             old_mat_info = MaterialInfo()
 
-        all_tex_sets = [ts.name() for ts in sp.textureset.all_texture_sets()]
+        all_tex_sets = [
+            _texture_set_name(ts) for ts in sp.textureset.all_texture_sets()
+        ]
         for tex_set in list(old_mat_info.tex_sets.keys()):
             if tex_set not in all_tex_sets:
                 del old_mat_info.tex_sets[tex_set]
@@ -149,7 +250,7 @@ class Exporter:
             {
                 **old_mat_info.tex_sets,
                 **{
-                    export_settings.tex_set.name(): TexSetInfo(
+                    _texture_set_name(export_settings.tex_set): TexSetInfo(
                         displacement_source=export_settings.displacement_source,
                         has_udims=export_settings.tex_set.has_uv_tiles(),
                         normal_source=export_settings.normal_source,
@@ -165,21 +266,22 @@ class Exporter:
 
     @staticmethod
     def _generate_config(
-        src_path: Path, export_settings_arr: typing.Iterable[TexSetExportSettings]
+        src_path: Path, export_targets: typing.Iterable[_ResolvedExportTarget]
     ) -> dict:
+        targets = list(export_targets)
         return {
             "exportPath": str(src_path),
             "exportShaderParams": True,
             "exportPresets": [
                 {
-                    "name": export_settings.tex_set.name(),
+                    "name": target.texture_set_name,
                     "maps": [
                         # Default RenderMan maps
-                        *Exporter._shader_maps(export_settings),
+                        *Exporter._shader_maps(target.settings),
                         # Extra AOVs
                         *[
                             {
-                                "fileName": f"$textureSet_{getattr(ch, 'label', None) and ch.label().replace(' ', '') or ch.type().name}(_$colorSpace)(.$udim)",
+                                "fileName": f"$textureSet_{_channel_export_name(ch)}(_$colorSpace)(.$udim)",
                                 "channels": [
                                     {
                                         "destChannel": color,
@@ -192,30 +294,27 @@ class Exporter:
                                 "parameters": {
                                     "bitDepth": bit_depth.lower(),
                                     "fileFormat": "png",
-                                    "sizeLog2": export_settings.resolution,
+                                    "sizeLog2": target.settings.resolution,
                                 },
                             }
-                            for ch in export_settings.extra_channels
+                            for ch in target.settings.extra_channels
                             for colors, bit_depth in re.findall(
                                 r"^s?(L|RGB)(\d{1,2}F?)$",
-                                export_settings.tex_set.get_stack()
-                                .get_channel(ch.type())
-                                .format()
-                                .name,
+                                target.stack.get_channel(ch.type()).format().name,
                             )
                         ],
                         # Preview Surface
                         *Exporter._preview_surface_maps(),
                     ],
                 }
-                for export_settings in export_settings_arr
+                for target in targets
             ],
             "exportList": [
                 {
-                    "rootPath": str(export_settings.tex_set.get_stack()),
-                    "exportPreset": export_settings.tex_set.name(),
+                    "rootPath": _stack_root_path(target.stack),
+                    "exportPreset": target.texture_set_name,
                 }
-                for export_settings in export_settings_arr
+                for target in targets
             ],
             "exportParameters": [
                 {

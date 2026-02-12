@@ -9,12 +9,13 @@ from __future__ import annotations
 import datetime
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import substance_painter as sp
 from env_sg import DB_Config
 from Qt import QtCore, QtWidgets
 from shared.util import get_documentation_path, get_production_path, resolve_mapped_path
+from substance_painter.project import NormalMapFormat, ProjectWorkflow, TangentSpace
 
 from pipe.asset.paths import DCC_SUBSTANCE, AssetPaths, paths_for_asset
 from pipe.db import DB
@@ -38,6 +39,25 @@ PIPE_SP_PROJECT_TEMPLATE_DIR = Path("painter_assets") / "templates"
 PIPE_SP_DOCS_PAGE = "Asset-Pipeline#substance-painter"
 
 
+def _texture_set_name(tex_set: sp.textureset.TextureSet) -> str:
+    """Return texture set name with backward compatibility across API versions."""
+    name_attr = getattr(tex_set, "name", None)
+    if callable(name_attr):
+        return name_attr()
+    if isinstance(name_attr, str):
+        return name_attr
+    return str(tex_set)
+
+
+def _default_project_settings() -> sp.project.Settings:
+    """Project settings used by the default project creator."""
+    return sp.project.Settings(
+        normal_map_format=NormalMapFormat.OpenGL,
+        tangent_space_mode=TangentSpace.PerVertex,
+        project_workflow=ProjectWorkflow.UVTile,
+    )
+
+
 def _substance_docs_url() -> str:
     return get_documentation_path(PIPE_SP_DOCS_PAGE)
 
@@ -59,6 +79,47 @@ def _utc_now_iso() -> str:
 
 def _metadata() -> sp.project.Metadata:
     return sp.project.Metadata(PIPE_SP_METADATA_CONTEXT)
+
+
+def _run_once_on_project_edition_entered(callback: Callable[[], None]) -> None:
+    """Run callback once the project enters edition state."""
+
+    def _on_project_edition_entered(_event: sp.event.ProjectEditionEntered) -> None:
+        try:
+            sp.event.DISPATCHER.disconnect(
+                sp.event.ProjectEditionEntered, _on_project_edition_entered
+            )
+        except Exception:
+            pass
+        callback()
+
+    sp.event.DISPATCHER.connect_strong(
+        sp.event.ProjectEditionEntered, _on_project_edition_entered
+    )
+
+
+def _run_when_project_editable(callback: Callable[[], None]) -> None:
+    """Run callback when a project is open, in edition state, and not busy."""
+    if not sp.project.is_open():
+        _run_once_on_project_edition_entered(
+            lambda: _run_when_project_editable(callback)
+        )
+        return
+
+    if sp.project.is_busy():
+        sp.project.execute_when_not_busy(lambda: _run_when_project_editable(callback))
+        return
+
+    try:
+        if not sp.project.is_in_edition_state():
+            _run_once_on_project_edition_entered(
+                lambda: _run_when_project_editable(callback)
+            )
+            return
+    except Exception:
+        return
+
+    callback()
 
 
 def _safe_get_metadata() -> dict[str, Any]:
@@ -111,8 +172,9 @@ def store_asset_selection_metadata(
     """Persist texture-set to asset mapping in the project metadata."""
     if not sp.project.is_open():
         return
+
     if sp.project.is_busy():
-        sp.project.execute_when_not_busy(
+        _run_when_project_editable(
             lambda: store_asset_selection_metadata(
                 asset_map,
                 last_asset=last_asset,
@@ -121,6 +183,21 @@ def store_asset_selection_metadata(
                 geo_variant=geo_variant,
             )
         )
+        return
+
+    try:
+        if not sp.project.is_in_edition_state():
+            _run_when_project_editable(
+                lambda: store_asset_selection_metadata(
+                    asset_map,
+                    last_asset=last_asset,
+                    asset_id=asset_id,
+                    asset_path=asset_path,
+                    geo_variant=geo_variant,
+                )
+            )
+            return
+    except Exception:
         return
 
     resolved_last_asset = last_asset
@@ -223,7 +300,8 @@ def store_asset_metadata_for_project(
         return
 
     asset_map = {
-        texset.name(): asset_display_name for texset in sp.textureset.all_texture_sets()
+        _texture_set_name(texset): asset_display_name
+        for texset in sp.textureset.all_texture_sets()
     }
     store_asset_selection_metadata(
         asset_map,
@@ -791,19 +869,58 @@ def _current_project_path() -> Path | None:
 def _store_asset_metadata_when_ready(
     asset: Asset, *, geo_variant: Optional[str] = None
 ) -> None:
-    if not sp.project.is_open():
-        return
-    sp.project.execute_when_not_busy(
+    _run_when_project_editable(
         lambda: store_asset_metadata_for_project(asset, geo_variant=geo_variant)
     )
 
 
-def _open_existing_project(path: Path) -> None:
-    sp.project.open(str(path))
+def _open_existing_project(path: Path, parent: QtWidgets.QWidget | None) -> bool:
+    resolved_path = resolve_mapped_path(path)
+    try:
+        sp.project.open(str(resolved_path))
+    except Exception:
+        log.exception("Failed to open Substance Painter project: %s", resolved_path)
+        MessageDialog(
+            parent,
+            f"Failed to open the Substance Painter project:\n{resolved_path}",
+            "Open Project Failed",
+        ).exec_()
+        return False
+    return True
 
 
-def _save_current_project_as(path: Path) -> None:
-    sp.project.save_as(str(path))
+def _save_current_project_as(path: Path, parent: QtWidgets.QWidget | None) -> bool:
+    resolved_path = resolve_mapped_path(path)
+    try:
+        sp.project.save_as(str(resolved_path))
+    except Exception:
+        log.exception("Failed to save Substance Painter project as: %s", resolved_path)
+        MessageDialog(
+            parent,
+            f"Failed to save the Substance Painter project:\n{resolved_path}",
+            "Save Failed",
+        ).exec_()
+        return False
+    return True
+
+
+def _close_current_project(
+    parent: QtWidgets.QWidget | None, *, action_context: str
+) -> bool:
+    try:
+        sp.project.close()
+    except Exception:
+        log.exception(
+            "Failed to close Substance Painter project before %s.", action_context
+        )
+        MessageDialog(
+            parent,
+            "Failed to close the currently opened project. "
+            "Resolve any pending project issues and try again.",
+            "Close Project Failed",
+        ).exec_()
+        return False
+    return True
 
 
 def _open_existing_project_for_asset(
@@ -822,16 +939,21 @@ def _open_existing_project_for_asset(
     current_path = _current_project_path()
     if current_path and current_path.resolve() == project_path.resolve():
         if sp.project.needs_saving():
-            _save_current_project_as(project_path)
+            if not _save_current_project_as(project_path, parent):
+                return
         _store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
         return
 
     if sp.project.is_open():
         if sp.project.needs_saving() and not _confirm_discard_unsaved(parent):
             return
-        sp.project.close()
+        if not _close_current_project(
+            parent, action_context="opening another asset project"
+        ):
+            return
 
-    _open_existing_project(project_path)
+    if not _open_existing_project(project_path, parent):
+        return
     _store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
     log.info(
         "Opened Substance project for asset %s (variant=%s)",
@@ -862,7 +984,8 @@ def _save_current_project_as_asset(
         return
 
     project_path.parent.mkdir(parents=True, exist_ok=True)
-    _save_current_project_as(project_path)
+    if not _save_current_project_as(project_path, parent):
+        return
     _store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
     log.info("Saved Substance project to %s (variant=%s)", project_path, geo_variant)
 
@@ -911,7 +1034,10 @@ def _create_default_project_for_asset(
     if sp.project.is_open():
         if sp.project.needs_saving() and not _confirm_discard_unsaved(parent):
             return
-        sp.project.close()
+        if not _close_current_project(
+            parent, action_context="creating a default asset project"
+        ):
+            return
 
     if project_path.exists() and not _confirm_overwrite_project(parent, project_path):
         return
@@ -932,6 +1058,7 @@ def _create_default_project_for_asset(
     resolved_template = resolve_mapped_path(template_path)
     try:
         sp.project.create(
+            settings=_default_project_settings(),
             mesh_file_path=str(resolved_mesh),
             template_file_path=str(resolved_template),
         )
@@ -948,13 +1075,11 @@ def _create_default_project_for_asset(
     resolved_project_path = resolve_mapped_path(project_path)
 
     def finalize_save() -> None:
-        _save_current_project_as(resolved_project_path)
+        if not _save_current_project_as(resolved_project_path, parent):
+            return
         _store_asset_metadata_when_ready(asset, geo_variant=variant)
 
-    if sp.project.is_busy():
-        sp.project.execute_when_not_busy(finalize_save)
-    else:
-        finalize_save()
+    _run_when_project_editable(finalize_save)
     log.info("Created Substance project at %s", project_path)
 
 

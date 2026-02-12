@@ -45,6 +45,15 @@ def _docs_link_html() -> str:
     return f'<a href="{url}">the documentation</a>'
 
 
+def _texture_set_name(tex_set: sp.textureset.TextureSet) -> str:
+    name_attr = getattr(tex_set, "name", None)
+    if callable(name_attr):
+        return name_attr()
+    if isinstance(name_attr, str):
+        return name_attr
+    return str(tex_set)
+
+
 class SubstanceExportWindow(QMainWindow, ButtonPair):
     _curr_asset: Asset
     _central_widget: QtWidgets.QWidget
@@ -263,8 +272,14 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     def do_export(self, isBatch: bool = False) -> None:
         if not self._curr_asset:
             return
+        if not self._preflight():
+            return
         if not self._ensure_project_saved():
             return
+
+        mat_var = self.mat_var.strip() or "default"
+        geo_var = self.geo_var.strip() or "main"
+        shader_layer = self.shader_layer.strip() or "default"
 
         asset_label = (
             self._curr_asset.display_name or self._curr_asset.name or "Unknown Asset"
@@ -272,19 +287,23 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         log.info(
             "Publishing textures for %s (geo=%s, mat=%s, layer=%s)",
             asset_label,
-            self.geo_var,
-            self.mat_var,
-            self.shader_layer,
+            geo_var,
+            mat_var,
+            shader_layer,
         )
 
-        if self.mat_var not in self._curr_asset.material_variants:
-            self._curr_asset.material_variants.add(self.mat_var)
-            log.info(f"Updating new material variant: {self.mat_var}")
-            self._conn.update_asset(self._curr_asset)
+        asset_updated = False
+        if mat_var not in self._curr_asset.material_variants:
+            self._curr_asset.material_variants.add(mat_var)
+            log.info("Updating new material variant: %s", mat_var)
+            asset_updated = True
 
-        if self.shader_layer not in self._curr_asset.render_variants:
-            self._curr_asset.render_variants.add(self.shader_layer)
-            log.info(f"Updating new shader layer: {self.shader_layer}")
+        if shader_layer not in self._curr_asset.render_variants:
+            self._curr_asset.render_variants.add(shader_layer)
+            log.info("Updating new shader layer: %s", shader_layer)
+            asset_updated = True
+
+        if asset_updated:
             self._conn.update_asset(self._curr_asset)
 
         log.info("Exporting!")
@@ -311,9 +330,9 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
         if exporter.export(
             export_settings,
-            self.mat_var,
-            self.geo_var,
-            self.shader_layer,
+            mat_var,
+            geo_var,
+            shader_layer,
         ):
             backup_status = None
             project_path = sp.project.file_path() or ""
@@ -323,7 +342,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             else:
                 asset_paths = paths_for_asset(self._curr_asset)
                 publish_path = asset_paths.publish_textures_layer_dir(
-                    self.geo_var, self.mat_var, self.shader_layer
+                    geo_var, mat_var, shader_layer
                 )
                 result = backup_if_changed(
                     source_path=Path(project_path),
@@ -332,9 +351,9 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                     dcc=DCC_SUBSTANCE,
                     publish_path=publish_path,
                     extra={
-                        "geo": self.geo_var,
-                        "material": self.mat_var,
-                        "shader_layer": self.shader_layer,
+                        "geo": geo_var,
+                        "material": mat_var,
+                        "shader_layer": shader_layer,
                     },
                     asset_name=self._curr_asset.display_name or self._curr_asset.name,
                     asset_path=self._curr_asset.path,
@@ -379,6 +398,28 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 "No Substance Painter project is open.",
                 "Publish Textures",
             ).exec_()
+            return False
+
+        if sp.project.is_busy():
+            MessageDialog(
+                get_main_qt_window(),
+                "Substance Painter is busy. Wait for the current operation to finish "
+                "before publishing.",
+                "Painter Busy",
+            ).exec_()
+            return False
+
+        try:
+            if not sp.project.is_in_edition_state():
+                MessageDialog(
+                    get_main_qt_window(),
+                    "The project is still loading. Wait for the project to finish "
+                    "loading before publishing.",
+                    "Project Loading",
+                ).exec_()
+                return False
+        except Exception:
+            log.exception("Failed to query project edition state before publish.")
             return False
 
         project_path = sp.project.file_path() or ""
@@ -437,7 +478,7 @@ class TexSetWidget(QtWidgets.QWidget):
     _normal_type_dropdown: QComboBox
     _resolution_dropdown: QComboBox
     _settings_container: QtWidgets.QWidget
-    _stack: sp.textureset.Stack
+    _stack: sp.textureset.Stack | None
     _tex_set: sp.textureset.TextureSet
 
     DEFAULT_CHANNELS = [
@@ -482,17 +523,20 @@ class TexSetWidget(QtWidgets.QWidget):
             QPixmap(os.getenv("PIPE_PATH", "") + "/lib/icon/material-help.svg")
         )
 
+        self._stack = None
         try:
             self._stack = self._tex_set.get_stack()
         except ValueError:
             MessageDialog(
                 get_main_qt_window(),
                 (
-                    "Warning! Could not get material stacks! You are doing "
-                    "something cool with material layering. Please show this to "
-                    "Dallin so he can fix it."
+                    f'Texture Set "{_texture_set_name(self._tex_set)}" uses material '
+                    "layering. This publish tool currently supports non-layered "
+                    "texture sets only."
                 ),
             ).exec_()
+            self._setup_unsupported_layout()
+            return
 
         self._setup_ui()
 
@@ -507,7 +551,24 @@ class TexSetWidget(QtWidgets.QWidget):
     def _get_default(items: typing.Iterable[str]) -> str:
         return next((i for i in items if i.endswith("(default)")), "")
 
+    def _setup_unsupported_layout(self) -> None:
+        layout = QtWidgets.QHBoxLayout()
+        self._enabled_checkbox = QtWidgets.QCheckBox()
+        self._enabled_checkbox.setChecked(False)
+        self._enabled_checkbox.setEnabled(False)
+        layout.addWidget(self._enabled_checkbox, 10, QtCore.Qt.AlignTop)
+
+        message = QLabel(
+            f"{_texture_set_name(self._tex_set)} "
+            "(material layering not supported by this exporter)"
+        )
+        message.setWordWrap(True)
+        message.setStyleSheet("font-size: 11px; color: #8a8a8a;")
+        layout.addWidget(message, 90)
+        self.setLayout(layout)
+
     def _setup_ui(self) -> None:
+        assert self._stack is not None
         layout = QtWidgets.QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -528,7 +589,7 @@ class TexSetWidget(QtWidgets.QWidget):
         layout.addWidget(settings_container, 90)
 
         # Texture set title
-        self.label = QLabel(self._tex_set.name())
+        self.label = QLabel(_texture_set_name(self._tex_set))
         self.label.setStyleSheet("font-size: 11px; font-weight: bold;")
         settings_layout.addWidget(self.label, 0, 0, 1, 3)
 
