@@ -46,6 +46,13 @@ def normalize_display_name(name: Optional[str]) -> str:
     return name.strip().lower().replace(" ", "_")
 
 
+def _split_csv_set(value: Optional[str]) -> set[str]:
+    """Parse a comma-separated ShotGrid string into normalized variant tokens."""
+    if not value:
+        return set()
+    return {token.strip() for token in value.split(",") if token.strip()}
+
+
 @attrs.define
 class SGDiffable(Diffable):
     @classmethod
@@ -128,21 +135,21 @@ class Asset(SGEntity):
     material_variants: set[str] = field(
         metadata={
             _SG_NAME: "sg_material_variants",
-            _STRUCT_HOOK: lambda mv, _: set(mv.split(",") if mv else []),
+            _STRUCT_HOOK: lambda mv, _: _split_csv_set(mv),
             _UNSTRUCT_HOOK: lambda mv, _: ",".join(mv) if mv else "",
         }
     )
     geometry_variants: set[str] = field(
         metadata={
             _SG_NAME: "sg_geometry_variants",
-            _STRUCT_HOOK: lambda mv, _: set(mv.split(",") if mv else []),
+            _STRUCT_HOOK: lambda mv, _: _split_csv_set(mv),
             _UNSTRUCT_HOOK: lambda mv, _: ",".join(mv) if mv else "",
         }
     )
     render_variants: set[str] = field(
         metadata={
             _SG_NAME: "sg_render_variants",
-            _STRUCT_HOOK: lambda mv, _: set(mv.split(",") if mv else []),
+            _STRUCT_HOOK: lambda mv, _: _split_csv_set(mv),
             _UNSTRUCT_HOOK: lambda mv, _: ",".join(mv) if mv else "",
         }
     )
