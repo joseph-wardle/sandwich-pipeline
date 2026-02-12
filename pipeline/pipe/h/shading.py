@@ -959,7 +959,11 @@ class MatlibManager:
             return
 
         asset = self._get_asset_or_none()
-        variants = sorted(asset.geometry_variants, key=str.casefold) if asset else []
+        variants = (
+            sorted((v for v in asset.geometry_variants if v), key=str.casefold)
+            if asset
+            else []
+        )
         geo_var.set(variants[0] if variants else "main")
 
     def _update_default_mat_var(self, node: hou.LopNode | None = None) -> None:
@@ -969,7 +973,11 @@ class MatlibManager:
             return
 
         asset = self._get_asset_or_none()
-        variants = sorted(asset.material_variants, key=str.casefold) if asset else []
+        variants = (
+            sorted((v for v in asset.material_variants if v), key=str.casefold)
+            if asset
+            else []
+        )
         mat_var.set(variants[0] if variants else _NO_TEXTURES)
 
     def _find_material_library(
@@ -1011,14 +1019,22 @@ class MatlibManager:
 
     def get_geo_variant_list(self) -> list[str]:
         asset = self._get_asset_or_none()
-        variants = sorted(asset.geometry_variants, key=str.casefold) if asset else []
+        variants = (
+            sorted((v for v in asset.geometry_variants if v), key=str.casefold)
+            if asset
+            else []
+        )
         if not variants:
             variants = ["main"]
         return _asset_menu_format(variants)
 
     def get_mat_variant_list(self) -> list[str]:
         asset = self._get_asset_or_none()
-        variants = sorted(asset.material_variants, key=str.casefold) if asset else []
+        variants = (
+            sorted((v for v in asset.material_variants if v), key=str.casefold)
+            if asset
+            else []
+        )
         if not variants:
             variants = [_NO_TEXTURES]
         return _asset_menu_format(variants)

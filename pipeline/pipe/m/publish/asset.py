@@ -73,7 +73,7 @@ class _PublishAssetVariantControls:
 
         self._geo_var_dropdown = QComboBox()
         self._geo_var_dropdown.setEditable(True)
-        self._geo_var_dropdown.setCurrentText("default")
+        self._geo_var_dropdown.setCurrentText("main")
         self._geo_var_dropdown.setToolTip(
             "Enter or select the geometry variant to publish."
         )
@@ -90,11 +90,16 @@ class _PublishAssetVariantControls:
 
     def _populate_geo_var(self, asset: Asset | None) -> None:
         if asset and hasattr(asset, "geometry_variants"):
-            variants = sorted(set(asset.geometry_variants) | {"main"})
+            variants = sorted(v for v in asset.geometry_variants if v)
         else:
             variants = []
+        if not variants:
+            variants = ["main"]
         self._geo_var_dropdown.clear()
         self._geo_var_dropdown.addItems(variants)
+        self._geo_var_dropdown.setCurrentText(
+            "main" if "main" in variants else variants[0]
+        )
 
 
 class PublishAssetOptionsDialog(FilteredListDialog, _PublishAssetVariantControls):

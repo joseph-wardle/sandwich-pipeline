@@ -143,19 +143,23 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         texture_set_scroll_area.setWidgetResizable(True)
         self._main_layout.addWidget(texture_set_scroll_area, 1)
 
+        mat_items = self._variant_items(self._curr_asset.material_variants, "default")
+        mat_default = "default" if "default" in mat_items else mat_items[0]
         self._mat_var_dropdown = self._build_variant_dropdown(
             label_text="Material Variant:",
             tooltip=(
                 "Material variant name used in the publish folder. "
                 "Type a new name to create a variant."
             ),
-            items=self._variant_items(self._curr_asset.material_variants, "default"),
-            default_value="default",
+            items=mat_items,
+            default_value=mat_default,
             editable=True,
             validator=QRegExpValidator(QRegExp("[a-z][a-z_\\d]*")),
         )
 
-        geo_items = sorted(self._curr_asset.geometry_variants) or ["main"]
+        geo_items = sorted(v for v in self._curr_asset.geometry_variants if v) or [
+            "main"
+        ]
         geo_default = "main" if "main" in geo_items else geo_items[0]
         self._geo_var_dropdown = self._build_variant_dropdown(
             label_text="Geometry Variant:",
@@ -165,11 +169,13 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             editable=False,
         )
 
+        shader_items = self._variant_items(self._curr_asset.render_variants, "default")
+        shader_default = "default" if "default" in shader_items else shader_items[0]
         self._shader_layer_dropdown = self._build_variant_dropdown(
             label_text="Shader Layer:",
             tooltip=("Shader layer name used for layered materials."),
-            items=self._variant_items(self._curr_asset.render_variants, "default"),
-            default_value="default",
+            items=shader_items,
+            default_value=shader_default,
             editable=True,
             validator=QRegExpValidator(QRegExp("[a-z][a-z_\\d]*")),
         )
@@ -228,10 +234,11 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         return dropdown
 
     @staticmethod
-    def _variant_items(options: list[str], default_value: str) -> list[str]:
-        items = set(options)
-        items.add(default_value)
-        return sorted(items)
+    def _variant_items(options: typing.Iterable[str], default_value: str) -> list[str]:
+        items = sorted({option for option in options if option})
+        if items:
+            return items
+        return [default_value]
 
     def _preflight(self) -> bool:
         """Check for asset metadata and correct channel types before running

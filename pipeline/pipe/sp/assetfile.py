@@ -616,13 +616,16 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
     def _populate_geo_variants(self) -> None:
         variants = set()
         if hasattr(self._asset, "geometry_variants"):
-            variants.update(self._asset.geometry_variants)
-        variants.add("main")
-        ordered = sorted(v for v in variants if v)
+            variants.update(v for v in self._asset.geometry_variants if v)
+        ordered = sorted(variants)
+        if not ordered:
+            ordered = ["main"]
         self._geo_variant_dropdown.clear()
         self._geo_variant_dropdown.addItems(ordered)
         if "main" in ordered:
             self._geo_variant_dropdown.setCurrentText("main")
+        else:
+            self._geo_variant_dropdown.setCurrentText(ordered[0])
 
     def _update_create_mode(self) -> None:
         use_variant = self._geo_variant_radio.isChecked()
