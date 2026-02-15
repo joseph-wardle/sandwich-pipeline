@@ -55,17 +55,17 @@ class RigPublisher(Publisher):
         asset = self._conn.get_asset_by_display_name(self._selected_item)
 
         try:
-            assert asset.path is not None
+            assert asset.asset_path
         except AssertionError:
             error = MessageDialog(
                 self._window,
-                "Error: No path for this Asset set in ShotGrid. Nothing exported",
+                "Error: Could not resolve the location for this asset in ShotGrid. Nothing exported",
                 "Error",
             )
             error.exec_()
             return None
 
-        asset_dir = get_production_path() / asset.path
+        asset_dir = get_production_path() / asset.asset_path
         asset_dir.mkdir(parents=True, exist_ok=True)  # Ensure the directory exists
         filename = asset.name + ".usd"
         save_path = asset_dir / filename

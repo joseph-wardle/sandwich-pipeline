@@ -409,10 +409,10 @@ def bind_materials_new_variant(
 
 def add_variant_to_model(asset: Asset, variant: str) -> None:
     # Construct the full path to geo.usd
-    if asset.path is None:
-        raise ValueError("asset.path is None, cannot construct usd_path")
+    if not asset.asset_path:
+        raise ValueError("asset.asset_path is empty, cannot construct usd_path")
 
-    usd_path = get_production_path() / asset.path / "usd" / "geo.usd"
+    usd_path = get_production_path() / asset.asset_path / "usd" / "geo.usd"
 
     # Open the USD stage
     stage = Usd.Stage.Open(str(usd_path))
@@ -435,7 +435,7 @@ def add_variant_to_model(asset: Asset, variant: str) -> None:
         inherits.ClearInherits()  # remove old ones
         inherits.AddInherit(new_class_path)  # add new one
 
-    cfx_usd_path = get_production_path() / asset.path / "usd" / "cfx.usd"
+    cfx_usd_path = get_production_path() / asset.asset_path / "usd" / "cfx.usd"
 
     cfx_stage = Usd.Stage.Open(str(cfx_usd_path))
     old_mat_bind_path: Sdf.Path = Sdf.Path(f"/character/{asset.name}/{asset.name}")
@@ -525,8 +525,10 @@ class ExportChaser(mayaUsdLib.ExportChaser):
                 try:
                     asset = conn.get_asset_by_name(base_name)
 
-                    assert asset.path is not None
-                    rig_path = str(asset.path).replace("\\", "/") + "/usd/main.usd"
+                    assert asset.asset_path
+                    rig_path = (
+                        str(asset.asset_path).replace("\\", "/") + "/usd/main.usd"
+                    )
                     walk_up_len = (
                         len(root_layer_path.relative_to(get_production_path()).parts)
                         - 1
@@ -542,7 +544,7 @@ class ExportChaser(mayaUsdLib.ExportChaser):
                 except Exception:
                     print(f"[chaser] asset link failed for {name} (base={base_name})")
                     print(
-                        f"    asset={getattr(asset, 'path', None)} rig_path={rig_path if 'rig_path' in locals() else None}"
+                        f"    asset={getattr(asset, 'asset_path', None)} rig_path={rig_path if 'rig_path' in locals() else None}"
                     )
                     print(
                         f"    relative_path={relative_path_str} root_layer={root_layer.realPath}"

@@ -1,7 +1,8 @@
 """Canonical asset path conventions for the pipeline.
 
 This module is the single source of truth for asset layout and naming.
-It respects the ShotGrid asset path for categorization.
+Asset location is derived from ShotGrid asset metadata:
+asset/<optional-subdirectory>/<asset-name>.
 """
 
 from __future__ import annotations
@@ -64,8 +65,8 @@ def asset_root(
     production_root: Optional[Path] = None,
     fallback_name: Optional[str] = None,
 ) -> Path:
-    """Resolve an asset root while respecting the ShotGrid path when present."""
-    asset_path = getattr(asset, "path", None)
+    """Resolve an asset root from the canonical asset-relative path."""
+    asset_path = getattr(asset, "asset_path", None)
     if asset_path:
         return asset_root_from_path(asset_path, production_root=production_root)
 
@@ -75,7 +76,7 @@ def asset_root(
         or getattr(asset, "name", None)
         or "asset"
     )
-    log.warning("Asset path missing; falling back to %s", fallback)
+    log.warning("Asset location metadata missing; falling back to %s", fallback)
     prod_root = production_root or get_production_path()
     return prod_root / "asset" / fallback
 

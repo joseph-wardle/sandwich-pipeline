@@ -92,7 +92,7 @@ class MAnimShotFileManager(MShotFileManager):
         # Import Rigs
         for asset_stub in self.shot.assets:
             asset = self._conn.get_asset_by_stub(asset_stub)
-            if not asset.path:
+            if not asset.asset_path:
                 continue
             rig_path = "/".join(("anim", "Rigs", asset.name + ".mb"))
             print(str(get_production_path()) + "/../" + rig_path)

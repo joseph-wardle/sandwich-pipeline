@@ -20,6 +20,7 @@ from pipe.struct.db import (
     Task,
     User,
     Version,
+    build_asset_path,
     normalize_display_name,
 )
 
@@ -137,6 +138,36 @@ class SGaaDB(DBInterface):
                 details,
             )
 
+    @staticmethod
+    def _normalize_relative_path(path: str) -> str:
+        return path.replace("\\", "/").strip("/")
+
+    @staticmethod
+    def _canonical_asset_path_from_sg(asset: dict) -> str:
+        try:
+            return build_asset_path(asset.get("code"), asset.get("sg_subdirectory"))
+        except ValueError as exc:
+            log.error(
+                "Invalid asset subdirectory in ShotGrid (id=%s code=%r subdirectory=%r): %s",
+                asset.get("id"),
+                asset.get("code"),
+                asset.get("sg_subdirectory"),
+                exc,
+            )
+            return build_asset_path(asset.get("code"), None)
+
+    def _asset_matches_path(self, asset: dict, target_path: str) -> bool:
+        canonical = self._normalize_relative_path(
+            self._canonical_asset_path_from_sg(asset)
+        )
+        if canonical == target_path:
+            return True
+
+        legacy_path = asset.get("sg_path")
+        if isinstance(legacy_path, str) and legacy_path.strip():
+            return self._normalize_relative_path(legacy_path) == target_path
+        return False
+
     def _load_sg_user_list(self) -> None:
         """Load the list of assets from SG to local cache"""
         with self._cache_lock:
@@ -168,6 +199,16 @@ class SGaaDB(DBInterface):
     def get_entity_by_attr(
         self, entity_type: type[SGEntity], attr: str, attr_val: str | int
     ) -> SGEntity:
+        if entity_type is Asset and attr == "path":
+            target = self._normalize_relative_path(str(attr_val))
+            return Asset.from_sg(
+                next(
+                    e
+                    for e in self._sg_entity_lists[Asset.__name__]
+                    if self._asset_matches_path(e, target)
+                )
+            )
+
         internal_attr = entity_type.map_sg_field_names(attr)
         return entity_type.from_sg(
             next(
@@ -204,25 +245,29 @@ class SGaaDB(DBInterface):
         return [e[attr] for e in entity_list]
 
     @staticmethod
+    def _filter_asset_list(
+        asset_list: list[dict], child_mode: DBInterface.ChildQueryMode
+    ) -> list[dict]:
+        if child_mode == DBInterface.ChildQueryMode.ALL:
+            return asset_list
+        if child_mode == DBInterface.ChildQueryMode.CHILDREN:
+            return [a for a in asset_list if a["parents"]]
+        if child_mode == DBInterface.ChildQueryMode.ROOTS:
+            return [a for a in asset_list if not a["parents"]]
+        if child_mode == DBInterface.ChildQueryMode.PARENTS:
+            return [a for a in asset_list if a["assets"]]
+        if child_mode == DBInterface.ChildQueryMode.LEAVES:
+            return [a for a in asset_list if not a["assets"]]
+        raise IndexError("Not a valid ChildQueryMode", child_mode)
+
+    @staticmethod
     def _asset_attr_mapper(
         asset_list: list[dict],
         attr: str,
         child_mode: DBInterface.ChildQueryMode = DBInterface.ChildQueryMode.LEAVES,
     ) -> list[str]:
-        if child_mode == DBInterface.ChildQueryMode.ALL:
-            arr = [a[attr] for a in asset_list]
-        elif child_mode == DBInterface.ChildQueryMode.CHILDREN:
-            arr = [a[attr] for a in asset_list if a["parents"]]
-        elif child_mode == DBInterface.ChildQueryMode.ROOTS:
-            arr = [a[attr] for a in asset_list if not a["parents"]]
-        elif child_mode == DBInterface.ChildQueryMode.PARENTS:
-            arr = [a[attr] for a in asset_list if a["assets"]]
-        elif child_mode == DBInterface.ChildQueryMode.LEAVES:
-            arr = [a[attr] for a in asset_list if not a["assets"]]
-        else:
-            raise IndexError("Not a valid ChildQueryMode", child_mode)
-
-        return arr
+        filtered = SGaaDB._filter_asset_list(asset_list, child_mode)
+        return [a[attr] for a in filtered]
 
     _entity_attr_custom_mappers: dict[
         str, Callable[[list[dict], str, Unpack[AttrMappingKwargs]], list[str]]
@@ -238,6 +283,18 @@ class SGaaDB(DBInterface):
         sorted: bool = False,
         **kwargs,
     ) -> list[str]:
+        if entity_type is Asset and attr == "path":
+            filtered_assets = self._filter_asset_list(
+                self._sg_entity_lists[Asset.__name__],
+                kwargs.get("child_mode", DBInterface.ChildQueryMode.LEAVES),
+            )
+            arr = [
+                self._canonical_asset_path_from_sg(asset) for asset in filtered_assets
+            ]
+            if sorted:
+                arr.sort()
+            return arr
+
         mapper = self._entity_attr_custom_mappers.get(
             entity_type.__name__, self._default_entity_attr_mapper
         )
@@ -545,7 +602,8 @@ class _AssetListQuery(_Query):
     def _base_fields(self) -> list[str]:
         return [
             "code",  # display name
-            "sg_path",  # asset path
+            "sg_subdirectory",  # asset grouping folder (single level)
+            "sg_path",  # legacy asset path (compatibility fallback only)
             "id",  # asset id
             "parents",  # parent assets
             "assets",  # child assets

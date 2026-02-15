@@ -26,7 +26,7 @@ from pipe.glui.dialogs import (
     MessageDialogCustomButtons,
 )
 from pipe.sp.local import get_main_qt_window
-from pipe.struct.db import Asset
+from pipe.struct.db import Asset, build_asset_path
 
 log = logging.getLogger(__name__)
 
@@ -142,6 +142,7 @@ def _build_asset_selection_payload(
     last_asset: Optional[str] = None,
     asset_id: Optional[int] = None,
     asset_path: Optional[str] = None,
+    asset_subdirectory: Optional[str] = None,
     geo_variant: Optional[str] = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -156,6 +157,8 @@ def _build_asset_selection_payload(
         payload["asset_id"] = asset_id
     if asset_path:
         payload["asset_path"] = asset_path
+    if asset_subdirectory is not None:
+        payload["asset_subdirectory"] = asset_subdirectory
     if geo_variant:
         payload["geo_variant"] = geo_variant
     return payload
@@ -167,6 +170,7 @@ def store_asset_selection_metadata(
     last_asset: Optional[str] = None,
     asset_id: Optional[int] = None,
     asset_path: Optional[str] = None,
+    asset_subdirectory: Optional[str] = None,
     geo_variant: Optional[str] = None,
 ) -> None:
     """Persist texture-set to asset mapping in the project metadata."""
@@ -180,6 +184,7 @@ def store_asset_selection_metadata(
                 last_asset=last_asset,
                 asset_id=asset_id,
                 asset_path=asset_path,
+                asset_subdirectory=asset_subdirectory,
                 geo_variant=geo_variant,
             )
         )
@@ -193,6 +198,7 @@ def store_asset_selection_metadata(
                     last_asset=last_asset,
                     asset_id=asset_id,
                     asset_path=asset_path,
+                    asset_subdirectory=asset_subdirectory,
                     geo_variant=geo_variant,
                 )
             )
@@ -211,6 +217,7 @@ def store_asset_selection_metadata(
         last_asset=resolved_last_asset,
         asset_id=asset_id,
         asset_path=asset_path,
+        asset_subdirectory=asset_subdirectory,
         geo_variant=geo_variant,
     )
     _metadata().set(PIPE_SP_METADATA_KEY, payload)
@@ -242,6 +249,8 @@ def get_active_asset_from_project(conn: DB) -> Asset | None:
         except Exception as exc:
             log.warning("Failed to resolve asset by path from metadata: %s", exc)
 
+    asset_subdirectory = selection_metadata.get("asset_subdirectory")
+
     asset_name = selection_metadata.get("last_asset")
     if not asset_name:
         asset_map = selection_metadata.get("asset_map") or {}
@@ -251,6 +260,14 @@ def get_active_asset_from_project(conn: DB) -> Asset | None:
 
     if not asset_name:
         return _asset_from_project_path(conn)
+
+    if asset_subdirectory is not None:
+        try:
+            return conn.get_asset_by_attr(
+                "path", build_asset_path(asset_name, asset_subdirectory)
+            )
+        except Exception:
+            pass
 
     try:
         return conn.get_asset_by_display_name(asset_name)
@@ -307,7 +324,8 @@ def store_asset_metadata_for_project(
         asset_map,
         last_asset=asset_display_name,
         asset_id=asset.id,
-        asset_path=asset.path,
+        asset_path=asset.asset_path,
+        asset_subdirectory=asset.subdirectory,
         geo_variant=geo_variant,
     )
     log.info("Stored asset metadata for project: %s", asset_display_name)
@@ -392,8 +410,8 @@ class SubstanceAssetDialog(FilteredListDialog):
             return
 
         asset = self._conn.get_asset_by_name(selected)
-        if not asset or not asset.path:
-            self._info_label.setText("Asset path not set in ShotGrid.")
+        if not asset:
+            self._info_label.setText("Could not resolve the selected asset.")
             return
 
         paths = paths_for_asset(asset)
@@ -531,11 +549,11 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
             return
 
         asset = self._conn.get_asset_by_name(selected)
-        if not asset or not asset.path:
+        if not asset:
             self._asset = None
             self._paths = None
             self._geo_variant_dropdown.clear()
-            self._info_label.setText("Asset path not set in ShotGrid.")
+            self._info_label.setText("Could not resolve the selected asset.")
             self._update_state()
             return
 
@@ -1109,14 +1127,6 @@ def launch_open_asset_textures() -> None:
         action,
         geo_variant,
     )
-    if not asset.path:
-        MessageDialog(
-            parent,
-            "The selected asset does not have a valid path in ShotGrid.",
-            "Missing Asset Path",
-        ).exec_()
-        return
-
     paths = paths_for_asset(asset)
     project_path = _project_path_for_variant(paths, geo_variant)
 

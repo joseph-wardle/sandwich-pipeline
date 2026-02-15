@@ -46,6 +46,40 @@ def normalize_display_name(name: Optional[str]) -> str:
     return name.strip().lower().replace(" ", "_")
 
 
+def normalize_subdirectory(subdirectory: Optional[str]) -> Optional[str]:
+    """Normalize and validate an asset subdirectory token.
+
+    The subdirectory must be a single folder name (no path separators).
+    """
+    if subdirectory is None:
+        return None
+    normalized = str(subdirectory).strip()
+    if not normalized:
+        return None
+    if normalized in {".", ".."}:
+        raise ValueError("Asset subdirectory cannot be '.' or '..'")
+    if "/" in normalized or "\\" in normalized:
+        raise ValueError(
+            "Asset subdirectory must be a single folder name without path separators"
+        )
+    return normalized
+
+
+def build_asset_path(display_name: Optional[str], subdirectory: Optional[str]) -> str:
+    """Build the canonical relative asset path.
+
+    Result format:
+      asset/<optional-subdirectory>/<normalized-asset-name>
+    """
+    asset_name = normalize_display_name(display_name) or "asset"
+    path_parts = ["asset"]
+    normalized_subdirectory = normalize_subdirectory(subdirectory)
+    if normalized_subdirectory:
+        path_parts.append(normalized_subdirectory)
+    path_parts.append(asset_name)
+    return "/".join(path_parts)
+
+
 def _split_csv_set(value: Optional[str]) -> set[str]:
     """Parse a comma-separated ShotGrid string into normalized variant tokens."""
     if not value:
@@ -132,6 +166,15 @@ class AssetStub(SGEntityStub):
 @attrs.define
 class Asset(SGEntity):
     type: str = field(metadata={_SG_NAME: "sg_asset_type"})
+    subdirectory: Optional[str] = field(
+        default=None,
+        kw_only=True,
+        metadata={
+            _SG_NAME: "sg_subdirectory",
+            _STRUCT_HOOK: lambda subdir, _: normalize_subdirectory(subdir),
+            _UNSTRUCT_HOOK: lambda subdir, _: subdir or "",
+        },
+    )
     material_variants: set[str] = field(
         metadata={
             _SG_NAME: "sg_material_variants",
@@ -177,10 +220,30 @@ class Asset(SGEntity):
         return normalize_display_name(self.display_name)
 
     @property
-    def tex_path(self) -> Optional[str]:
-        if not self.path:
-            return None
-        return f"{self.path}/publish/tex/"
+    def asset_path(self) -> str:
+        """Canonical relative path for this asset."""
+        return build_asset_path(self.display_name, self.subdirectory)
+
+    @property
+    def tex_path(self) -> str:
+        return f"{self.asset_path}/publish/tex/"
+
+    def __attrs_post_init__(self) -> None:
+        self.subdirectory = normalize_subdirectory(self.subdirectory)
+        self.path = self.asset_path
+        super().__attrs_post_init__()
+
+    def sg_diff(self) -> dict[str, Any]:
+        """Return only ShotGrid fields that should be updated for Asset.
+
+        Asset path is derived from display_name + subdirectory and should not
+        write back to deprecated sg_path.
+        """
+        self.path = self.asset_path
+        diff = super().sg_diff()
+        diff.pop("path", None)
+        diff.pop("sg_path", None)
+        return diff
 
 
 @attrs.define

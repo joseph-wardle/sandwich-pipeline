@@ -61,13 +61,13 @@ class PrevisAssetPublisher(Publisher):
         cast(PublishPrevisAssetDialog, self._dialog)
         asset = cast(Asset, self._entity)
         try:
-            assert asset.path is not None
-            return Path(get_production_path() / asset.path / "previs.usd")
+            assert asset.asset_path
+            return Path(get_production_path() / asset.asset_path / "previs.usd")
 
         except AssertionError:
             error = MessageDialog(
                 self._window,
-                "Error: No path for this Asset set in ShotGrid. Nothing exported",
+                "Error: Could not resolve the location for this asset in ShotGrid. Nothing exported",
                 "Error",
             )
             error.exec_()
@@ -128,7 +128,7 @@ class PrevisAssetPublisher(Publisher):
 
         try:
             check_path = os.path.join(
-                get_production_path(), asset.path, "export", "payload.usdc"
+                get_production_path(), asset.asset_path, "export", "payload.usdc"
             )
             print(check_path)
             assert not os.path.exists(check_path)
@@ -143,7 +143,7 @@ class PrevisAssetPublisher(Publisher):
             return None
 
         stage_path = Path(
-            get_production_path() / asset.path / "export" / (asset.name + ".usd")
+            get_production_path() / asset.asset_path / "export" / (asset.name + ".usd")
         )
 
         print(f"STAGE PATH: {stage_path}")

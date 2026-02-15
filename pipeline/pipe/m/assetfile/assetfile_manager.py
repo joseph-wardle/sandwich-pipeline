@@ -33,6 +33,7 @@ FILEINFO_ASSET_ID = f"{FILEINFO_PREFIX}_id"
 FILEINFO_ASSET_NAME = f"{FILEINFO_PREFIX}_name"
 FILEINFO_ASSET_DISPLAY_NAME = f"{FILEINFO_PREFIX}_display_name"
 FILEINFO_ASSET_PATH = f"{FILEINFO_PREFIX}_path"
+FILEINFO_ASSET_SUBDIRECTORY = f"{FILEINFO_PREFIX}_subdirectory"
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class AssetMetadata:
     name: Optional[str]
     display_name: Optional[str]
     path: Optional[str]
+    subdirectory: Optional[str]
     asset: Optional[Asset]
 
 
@@ -86,7 +88,10 @@ def write_asset_metadata(asset: Asset) -> None:
     _set_file_info_value(
         FILEINFO_ASSET_DISPLAY_NAME, _normalize_value(asset.display_name)
     )
-    _set_file_info_value(FILEINFO_ASSET_PATH, _normalize_value(asset.path))
+    _set_file_info_value(FILEINFO_ASSET_PATH, _normalize_value(asset.asset_path))
+    _set_file_info_value(
+        FILEINFO_ASSET_SUBDIRECTORY, _normalize_value(asset.subdirectory)
+    )
 
 
 def read_asset_metadata(conn: DB | None = None) -> AssetMetadata:
@@ -95,6 +100,7 @@ def read_asset_metadata(conn: DB | None = None) -> AssetMetadata:
     asset_name = _get_file_info_value(FILEINFO_ASSET_NAME)
     asset_display_name = _get_file_info_value(FILEINFO_ASSET_DISPLAY_NAME)
     asset_path = _get_file_info_value(FILEINFO_ASSET_PATH)
+    asset_subdirectory = _get_file_info_value(FILEINFO_ASSET_SUBDIRECTORY)
 
     asset_id: Optional[int]
     if asset_id_raw:
@@ -125,6 +131,7 @@ def read_asset_metadata(conn: DB | None = None) -> AssetMetadata:
         name=asset_name,
         display_name=asset_display_name,
         path=asset_path,
+        subdirectory=asset_subdirectory,
         asset=resolved,
     )
 
@@ -222,8 +229,8 @@ class AssetOpenDialog(FilteredListDialog):
             return
 
         asset = self._conn.get_asset_by_name(selected)
-        if not asset or not asset.path:
-            self._info_label.setText("Asset path not set in ShotGrid.")
+        if not asset:
+            self._info_label.setText("Could not resolve the selected asset.")
             return
 
         paths = paths_for_asset(asset)
@@ -300,11 +307,14 @@ class MAssetFileManager(FileManager):
     def _ensure_scene_asset_metadata(self, scene_path: Optional[Path] = None) -> None:
         meta = read_asset_metadata(self._conn)
         if meta.asset:
+            expected_path = _normalize_value(meta.asset.asset_path)
+            expected_subdirectory = _normalize_value(meta.asset.subdirectory)
             if (
                 meta.id is None
                 or not meta.name
                 or not meta.display_name
-                or not meta.path
+                or meta.path != expected_path
+                or meta.subdirectory != expected_subdirectory
             ):
                 log.info("Backfilling incomplete asset metadata in fileInfo.")
                 write_asset_metadata(meta.asset)
@@ -319,7 +329,7 @@ class MAssetFileManager(FileManager):
 
         asset = resolve_asset_from_scene_path(self._conn, scene_path)
         if asset:
-            log.info("Inferred asset metadata from scene path: %s", asset.path)
+            log.info("Inferred asset metadata from scene path: %s", asset.asset_path)
             write_asset_metadata(asset)
         else:
             log.debug("Unable to infer asset metadata from scene path: %s", scene_path)
@@ -378,11 +388,11 @@ class MAssetFileManager(FileManager):
             return
 
         asset = self._conn.get_asset_by_name(selection)
-        if not asset or not asset.path:
+        if not asset:
             MessageDialog(
                 self._main_window,
-                "The selected asset does not have a valid path in ShotGrid.",
-                "Missing Asset Path",
+                "The selected asset could not be resolved from ShotGrid.",
+                "Missing Asset",
             ).exec_()
             return
 
@@ -444,6 +454,7 @@ __all__ = [
     "FILEINFO_ASSET_NAME",
     "FILEINFO_ASSET_DISPLAY_NAME",
     "FILEINFO_ASSET_PATH",
+    "FILEINFO_ASSET_SUBDIRECTORY",
     "AssetMetadata",
     "write_asset_metadata",
     "read_asset_metadata",

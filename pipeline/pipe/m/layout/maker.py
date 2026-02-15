@@ -190,7 +190,7 @@ class LayoutMaker:
 
         reference_file_abs = (
             str(get_production_path())
-            + f"/{selected_asset.path}/export/{selected_asset.name}.usd"
+            + f"/{selected_asset.asset_path}/export/{selected_asset.name}.usd"
         )
 
         # Get Maya file path

@@ -91,14 +91,6 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             self.close()
             return
 
-        if not self._curr_asset.tex_path:
-            MessageDialog(
-                get_main_qt_window(),
-                "This asset does not have a textures path set in ShotGrid.",
-            ).exec_()
-            self.close()
-            return
-
         self._setup_publish_ui()
 
     def _setup_publish_ui(self) -> None:
@@ -360,7 +352,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                         "material_layer": material_layer,
                     },
                     asset_name=self._curr_asset.display_name or self._curr_asset.name,
-                    asset_path=self._curr_asset.path,
+                    asset_path=self._curr_asset.asset_path,
                     asset_id=self._curr_asset.id,
                 )
 

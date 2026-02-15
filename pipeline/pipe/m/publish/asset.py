@@ -294,7 +294,7 @@ class AssetPublisher(Publisher):
             variant=self._geo_variant,
             publish_path=self._publish_path,
             asset_name=asset.name,
-            asset_path=asset.path,
+            asset_path=asset.asset_path,
             asset_id=asset.id,
         )
 
@@ -335,8 +335,8 @@ class AssetPublisher(Publisher):
         name = (asset.name or "").strip()
         if not name or name == "none":
             name = ""
-        if not name and asset.path:
-            name = Path(asset.path).name
+        if not name and asset.asset_path:
+            name = Path(asset.asset_path).name
         if not name:
             name = "asset"
 
@@ -410,10 +410,10 @@ class AssetPublisher(Publisher):
             ).exec_()
             return None
 
-        if not asset.path:
+        if not asset.asset_path:
             MessageDialog(
                 self._window,
-                "Error: No path for this Asset set in ShotGrid. Nothing exported",
+                "Error: Could not resolve the location for this asset in ShotGrid. Nothing exported",
                 "Error",
             ).exec_()
             return None
@@ -627,8 +627,8 @@ class AssetPublisher(Publisher):
             )
 
         asset_name = self._asset_name or (asset.name or "").strip()
-        if not asset_name and asset.path:
-            asset_name = Path(asset.path).name
+        if not asset_name and asset.asset_path:
+            asset_name = Path(asset.asset_path).name
         if not asset_name:
             asset_name = component_name
 

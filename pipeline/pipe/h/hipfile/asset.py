@@ -25,7 +25,7 @@ class HAssetFileManager(HFileManager):
         asset_name = (
             (asset.name or "").strip()
             or (asset.display_name or "").strip()
-            or (Path(asset.path).name if asset.path else "")
+            or (Path(asset.asset_path).name if asset.asset_path else "")
         )
 
         if asset_name:
