@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 # mypy: disable-error-code="union-attr"
@@ -216,10 +217,11 @@ def create_skd_component_builder(kwargs: dict) -> hou.Node:
     env.parm("loppath").set(f"../{ldv.name()}/OUT_ENV")
 
     # Configure Component Output node
-    asset_name = hou.hscriptStringExpression("$HIP").split("/")[-1]
+    asset_name = Path(hou.hscriptStringExpression("$HIP")).name.strip() or "asset"
+    out.parm("filename").set(f"{asset_name}.usd")
     out.parm("rootprim").set("/" + asset_name)
     out.parm("localize").set(False)
-    out.parm("lopoutput").set('$HIP/export/`chs("filename")`')
+    out.parm("lopoutput").set('$HIP/publish/`chs("filename")`')
     out.parm("thumbnailmode").set(2)
     out.parm("renderer").set("RenderMan RIS")
     out.parm("thumbnailscenesource").set(1)

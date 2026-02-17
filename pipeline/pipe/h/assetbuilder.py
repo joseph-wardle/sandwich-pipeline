@@ -151,7 +151,8 @@ def _create_hip_file(
 
     # Configure the final output node.
     root_name = root_prim or component_name
-    _set_parm(out_node, "lopoutput", '$HIP/export/`chs("filename")`')
+    _set_parm(out_node, "filename", f"{component_name}.usd")
+    _set_parm(out_node, "lopoutput", '$HIP/publish/`chs("filename")`')
     _set_parm(out_node, "rootprim", f"/{root_name}")
     _set_parm(out_node, "localize", False)
     _set_parm(out_node, "thumbnailmode", 2)
