@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -7,6 +8,8 @@ from typing import TYPE_CHECKING
 # mypy: disable-error-code="union-attr"
 import hou
 import loptoolutils  # type: ignore[import-not-found]
+
+from . import variants
 
 if TYPE_CHECKING:
     from typing import Optional
@@ -29,6 +32,11 @@ SKD_COMPONENT_GEOMETRY_NAME = "main"
 SKD_BUILDER_MANAGED_KEY = "pipe_skd_builder_managed"
 SKD_BUILDER_MANAGED_VALUE = "1"
 SKD_BUILDER_NODE_NAME = "skd_component_output"
+SKD_VARIANT_GRAPH_MANAGED_KEY = "pipe_skd_variant_graph_managed"
+SKD_VARIANT_GRAPH_MANAGED_VALUE = "1"
+SKD_VARIANT_GRAPH_OWNER_KEY = "pipe_skd_variant_graph_owner"
+SKD_VARIANT_WARNINGS_KEY = "pipe_skd_variant_graph_warnings"
+SKD_VARIANT_COMMENT_PREFIX = "SKD Variant Graph Warnings"
 
 log = logging.getLogger(__name__)
 
@@ -77,14 +85,18 @@ def _resolve_component_output_type() -> str | None:
 def create_skd_matlib(parent: hou.Node, node_name: str | None = None) -> hou.Node:
     node_type = _latest_skd_type(SKD_MATLIB_TYPE)
     if node_name:
-        return parent.createNode(node_type, node_name)
+        node = parent.createNode(node_type)
+        node.setName(node_name, unique_name=True)
+        return node
     return parent.createNode(node_type)
 
 
 def create_skd_lookdev(parent: hou.Node, node_name: str | None = None) -> hou.Node:
     node_type = _latest_skd_type(SKD_LOOKDEV_TYPE)
     if node_name:
-        return parent.createNode(node_type, node_name)
+        node = parent.createNode(node_type)
+        node.setName(node_name, unique_name=True)
+        return node
     return parent.createNode(node_type)
 
 
@@ -234,16 +246,25 @@ def _looks_like_skd_builder_output(node: hou.LopNode) -> bool:
     if not config_inputs or config_inputs[0] is None:
         return False
 
-    component_material = config_inputs[0]
-    if component_material.type().name() != "componentmaterial":
+    payload = config_inputs[0]
+    payload_type = payload.type().name()
+
+    # Phase 4 variant graph may feed componentgeometryvariants directly.
+    if payload_type == "componentgeometryvariants":
+        return True
+
+    if payload_type != "componentmaterial":
         return False
 
-    material_inputs = component_material.inputs()
+    material_inputs = payload.inputs()
     if len(material_inputs) < 2:
         return False
     if material_inputs[0] is None or material_inputs[1] is None:
         return False
-    if material_inputs[0].type().name() != "componentgeometry":
+    if material_inputs[0].type().name() not in {
+        "componentgeometry",
+        "componentmaterial",
+    }:
         return False
     if not _is_skd_matlib_like(material_inputs[1]):
         return False
@@ -252,6 +273,70 @@ def _looks_like_skd_builder_output(node: hou.LopNode) -> bool:
 
 def _mark_managed_builder(output: hou.LopNode) -> None:
     output.setUserData(SKD_BUILDER_MANAGED_KEY, SKD_BUILDER_MANAGED_VALUE)
+
+
+def _set_parm_if_exists(node: hou.Node, parm_name: str, value) -> None:
+    parm = node.parm(parm_name)
+    if parm is None:
+        return
+    parm.set(value)
+
+
+def _mark_managed_variant_node(node: hou.Node, *, owner_path: str) -> None:
+    node.setUserData(SKD_VARIANT_GRAPH_MANAGED_KEY, SKD_VARIANT_GRAPH_MANAGED_VALUE)
+    node.setUserData(SKD_VARIANT_GRAPH_OWNER_KEY, owner_path)
+
+
+def _clear_managed_variant_nodes(
+    parent: hou.Node, *, keep_paths: set[str], owner_path: str
+) -> None:
+    for node in list(parent.children()):
+        if node.path() in keep_paths:
+            continue
+        if (
+            node.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
+            != SKD_VARIANT_GRAPH_MANAGED_VALUE
+        ):
+            continue
+        if node.userData(SKD_VARIANT_GRAPH_OWNER_KEY) not in ("", owner_path):
+            continue
+        node.destroy()
+
+
+def _set_variant_generation_warnings(node: hou.Node, warnings: list[str]) -> None:
+    node.setUserData(SKD_VARIANT_WARNINGS_KEY, json.dumps(warnings))
+
+    summary = node.parm("status_summary")
+    payload = node.parm("status_json")
+    if warnings:
+        preview = "; ".join(warnings[:3])
+        if len(warnings) > 3:
+            preview = f"{preview}; +{len(warnings) - 3} more"
+        node.setComment(f"{SKD_VARIANT_COMMENT_PREFIX} ({len(warnings)}): {preview}")
+        if summary is not None:
+            summary.set(
+                f"Variant graph generated with {len(warnings)} warning(s). "
+                "See node comment or user data for details."
+            )
+    else:
+        if node.comment().startswith(SKD_VARIANT_COMMENT_PREFIX):
+            node.setComment("")
+        if summary is not None:
+            summary.set("Ready")
+
+    if payload is not None:
+        payload.set(
+            json.dumps(
+                {
+                    "status": "success",
+                    "warnings": [
+                        {"code": "VariantGraphWarning", "message": w} for w in warnings
+                    ],
+                    "errors": [],
+                },
+                indent=2,
+            )
+        )
 
 
 def lnd_clustersetup(kwargs: dict, parent: Optional[hou.Node] = None) -> hou.Node:
@@ -315,7 +400,12 @@ def lnd_clustersetup(kwargs: dict, parent: Optional[hou.Node] = None) -> hou.Nod
 
 
 def create_skd_component_geometry(
-    kwargs: dict, parent: Optional[hou.Node] = None
+    kwargs: dict,
+    parent: Optional[hou.Node] = None,
+    *,
+    node_name: str | None = None,
+    geo_variant: str | None = None,
+    source_expression: str | None = None,
 ) -> hou.Node:
     """Create the standard SKD Component Geometry node setup."""
     if parent:
@@ -324,20 +414,37 @@ def create_skd_component_geometry(
         cgeo = loptoolutils.genericTool(kwargs, "componentgeometry")
 
     # Rename to match publishing expectations.
-    cgeo.setName(SKD_COMPONENT_GEOMETRY_NAME, unique_name=True)
+    cgeo.setName(node_name or SKD_COMPONENT_GEOMETRY_NAME, unique_name=True)
 
     # Set up nodes inside of Component Geometry
     geo_sop = cgeo.node("./sopnet/geo")
-    geo_sop.loadItemsFromFile(
-        hou.hscriptStringExpression("$HSITE") + "/sop/component.cpio"
-    )
-    for name in ["default", "proxy", "simproxy"]:
-        geo_sop.node(f"./{name}").setInput(0, geo_sop.node(f"./OUT_{name}"))
+    if geo_sop is not None:
+        geo_sop.loadItemsFromFile(
+            hou.hscriptStringExpression("$HSITE") + "/sop/component.cpio"
+        )
+        for name in ["default", "proxy", "simproxy"]:
+            target = geo_sop.node(f"./{name}")
+            source = geo_sop.node(f"./OUT_{name}")
+            if target is not None and source is not None:
+                target.setInput(0, source)
+    else:
+        log.warning("Component Geometry node is missing /sopnet/geo: %s", cgeo.path())
 
     # Configure Component Geometry node
-    cgeo.parm("dogeommodelapi").set(True)
-    cgeo.parm("attribs").set("P uv")
-    cgeo.parm("indexattribs").set("texset")
+    _set_parm_if_exists(cgeo, "dogeommodelapi", True)
+    _set_parm_if_exists(cgeo, "attribs", "P uv")
+    _set_parm_if_exists(cgeo, "indexattribs", "texset")
+    _set_parm_if_exists(cgeo, "geovariantname", geo_variant or cgeo.name())
+
+    importer = cgeo.node("./sopnet/geo/import_usd")
+    if importer is not None:
+        _set_parm_if_exists(
+            importer,
+            "filepath1",
+            source_expression or variants.default_geo_source_expression(),
+        )
+    else:
+        log.warning("Component Geometry SOP is missing import_usd: %s", cgeo.path())
 
     cgeo.setColor(hou.Color((0.616, 0.871, 0.769)))
 
@@ -345,7 +452,12 @@ def create_skd_component_geometry(
 
 
 def create_skd_component_material(
-    kwargs: dict, parent: Optional[hou.Node] = None
+    kwargs: dict,
+    parent: Optional[hou.Node] = None,
+    *,
+    node_name: str | None = None,
+    variant_name: str | None = None,
+    use_input_variant_expression: bool = True,
 ) -> hou.Node:
     """Create the standard SKD Component Material configuration."""
     MAT_ROOT = "/ASSET/mtl/MAT_"
@@ -356,28 +468,361 @@ def create_skd_component_material(
     else:
         cmat = loptoolutils.genericTool(kwargs, "componentmaterial")
 
-    # Drive variant name directly from SKD_MatLib input 1.
-    cmat.parm("variantname").setExpression(
-        'chs(opinputpath(".",1)+"/mat_var")', hou.exprLanguage.Hscript
-    )
+    if node_name:
+        cmat.setName(node_name, unique_name=True)
+
+    # Drive variant name from SKD_MatLib input by default, but allow explicit
+    # names for managed variant graph generation.
+    variant_parm = cmat.parm("variantname")
+    if variant_parm is not None:
+        if use_input_variant_expression:
+            variant_parm.setExpression(
+                'chs(opinputpath(".",1)+"/mat_var")', hou.exprLanguage.Hscript
+            )
+        elif variant_name is not None:
+            variant_parm.set(variant_name)
+    _set_parm_if_exists(cmat, "variantset", "mtl")
 
     # set up primvar-based material assignment
     edit = cmat.node("./edit")
-    assign = edit.createNode("assignmaterial")
-    assign.setInput(0, edit.indirectInputs()[0])
-    edit.node("./output0").setInput(0, assign)
-    assign.parm("primpattern1").set(
-        "%descendants(`lopinputprims('.', 0)`) & %type:Mesh"
-    )
-    assign.parm("matspecmethod1").set("vexpr")
-    assign.parm("matspecvexpr1").set(
-        f"return '{MAT_ROOT}' + usd_primvarelement(0, @primpath, '{TS_PRIMVAR}', usd_primvarindices(0, @primpath, '{TS_PRIMVAR}')[@elemnum]);"
-    )
-    assign.parm("geosubset1").set(True)
+    if edit is None:
+        log.warning("Component Material node is missing ./edit: %s", cmat.path())
+    else:
+        assign = edit.createNode("assignmaterial")
+        indirect_inputs = edit.indirectInputs()
+        if indirect_inputs:
+            assign.setInput(0, indirect_inputs[0])
+        output = edit.node("./output0")
+        if output is not None:
+            output.setInput(0, assign)
+        _set_parm_if_exists(
+            assign, "primpattern1", "%descendants(`lopinputprims('.', 0)`) & %type:Mesh"
+        )
+        _set_parm_if_exists(assign, "matspecmethod1", "vexpr")
+        _set_parm_if_exists(
+            assign,
+            "matspecvexpr1",
+            (
+                f"return '{MAT_ROOT}' + usd_primvarelement(0, @primpath, '{TS_PRIMVAR}', "
+                f"usd_primvarindices(0, @primpath, '{TS_PRIMVAR}')[@elemnum]);"
+            ),
+        )
+        _set_parm_if_exists(assign, "geosubset1", True)
 
     cmat.setColor(hou.Color((0.616, 0.871, 0.769)))
 
     return cmat
+
+
+def _configure_component_output_defaults(out: hou.Node) -> None:
+    asset_name = Path(hou.hscriptStringExpression("$HIP")).name.strip() or "asset"
+    _set_parm_if_exists(out, "filename", f"{asset_name}.usd")
+    _set_parm_if_exists(out, "rootprim", "/" + asset_name)
+    _set_parm_if_exists(out, "localize", False)
+    _set_parm_if_exists(out, "lopoutput", '$HIP/publish/`chs("filename")`')
+    _set_parm_if_exists(out, "thumbnailmode", 2)
+    _set_parm_if_exists(out, "renderer", "RenderMan RIS")
+    _set_parm_if_exists(out, "thumbnailscenesource", 1)
+    _set_parm_if_exists(out, "thumbnailinputcamera", "/lookdev/cam")
+
+
+def _set_matlib_variant_selection(
+    matlib: hou.Node, *, geo_variant: str, mat_variant: str
+) -> None:
+    _set_parm_if_exists(matlib, "geo_var", geo_variant)
+    _set_parm_if_exists(matlib, "mat_var", mat_variant)
+
+
+def _discover_asset_variants_from_shotgrid() -> (
+    tuple[tuple[str, ...], tuple[str, ...], list[str]]
+):
+    """Return declared (geo, mat) variants from ShotGrid for the current ASSET."""
+    warnings: list[str] = []
+
+    try:
+        asset_name = str(hou.contextOption("ASSET")).strip()
+    except Exception:
+        asset_name = ""
+    if not asset_name:
+        warnings.append(
+            "ASSET context option is not set; variant graph generation fell back to filesystem-only discovery."
+        )
+        return (), (), warnings
+
+    try:
+        from env_sg import DB_Config
+
+        from pipe.db import DB
+    except Exception as exc:
+        warnings.append(
+            f"ShotGrid metadata unavailable for ASSET '{asset_name}': {exc}. Using filesystem-only variant discovery."
+        )
+        return (), (), warnings
+
+    try:
+        connection = DB.Get(DB_Config)
+        asset = connection.get_asset_by_name(asset_name)
+    except Exception as exc:
+        warnings.append(
+            f"Failed to query ShotGrid variants for ASSET '{asset_name}': {exc}. Using filesystem-only variant discovery."
+        )
+        return (), (), warnings
+
+    geo = tuple(
+        sorted(
+            {
+                value.strip()
+                for value in getattr(asset, "geometry_variants", ())
+                if value and value.strip()
+            },
+            key=str.casefold,
+        )
+    )
+    mat = tuple(
+        sorted(
+            {
+                value.strip()
+                for value in getattr(asset, "material_variants", ())
+                if value and value.strip()
+            },
+            key=str.casefold,
+        )
+    )
+
+    if not geo:
+        warnings.append(
+            f"ShotGrid returned no geometry variants for ASSET '{asset_name}'; geometry variants will be inferred from publish files."
+        )
+    if not mat:
+        warnings.append(
+            f"ShotGrid returned no material variants for ASSET '{asset_name}'; material variants will be inferred from publish files."
+        )
+    return geo, mat, warnings
+
+
+def _rebuild_matlib_for_variant(
+    matlib: hou.Node,
+    *,
+    geo_variant: str,
+    mat_variant: str,
+    warnings: list[str],
+) -> None:
+    if not isinstance(matlib, hou.LopNode):
+        return
+    try:
+        from . import shading as shading_module
+    except Exception as exc:
+        warnings.append(f"MatLib rebuild unavailable for {matlib.path()}: {exc}")
+        return
+
+    try:
+        shading_module.matlib_rebuild(matlib)
+    except Exception as exc:
+        warnings.append(
+            f"MatLib rebuild failed for geo='{geo_variant}' mat='{mat_variant}': {exc}"
+        )
+
+
+def _first_managed_geometry_node(
+    parent: hou.Node, *, owner_path: str | None = None
+) -> hou.Node | None:
+    geometry_nodes = [
+        node
+        for node in parent.children()
+        if node.type().name() == "componentgeometry"
+        and node.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
+        == SKD_VARIANT_GRAPH_MANAGED_VALUE
+        and (
+            owner_path is None
+            or node.userData(SKD_VARIANT_GRAPH_OWNER_KEY) == owner_path
+        )
+    ]
+    if not geometry_nodes:
+        return None
+    return sorted(geometry_nodes, key=lambda node: node.name().casefold())[0]
+
+
+def _mark_pending_variant_node(node: hou.Node, *, reason: str) -> None:
+    node.setColor(hou.Color((0.42, 0.42, 0.42)))
+    node.setComment(f"Pending Variant: {reason}")
+
+
+def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
+    """Rebuild a deterministic managed variant graph around an output node."""
+    parent = output.parent()
+    out_pos = output.position()
+    declared_geo, declared_mat, sg_warnings = _discover_asset_variants_from_shotgrid()
+    plan = variants.discover_build_plan(
+        Path(hou.hscriptStringExpression("$HIP")),
+        preferred_geo_variants=declared_geo or None,
+        preferred_mat_variants=declared_mat or None,
+    )
+    warnings: list[str] = [*sg_warnings, *plan.warnings]
+
+    owner_path = output.path()
+    _clear_managed_variant_nodes(
+        parent, keep_paths={output.path()}, owner_path=owner_path
+    )
+
+    config = parent.createNode("sdm223::lnd_componentconfig")
+    config.setName("config", unique_name=True)
+    _mark_managed_variant_node(config, owner_path=owner_path)
+
+    lookdev = create_skd_lookdev(parent, "lookdev")
+    _mark_managed_variant_node(lookdev, owner_path=owner_path)
+
+    env = parent.createNode("fetch")
+    env.setName("env", unique_name=True)
+    _mark_managed_variant_node(env, owner_path=owner_path)
+
+    branch_outputs: list[tuple[str, hou.Node]] = []
+    all_geo_nodes: list[hou.Node] = []
+    geo_count = len(plan.geometry_variants)
+    center_x = (geo_count - 1) / 2.0
+    x_spacing = 10.0
+
+    for geo_index, geo_plan in enumerate(plan.geometry_variants):
+        geo_token = variants.node_token(geo_plan.name)
+        geo_name = SKD_COMPONENT_GEOMETRY_NAME if geo_count == 1 else f"geo_{geo_token}"
+        geo_node = create_skd_component_geometry(
+            {},
+            parent=parent,
+            node_name=geo_name,
+            geo_variant=geo_plan.name,
+            source_expression=variants.to_hip_expression(
+                geo_plan.source_path,
+                hip_root=plan.hip_root,
+            ),
+        )
+        _mark_managed_variant_node(geo_node, owner_path=owner_path)
+        all_geo_nodes.append(geo_node)
+
+        if not geo_plan.source_exists:
+            _mark_pending_variant_node(
+                geo_node,
+                reason=(
+                    f"Missing geometry publish: "
+                    f"{variants.to_hip_expression(geo_plan.source_path, hip_root=plan.hip_root)}"
+                ),
+            )
+
+        branch_x = (geo_index - center_x) * x_spacing
+        geo_node.setPosition(out_pos + hou.Vector2(branch_x, 5.0))
+        active_tail: hou.Node | None = None
+
+        single_branch = geo_count == 1 and len(geo_plan.material_variants) == 1
+        for mat_index, mat_variant in enumerate(geo_plan.material_variants):
+            mat_token = variants.node_token(mat_variant)
+            matlib_name = (
+                "matlib" if single_branch else f"matlib_{geo_token}_{mat_token}"
+            )
+            cmat_name = (
+                "material" if single_branch else f"material_{geo_token}_{mat_token}"
+            )
+
+            matlib = create_skd_matlib(parent, matlib_name)
+            _mark_managed_variant_node(matlib, owner_path=owner_path)
+            _set_matlib_variant_selection(
+                matlib, geo_variant=geo_plan.name, mat_variant=mat_variant
+            )
+
+            cmat = create_skd_component_material(
+                {},
+                parent=parent,
+                node_name=cmat_name,
+                variant_name=mat_variant,
+                use_input_variant_expression=False,
+            )
+            _mark_managed_variant_node(cmat, owner_path=owner_path)
+            cmat.setInput(1, matlib)
+
+            is_texture_published = mat_variant in geo_plan.existing_material_variants
+            is_active_combo = geo_plan.source_exists and is_texture_published
+            if is_active_combo:
+                cmat.setInput(0, active_tail or geo_node)
+                active_tail = cmat
+                mat_x = branch_x
+            else:
+                cmat.setInput(0, geo_node)
+                mat_x = branch_x + 3.3
+                reason = (
+                    "missing geometry publish"
+                    if not geo_plan.source_exists
+                    else "missing texture publish"
+                )
+                _mark_pending_variant_node(
+                    cmat,
+                    reason=f"{reason} for geo='{geo_plan.name}' mat='{mat_variant}'",
+                )
+                _mark_pending_variant_node(
+                    matlib,
+                    reason=f"Awaiting textures for geo='{geo_plan.name}' mat='{mat_variant}'",
+                )
+
+            mat_y = 3.3 - mat_index * 2.4
+            cmat.setPosition(out_pos + hou.Vector2(mat_x, mat_y))
+            matlib.setPosition(out_pos + hou.Vector2(mat_x + 2.0, mat_y + 0.9))
+
+            if is_texture_published:
+                _rebuild_matlib_for_variant(
+                    matlib,
+                    geo_variant=geo_plan.name,
+                    mat_variant=mat_variant,
+                    warnings=warnings,
+                )
+
+        if not geo_plan.source_exists:
+            warnings.append(
+                f"Branch generated but disconnected for geometry '{geo_plan.name}' (publish missing)."
+            )
+            continue
+
+        if active_tail is not None:
+            branch_outputs.append((geo_plan.name, active_tail))
+            continue
+
+        warnings.append(
+            f"No published material variants found for geometry '{geo_plan.name}'; wiring geometry branch directly."
+        )
+        branch_outputs.append((geo_plan.name, geo_node))
+
+    if not branch_outputs and all_geo_nodes:
+        warnings.append(
+            "No published geometry branches were available; wiring fallback geometry branch so network remains valid."
+        )
+        fallback_geo_name = plan.geometry_variants[0].name
+        branch_outputs.append((fallback_geo_name, all_geo_nodes[0]))
+
+    upstream: hou.Node = branch_outputs[0][1]
+    if len(branch_outputs) > 1:
+        geo_variants = parent.createNode("componentgeometryvariants")
+        geo_variants.setName("geo_variants", unique_name=True)
+        _mark_managed_variant_node(geo_variants, owner_path=owner_path)
+        geo_variants.setPosition(out_pos + hou.Vector2(0.0, 2.4))
+
+        for index, (_, branch) in enumerate(branch_outputs):
+            geo_variants.setInput(index, branch)
+
+        _set_parm_if_exists(geo_variants, "variantset", "geo")
+        _set_parm_if_exists(geo_variants, "variantnamesrc", 0)
+        _set_parm_if_exists(geo_variants, "variantcount", len(branch_outputs))
+        for index, (geo_name, _) in enumerate(branch_outputs, start=1):
+            _set_parm_if_exists(geo_variants, f"variantname{index}", geo_name)
+
+        upstream = geo_variants
+
+    config.setInput(0, upstream)
+    output.setInput(0, config)
+    output.setInput(1, env)
+    lookdev.setInput(0, output)
+    _set_parm_if_exists(env, "loppath", f"../{lookdev.name()}/OUT_ENV")
+
+    config.setPosition(out_pos + hou.Vector2(0.0, 1.0))
+    env.setPosition(out_pos + hou.Vector2(1.5, 0.5))
+    lookdev.setPosition(out_pos + hou.Vector2(0.0, -1.0))
+
+    _set_variant_generation_warnings(output, warnings)
+    return tuple(warnings)
 
 
 def create_skd_component_builder(
@@ -386,54 +831,24 @@ def create_skd_component_builder(
     """Build the standard SKD Solaris component network."""
     out = _create_component_output_node(kwargs=kwargs, parent=parent)
     out.setColor(hou.Color((0.616, 0.871, 0.769)))
-
-    out_pos = out.position()
-    p = parent or out.parent()
-    geo = create_skd_component_geometry(kwargs, parent=p)
-    mtl = create_skd_component_material(kwargs, parent=p)
-    lib = create_skd_matlib(p, "matlib")
-    cnf = p.createNode("sdm223::lnd_componentconfig")
-    ldv = create_skd_lookdev(p, "lookdev")
-    env = p.createNode("fetch", "env")
-    out.setInput(0, cnf)
-    out.setInput(1, env)
-    cnf.setInput(0, mtl)
-    mtl.setInput(0, geo)
-    mtl.setInput(1, lib)
-    ldv.setInput(0, out)
-
-    # Arrange nodes in "Y" shape
-    geo_move = hou.Vector2(-1.22, 3.5)
-    mtl_move = hou.Vector2(0.0, 2.0)
-    lib_move = hou.Vector2(1.22, 3.0)
-    cnf_move = hou.Vector2(0.0, 1.0)
-    ldv_move = hou.Vector2(0.0, -1.0)
-    env_move = hou.Vector2(1.5, 0.5)
-    geo.setPosition(geo_move + out_pos)
-    mtl.setPosition(mtl_move + out_pos)
-    lib.setPosition(lib_move + out_pos)
-    cnf.setPosition(cnf_move + out_pos)
-    ldv.setPosition(ldv_move + out_pos)
-    env.setPosition(env_move + out_pos)
-
-    # Configure environment fetch
-    env.parm("loppath").set(f"../{ldv.name()}/OUT_ENV")
-
-    # Configure Component Output node
-    asset_name = Path(hou.hscriptStringExpression("$HIP")).name.strip() or "asset"
-    out.parm("filename").set(f"{asset_name}.usd")
-    out.parm("rootprim").set("/" + asset_name)
-    out.parm("localize").set(False)
-    out.parm("lopoutput").set('$HIP/publish/`chs("filename")`')
-    out.parm("thumbnailmode").set(2)
-    out.parm("renderer").set("RenderMan RIS")
-    out.parm("thumbnailscenesource").set(1)
-    out.parm("thumbnailinputcamera").set("/lookdev/cam")
+    _configure_component_output_defaults(out)
+    warnings = rebuild_managed_skd_variant_graph(out)
 
     _mark_managed_builder(out)
 
-    # Set Geometry as last selected
-    geo.setSelected(True, clear_all_selected=True)
+    # Set first managed geometry node as the selected node.
+    p = parent or out.parent()
+    first_geo = _first_managed_geometry_node(p, owner_path=out.path())
+    if first_geo is not None:
+        first_geo.setSelected(True, clear_all_selected=True)
+    else:
+        out.setSelected(True, clear_all_selected=True)
+
+    if warnings:
+        log.warning(
+            "SKD Component Builder created with %d variant warning(s).",
+            len(warnings),
+        )
 
     return out
 
