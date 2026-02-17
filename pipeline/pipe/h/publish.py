@@ -612,20 +612,19 @@ def _collect_thumbnail(
 
     thumbnail_path = _resolve_thumbnail_output_path(node)
     if options.collect_thumbnail and options.generate_thumbnail_if_missing:
-        file_missing = thumbnail_path is not None and not thumbnail_path.exists()
-        if thumbnail_path is None or file_missing:
-            with _thumbnail_context_enabled():
-                _generate_thumbnail_if_supported(node=node, result=result)
+        # Regenerate thumbnail on every publish to keep gallery visuals current.
+        with _thumbnail_context_enabled():
+            _generate_thumbnail_if_supported(node=node, result=result)
 
-            thumbnail_path = _resolve_thumbnail_output_path(node)
-            if thumbnail_path is not None and not thumbnail_path.exists():
-                with _thumbnail_context_enabled():
-                    _generate_thumbnail_if_supported(
-                        node=node,
-                        result=result,
-                        force_mode=THUMBNAIL_FALLBACK_MODE,
-                    )
-            thumbnail_path = _resolve_thumbnail_output_path(node)
+        thumbnail_path = _resolve_thumbnail_output_path(node)
+        if thumbnail_path is not None and not thumbnail_path.exists():
+            with _thumbnail_context_enabled():
+                _generate_thumbnail_if_supported(
+                    node=node,
+                    result=result,
+                    force_mode=THUMBNAIL_FALLBACK_MODE,
+                )
+        thumbnail_path = _resolve_thumbnail_output_path(node)
 
     summary["thumbnail_file"] = str(thumbnail_path) if thumbnail_path else ""
 
@@ -639,6 +638,17 @@ def _collect_thumbnail(
             f"Thumbnail file path is set but file does not exist: {thumbnail_path}",
         )
         return summary, None
+
+    source_path = thumbnail_path
+    staged_path = _stage_thumbnail_in_publish_cache(
+        source=source_path, context=context, result=result
+    )
+    thumbnail_path = staged_path or source_path
+    _relocate_thumbnail_scene_artifacts(context=context, result=result)
+    _cleanup_stock_thumbnail_artifacts(
+        source=source_path, staged=thumbnail_path, context=context
+    )
+    summary["thumbnail_file"] = str(thumbnail_path)
 
     try:
         data = thumbnail_path.read_bytes()
@@ -747,6 +757,90 @@ def _resolve_thumbnail_output_path(node: hou.LopNode) -> Path | None:
         if candidate.exists():
             return candidate
     return candidates[0] if candidates else None
+
+
+def _stage_thumbnail_in_publish_cache(
+    *, source: Path, context: _PublishContext, result: PublishResult
+) -> Path | None:
+    target_dir = context.export_path.parent / ".thumbnails"
+    target = target_dir / f"{context.export_path.stem}.png"
+    if source == target:
+        return source
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+    except Exception as exc:
+        _warn(
+            result,
+            "ThumbnailStageFailed",
+            f"Failed staging thumbnail {source} -> {target}: {exc}",
+        )
+        return None
+    return target
+
+
+def _cleanup_stock_thumbnail_artifacts(
+    *, source: Path, staged: Path, context: _PublishContext
+) -> None:
+    publish_dir = context.export_path.parent
+    for path in (
+        publish_dir / "thumbnail.png",
+        publish_dir / "Thumbnail.png",
+    ):
+        if path == staged:
+            continue
+        _remove_file_if_exists(path)
+
+    if (
+        source != staged
+        and source.parent == publish_dir
+        and source.name.lower() in ("thumbnail.png",)
+    ):
+        _remove_file_if_exists(source)
+
+
+def _relocate_thumbnail_scene_artifacts(
+    *, context: _PublishContext, result: PublishResult
+) -> None:
+    publish_dir = context.export_path.parent
+    target_dir = publish_dir / ".thumbnails"
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        _warn(
+            result,
+            "ThumbnailSceneStageFailed",
+            f"Failed creating thumbnail scene directory {target_dir}: {exc}",
+        )
+        return
+
+    for source in (
+        publish_dir / "Thumbnail.usda",
+        publish_dir / "thumbnail.usda",
+        publish_dir / "Thumbnail.usd",
+        publish_dir / "thumbnail.usd",
+    ):
+        if not source.exists() or not source.is_file():
+            continue
+        target = target_dir / source.name
+        if source == target:
+            continue
+        try:
+            source.replace(target)
+        except Exception as exc:
+            _warn(
+                result,
+                "ThumbnailSceneStageFailed",
+                f"Failed moving thumbnail scene {source} -> {target}: {exc}",
+            )
+
+
+def _remove_file_if_exists(path: Path) -> None:
+    try:
+        if path.exists() and path.is_file():
+            path.unlink()
+    except Exception:
+        pass
 
 
 def _thumbnail_output_candidates(node: hou.LopNode) -> list[Path]:
