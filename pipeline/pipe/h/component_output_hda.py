@@ -190,7 +190,7 @@ def _collect_publish_options(node: hou.Node) -> PublishOptions:
         export_component=_eval_bool(node, "export_component", True),
         collect_thumbnail=_eval_bool(node, "collect_thumbnail", True),
         generate_thumbnail_if_missing=_eval_bool(
-            node, "generate_thumbnail_if_missing", False
+            node, "generate_thumbnail_if_missing", True
         ),
         update_gallery=_eval_bool(node, "enable_gallery_sync", True),
         gallery_db_path=_eval_path(node, "gallery_db_override"),
@@ -385,7 +385,30 @@ def _format_summary(title: str, payload: dict[str, Any]) -> str:
     warnings = payload.get("warnings", [])
     errors = payload.get("errors", [])
     status = str(payload.get("status", "unknown")).upper()
-    return f"{title}: {status}\nWarnings: {len(warnings)}\nErrors: {len(errors)}"
+    lines = [
+        f"{title}: {status}",
+        f"Warnings: {len(warnings)}",
+        f"Errors: {len(errors)}",
+    ]
+
+    warn_code = _first_message_code(warnings)
+    err_code = _first_message_code(errors)
+    if warn_code:
+        lines.append(f"First Warning: {warn_code}")
+    if err_code:
+        lines.append(f"First Error: {err_code}")
+    return "\n".join(lines)
+
+
+def _first_message_code(messages: Any) -> str:
+    if not isinstance(messages, list) or not messages:
+        return ""
+    first = messages[0]
+    if isinstance(first, dict):
+        code = str(first.get("code", "")).strip()
+        if code:
+            return code
+    return ""
 
 
 def _apply_node_color(node: hou.Node, payload: dict[str, Any]) -> None:

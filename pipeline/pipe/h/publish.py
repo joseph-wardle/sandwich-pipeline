@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib
 import logging
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,6 +38,8 @@ DCC_HOUDINI_NAME = "houdini"
 MANIFEST_FILENAME = "asset_manifest.json"
 DEFAULT_VARIANT = "main"
 DEFAULT_HOOK_FUNCTION = "run"
+THUMBNAIL_CONTEXT_OPTION = "RENDER_THUMBNAIL"
+THUMBNAIL_FALLBACK_MODE = 3
 
 GALLERY_META_ASSET_KEY = "pipe_asset_key"
 GALLERY_META_ASSET_NAME = "pipe_asset_name"
@@ -131,7 +134,7 @@ class PublishOptions:
     export_component: bool = True
 
     collect_thumbnail: bool = True
-    generate_thumbnail_if_missing: bool = False
+    generate_thumbnail_if_missing: bool = True
     thumbnail_max_bytes: int = 8 * 1024 * 1024
 
     update_gallery: bool = True
@@ -340,11 +343,6 @@ def _resolve_component_output_node(
         and child.type().name() == COMPONENT_OUTPUT_TYPE_NAME
     ]
     if len(matches) == 1:
-        _warn(
-            result,
-            "NodeResolvedToChild",
-            f"Resolved componentoutput child from wrapper node: {matches[0].path()}",
-        )
         return matches[0]
     if len(matches) > 1:
         _error(
@@ -612,23 +610,22 @@ def _collect_thumbnail(
     summary["renderer"] = _eval_parm_string(node, "renderer")
     summary["mode"] = _eval_parm_int(node, "thumbnailmode", default=-1)
 
-    thumbnail_path = _eval_parm_path(node, "thumbnailfile")
-    if (
-        options.collect_thumbnail
-        and thumbnail_path is None
-        and options.generate_thumbnail_if_missing
-    ):
-        parm = node.parm("executesavethumbnail")
-        if parm is not None:
-            try:
-                parm.pressButton()
-            except Exception as exc:
-                _warn(
-                    result,
-                    "ThumbnailGenerateFailed",
-                    f"Failed to generate thumbnail on {node.path()}: {exc}",
-                )
-            thumbnail_path = _eval_parm_path(node, "thumbnailfile")
+    thumbnail_path = _resolve_thumbnail_output_path(node)
+    if options.collect_thumbnail and options.generate_thumbnail_if_missing:
+        file_missing = thumbnail_path is not None and not thumbnail_path.exists()
+        if thumbnail_path is None or file_missing:
+            with _thumbnail_context_enabled():
+                _generate_thumbnail_if_supported(node=node, result=result)
+
+            thumbnail_path = _resolve_thumbnail_output_path(node)
+            if thumbnail_path is not None and not thumbnail_path.exists():
+                with _thumbnail_context_enabled():
+                    _generate_thumbnail_if_supported(
+                        node=node,
+                        result=result,
+                        force_mode=THUMBNAIL_FALLBACK_MODE,
+                    )
+            thumbnail_path = _resolve_thumbnail_output_path(node)
 
     summary["thumbnail_file"] = str(thumbnail_path) if thumbnail_path else ""
 
@@ -664,6 +661,149 @@ def _collect_thumbnail(
     summary["captured"] = True
     summary["thumbnail_bytes"] = len(data)
     return summary, data
+
+
+def _generate_thumbnail_if_supported(
+    *, node: hou.LopNode, result: PublishResult, force_mode: int | None = None
+) -> bool:
+    mode = (
+        force_mode
+        if force_mode is not None
+        else _eval_parm_int(node, "thumbnailmode", default=-1)
+    )
+    mode_button = {
+        0: "executefile",
+        1: "executegl",
+        2: "executerender",
+        3: "executeviewport",
+    }.get(mode)
+
+    candidate_buttons: list[str] = []
+    if mode_button:
+        candidate_buttons.append(mode_button)
+    candidate_buttons.extend(
+        name
+        for name in (
+            "executerender",
+            "executegl",
+            "executeviewport",
+            "executefile",
+            "executesavethumbnail",
+        )
+        if name not in candidate_buttons
+    )
+
+    mode_parm = node.parm("thumbnailmode")
+    original_mode = None
+    mode_overridden = False
+    if force_mode is not None and mode_parm is not None:
+        try:
+            original_mode = int(mode_parm.evalAsInt())
+            if original_mode != force_mode:
+                mode_parm.set(force_mode)
+                mode_overridden = True
+        except Exception as exc:
+            _warn(
+                result,
+                "ThumbnailModeSetFailed",
+                f"Failed to set thumbnailmode={force_mode} on {node.path()}: {exc}",
+            )
+
+    pressed = False
+    for parm_name in candidate_buttons:
+        parm = node.parm(parm_name)
+        if parm is None:
+            continue
+        try:
+            parm.pressButton()
+            pressed = True
+            break
+        except Exception as exc:
+            _warn(
+                result,
+                "ThumbnailGenerateFailed",
+                f"Failed pressing {parm_name} on {node.path()}: {exc}",
+            )
+
+    if mode_overridden and mode_parm is not None and original_mode is not None:
+        try:
+            mode_parm.set(original_mode)
+        except Exception:
+            pass
+
+    if not pressed:
+        _warn(
+            result,
+            "ThumbnailGenerateUnsupported",
+            f"Node {node.path()} does not expose a supported thumbnail generate button.",
+        )
+        return False
+    return True
+
+
+def _resolve_thumbnail_output_path(node: hou.LopNode) -> Path | None:
+    candidates = _thumbnail_output_candidates(node)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0] if candidates else None
+
+
+def _thumbnail_output_candidates(node: hou.LopNode) -> list[Path]:
+    candidates: list[Path] = []
+
+    parm_path = _eval_parm_path(node, "thumbnailfile")
+    if parm_path is not None:
+        candidates.append(parm_path)
+
+    render_node = node.node("thumbnail_render")
+    if isinstance(render_node, hou.Node):
+        render_path = _eval_parm_path(render_node, "outputimage")
+        if render_path is not None:
+            candidates.append(render_path)
+
+    # Preserve insertion order while removing duplicates.
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+@contextmanager
+def _thumbnail_context_enabled():
+    had_previous = False
+    previous_value: Any = None
+    try:
+        previous_value = hou.contextOption(THUMBNAIL_CONTEXT_OPTION)
+        had_previous = True
+    except Exception:
+        had_previous = False
+
+    try:
+        hou.setContextOption(THUMBNAIL_CONTEXT_OPTION, 1)
+    except Exception:
+        pass
+
+    try:
+        yield
+    finally:
+        if had_previous:
+            try:
+                hou.setContextOption(THUMBNAIL_CONTEXT_OPTION, previous_value)
+            except Exception:
+                pass
+        else:
+            remove_fn = getattr(hou, "removeContextOption", None)
+            if callable(remove_fn):
+                try:
+                    remove_fn(THUMBNAIL_CONTEXT_OPTION)
+                except Exception:
+                    pass
 
 
 def _sync_gallery(
@@ -767,7 +907,19 @@ def _sync_gallery(
             datasource.setOwnsFile(added_item_id, False)
             datasource.setMetadata(added_item_id, metadata)
             if thumbnail_bytes:
-                datasource.setThumbnail(added_item_id, thumbnail_bytes)
+                set_result = datasource.setThumbnail(added_item_id, thumbnail_bytes)
+                if set_result is False:
+                    _warn(
+                        result,
+                        "GalleryThumbnailSetFailed",
+                        f"Asset Gallery rejected thumbnail bytes for item {added_item_id}.",
+                    )
+            elif options.collect_thumbnail:
+                _warn(
+                    result,
+                    "GalleryThumbnailMissing",
+                    f"No thumbnail bytes available for {context.node.path()}; gallery item will be created without a thumbnail.",
+                )
         except Exception:
             datasource.endTransaction(commit=False)
             raise
