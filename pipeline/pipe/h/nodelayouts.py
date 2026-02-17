@@ -10,10 +10,15 @@ if TYPE_CHECKING:
     from typing import Optional
 
 
-"""Scripts for building node setups. Called by lnd_nodelayouts.hdanc in Interactive > Shelf Tools, also make sure to check a network context in the context tab"""
+"""Node-graph builders for Houdini Solaris tools.
+
+This module defines the canonical SKD component builder entry points used by
+tool shelves and headless build scripts.
+"""
 
 SKD_LOOKDEV_TYPE = "skd::main::SKD_Lookdev::1.0"
 SKD_MATLIB_TYPE = "skd::main::SKD_MatLib::1.0"
+SKD_COMPONENT_GEOMETRY_NAME = "main"
 
 
 def _latest_skd_type(default_type: str) -> str:
@@ -107,14 +112,17 @@ def lnd_clustersetup(kwargs: dict, parent: Optional[hou.Node] = None) -> hou.Nod
     return out
 
 
-def bobo_componentgeometry(kwargs: dict, parent: Optional[hou.Node] = None) -> hou.Node:
+def create_skd_component_geometry(
+    kwargs: dict, parent: Optional[hou.Node] = None
+) -> hou.Node:
+    """Create the standard SKD Component Geometry node setup."""
     if parent:
         cgeo = parent.createNode("componentgeometry")
     else:
         cgeo = loptoolutils.genericTool(kwargs, "componentgeometry")
 
     # Rename to match publishing expectations.
-    cgeo.setName("main", unique_name=True)
+    cgeo.setName(SKD_COMPONENT_GEOMETRY_NAME, unique_name=True)
 
     # Set up nodes inside of Component Geometry
     geo_sop = cgeo.node("./sopnet/geo")
@@ -134,7 +142,10 @@ def bobo_componentgeometry(kwargs: dict, parent: Optional[hou.Node] = None) -> h
     return cgeo
 
 
-def lnd_componentmaterial(kwargs: dict, parent: Optional[hou.Node] = None) -> hou.Node:
+def create_skd_component_material(
+    kwargs: dict, parent: Optional[hou.Node] = None
+) -> hou.Node:
+    """Create the standard SKD Component Material configuration."""
     MAT_ROOT = "/ASSET/mtl/MAT_"
     TS_PRIMVAR = "texset"
 
@@ -167,14 +178,15 @@ def lnd_componentmaterial(kwargs: dict, parent: Optional[hou.Node] = None) -> ho
     return cmat
 
 
-def bobo_componentsetup(kwargs: dict) -> hou.Node:
+def create_skd_component_builder(kwargs: dict) -> hou.Node:
+    """Build the standard SKD Solaris component network."""
     out: hou.LopNode = loptoolutils.genericTool(kwargs, "componentoutput")
     out.setColor(hou.Color((0.616, 0.871, 0.769)))
 
     out_pos = out.position()
     p = out.parent()
-    geo = bobo_componentgeometry(kwargs, parent=p)
-    mtl = lnd_componentmaterial(kwargs, parent=p)
+    geo = create_skd_component_geometry(kwargs, parent=p)
+    mtl = create_skd_component_material(kwargs, parent=p)
     lib = create_skd_matlib(p)
     cnf = p.createNode("sdm223::lnd_componentconfig")
     ldv = create_skd_lookdev(p)

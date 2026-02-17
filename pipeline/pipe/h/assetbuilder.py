@@ -1,4 +1,4 @@
-"""Build Houdini component packages for the Bobo asset pipeline."""
+"""Build Houdini component packages for the SKD asset pipeline."""
 
 from __future__ import annotations
 
@@ -17,6 +17,9 @@ import hou
 from pipe.h import nodelayouts
 
 log = logging.getLogger(__name__)
+
+COMPONENT_GEOMETRY_NODE_NAME = nodelayouts.SKD_COMPONENT_GEOMETRY_NAME
+COMPONENT_OUTPUT_NODE_NAME = "COMPONENT_OUT"
 
 
 class BuildError(TypedDict):
@@ -109,14 +112,14 @@ def _create_hip_file(
     if not stage:
         raise RuntimeError("Could not find /stage in Houdini session")
 
-    log.info("Building Bobo component network")
-    geo_node = nodelayouts.bobo_componentgeometry({}, parent=stage)
-    cmat_node = nodelayouts.lnd_componentmaterial({}, parent=stage)
+    log.info("Building SKD component network")
+    geo_node = nodelayouts.create_skd_component_geometry({}, parent=stage)
+    cmat_node = nodelayouts.create_skd_component_material({}, parent=stage)
     lib_node = nodelayouts.create_skd_matlib(stage, "matlib")
     config_node = stage.createNode("sdm223::lnd_componentconfig", "config")
     lookdev_node = nodelayouts.create_skd_lookdev(stage, "lookdev")
     env_node = stage.createNode("fetch", "env")
-    out_node = stage.createNode("componentoutput", "COMPONENT_OUT")
+    out_node = stage.createNode("componentoutput", COMPONENT_OUTPUT_NODE_NAME)
     out_node.setColor(hou.Color((0.616, 0.871, 0.769)))
 
     out_node.setInput(0, config_node)
@@ -168,12 +171,15 @@ def _update_hip_file(*, result: BuildResult, hip_path: Path, usd_path: Path) -> 
     except hou.LoadWarning as exc:
         result["warnings"].append(f"Houdini load warning: {exc}")
 
-    geo_node = _find_node("main", hou.LopNode)
+    geo_node = _find_node(COMPONENT_GEOMETRY_NODE_NAME, hou.LopNode)
     if not geo_node:
         result["errors"].append(
             {
                 "code": "NetworkMissingError",
-                "message": "Expected to find a 'main' LOP node in /stage",
+                "message": (
+                    f"Expected to find a '{COMPONENT_GEOMETRY_NODE_NAME}' "
+                    "LOP node in /stage"
+                ),
             }
         )
         return
@@ -207,12 +213,14 @@ def _export_component(*, result: BuildResult, export_dir: Path) -> None:
         log.warning("Skipping export due to previous errors")
         return
 
-    out_node = _find_node("COMPONENT_OUT")
+    out_node = _find_node(COMPONENT_OUTPUT_NODE_NAME)
     if not out_node:
         result["errors"].append(
             {
                 "code": "NetworkMissingError",
-                "message": "Cannot find 'COMPONENT_OUT' node to trigger export",
+                "message": (
+                    f"Cannot find '{COMPONENT_OUTPUT_NODE_NAME}' node to trigger export"
+                ),
             }
         )
         return
