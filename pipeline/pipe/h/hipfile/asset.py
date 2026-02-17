@@ -8,6 +8,7 @@ import hou
 
 from pipe.struct.db import Asset, SGEntity
 
+from .. import nodelayouts
 from .filemanager import HFileManager
 
 log = logging.getLogger(__name__)
@@ -32,3 +33,8 @@ class HAssetFileManager(HFileManager):
             hou.setContextOption("ASSET", asset_name)
         else:
             log.warning("Unable to set ASSET context option; asset name missing")
+
+        try:
+            nodelayouts.ensure_managed_skd_component_builder()
+        except Exception:
+            log.exception("Failed to ensure SKD Component Builder for %s", asset_name)
