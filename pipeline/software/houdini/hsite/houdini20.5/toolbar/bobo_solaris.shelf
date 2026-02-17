@@ -10,5 +10,22 @@
     <memberTool name="open_set"/>
     <memberTool name="open_shot"/>
     <memberTool name="bobo_playblast"/>
+    <memberTool name="reload_pipe_houdini"/>
   </toolshelf>
+
+  <tool name="reload_pipe_houdini" label="Reload Pipe" icon="BUTTONS_reload">
+    <script scriptType="python"><![CDATA[from pipe.h.reload import reload_pipe
+
+reload_pipe()
+
+try:
+    import hou
+
+    hou.ui.setStatusMessage(
+        "Pipeline reloaded (Python modules + HDA libraries)",
+        severity=hou.severityType.Message,
+    )
+except Exception:
+    pass]]></script>
+  </tool>
 </shelfDocument>
