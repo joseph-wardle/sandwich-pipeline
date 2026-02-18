@@ -144,8 +144,9 @@ class MayaDCC(DCC):
             ]
         else:
             launch_command = str(Executables.maya)
+            launch_args.extend(("-name", "Mayo"))
             if extra_args:
-                launch_args = extra_args
+                launch_args.append(extra_args)
 
         super().__init__(launch_command, launch_args, env_vars, self._pre_launch_tasks)
 

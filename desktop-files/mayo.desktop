@@ -1,0 +1,18 @@
+[Desktop Entry]
+Comment[en_US]=
+Comment=
+Exec=/groups/sandwich/.pipeline/.venv/bin/python /groups/sandwich/.pipeline/pipeline maya
+GenericName[en_US]=Sandwich Kwon Do Maya Launcher\s
+GenericName=Sandwich Kwon Do Maya Launcher\s
+Icon=/groups/sandwich/.pipeline/pipeline/lib/icon/maya.png
+MimeType=
+Name[en_US]=Mayo
+Name=Mayo
+Path=
+StartupNotify=true
+StartupWMClass=Mayo
+Terminal=false
+TerminalOptions=
+Type=Application
+X-KDE-SubstituteUID=false
+X-KDE-Username=
