@@ -4,18 +4,18 @@ Callbacks for the SKD Component Output HDA.
 
 from __future__ import annotations
 
-import importlib
 import json
 import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import hou
 
+from pipe.h import publish_hooks
 from pipe.h.publish import PublishOptions, publish_component
 
-TURNAROUND_HOOK = "pipe.h.publish_hooks.turnaround:run"
-TURNAROUND_SG_HOOK = "pipe.h.publish_hooks.turnaround_shotgrid:run"
+TURNAROUND_HOOK = "turnaround"
+TURNAROUND_SG_HOOK = "turnaround_shotgrid"
 
 STATUS_SUMMARY_PARM = "status_summary"
 STATUS_JSON_PARM = "status_json"
@@ -219,21 +219,8 @@ def _collect_hook_specs(node: hou.Node) -> list[str]:
     return hooks
 
 
-def _resolve_hook(spec: str) -> Callable[..., Any]:
-    value = spec.strip()
-    if ":" in value:
-        module_name, attr = value.split(":", 1)
-    else:
-        module_name, _, attr = value.rpartition(".")
-        if not module_name:
-            module_name = value
-            attr = "run"
-
-    module = importlib.import_module(module_name)
-    callback = getattr(module, attr)
-    if not callable(callback):
-        raise TypeError("hook is not callable")
-    return callback
+def _resolve_hook(spec: str) -> None:
+    publish_hooks.resolve_hook(spec)
 
 
 def _find_component_output(node: hou.Node) -> hou.LopNode | None:

@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 RESULT_START_MARKER = "--BUILD-RESULT--"
 RESULT_END_MARKER = "--END-BUILD-RESULT--"
 
-TURNAROUND_HOOK = "pipe.h.publish_hooks.turnaround:run"
+TURNAROUND_HOOK = "turnaround"
 
 
 class ResultMessage(TypedDict):

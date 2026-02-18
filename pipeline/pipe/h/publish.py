@@ -13,14 +13,13 @@ Design goals:
 
 from __future__ import annotations
 
-import importlib
 import logging
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, NotRequired, TypedDict
+from typing import Any, Mapping, NotRequired, TypedDict
 
 import hou
 
@@ -31,13 +30,14 @@ from pipe.asset.versioning import (
     record_publish,
 )
 
+from . import publish_hooks
+
 log = logging.getLogger(__name__)
 
 COMPONENT_OUTPUT_TYPE_NAME = "componentoutput"
 DCC_HOUDINI_NAME = "houdini"
 MANIFEST_FILENAME = "asset_manifest.json"
 DEFAULT_VARIANT = "main"
-DEFAULT_HOOK_FUNCTION = "run"
 THUMBNAIL_CONTEXT_OPTION = "RENDER_THUMBNAIL"
 THUMBNAIL_FALLBACK_MODE = 3
 DEFAULT_LOOKDEV_CAMERA = "/lookdev/cam"
@@ -1268,72 +1268,53 @@ def _run_hooks(
     if not options.hooks:
         return summaries
 
+    published_at = _utc_now_iso()
     hook_context = {
         "asset_name": context.asset_name,
         "asset_root": str(context.asset_root),
         "variant": context.variant,
+        "geo_variant": context.geo_variant,
+        "material_variant": context.material_variant,
+        "material_layer": context.material_layer,
         "node_path": context.node.path(),
         "hip_path": str(context.hip_path),
         "manifest_path": str(context.manifest_path),
         "backup_hip": backup["backup_hip"],
         "backup_version": str(backup["backup_version"]),
         "export_path": export["export_path"],
+        "export_executed": str(export["executed"]),
+        "thumbnail_file": result["thumbnail"].get("thumbnail_file", ""),
         "gallery_item_id": gallery["item_id"],
         "gallery_status": gallery["status"],
+        "gallery_policy_key": gallery.get("policy_key", ""),
+        "published_at": published_at,
     }
 
     for spec in options.hooks:
-        try:
-            callback = _resolve_hook(spec)
-            payload = callback(dict(hook_context))
-            hook_summary: HookSummary = {
-                "hook": spec,
-                "status": "success",
-                "message": "ok",
-            }
-            if isinstance(payload, dict):
-                hook_summary["payload"] = {
-                    str(k): str(v) for k, v in payload.items() if v is not None
-                }
-            summaries.append(hook_summary)
-        except Exception as exc:
-            message = f"Hook failed ({spec}): {exc}"
+        execution = publish_hooks.execute_hook(spec, hook_context)
+        hook_summary: HookSummary = {
+            "hook": execution["hook"],
+            "status": execution["status"],
+            "message": execution["message"],
+        }
+        if execution["payload"]:
+            hook_summary["payload"] = dict(execution["payload"])
+        summaries.append(hook_summary)
+
+        if execution["status"] == "failed":
+            message = f"Hook failed ({spec}): {execution['message']}"
             if options.fail_on_hook_error:
                 _error(result, "HookFailed", message)
             else:
                 _warn(result, "HookFailed", message)
-            summaries.append({"hook": spec, "status": "failed", "message": str(exc)})
+            continue
+
+        if execution["status"] == "skipped":
+            log.info("Hook skipped (%s): %s", execution["hook"], execution["message"])
+            continue
+
+        log.info("Hook succeeded (%s): %s", execution["hook"], execution["message"])
     return summaries
-
-
-def _resolve_hook(spec: str) -> Callable[[dict[str, str]], Any]:
-    module_name, attr_name = _parse_hook_spec(spec)
-    module = importlib.import_module(module_name)
-    callback = getattr(module, attr_name)
-    if not callable(callback):
-        raise TypeError(f"Hook is not callable: {spec}")
-    return callback
-
-
-def _parse_hook_spec(spec: str) -> tuple[str, str]:
-    value = spec.strip()
-    if ":" in value:
-        module_name, attr_name = value.split(":", 1)
-        return module_name.strip(), attr_name.strip()
-
-    # Prefer importing as a module first (default function `run`).
-    try:
-        importlib.import_module(value)
-        return value, DEFAULT_HOOK_FUNCTION
-    except Exception:
-        pass
-
-    module_name, sep, attr_name = value.rpartition(".")
-    if not sep:
-        raise ValueError(
-            f"Invalid hook spec '{spec}'. Use 'module', 'module:function', or 'module.function'."
-        )
-    return module_name.strip(), attr_name.strip()
 
 
 def _resolve_gallery_db_path(options: PublishOptions) -> Path | None:
