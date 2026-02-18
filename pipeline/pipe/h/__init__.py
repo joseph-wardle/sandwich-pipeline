@@ -1,13 +1,13 @@
 # Import nested module
 from . import hipfile, local, shading
-from .assetbuilder import build_component_package
+from .assetbuilder import run_headless_publish
 from .publish import PublishOptions, publish_component
 
 __all__ = [
     "hipfile",
     "local",
     "shading",
-    "build_component_package",
+    "run_headless_publish",
     "PublishOptions",
     "publish_component",
 ]

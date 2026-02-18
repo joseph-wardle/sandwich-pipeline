@@ -14,7 +14,6 @@ from env import Executables
 from Qt.QtCore import QRegExp
 from Qt.QtGui import QRegExpValidator, QTextCursor
 from Qt.QtWidgets import QComboBox, QDialogButtonBox, QHBoxLayout, QLabel, QWidget
-from shared.util import get_pipe_path
 from software.houdini.dcc import HoudiniDCC
 
 from pipe.asset.paths import DCC_MAYA, paths_for_asset
@@ -45,9 +44,9 @@ except TypeError:
     MCUI = object
 
 log = logging.getLogger(__name__)
-ASSET_BUILDER_SCRIPT = get_pipe_path() / "pipe/h/assetbuilder.py"
-# Temporary switch: disable Houdini component builds until HDAs/tooling are ready.
-ENABLE_HOUDINI_ASSET_BUILD = False
+ENABLE_HOUDINI_ASSET_BUILD = True
+_HOUDINI_RESULT_START = "--BUILD-RESULT--"
+_HOUDINI_RESULT_END = "--END-BUILD-RESULT--"
 
 
 class HoudiniBuildError(RuntimeError):
@@ -444,26 +443,88 @@ class AssetPublisher(Publisher):
             details.append("Houdini component publish failed or was skipped.")
         else:
             result = self._houdini_result
-            status = result.get("status", "unknown").capitalize()
-            mode = result.get("mode", "unknown")
+            status = str(result.get("status", "unknown")).capitalize()
+            details.append(f"Houdini publish status: {status}")
 
-            details.append(f"Houdini build status: {status} ({mode} mode)")
-            if result.get("changed_usd_reference"):
-                details.append("- Updated USD reference.")
-            if result.get("export_performed"):
-                details.append(f"- Exported to: {result.get('export_dir')}")
+            summary = result.get("summary")
+            if isinstance(summary, dict):
+                hip_path = str(summary.get("hip_path", "")).strip()
+                if hip_path:
+                    details.append(f"- Builder HIP: {hip_path}")
+                details.append(
+                    "- Builder: "
+                    + (
+                        "created"
+                        if summary.get("builder_created")
+                        else "reused existing network"
+                    )
+                )
+                if summary.get("variant_graph_regenerated"):
+                    details.append("- Managed variants: regenerated")
+                elif summary.get("respected_existing"):
+                    details.append("- Managed variants: respected existing graph")
 
-            warnings = result.get("warnings")
-            if warnings:
-                details.append("")
-                details.append("Warnings:")
-                details.extend(f"- {w}" for w in warnings)
+            publish_result = result.get("publish")
+            if isinstance(publish_result, dict):
+                publish_status = str(
+                    publish_result.get("status", "unknown")
+                ).capitalize()
+                details.append(f"- Component publish: {publish_status}")
 
-            errors = result.get("errors")
-            if errors:
-                details.append("")
-                details.append("Errors:")
-                details.extend(f"- {e.get('code')}: {e.get('message')}" for e in errors)
+                export = publish_result.get("export")
+                if isinstance(export, dict):
+                    export_path = str(export.get("export_path", "")).strip()
+                    if export_path:
+                        details.append(f"- Exported to: {export_path}")
+
+                gallery = publish_result.get("gallery")
+                if isinstance(gallery, dict):
+                    gallery_status = str(gallery.get("status", "")).strip()
+                    if gallery_status:
+                        details.append(f"- Gallery sync: {gallery_status}")
+
+            def _append_messages(
+                heading: str,
+                payload: Any,
+                target: list[str],
+            ) -> None:
+                if not payload:
+                    return
+                lines: list[str] = []
+                if isinstance(payload, list):
+                    for item in payload:
+                        if isinstance(item, dict):
+                            code = str(item.get("code", "")).strip()
+                            msg = str(item.get("message", "")).strip()
+                            if code and msg:
+                                lines.append(f"- {code}: {msg}")
+                            elif msg:
+                                lines.append(f"- {msg}")
+                            else:
+                                lines.append(f"- {item}")
+                        else:
+                            lines.append(f"- {item}")
+                else:
+                    lines.append(f"- {payload}")
+                if lines:
+                    target.append("")
+                    target.append(heading)
+                    target.extend(lines)
+
+            _append_messages("Warnings:", result.get("warnings"), details)
+            if isinstance(publish_result, dict):
+                _append_messages(
+                    "Publish Warnings:",
+                    publish_result.get("warnings"),
+                    details,
+                )
+            _append_messages("Errors:", result.get("errors"), details)
+            if isinstance(publish_result, dict):
+                _append_messages(
+                    "Publish Errors:",
+                    publish_result.get("errors"),
+                    details,
+                )
 
         if details:
             return f"{message}\n\n" + "\n".join(details)
@@ -577,13 +638,13 @@ class AssetPublisher(Publisher):
             log.info("Skipping Houdini component publish (disabled)")
             self._houdini_result = {
                 "status": "skipped",
-                "mode": "disabled",
-                "hip_path": str(self._component_hip_path or ""),
-                "usd_path": str(getattr(self, "_publish_path", "")),
-                "export_dir": str(self._component_export_dir or ""),
-                "export_performed": False,
+                "asset_root": "",
+                "asset_name": "",
                 "variant": self._geo_variant,
-                "changed_usd_reference": False,
+                "ensure_builder": False,
+                "publish_requested": False,
+                "summary": None,
+                "publish": None,
                 "warnings": [],
                 "errors": [],
             }
@@ -601,24 +662,9 @@ class AssetPublisher(Publisher):
             ).exec_()
 
     def _run_houdini_asset_builder(self, asset: Asset) -> None:
-        publish_path = getattr(self, "_publish_path", None)
-        if publish_path is None:
+        if getattr(self, "_publish_path", None) is None:
             raise HoudiniBuildError(
-                "Publish path is undefined; cannot build Houdini component package."
-            )
-
-        publish_path = Path(publish_path)
-        component_name = self._component_basename or publish_path.stem
-        publish_dir = publish_path.parent
-        export_dir = publish_dir / "export"
-        hip_path = publish_dir / f"{component_name}.hipnc"
-
-        self._component_export_dir = export_dir
-        self._component_hip_path = hip_path
-
-        if not ASSET_BUILDER_SCRIPT.exists():
-            raise HoudiniBuildError(
-                f"Unable to locate Houdini asset builder script: {ASSET_BUILDER_SCRIPT}"
+                "Publish path is undefined; cannot run Houdini publish."
             )
 
         if not Executables.hython.exists():
@@ -626,38 +672,46 @@ class AssetPublisher(Publisher):
                 f"Houdini executable not found at {Executables.hython}"
             )
 
+        asset_paths = paths_for_asset(asset)
+        hip_path = asset_paths.asset_builder_path
+        self._component_hip_path = hip_path
+        self._component_export_dir = asset_paths.publish_dir
+
         asset_name = self._asset_name or (asset.name or "").strip()
         if not asset_name and asset.asset_path:
             asset_name = Path(asset.asset_path).name
         if not asset_name:
-            asset_name = component_name
+            asset_name = asset_paths.root.name
 
         command = [
             str(Executables.hython),
             "-m",
             "pipe.h.assetbuilder",
-            "--hip-path",
-            str(hip_path),
-            "--usd-path",
-            str(publish_path),
-            "--export-dir",
-            str(export_dir),
-            "--component-name",
-            component_name,
+            "--asset-root",
+            str(asset_paths.root),
             "--asset-name",
             asset_name,
             "--variant",
             self._geo_variant,
+            "--ensure-builder",
+            "--publish",
+            "--respect-existing",
         ]
 
-        if asset_name and asset_name != component_name:
-            command.extend(["--root-prim", asset_name])
+        if asset.asset_path:
+            command.extend(["--asset-path", asset.asset_path])
+        if asset.id is not None:
+            command.extend(["--asset-id", str(asset.id)])
 
         dcc = HoudiniDCC(is_python_shell=True)
         env = dcc._get_env_vars()
         env["PIPE_LOG_LEVEL"] = str(log.getEffectiveLevel())
 
-        log.info("Running Houdini asset builder for %s", component_name)
+        log.info(
+            "Running Houdini headless publish for %s (variant=%s)",
+            asset_name,
+            self._geo_variant,
+        )
         try:
             result = subprocess.run(
                 command,
@@ -673,6 +727,12 @@ class AssetPublisher(Publisher):
         except subprocess.CalledProcessError as exc:
             stdout = exc.stdout or ""
             stderr = exc.stderr or ""
+            payload = self._parse_houdini_result_payload(stdout)
+            if payload is not None:
+                self._houdini_result = payload
+                raise HoudiniBuildError(
+                    f"Build failed: {self._summarize_houdini_errors(payload)}"
+                ) from exc
             if stdout:
                 log.error("Houdini asset builder stdout:\n%s", stdout)
             if stderr:
@@ -683,27 +743,52 @@ class AssetPublisher(Publisher):
 
         # Parse the structured JSON output from the builder script
         stdout = result.stdout or ""
-        json_block_start = stdout.find("--BUILD-RESULT--")
-        json_block_end = stdout.find("--END-BUILD-RESULT--")
-
-        if json_block_start == -1 or json_block_end == -1:
+        payload = self._parse_houdini_result_payload(stdout)
+        if payload is None:
             log.error("Houdini asset builder stdout:\n%s", stdout)
             log.error("Houdini asset builder stderr:\n%s", result.stderr or "")
             raise HoudiniBuildError(
                 "Failed to parse structured output from Houdini build."
             )
+        self._houdini_result = payload
 
-        json_text = stdout[json_block_start + len("--BUILD-RESULT--") : json_block_end]
+        if self._houdini_result.get("status") != "success":  # type: ignore[union-attr]
+            raise HoudiniBuildError(
+                f"Build failed: {self._summarize_houdini_errors(self._houdini_result)}"
+            )
+
+    @staticmethod
+    def _parse_houdini_result_payload(stdout: str) -> dict[str, Any] | None:
+        start = stdout.find(_HOUDINI_RESULT_START)
+        end = stdout.find(_HOUDINI_RESULT_END)
+        if start == -1 or end == -1:
+            return None
+
+        json_text = stdout[start + len(_HOUDINI_RESULT_START) : end]
         try:
-            self._houdini_result = json.loads(json_text)
+            payload = json.loads(json_text)
         except json.JSONDecodeError:
-            log.error("Houdini asset builder stdout:\n%s", stdout)
-            raise HoudiniBuildError("Failed to decode JSON from Houdini build.")
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return payload
 
-        if self._houdini_result.get("status") != "success":  # type: ignore
-            errors = self._houdini_result.get("errors", [])  # type: ignore
-            error_summary = "; ".join(e.get("message", "Unknown error") for e in errors)
-            raise HoudiniBuildError(f"Build failed: {error_summary}")
+    @staticmethod
+    def _summarize_houdini_errors(payload: dict[str, Any]) -> str:
+        messages: list[str] = []
+        for entry in payload.get("errors", []):
+            if isinstance(entry, dict) and entry.get("message"):
+                messages.append(str(entry["message"]))
+
+        publish_payload = payload.get("publish")
+        if isinstance(publish_payload, dict):
+            for entry in publish_payload.get("errors", []):
+                if isinstance(entry, dict) and entry.get("message"):
+                    messages.append(str(entry["message"]))
+
+        if messages:
+            return "; ".join(messages)
+        return "Unknown error"
 
 
 class ModelChecker(MCUI):
