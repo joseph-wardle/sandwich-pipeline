@@ -811,7 +811,7 @@ def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
         default=1,
     )
     branch_top_y = out_pos.y() + 5.2 + max(0.0, float(max_mats - 3) * 0.9)
-    x_spacing = 3.6
+    x_spacing = 4.4
 
     for geo_index, geo_plan in enumerate(plan.geometry_variants):
         geo_token = variants.node_token(geo_plan.name)
@@ -936,13 +936,6 @@ def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
         for index, (geo_name, _) in enumerate(branch_outputs, start=1):
             _set_parm_if_exists(geo_variants, f"variantname{index}", geo_name)
 
-        _create_managed_variant_box(
-            parent,
-            owner_path=owner_path,
-            name="geo_variant_merge",
-            label="Geometry Variant Merge",
-            nodes=[geo_variants],
-        )
         upstream = geo_variants
 
     config.setInput(0, upstream)
@@ -956,14 +949,6 @@ def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
     output.setPosition(hou.Vector2(out_pos.x(), publish_anchor_y - 1.6))
     env.setPosition(hou.Vector2(out_pos.x() + 2.1, publish_anchor_y - 0.9))
     lookdev.setPosition(hou.Vector2(out_pos.x(), publish_anchor_y - 3.3))
-
-    _create_managed_variant_box(
-        parent,
-        owner_path=owner_path,
-        name="component_publish",
-        label="Component Publish",
-        nodes=[config, output, env, lookdev],
-    )
 
     _set_variant_generation_warnings(output, warnings)
     return tuple(warnings)
