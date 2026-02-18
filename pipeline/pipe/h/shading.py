@@ -996,10 +996,14 @@ class MatlibManager:
         return None
 
     @staticmethod
-    def _configure_material_library(matlib: hou.Node, *, mat_variant: str) -> None:
+    def _configure_material_library(
+        matlib: hou.Node, *, geo_variant: str, mat_variant: str
+    ) -> None:
         # Component Material expects materials under
-        # /ASSET/mtl/v_<matVariant>/MAT_<texset>.
-        material_prefix = variants.material_scope_path(mat_variant)
+        # /ASSET/mtl/g_<geoVariant>/v_<matVariant>/MAT_<texset>.
+        material_prefix = variants.material_scope_path(
+            mat_variant, geo_variant=geo_variant
+        )
         for parm_name, value in (
             ("matpathprefix", material_prefix),
             ("materialpathprefix", material_prefix),
@@ -1054,7 +1058,11 @@ class MatlibManager:
         if matlib is None:
             log.error("No materiallibrary node found inside %s", curr_node.path())
             return
-        self._configure_material_library(matlib, mat_variant=self.mat_variant_name)
+        self._configure_material_library(
+            matlib,
+            geo_variant=self.geo_variant_name,
+            mat_variant=self.mat_variant_name,
+        )
 
         discovery = MatlibDiscovery(
             self._hip, self.geo_variant_name, self.mat_variant_name

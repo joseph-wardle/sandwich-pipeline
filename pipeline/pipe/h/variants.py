@@ -15,6 +15,7 @@ USD_EXTENSIONS = frozenset({".usd", ".usda", ".usdc"})
 USD_EXTENSION_ORDER = (".usd", ".usdc", ".usda")
 DEFAULT_GEO_VARIANT = "main"
 DEFAULT_MAT_VARIANT = "main"
+GEOMETRY_SCOPE_PREFIX = "g_"
 MATERIAL_SCOPE_PREFIX = "v_"
 GEO_SOURCE_DIR = Path("publish") / "_src"
 TEX_SOURCE_DIR = Path("publish") / "tex"
@@ -82,9 +83,24 @@ def material_scope_name(mat_variant: str) -> str:
     return f"{MATERIAL_SCOPE_PREFIX}{token}"
 
 
-def material_scope_path(mat_variant: str) -> str:
-    """Return canonical material scope path under /ASSET/mtl."""
-    return f"/ASSET/mtl/{material_scope_name(mat_variant)}/"
+def geometry_scope_name(geo_variant: str) -> str:
+    """Return deterministic geometry-scope token: g_<geoVariant>."""
+    token = node_token(geo_variant, fallback=DEFAULT_GEO_VARIANT)
+    return f"{GEOMETRY_SCOPE_PREFIX}{token}"
+
+
+def material_scope_path(mat_variant: str, *, geo_variant: str | None = None) -> str:
+    """Return canonical material scope path under /ASSET/mtl.
+
+    When `geo_variant` is provided the path is:
+    `/ASSET/mtl/g_<geoVariant>/v_<matVariant>/`.
+    """
+    if geo_variant is None:
+        return f"/ASSET/mtl/{material_scope_name(mat_variant)}/"
+    return (
+        f"/ASSET/mtl/{geometry_scope_name(geo_variant)}/"
+        f"{material_scope_name(mat_variant)}/"
+    )
 
 
 def discover_build_plan(
@@ -283,6 +299,7 @@ def _usd_sort_key(path: Path) -> tuple[int, str]:
 __all__ = [
     "DEFAULT_GEO_VARIANT",
     "DEFAULT_MAT_VARIANT",
+    "GEOMETRY_SCOPE_PREFIX",
     "GEO_SOURCE_DIR",
     "GeometryVariantPlan",
     "MATERIAL_SCOPE_PREFIX",
@@ -290,6 +307,7 @@ __all__ = [
     "VariantBuildPlan",
     "default_geo_source_expression",
     "discover_build_plan",
+    "geometry_scope_name",
     "geo_source_expression",
     "material_scope_name",
     "material_scope_path",

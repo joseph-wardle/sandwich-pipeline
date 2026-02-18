@@ -553,6 +553,7 @@ def create_skd_component_material(
     parent: Optional[hou.Node] = None,
     *,
     node_name: str | None = None,
+    geo_variant_name: str | None = None,
     variant_name: str | None = None,
     use_input_variant_expression: bool = True,
 ) -> hou.Node:
@@ -593,13 +594,14 @@ def create_skd_component_material(
             output.setInput(0, assign)
 
         if variant_name is not None:
-            mat_root = f"{variants.material_scope_path(variant_name)}MAT_"
+            mat_root = f"{variants.material_scope_path(variant_name, geo_variant=geo_variant_name)}MAT_"
         elif use_input_variant_expression:
-            mat_root = '/ASSET/mtl/v_`chs(opinputpath(".",1)+"/mat_var")`/MAT_'
-        else:
             mat_root = (
-                f"{variants.material_scope_path(variants.DEFAULT_MAT_VARIANT)}MAT_"
+                '/ASSET/mtl/g_`chs(opinputpath(".",1)+"/geo_var")`/'
+                'v_`chs(opinputpath(".",1)+"/mat_var")`/MAT_'
             )
+        else:
+            mat_root = f"{variants.material_scope_path(variants.DEFAULT_MAT_VARIANT, geo_variant=variants.DEFAULT_GEO_VARIANT)}MAT_"
 
         _set_parm_if_exists(
             assign, "primpattern1", "%descendants(`lopinputprims('.', 0)`) & %type:Mesh"
@@ -635,7 +637,10 @@ def _configure_component_output_defaults(out: hou.Node) -> None:
 def _set_matlib_variant_selection(
     matlib: hou.Node, *, geo_variant: str, mat_variant: str
 ) -> None:
-    material_prefix = variants.material_scope_path(mat_variant)
+    material_prefix = variants.material_scope_path(
+        mat_variant,
+        geo_variant=geo_variant,
+    )
     _set_parm_if_exists(matlib, "geo_var", geo_variant)
     _set_parm_if_exists(matlib, "mat_var", mat_variant)
     _set_parm_if_exists(matlib, "matpathprefix", material_prefix)
@@ -867,6 +872,7 @@ def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
                 {},
                 parent=parent,
                 node_name=cmat_name,
+                geo_variant_name=geo_plan.name,
                 variant_name=mat_variant,
                 use_input_variant_expression=False,
             )
