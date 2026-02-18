@@ -37,6 +37,7 @@ SKD_VARIANT_GRAPH_MANAGED_VALUE = "1"
 SKD_VARIANT_GRAPH_OWNER_KEY = "pipe_skd_variant_graph_owner"
 SKD_VARIANT_WARNINGS_KEY = "pipe_skd_variant_graph_warnings"
 SKD_VARIANT_COMMENT_PREFIX = "SKD Variant Graph Warnings"
+SKD_PENDING_COMMENT_PREFIX = "Pending Variant:"
 
 log = logging.getLogger(__name__)
 
@@ -301,6 +302,70 @@ def _clear_managed_variant_nodes(
         if node.userData(SKD_VARIANT_GRAPH_OWNER_KEY) not in ("", owner_path):
             continue
         node.destroy()
+
+
+def _clear_managed_variant_boxes(parent: hou.Node, *, owner_path: str) -> None:
+    if not hasattr(parent, "networkBoxes"):
+        return
+    for net_box in parent.networkBoxes():
+        try:
+            managed = (
+                net_box.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
+                == SKD_VARIANT_GRAPH_MANAGED_VALUE
+            )
+            owner = net_box.userData(SKD_VARIANT_GRAPH_OWNER_KEY)
+        except Exception:
+            continue
+        if not managed:
+            continue
+        if owner not in ("", owner_path):
+            continue
+        try:
+            net_box.destroy()
+        except Exception:
+            continue
+
+
+def _create_managed_variant_box(
+    parent: hou.Node,
+    *,
+    owner_path: str,
+    name: str,
+    label: str,
+    nodes: list[hou.Node],
+) -> None:
+    if not hasattr(parent, "createNetworkBox"):
+        return
+    try:
+        net_box = parent.createNetworkBox()
+        net_box.setName(name, unique_name=True)
+        net_box.setUserData(
+            SKD_VARIANT_GRAPH_MANAGED_KEY, SKD_VARIANT_GRAPH_MANAGED_VALUE
+        )
+        net_box.setUserData(SKD_VARIANT_GRAPH_OWNER_KEY, owner_path)
+    except Exception:
+        return
+
+    if hasattr(net_box, "setComment"):
+        try:
+            net_box.setComment(label)
+        except Exception:
+            pass
+    elif hasattr(net_box, "setLabel"):
+        try:
+            net_box.setLabel(label)
+        except Exception:
+            pass
+
+    for item in nodes:
+        try:
+            net_box.addItem(item)
+        except Exception:
+            continue
+    try:
+        net_box.fitAroundContents()
+    except Exception:
+        pass
 
 
 def _set_variant_generation_warnings(node: hou.Node, warnings: list[str]) -> None:
@@ -642,9 +707,25 @@ def _first_managed_geometry_node(
     return sorted(geometry_nodes, key=lambda node: node.name().casefold())[0]
 
 
-def _mark_pending_variant_node(node: hou.Node, *, reason: str) -> None:
-    node.setColor(hou.Color((0.42, 0.42, 0.42)))
-    node.setComment(f"Pending Variant: {reason}")
+def _set_node_bypass(node: hou.Node, enabled: bool) -> None:
+    try:
+        node.bypass(enabled)
+        return
+    except Exception:
+        pass
+    try:
+        node.setGenericFlag(hou.nodeFlag.Bypass, enabled)
+    except Exception:
+        pass
+
+
+def _set_pending_state(node: hou.Node, *, pending: bool, reason: str = "") -> None:
+    _set_node_bypass(node, pending)
+    if pending:
+        node.setComment(f"{SKD_PENDING_COMMENT_PREFIX} {reason}")
+        return
+    if node.comment().startswith(SKD_PENDING_COMMENT_PREFIX):
+        node.setComment("")
 
 
 def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
@@ -660,6 +741,7 @@ def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
     warnings: list[str] = [*sg_warnings, *plan.warnings]
 
     owner_path = output.path()
+    _clear_managed_variant_boxes(parent, owner_path=owner_path)
     _clear_managed_variant_nodes(
         parent, keep_paths={output.path()}, owner_path=owner_path
     )
@@ -676,14 +758,21 @@ def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
     _mark_managed_variant_node(env, owner_path=owner_path)
 
     branch_outputs: list[tuple[str, hou.Node]] = []
-    all_geo_nodes: list[hou.Node] = []
+    branch_bottom_y: float = out_pos.y() + 2.0
     geo_count = len(plan.geometry_variants)
     center_x = (geo_count - 1) / 2.0
-    x_spacing = 10.0
+    max_mats = max(
+        (len(geo_plan.material_variants) for geo_plan in plan.geometry_variants),
+        default=1,
+    )
+    branch_top_y = out_pos.y() + 5.2 + max(0.0, float(max_mats - 3) * 0.9)
+    x_spacing = 5.0
 
     for geo_index, geo_plan in enumerate(plan.geometry_variants):
         geo_token = variants.node_token(geo_plan.name)
         geo_name = SKD_COMPONENT_GEOMETRY_NAME if geo_count == 1 else f"geo_{geo_token}"
+        branch_nodes: list[hou.Node] = []
+
         geo_node = create_skd_component_geometry(
             {},
             parent=parent,
@@ -695,20 +784,19 @@ def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
             ),
         )
         _mark_managed_variant_node(geo_node, owner_path=owner_path)
-        all_geo_nodes.append(geo_node)
-
-        if not geo_plan.source_exists:
-            _mark_pending_variant_node(
-                geo_node,
-                reason=(
-                    f"Missing geometry publish: "
-                    f"{variants.to_hip_expression(geo_plan.source_path, hip_root=plan.hip_root)}"
-                ),
-            )
+        branch_nodes.append(geo_node)
+        _set_pending_state(
+            geo_node,
+            pending=not geo_plan.source_exists,
+            reason=(
+                f"Missing geometry publish: "
+                f"{variants.to_hip_expression(geo_plan.source_path, hip_root=plan.hip_root)}"
+            ),
+        )
 
         branch_x = (geo_index - center_x) * x_spacing
-        geo_node.setPosition(out_pos + hou.Vector2(branch_x, 5.0))
-        active_tail: hou.Node | None = None
+        geo_node.setPosition(hou.Vector2(out_pos.x() + branch_x, branch_top_y))
+        branch_tail: hou.Node = geo_node
 
         single_branch = geo_count == 1 and len(geo_plan.material_variants) == 1
         for mat_index, mat_variant in enumerate(geo_plan.material_variants):
@@ -722,6 +810,7 @@ def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
 
             matlib = create_skd_matlib(parent, matlib_name)
             _mark_managed_variant_node(matlib, owner_path=owner_path)
+            branch_nodes.append(matlib)
             _set_matlib_variant_selection(
                 matlib, geo_variant=geo_plan.name, mat_variant=mat_variant
             )
@@ -734,34 +823,33 @@ def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
                 use_input_variant_expression=False,
             )
             _mark_managed_variant_node(cmat, owner_path=owner_path)
+            branch_nodes.append(cmat)
+
+            cmat.setInput(0, branch_tail)
             cmat.setInput(1, matlib)
+            branch_tail = cmat
 
             is_texture_published = mat_variant in geo_plan.existing_material_variants
-            is_active_combo = geo_plan.source_exists and is_texture_published
-            if is_active_combo:
-                cmat.setInput(0, active_tail or geo_node)
-                active_tail = cmat
-                mat_x = branch_x
-            else:
-                cmat.setInput(0, geo_node)
-                mat_x = branch_x + 3.3
-                reason = (
-                    "missing geometry publish"
-                    if not geo_plan.source_exists
-                    else "missing texture publish"
-                )
-                _mark_pending_variant_node(
-                    cmat,
-                    reason=f"{reason} for geo='{geo_plan.name}' mat='{mat_variant}'",
-                )
-                _mark_pending_variant_node(
-                    matlib,
-                    reason=f"Awaiting textures for geo='{geo_plan.name}' mat='{mat_variant}'",
-                )
+            combo_missing = (not geo_plan.source_exists) or (not is_texture_published)
+            _set_pending_state(
+                cmat,
+                pending=combo_missing,
+                reason=(
+                    f"Missing texture publish for geo='{geo_plan.name}' mat='{mat_variant}'"
+                    if geo_plan.source_exists
+                    else f"Missing geometry publish for geo='{geo_plan.name}'"
+                ),
+            )
+            _set_pending_state(
+                matlib,
+                pending=not is_texture_published,
+                reason=f"Awaiting textures for geo='{geo_plan.name}' mat='{mat_variant}'",
+            )
 
-            mat_y = 3.3 - mat_index * 2.4
-            cmat.setPosition(out_pos + hou.Vector2(mat_x, mat_y))
-            matlib.setPosition(out_pos + hou.Vector2(mat_x + 2.0, mat_y + 0.9))
+            mat_y = branch_top_y - 1.4 - mat_index * 1.6
+            cmat.setPosition(hou.Vector2(out_pos.x() + branch_x, mat_y))
+            matlib.setPosition(hou.Vector2(out_pos.x() + branch_x + 1.7, mat_y + 0.8))
+            branch_bottom_y = min(branch_bottom_y, mat_y)
 
             if is_texture_published:
                 _rebuild_matlib_for_variant(
@@ -771,44 +859,42 @@ def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
                     warnings=warnings,
                 )
 
-        if not geo_plan.source_exists:
-            warnings.append(
-                f"Branch generated but disconnected for geometry '{geo_plan.name}' (publish missing)."
-            )
-            continue
-
-        if active_tail is not None:
-            branch_outputs.append((geo_plan.name, active_tail))
-            continue
-
-        warnings.append(
-            f"No published material variants found for geometry '{geo_plan.name}'; wiring geometry branch directly."
+        branch_bottom_y = min(branch_bottom_y, branch_top_y)
+        _create_managed_variant_box(
+            parent,
+            owner_path=owner_path,
+            name=f"geo_branch_{geo_token}",
+            label=f"Geo Variant: {geo_plan.name}",
+            nodes=branch_nodes,
         )
-        branch_outputs.append((geo_plan.name, geo_node))
+        branch_outputs.append((geo_plan.name, branch_tail))
 
-    if not branch_outputs and all_geo_nodes:
-        warnings.append(
-            "No published geometry branches were available; wiring fallback geometry branch so network remains valid."
-        )
-        fallback_geo_name = plan.geometry_variants[0].name
-        branch_outputs.append((fallback_geo_name, all_geo_nodes[0]))
+    if not branch_outputs:
+        raise RuntimeError("Variant graph generation produced no geometry branches")
 
     upstream: hou.Node = branch_outputs[0][1]
     if len(branch_outputs) > 1:
         geo_variants = parent.createNode("componentgeometryvariants")
         geo_variants.setName("geo_variants", unique_name=True)
         _mark_managed_variant_node(geo_variants, owner_path=owner_path)
-        geo_variants.setPosition(out_pos + hou.Vector2(0.0, 2.4))
+        geo_variants.setPosition(hou.Vector2(out_pos.x(), branch_bottom_y - 1.4))
 
         for index, (_, branch) in enumerate(branch_outputs):
             geo_variants.setInput(index, branch)
 
         _set_parm_if_exists(geo_variants, "variantset", "geo")
         _set_parm_if_exists(geo_variants, "variantnamesrc", 0)
-        _set_parm_if_exists(geo_variants, "variantcount", len(branch_outputs))
+        _set_parm_if_exists(geo_variants, "variantcount", len(plan.geometry_variants))
         for index, (geo_name, _) in enumerate(branch_outputs, start=1):
             _set_parm_if_exists(geo_variants, f"variantname{index}", geo_name)
 
+        _create_managed_variant_box(
+            parent,
+            owner_path=owner_path,
+            name="geo_variant_merge",
+            label="Geometry Variant Merge",
+            nodes=[geo_variants],
+        )
         upstream = geo_variants
 
     config.setInput(0, upstream)
@@ -817,9 +903,18 @@ def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
     lookdev.setInput(0, output)
     _set_parm_if_exists(env, "loppath", f"../{lookdev.name()}/OUT_ENV")
 
-    config.setPosition(out_pos + hou.Vector2(0.0, 1.0))
+    config_y = (upstream.position().y() + out_pos.y()) / 2.0
+    config.setPosition(hou.Vector2(out_pos.x(), config_y))
     env.setPosition(out_pos + hou.Vector2(1.5, 0.5))
     lookdev.setPosition(out_pos + hou.Vector2(0.0, -1.0))
+
+    _create_managed_variant_box(
+        parent,
+        owner_path=owner_path,
+        name="component_publish",
+        label="Component Publish",
+        nodes=[config, output, env, lookdev],
+    )
 
     _set_variant_generation_warnings(output, warnings)
     return tuple(warnings)
