@@ -38,6 +38,7 @@ SKD_VARIANT_GRAPH_OWNER_KEY = "pipe_skd_variant_graph_owner"
 SKD_VARIANT_WARNINGS_KEY = "pipe_skd_variant_graph_warnings"
 SKD_VARIANT_COMMENT_PREFIX = "SKD Variant Graph Warnings"
 SKD_PENDING_COMMENT_PREFIX = "Pending Variant:"
+SKD_VARIANT_BOX_PREFIX = "skd_variant_"
 
 log = logging.getLogger(__name__)
 
@@ -308,6 +309,12 @@ def _clear_managed_variant_boxes(parent: hou.Node, *, owner_path: str) -> None:
     if not hasattr(parent, "networkBoxes"):
         return
     for net_box in parent.networkBoxes():
+        box_name = ""
+        try:
+            box_name = net_box.name()
+        except Exception:
+            box_name = ""
+
         try:
             managed = (
                 net_box.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
@@ -315,10 +322,12 @@ def _clear_managed_variant_boxes(parent: hou.Node, *, owner_path: str) -> None:
             )
             owner = net_box.userData(SKD_VARIANT_GRAPH_OWNER_KEY)
         except Exception:
+            managed = False
+            owner = ""
+
+        if not managed and not box_name.startswith(SKD_VARIANT_BOX_PREFIX):
             continue
-        if not managed:
-            continue
-        if owner not in ("", owner_path):
+        if managed and owner not in ("", owner_path):
             continue
         try:
             net_box.destroy()
@@ -338,22 +347,31 @@ def _create_managed_variant_box(
         return
     try:
         net_box = parent.createNetworkBox()
-        net_box.setName(name, unique_name=True)
+        net_box.setName(f"{SKD_VARIANT_BOX_PREFIX}{name}", unique_name=True)
+    except Exception:
+        return
+
+    try:
         net_box.setUserData(
             SKD_VARIANT_GRAPH_MANAGED_KEY, SKD_VARIANT_GRAPH_MANAGED_VALUE
         )
         net_box.setUserData(SKD_VARIANT_GRAPH_OWNER_KEY, owner_path)
     except Exception:
-        return
+        pass
 
+    if hasattr(net_box, "setLabel"):
+        try:
+            net_box.setLabel(label)
+        except Exception:
+            pass
     if hasattr(net_box, "setComment"):
         try:
             net_box.setComment(label)
-        except Exception:
-            pass
-    elif hasattr(net_box, "setLabel"):
-        try:
-            net_box.setLabel(label)
+            if hasattr(net_box, "setGenericFlag"):
+                try:
+                    net_box.setGenericFlag(hou.networkItemFlag.DisplayComment, True)
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -361,11 +379,25 @@ def _create_managed_variant_box(
         try:
             net_box.addItem(item)
         except Exception:
-            continue
+            try:
+                net_box.addNode(item)
+            except Exception:
+                continue
     try:
         net_box.fitAroundContents()
     except Exception:
-        pass
+        try:
+            points = [node.position() for node in nodes]
+            if not points:
+                return
+            min_x = min(point.x() for point in points) - 1.6
+            max_x = max(point.x() for point in points) + 3.1
+            min_y = min(point.y() for point in points) - 1.2
+            max_y = max(point.y() for point in points) + 1.8
+            net_box.setPosition(hou.Vector2(min_x, max_y))
+            net_box.setSize(hou.Vector2(max_x - min_x, max_y - min_y))
+        except Exception:
+            pass
 
 
 def _set_variant_generation_warnings(node: hou.Node, warnings: list[str]) -> None:
@@ -779,11 +811,14 @@ def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
         default=1,
     )
     branch_top_y = out_pos.y() + 5.2 + max(0.0, float(max_mats - 3) * 0.9)
-    x_spacing = 5.0
+    x_spacing = 3.6
 
     for geo_index, geo_plan in enumerate(plan.geometry_variants):
         geo_token = variants.node_token(geo_plan.name)
-        geo_name = SKD_COMPONENT_GEOMETRY_NAME if geo_count == 1 else f"geo_{geo_token}"
+        geo_name = variants.node_token(
+            geo_plan.name,
+            fallback=SKD_COMPONENT_GEOMETRY_NAME,
+        )
         branch_nodes: list[hou.Node] = []
 
         geo_node = create_skd_component_geometry(
@@ -916,10 +951,11 @@ def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
     lookdev.setInput(0, output)
     _set_parm_if_exists(env, "loppath", f"../{lookdev.name()}/OUT_ENV")
 
-    config_y = (upstream.position().y() + out_pos.y()) / 2.0
-    config.setPosition(hou.Vector2(out_pos.x(), config_y))
-    env.setPosition(out_pos + hou.Vector2(1.5, 0.5))
-    lookdev.setPosition(out_pos + hou.Vector2(0.0, -1.0))
+    publish_anchor_y = upstream.position().y() - 2.0
+    config.setPosition(hou.Vector2(out_pos.x(), publish_anchor_y))
+    output.setPosition(hou.Vector2(out_pos.x(), publish_anchor_y - 1.6))
+    env.setPosition(hou.Vector2(out_pos.x() + 2.1, publish_anchor_y - 0.9))
+    lookdev.setPosition(hou.Vector2(out_pos.x(), publish_anchor_y - 3.3))
 
     _create_managed_variant_box(
         parent,
