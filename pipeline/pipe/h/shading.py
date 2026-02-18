@@ -12,6 +12,8 @@ from pipe.db import DB
 from pipe.struct.db import Asset
 from pipe.struct.material import MaterialInfo
 
+from . import variants
+
 log = logging.getLogger(__name__)
 
 _MATLIB_NAME = "Material_Library"
@@ -994,11 +996,13 @@ class MatlibManager:
         return None
 
     @staticmethod
-    def _configure_material_library(matlib: hou.Node) -> None:
-        # Component Material expects materials under /ASSET/mtl/MAT_<texset>.
+    def _configure_material_library(matlib: hou.Node, *, mat_variant: str) -> None:
+        # Component Material expects materials under
+        # /ASSET/mtl/v_<matVariant>/MAT_<texset>.
+        material_prefix = variants.material_scope_path(mat_variant)
         for parm_name, value in (
-            ("matpathprefix", "/ASSET/mtl/"),
-            ("materialpathprefix", "/ASSET/mtl/"),
+            ("matpathprefix", material_prefix),
+            ("materialpathprefix", material_prefix),
             ("matnodepattern", "MAT_*"),
         ):
             parm = matlib.parm(parm_name)
@@ -1050,7 +1054,7 @@ class MatlibManager:
         if matlib is None:
             log.error("No materiallibrary node found inside %s", curr_node.path())
             return
-        self._configure_material_library(matlib)
+        self._configure_material_library(matlib, mat_variant=self.mat_variant_name)
 
         discovery = MatlibDiscovery(
             self._hip, self.geo_variant_name, self.mat_variant_name

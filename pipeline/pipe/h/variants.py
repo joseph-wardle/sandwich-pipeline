@@ -15,6 +15,7 @@ USD_EXTENSIONS = frozenset({".usd", ".usda", ".usdc"})
 USD_EXTENSION_ORDER = (".usd", ".usdc", ".usda")
 DEFAULT_GEO_VARIANT = "main"
 DEFAULT_MAT_VARIANT = "main"
+MATERIAL_SCOPE_PREFIX = "v_"
 GEO_SOURCE_DIR = Path("publish") / "_src"
 TEX_SOURCE_DIR = Path("publish") / "tex"
 _NODE_TOKEN_RE = re.compile(r"[^A-Za-z0-9_]+")
@@ -73,6 +74,17 @@ def node_token(value: str, *, fallback: str = "main") -> str:
     if token[0].isdigit():
         token = f"v_{token}"
     return token.lower()
+
+
+def material_scope_name(mat_variant: str) -> str:
+    """Return deterministic material-scope token: v_<matVariant>."""
+    token = node_token(mat_variant, fallback=DEFAULT_MAT_VARIANT)
+    return f"{MATERIAL_SCOPE_PREFIX}{token}"
+
+
+def material_scope_path(mat_variant: str) -> str:
+    """Return canonical material scope path under /ASSET/mtl."""
+    return f"/ASSET/mtl/{material_scope_name(mat_variant)}/"
 
 
 def discover_build_plan(
@@ -273,11 +285,14 @@ __all__ = [
     "DEFAULT_MAT_VARIANT",
     "GEO_SOURCE_DIR",
     "GeometryVariantPlan",
+    "MATERIAL_SCOPE_PREFIX",
     "TEX_SOURCE_DIR",
     "VariantBuildPlan",
     "default_geo_source_expression",
     "discover_build_plan",
     "geo_source_expression",
+    "material_scope_name",
+    "material_scope_path",
     "node_token",
     "to_hip_expression",
 ]

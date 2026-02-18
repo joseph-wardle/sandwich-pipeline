@@ -525,7 +525,6 @@ def create_skd_component_material(
     use_input_variant_expression: bool = True,
 ) -> hou.Node:
     """Create the standard SKD Component Material configuration."""
-    MAT_ROOT = "/ASSET/mtl/MAT_"
     TS_PRIMVAR = "texset"
 
     if parent:
@@ -560,6 +559,16 @@ def create_skd_component_material(
         output = edit.node("./output0")
         if output is not None:
             output.setInput(0, assign)
+
+        if variant_name is not None:
+            mat_root = f"{variants.material_scope_path(variant_name)}MAT_"
+        elif use_input_variant_expression:
+            mat_root = '/ASSET/mtl/v_`chs(opinputpath(".",1)+"/mat_var")`/MAT_'
+        else:
+            mat_root = (
+                f"{variants.material_scope_path(variants.DEFAULT_MAT_VARIANT)}MAT_"
+            )
+
         _set_parm_if_exists(
             assign, "primpattern1", "%descendants(`lopinputprims('.', 0)`) & %type:Mesh"
         )
@@ -568,7 +577,7 @@ def create_skd_component_material(
             assign,
             "matspecvexpr1",
             (
-                f"return '{MAT_ROOT}' + usd_primvarelement(0, @primpath, '{TS_PRIMVAR}', "
+                f"return '{mat_root}' + usd_primvarelement(0, @primpath, '{TS_PRIMVAR}', "
                 f"usd_primvarindices(0, @primpath, '{TS_PRIMVAR}')[@elemnum]);"
             ),
         )
@@ -594,8 +603,12 @@ def _configure_component_output_defaults(out: hou.Node) -> None:
 def _set_matlib_variant_selection(
     matlib: hou.Node, *, geo_variant: str, mat_variant: str
 ) -> None:
+    material_prefix = variants.material_scope_path(mat_variant)
     _set_parm_if_exists(matlib, "geo_var", geo_variant)
     _set_parm_if_exists(matlib, "mat_var", mat_variant)
+    _set_parm_if_exists(matlib, "matpathprefix", material_prefix)
+    _set_parm_if_exists(matlib, "materialpathprefix", material_prefix)
+    _set_parm_if_exists(matlib, "matnodepattern", "MAT_*")
 
 
 def _discover_asset_variants_from_shotgrid() -> (
