@@ -336,12 +336,7 @@ def _resolve_component_output_node(
     if node.type().name() == COMPONENT_OUTPUT_TYPE_NAME:
         return node
 
-    matches = [
-        child
-        for child in node.children()
-        if isinstance(child, hou.LopNode)
-        and child.type().name() == COMPONENT_OUTPUT_TYPE_NAME
-    ]
+    matches = _embedded_component_outputs(node)
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -358,6 +353,54 @@ def _resolve_component_output_node(
         f"Node is not a componentoutput and has no componentoutput child: {node.path()}",
     )
     return None
+
+
+def _embedded_component_outputs(node: hou.Node) -> list[hou.LopNode]:
+    """Return embedded componentoutput children for wrapper HDAs.
+
+    Some locked HDAs do not expose internal nodes through `children()`, but
+    still resolve direct paths via `node.node("component_output")`.
+    """
+
+    matches: list[hou.LopNode] = []
+    seen_paths: set[str] = set()
+
+    def _append(candidate: hou.Node | None) -> None:
+        if candidate is None:
+            return
+        if not isinstance(candidate, hou.LopNode):
+            return
+        if candidate.type().name() != COMPONENT_OUTPUT_TYPE_NAME:
+            return
+        path = candidate.path()
+        if path in seen_paths:
+            return
+        seen_paths.add(path)
+        matches.append(candidate)
+
+    # Most common direct internal names for wrapper HDAs.
+    for name in ("component_output", "componentoutput", "COMPONENT_OUT"):
+        _append(node.node(name))
+
+    # Visible direct children (unlocked HDAs / subnets).
+    for child in node.children():
+        if child.parent() != node:
+            continue
+        _append(child)
+
+    if matches:
+        return matches
+
+    # Locked HDAs can still report descendants via allSubChildren.
+    try:
+        descendants = node.allSubChildren()
+    except Exception:
+        descendants = ()
+    for child in descendants:
+        if child.parent() != node:
+            continue
+        _append(child)
+    return matches
 
 
 def _resolve_hip_path(

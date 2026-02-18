@@ -238,8 +238,25 @@ def _find_component_output(node: hou.Node) -> hou.LopNode | None:
     if isinstance(node, hou.LopNode) and node.type().name() == "componentoutput":
         return node
 
+    for name in ("component_output", "componentoutput", "COMPONENT_OUT"):
+        child = node.node(name)
+        if isinstance(child, hou.LopNode) and child.type().name() == "componentoutput":
+            return child
+
     for child in node.children():
         if isinstance(child, hou.LopNode) and child.type().name() == "componentoutput":
+            return child
+
+    try:
+        descendants = node.allSubChildren()
+    except Exception:
+        descendants = ()
+    for child in descendants:
+        if (
+            isinstance(child, hou.LopNode)
+            and child.parent() == node
+            and child.type().name() == "componentoutput"
+        ):
             return child
     return None
 
