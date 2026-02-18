@@ -40,12 +40,19 @@ DEFAULT_VARIANT = "main"
 DEFAULT_HOOK_FUNCTION = "run"
 THUMBNAIL_CONTEXT_OPTION = "RENDER_THUMBNAIL"
 THUMBNAIL_FALLBACK_MODE = 3
+DEFAULT_LOOKDEV_CAMERA = "/lookdev/cam"
 
 GALLERY_META_ASSET_KEY = "pipe_asset_key"
+GALLERY_META_POLICY_KEY = "pipe_policy_key"
 GALLERY_META_ASSET_NAME = "pipe_asset_name"
+GALLERY_META_ASSET_ID = "pipe_asset_id"
+GALLERY_META_ASSET_PATH = "pipe_asset_path"
 GALLERY_META_BACKUP_VERSION = "pipe_backup_version"
 GALLERY_META_EXPORT_PATH = "pipe_export_path"
+GALLERY_META_GEO_VARIANT = "pipe_geo_variant"
 GALLERY_META_HIP_PATH = "pipe_hip_path"
+GALLERY_META_MATERIAL_LAYER = "pipe_material_layer"
+GALLERY_META_MATERIAL_VARIANT = "pipe_material_variant"
 GALLERY_META_NODE_PATH = "pipe_node_path"
 GALLERY_META_PUBLISHED_AT = "pipe_published_at"
 GALLERY_META_VARIANT = "pipe_variant"
@@ -83,6 +90,7 @@ class GallerySummary(TypedDict):
     status: str
     db_path: str
     item_id: str
+    policy_key: str
     pruned_item_ids: list[str]
 
 
@@ -122,6 +130,9 @@ class PublishOptions:
     asset_path: str | None = None
     asset_id: int | None = None
     variant: str | None = None
+    geo_variant: str | None = None
+    material_variant: str | None = None
+    material_layer: str | None = None
 
     save_hip_before_publish: bool = True
     backup_dir: Path | None = None
@@ -168,6 +179,9 @@ class _PublishContext:
     backup_dir: Path
     asset_name: str
     variant: str
+    geo_variant: str
+    material_variant: str
+    material_layer: str
     export_path: Path
 
 
@@ -260,7 +274,13 @@ def _default_thumbnail_summary() -> ThumbnailSummary:
 
 
 def _default_gallery_summary() -> GallerySummary:
-    return {"status": "skipped", "db_path": "", "item_id": "", "pruned_item_ids": []}
+    return {
+        "status": "skipped",
+        "db_path": "",
+        "item_id": "",
+        "policy_key": "",
+        "pruned_item_ids": [],
+    }
 
 
 def _preflight_context(
@@ -296,6 +316,15 @@ def _preflight_context(
 
     asset_name = _resolve_asset_name(options=options, asset_root=asset_root)
     variant = _normalized_variant(options.variant)
+    geo_variant = _normalized_optional(
+        options.geo_variant or options.variant or _safe_context_option("GEO_VARIANT")
+    )
+    material_variant = _normalized_optional(
+        options.material_variant or _safe_context_option("MAT_VARIANT")
+    )
+    material_layer = _normalized_optional(
+        options.material_layer or _safe_context_option("MATERIAL_LAYER")
+    )
 
     if options.export_component and not _node_can_export(node):
         _error(
@@ -318,6 +347,9 @@ def _preflight_context(
         backup_dir=backup_dir,
         asset_name=asset_name,
         variant=variant,
+        geo_variant=geo_variant,
+        material_variant=material_variant,
+        material_layer=material_layer,
         export_path=export_path,
     )
 
@@ -649,15 +681,28 @@ def _collect_thumbnail(
 ) -> tuple[ThumbnailSummary, bytes | None]:
     node = context.node
     summary = _default_thumbnail_summary()
-    summary["camera"] = _eval_parm_string(node, "thumbnailinputcamera")
+    summary["camera"] = (
+        _eval_parm_string(node, "thumbnailinputcamera") or DEFAULT_LOOKDEV_CAMERA
+    )
     summary["renderer"] = _eval_parm_string(node, "renderer")
     summary["mode"] = _eval_parm_int(node, "thumbnailmode", default=-1)
 
     thumbnail_path = _resolve_thumbnail_output_path(node)
     if options.collect_thumbnail and options.generate_thumbnail_if_missing:
+        force_mode = None
+        if not _thumbnail_camera_available(node=node, camera_prim=summary["camera"]):
+            force_mode = THUMBNAIL_FALLBACK_MODE
+            _warn(
+                result,
+                "ThumbnailCameraMissing",
+                f"Thumbnail camera prim not found at {summary['camera']}; falling back to viewport thumbnail generation.",
+            )
+
         # Regenerate thumbnail on every publish to keep gallery visuals current.
         with _thumbnail_context_enabled():
-            _generate_thumbnail_if_supported(node=node, result=result)
+            _generate_thumbnail_if_supported(
+                node=node, result=result, force_mode=force_mode
+            )
 
         thumbnail_path = _resolve_thumbnail_output_path(node)
         if thumbnail_path is not None and not thumbnail_path.exists():
@@ -714,6 +759,34 @@ def _collect_thumbnail(
     summary["captured"] = True
     summary["thumbnail_bytes"] = len(data)
     return summary, data
+
+
+def _thumbnail_camera_available(*, node: hou.LopNode, camera_prim: str) -> bool:
+    prim_path = camera_prim.strip()
+    if not prim_path:
+        return False
+
+    try:
+        stage = node.stage()
+    except Exception:
+        return False
+    if stage is None:
+        return False
+
+    try:
+        prim = stage.GetPrimAtPath(prim_path)
+    except Exception:
+        return False
+
+    try:
+        if not prim or not prim.IsValid():
+            return False
+        prim_type = (prim.GetTypeName() or "").strip()
+    except Exception:
+        return False
+    if prim_type and prim_type.casefold() == "camera":
+        return True
+    return False
 
 
 def _generate_thumbnail_if_supported(
@@ -951,116 +1024,99 @@ def _sync_gallery(
     thumbnail_bytes: bytes | None,
     backup_version: int,
 ) -> GallerySummary:
+    policy_key = _gallery_policy_key(context)
     if not options.update_gallery:
-        return _default_gallery_summary()
+        summary = _default_gallery_summary()
+        summary["policy_key"] = policy_key
+        return summary
 
     db_path = _resolve_gallery_db_path(options)
     if db_path is None:
         message = "Gallery DB path is not configured (HOUDINI_ASSETGALLERY_DATA_SOURCE/HOUDINI_ASSETGALLERY_DB_FILE)."
         _gallery_issue(result, options, code="GalleryDBMissing", message=message)
-        return _default_gallery_summary()
-
-    try:
-        datasource = hou.AssetGalleryDataSource(str(db_path))
-    except Exception as exc:
-        _gallery_issue(
-            result,
-            options,
-            code="GalleryInitError",
-            message=f"Failed to open Asset Gallery datasource {db_path}: {exc}",
-        )
-        return {
-            "status": "failed",
-            "db_path": str(db_path),
-            "item_id": "",
-            "pruned_item_ids": [],
-        }
-
-    if not datasource.isValid():
-        _gallery_issue(
-            result,
-            options,
-            code="GalleryInvalid",
-            message=f"Asset Gallery datasource is invalid: {db_path}",
-        )
-        return {
-            "status": "failed",
-            "db_path": str(db_path),
-            "item_id": "",
-            "pruned_item_ids": [],
-        }
-
-    if datasource.isReadOnly():
-        _gallery_issue(
-            result,
-            options,
-            code="GalleryReadOnly",
-            message=f"Asset Gallery datasource is read-only: {db_path}",
-        )
-        return {
-            "status": "failed",
-            "db_path": str(db_path),
-            "item_id": "",
-            "pruned_item_ids": [],
-        }
+        summary = _default_gallery_summary()
+        summary["policy_key"] = policy_key
+        return summary
 
     label = options.gallery_label or context.asset_name or context.export_path.stem
     asset_key = f"{context.asset_name}|{context.variant}"
     metadata = {
         GALLERY_META_ASSET_KEY: asset_key,
+        GALLERY_META_POLICY_KEY: policy_key,
         GALLERY_META_ASSET_NAME: context.asset_name,
         GALLERY_META_VARIANT: context.variant,
+        GALLERY_META_GEO_VARIANT: context.geo_variant,
+        GALLERY_META_MATERIAL_VARIANT: context.material_variant,
+        GALLERY_META_MATERIAL_LAYER: context.material_layer,
         GALLERY_META_NODE_PATH: context.node.path(),
         GALLERY_META_HIP_PATH: str(context.hip_path),
         GALLERY_META_EXPORT_PATH: str(context.export_path),
         GALLERY_META_BACKUP_VERSION: str(backup_version),
         GALLERY_META_PUBLISHED_AT: _utc_now_iso(),
     }
+    if options.asset_path:
+        metadata[GALLERY_META_ASSET_PATH] = options.asset_path
+    if options.asset_id is not None:
+        metadata[GALLERY_META_ASSET_ID] = str(options.asset_id)
 
     pruned_ids: list[str] = []
     added_item_id = ""
     try:
-        existing_ids = _find_gallery_matches(
-            datasource=datasource,
-            export_path=context.export_path,
-            asset_key=asset_key,
-        )
-        datasource.startTransaction()
-        try:
-            if options.prune_existing_items and existing_ids:
-                if datasource.markItemsForDeletion(tuple(existing_ids)):
-                    pruned_ids = existing_ids
-                else:
+        with _gallery_lock(db_path=db_path, options=options, result=result):
+            datasource = _open_gallery_datasource(
+                db_path=db_path, options=options, result=result
+            )
+            if datasource is None:
+                return {
+                    "status": "failed",
+                    "db_path": str(db_path),
+                    "item_id": "",
+                    "policy_key": policy_key,
+                    "pruned_item_ids": [],
+                }
+
+            existing_ids = _find_gallery_matches(
+                datasource=datasource,
+                export_path=context.export_path,
+                policy_key=policy_key,
+                asset_key=asset_key,
+            )
+            datasource.startTransaction()
+            try:
+                if options.prune_existing_items and existing_ids:
+                    if datasource.markItemsForDeletion(tuple(existing_ids)):
+                        pruned_ids = existing_ids
+                    else:
+                        _warn(
+                            result,
+                            "GalleryPruneFailed",
+                            f"Failed to mark existing gallery items for deletion: {existing_ids}",
+                        )
+
+                added_item_id = datasource.addItem(label, str(context.export_path))
+                if not added_item_id:
+                    raise RuntimeError("addItem returned an empty item id")
+
+                datasource.setOwnsFile(added_item_id, False)
+                datasource.setMetadata(added_item_id, metadata)
+                if thumbnail_bytes:
+                    set_result = datasource.setThumbnail(added_item_id, thumbnail_bytes)
+                    if set_result is False:
+                        _warn(
+                            result,
+                            "GalleryThumbnailSetFailed",
+                            f"Asset Gallery rejected thumbnail bytes for item {added_item_id}.",
+                        )
+                elif options.collect_thumbnail:
                     _warn(
                         result,
-                        "GalleryPruneFailed",
-                        f"Failed to mark existing gallery items for deletion: {existing_ids}",
+                        "GalleryThumbnailMissing",
+                        f"No thumbnail bytes available for {context.node.path()}; gallery item will be created without a thumbnail.",
                     )
-
-            added_item_id = datasource.addItem(label, str(context.export_path))
-            if not added_item_id:
-                raise RuntimeError("addItem returned an empty item id")
-
-            datasource.setOwnsFile(added_item_id, False)
-            datasource.setMetadata(added_item_id, metadata)
-            if thumbnail_bytes:
-                set_result = datasource.setThumbnail(added_item_id, thumbnail_bytes)
-                if set_result is False:
-                    _warn(
-                        result,
-                        "GalleryThumbnailSetFailed",
-                        f"Asset Gallery rejected thumbnail bytes for item {added_item_id}.",
-                    )
-            elif options.collect_thumbnail:
-                _warn(
-                    result,
-                    "GalleryThumbnailMissing",
-                    f"No thumbnail bytes available for {context.node.path()}; gallery item will be created without a thumbnail.",
-                )
-        except Exception:
-            datasource.endTransaction(commit=False)
-            raise
-        datasource.endTransaction(commit=True)
+            except Exception:
+                datasource.endTransaction(commit=False)
+                raise
+            datasource.endTransaction(commit=True)
     except Exception as exc:
         _gallery_issue(
             result,
@@ -1072,6 +1128,7 @@ def _sync_gallery(
             "status": "failed",
             "db_path": str(db_path),
             "item_id": "",
+            "policy_key": policy_key,
             "pruned_item_ids": pruned_ids,
         }
 
@@ -1079,12 +1136,98 @@ def _sync_gallery(
         "status": "success",
         "db_path": str(db_path),
         "item_id": added_item_id,
+        "policy_key": policy_key,
         "pruned_item_ids": pruned_ids,
     }
 
 
+def _open_gallery_datasource(
+    *,
+    db_path: Path,
+    options: PublishOptions,
+    result: PublishResult,
+) -> hou.AssetGalleryDataSource | None:
+    try:
+        datasource = hou.AssetGalleryDataSource(str(db_path))
+    except Exception as exc:
+        _gallery_issue(
+            result,
+            options,
+            code="GalleryInitError",
+            message=f"Failed to open Asset Gallery datasource {db_path}: {exc}",
+        )
+        return None
+
+    if not datasource.isValid():
+        _gallery_issue(
+            result,
+            options,
+            code="GalleryInvalid",
+            message=f"Asset Gallery datasource is invalid: {db_path}",
+        )
+        return None
+
+    if datasource.isReadOnly():
+        _gallery_issue(
+            result,
+            options,
+            code="GalleryReadOnly",
+            message=f"Asset Gallery datasource is read-only: {db_path}",
+        )
+        return None
+    return datasource
+
+
+@contextmanager
+def _gallery_lock(*, db_path: Path, options: PublishOptions, result: PublishResult):
+    lock_file = Path(str(db_path) + ".lock")
+    try:
+        from filelock import FileLock
+    except Exception:
+        _warn(
+            result,
+            "GalleryLockUnavailable",
+            "filelock package unavailable; proceeding without gallery DB lock.",
+        )
+        yield
+        return
+
+    lock = FileLock(str(lock_file), mode=0o775)
+    try:
+        with lock.acquire(timeout=40):
+            yield
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed acquiring gallery DB lock {lock_file}: {exc}"
+        ) from exc
+
+
+def _gallery_policy_key(context: _PublishContext) -> str:
+    """Deterministic key for gallery prune/update policy.
+
+    Priority:
+    1. asset + geo/material/material-layer variants when available
+    2. asset + publish `variant` fallback
+    """
+
+    parts = [context.asset_name]
+    if context.geo_variant:
+        parts.append(f"geo={context.geo_variant}")
+    if context.material_variant:
+        parts.append(f"mat={context.material_variant}")
+    if context.material_layer:
+        parts.append(f"layer={context.material_layer}")
+    if len(parts) == 1:
+        parts.append(f"variant={context.variant}")
+    return "|".join(parts)
+
+
 def _find_gallery_matches(
-    *, datasource: hou.AssetGalleryDataSource, export_path: Path, asset_key: str
+    *,
+    datasource: hou.AssetGalleryDataSource,
+    export_path: Path,
+    policy_key: str,
+    asset_key: str,
 ) -> list[str]:
     matches: list[str] = []
     export_str = str(export_path)
@@ -1094,6 +1237,10 @@ def _find_gallery_matches(
             matches.append(item_id)
             continue
         metadata = datasource.metadata(item_id) or {}
+        if str(metadata.get(GALLERY_META_POLICY_KEY, "")).strip() == policy_key:
+            matches.append(item_id)
+            continue
+        # Legacy fallback before policy key existed.
         if str(metadata.get(GALLERY_META_ASSET_KEY, "")).strip() == asset_key:
             matches.append(item_id)
     return matches
@@ -1233,6 +1380,11 @@ def _eval_parm_path(node: hou.Node, parm_name: str) -> Path | None:
 def _normalized_variant(value: str | None) -> str:
     text = (value or "").strip()
     return text or DEFAULT_VARIANT
+
+
+def _normalized_optional(value: str | None) -> str:
+    text = (value or "").strip()
+    return text
 
 
 def _safe_context_option(name: str) -> str | None:

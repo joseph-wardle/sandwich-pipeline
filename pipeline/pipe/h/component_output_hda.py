@@ -176,12 +176,14 @@ def publish(node: hou.Node) -> dict[str, Any]:
 
 def _collect_publish_options(node: hou.Node) -> PublishOptions:
     asset_id = _eval_int(node, "asset_id_override")
+    variant = _empty_to_none(_eval_string(node, "variant_override"))
     return PublishOptions(
         asset_root=_eval_path(node, "asset_root_override"),
         asset_name=_empty_to_none(_eval_string(node, "asset_name_override")),
         asset_path=_empty_to_none(_eval_string(node, "asset_path_override")),
         asset_id=asset_id,
-        variant=_empty_to_none(_eval_string(node, "variant_override")),
+        variant=variant,
+        geo_variant=variant,
         save_hip_before_publish=_eval_bool(node, "save_hip_before_publish", True),
         backup_dir=_eval_path(node, "backup_dir_override"),
         manifest_path=_eval_path(node, "manifest_path_override"),

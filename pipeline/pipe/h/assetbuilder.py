@@ -200,6 +200,7 @@ def run_headless_publish(
             asset_path=asset_path,
             asset_id=asset_id,
             variant=normalized_variant,
+            geo_variant=normalized_variant,
             hooks=tuple(hooks),
             fail_on_hook_error=fail_on_hook_error,
         )
