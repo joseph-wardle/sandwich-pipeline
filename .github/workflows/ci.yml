@@ -2,9 +2,9 @@ name: CI — Lint & Type Check
 
 on:
   push:
-    branches: ["main"]
+    branches: ["prod"]
   pull_request:
-    branches: ["main"]
+    branches: ["prod"]
 
 permissions:
   contents: read
