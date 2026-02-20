@@ -1,0 +1,41 @@
+name: CI — Lint & Type Check
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  lint_and_types:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Check out the repository
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --only-group lint
+
+      # Run type checking with ty
+      - name: Type Check (mypy)
+        run: |
+          uv run mypy
+
+      # Run ruff lint checks
+      - name: Lint (Ruff)
+        run: uv run ruff check
+
+      # Run ruff format check
+      - name: Format Check (Ruff)
+        run: uv run ruff format --check
