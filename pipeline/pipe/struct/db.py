@@ -369,6 +369,17 @@ class Shot(SGEntity):
         self.path = build_shot_path(self.code)
         super().__attrs_post_init__()
 
+    def sg_diff(self) -> dict[str, Any]:
+        """Return only ShotGrid fields that should be updated for Shot.
+
+        Shot path is derived from shot code and should never write to sg_path.
+        """
+        self.path = build_shot_path(self.code)
+        diff = super().sg_diff()
+        diff.pop("path", None)
+        diff.pop("sg_path", None)
+        return diff
+
 
 @attrs.frozen
 class UserStub(SGEntityStub):
