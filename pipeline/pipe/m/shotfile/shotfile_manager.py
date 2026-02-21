@@ -15,7 +15,7 @@ from timeline_marker.ui import TimelineMarker  # type: ignore[import-not-found]
 
 from pipe.db import DB
 from pipe.m.local import get_main_qt_window
-from pipe.struct.db import SGEntity, Shot
+from pipe.struct.db import SGEntity, Shot, build_shot_path, validate_shot_code_token
 from pipe.util import FileManager, log_errors
 
 from .timeline import shot_timeline_generator
@@ -52,17 +52,35 @@ class MShotFileManager(FileManager):
 
     @classmethod
     def _shot_code_from_scene_path(cls, scene_path: Optional[str]) -> Optional[str]:
+        """Resolve shot code from a scene path using canonical shot folder semantics.
+
+        Preferred source is the directory token immediately after `shot/`.
+        Falls back to the scene filename stem for legacy/non-canonical paths.
+        """
         if not scene_path:
             return None
         path = Path(scene_path)
         try:
             shot_index = path.parts.index("shot")
             if shot_index + 1 < len(path.parts):
-                return path.parts[shot_index + 1]
+                try:
+                    return validate_shot_code_token(path.parts[shot_index + 1])
+                except ValueError:
+                    log.warning("Invalid shot token in scene path: %s", scene_path)
         except ValueError:
             pass
         stem = path.stem
-        return stem.split(".")[0] if stem else None
+        if not stem:
+            return None
+        try:
+            return validate_shot_code_token(stem.split(".")[0])
+        except ValueError:
+            return None
+
+    @classmethod
+    def _edit_target_path_for_shot(cls, shot_code: str) -> str:
+        """Return canonical edit target path for a shot override layer."""
+        return "/".join((build_shot_path(shot_code), "set", cls.MAYA_OVERRIDE))
 
     @classmethod
     def _path_has_layout_name(cls, path: str, layout_name: str) -> bool:
@@ -282,7 +300,7 @@ class MShotFileManager(FileManager):
             mc.mayaUsdEditTarget(  # type: ignore[attr-defined]
                 cls.get_stage_shape(),
                 edit=True,
-                editTarget="/".join(["shot", shot_code, "set", cls.MAYA_OVERRIDE]),
+                editTarget=cls._edit_target_path_for_shot(shot_code),
             )
 
             conn = DB.Get(DB_Config)
