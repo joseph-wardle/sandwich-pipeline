@@ -80,6 +80,35 @@ def build_asset_path(display_name: Optional[str], subdirectory: Optional[str]) -
     return "/".join(path_parts)
 
 
+def validate_shot_code_token(shot_code: Optional[str]) -> str:
+    """Validate a shot code for safe use as a single path token.
+
+    Rules:
+    - required (must be non-empty after trimming whitespace)
+    - must not be "." or ".."
+    - must not contain path separators ("/" or "\\")
+    """
+    if shot_code is None:
+        raise ValueError("Shot code is required")
+
+    token = str(shot_code).strip()
+    if not token:
+        raise ValueError("Shot code cannot be empty")
+    if token in {".", ".."}:
+        raise ValueError("Shot code cannot be '.' or '..'")
+    if "/" in token or "\\" in token:
+        raise ValueError(
+            "Shot code must be a single folder name without path separators"
+        )
+
+    return token
+
+
+def build_shot_path(shot_code: Optional[str]) -> str:
+    """Build the canonical relative shot path: shot/<shot_code>."""
+    return "/".join(("shot", validate_shot_code_token(shot_code)))
+
+
 def _split_csv_set(value: Optional[str]) -> set[str]:
     """Parse a comma-separated ShotGrid string into normalized variant tokens."""
     if not value:
