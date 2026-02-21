@@ -21,6 +21,7 @@ from pipe.struct.db import (
     User,
     Version,
     build_asset_path,
+    build_shot_path,
     normalize_display_name,
 )
 
@@ -168,6 +169,25 @@ class SGaaDB(DBInterface):
             return self._normalize_relative_path(legacy_path) == target_path
         return False
 
+    @staticmethod
+    def _canonical_shot_path_from_sg(shot: dict) -> str:
+        return build_shot_path(shot.get("code"))
+
+    def _shot_matches_path(self, shot: dict, target_path: str) -> bool:
+        try:
+            canonical = self._normalize_relative_path(
+                self._canonical_shot_path_from_sg(shot)
+            )
+        except ValueError as exc:
+            log.error(
+                "Invalid shot code in ShotGrid (id=%s code=%r): %s",
+                shot.get("id"),
+                shot.get("code"),
+                exc,
+            )
+            return False
+        return canonical == target_path
+
     def _load_sg_user_list(self) -> None:
         """Load the list of assets from SG to local cache"""
         with self._cache_lock:
@@ -206,6 +226,15 @@ class SGaaDB(DBInterface):
                     e
                     for e in self._sg_entity_lists[Asset.__name__]
                     if self._asset_matches_path(e, target)
+                )
+            )
+        if entity_type is Shot and attr == "path":
+            target = self._normalize_relative_path(str(attr_val))
+            return Shot.from_sg(
+                next(
+                    e
+                    for e in self._sg_entity_lists[Shot.__name__]
+                    if self._shot_matches_path(e, target)
                 )
             )
 
@@ -291,6 +320,23 @@ class SGaaDB(DBInterface):
             arr = [
                 self._canonical_asset_path_from_sg(asset) for asset in filtered_assets
             ]
+            if sorted:
+                arr.sort()
+            return arr
+        if entity_type is Shot and attr == "path":
+            arr: list[str] = []
+            for shot in self._sg_entity_lists[Shot.__name__]:
+                if not shot.get("code"):
+                    continue
+                try:
+                    arr.append(self._canonical_shot_path_from_sg(shot))
+                except ValueError as exc:
+                    log.error(
+                        "Invalid shot code in ShotGrid (id=%s code=%r): %s",
+                        shot.get("id"),
+                        shot.get("code"),
+                        exc,
+                    )
             if sorted:
                 arr.sort()
             return arr
