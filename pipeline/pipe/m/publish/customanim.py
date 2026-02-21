@@ -80,9 +80,9 @@ class AnimPublisher(Publisher):
 
     def _get_save_path(self) -> Path | None:
         rig_name = self._rig_root.split("|")[-1]  # get the short name
-        if not self._shot.path:
-            return None
-        save_path = get_production_path() / self._shot.path / f"rigs/usd/{rig_name}.usd"
+        save_path = (
+            get_production_path() / self._shot.shot_path / f"rigs/usd/{rig_name}.usd"
+        )
         return save_path
 
     def _presave(self) -> bool:

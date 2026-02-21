@@ -70,9 +70,7 @@ class AnimPublisher(Publisher):
         return True
 
     def _get_save_path(self) -> Path | None:
-        if not self._shot.path:
-            return None
-        return get_production_path() / self._shot.path / "anim/usd/main.usd"
+        return get_production_path() / self._shot.shot_path / "anim/usd/main.usd"
 
     def _presave(self) -> bool:
         return True

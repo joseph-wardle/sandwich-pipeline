@@ -365,8 +365,13 @@ class Shot(SGEntity):
         },
     )
 
+    @property
+    def shot_path(self) -> str:
+        """Canonical relative path for this shot: shot/<shot_code>."""
+        return build_shot_path(self.code)
+
     def __attrs_post_init__(self) -> None:
-        self.path = build_shot_path(self.code)
+        self.path = self.shot_path
         super().__attrs_post_init__()
 
     def sg_diff(self) -> dict[str, Any]:
@@ -374,7 +379,7 @@ class Shot(SGEntity):
 
         Shot path is derived from shot code and should never write to sg_path.
         """
-        self.path = build_shot_path(self.code)
+        self.path = self.shot_path
         diff = super().sg_diff()
         diff.pop("path", None)
         diff.pop("sg_path", None)

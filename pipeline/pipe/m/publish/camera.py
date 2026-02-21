@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 import maya.cmds as mc
 from shared.util import get_production_path
 
-from pipe.glui.dialogs import FilteredListDialog, MessageDialog
+from pipe.glui.dialogs import FilteredListDialog
 from pipe.struct.db import SGEntity, Shot
 
 from .publisher import Publisher
@@ -64,18 +64,8 @@ class CameraPublisher(Publisher):
         return self._conn.get_shot_by_code(display_name)
 
     def _get_save_path(self) -> Path | None:
-        try:
-            assert self._entity.path is not None
-        except AssertionError:
-            error = MessageDialog(
-                self._window,
-                "Error: No path for this Shot set in ShotGrid. Nothing exported",
-                "Error",
-            )
-            error.exec_()
-            return None
-
-        return get_production_path() / self._entity.path / "cam" / "cam.usd"
+        shot = cast(Shot, self._entity)
+        return get_production_path() / shot.shot_path / "cam" / "cam.usd"
 
     def _presave(self) -> bool:
         mc.select(self._camera, replace=True)

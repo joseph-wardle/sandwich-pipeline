@@ -344,13 +344,13 @@ class MShotFileManager(FileManager):
         self.run_on_open()
 
     def _import_camera(self) -> None:
-        assert self.shot.path is not None
+        shot_path = self.shot.shot_path
         root_layer = self.get_stage().GetRootLayer()
 
         # mc.mayaUsdLayerEditor(cam_layer.identifier, edit=True, lockLayer=(2, 0, stageShape))
 
         cam_file_layer = Sdf.Layer.FindOrOpenRelativeToLayer(
-            root_layer, "/".join((self.shot.path, "cam", "cam.usd"))
+            root_layer, "/".join((shot_path, "cam", "cam.usd"))
         )
         if not cam_file_layer:
             mc.warning("No exported camera found")
@@ -360,7 +360,7 @@ class MShotFileManager(FileManager):
             root_layer.subLayerPaths.append(cam_file_layer.identifier)
 
     def _import_env(self) -> None:
-        assert self.shot.path is not None
+        shot_path = self.shot.shot_path
         stage = self.get_stage()
         root_layer = stage.GetRootLayer()
         # locked_layers: list[str] = []
@@ -376,11 +376,11 @@ class MShotFileManager(FileManager):
         # Set up shot-level overrides
         env_override_layer = Sdf.Layer.FindOrOpenRelativeToLayer(
             root_layer,
-            "/".join((self.shot.path, "set", MShotFileManager.MAYA_OVERRIDE)),
+            "/".join((shot_path, "set", MShotFileManager.MAYA_OVERRIDE)),
         ) or Sdf.Layer.CreateNew(
             str(
                 get_production_path()
-                / self.shot.path
+                / shot_path
                 / "set"
                 / MShotFileManager.MAYA_OVERRIDE
             )
@@ -451,7 +451,7 @@ class MShotFileManager(FileManager):
         mc.file(rename=str(path))
 
         self.shot = cast(Shot, entity)
-        assert self.shot.path is not None
+        shot_path = self.shot.shot_path
 
         # Create USD Stage
         transform = mc.createNode("transform", name="stage_transform")
@@ -460,7 +460,7 @@ class MShotFileManager(FileManager):
         mc.connectAttr("time1.outTime", f"{stage_shape}.time")
 
         ROOT_LAYER = "maya_root.usd"
-        root_layer_path = str(get_production_path() / self.shot.path / ROOT_LAYER)
+        root_layer_path = str(get_production_path() / shot_path / ROOT_LAYER)
         root_layer = Sdf.Layer.FindOrOpen(root_layer_path) or Sdf.Layer.CreateNew(
             root_layer_path
         )

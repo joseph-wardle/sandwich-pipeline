@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import hou
-
 from typing import TYPE_CHECKING
 
-from pipe.db import DB
+import hou
 from env_sg import DB_Config
+
+from pipe.db import DB
 
 if TYPE_CHECKING:
     pass
@@ -20,6 +20,7 @@ class AnimPostProcessor:
     def run(self, shot_code: str) -> None:
         # Set up
         shot = self._conn.get_shot_by_code(shot_code)
+        shot_path = shot.shot_path
         hou.playbar.setFrameRange(shot.cut_in - 5, shot.cut_out + 5)
         hou.playbar.setPlaybackRange(shot.cut_in - 5, shot.cut_out + 5)
 
@@ -33,7 +34,7 @@ class AnimPostProcessor:
                 load_layer = stage_ctx.createNode(
                     "dbclark::main::Bobo_Load_Layers::1.0"
                 )
-                load_layer.parm("shot").set(f"$JOB/{shot.path}")  # type: ignore[union-attr]
+                load_layer.parm("shot").set(f"$JOB/{shot_path}")  # type: ignore[union-attr]
                 for dep in ["cfx", "fx", "envfx", "flo", "lighting", "render"]:
                     load_layer.parm(f"{dep}_enable").set(0)  # type: ignore[union-attr]
                 if layout and layout.path:
@@ -44,7 +45,7 @@ class AnimPostProcessor:
             env_stub = shot.set or self._conn.get_sequence_by_stub(shot.sequence).set  # type: ignore[assignment, arg-type]
             layout = self._conn.get_env_by_stub(env_stub)
             load_layer = stage_ctx.createNode("dbclark::main::Bobo_Load_Layers::1.0")
-            load_layer.parm("shot").set(f"$JOB/{shot.path}")  # type: ignore[union-attr]
+            load_layer.parm("shot").set(f"$JOB/{shot_path}")  # type: ignore[union-attr]
             for dep in ["cfx", "fx", "envfx", "flo" "lighting", "render"]:
                 load_layer.parm(f"{dep}_enable").set(0)  # type: ignore[union-attr]
             if layout and layout.path:
@@ -68,7 +69,7 @@ class AnimPostProcessor:
 
         publish = stage_ctx.createNode("usd_rop")
         publish.parm("trange").set("normal")  # type: ignore[union-attr]
-        publish.parm("lopoutput").set(f"$JOB/{shot.path}/anim/usd/post-process.usd")  # type: ignore[union-attr]
+        publish.parm("lopoutput").set(f"$JOB/{shot_path}/anim/usd/post-process.usd")  # type: ignore[union-attr]
         publish.parm("savestyle").set("flattenalllayers")  # type: ignore[union-attr]
         publish.setInput(0, postprocess)
 

@@ -304,8 +304,7 @@ class HShotFileManager(HFileManager):
         return stage
 
     def _set_shot_context(self, shot: Shot) -> None:
-        if shot.path:
-            hou.setContextOption("SHOT", shot.path)
+        hou.setContextOption("SHOT", shot.shot_path)
 
     def _set_playbar_ranges(self, shot: Shot) -> None:
         start = shot.cut_in - 5
