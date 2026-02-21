@@ -703,7 +703,6 @@ class _ShotListQuery(_Query):
             "sg_cut_in",
             "sg_cut_out",
             "sg_cut_duration",
-            "sg_path",
             "sg_sequence",
             "sg_set",
             "sg_sets",
