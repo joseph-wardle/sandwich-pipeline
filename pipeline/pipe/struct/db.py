@@ -365,10 +365,9 @@ class Shot(SGEntity):
         },
     )
 
-    @property
-    def shot_path(self) -> str:
-        """Canonical relative path for this shot: shot/<shot_code>."""
-        return build_shot_path(self.code)
+    def __attrs_post_init__(self) -> None:
+        self.path = build_shot_path(self.code)
+        super().__attrs_post_init__()
 
 
 @attrs.frozen
