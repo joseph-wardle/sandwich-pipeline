@@ -2,6 +2,8 @@ from __future__ import annotations
 
 # We need to always import typing for defining the structs
 # attrs doesn't support `|` syntax in 3.9
+import re
+import unicodedata
 from typing import Any, Optional, Type, TypeVar
 
 import attrs
@@ -37,13 +39,20 @@ _con.register_structure_hook_factory(
 def normalize_display_name(name: Optional[str]) -> str:
     """Normalize a ShotGrid display name into a pipeline-safe name.
 
-    Current rules:
+    Current steps:
+    - normalizes the unicode + encodes to ascii: aあä > aa
     - lower-case the string
     - replace spaces with underscores
+    - removes all non alpha_numeric characters
     """
     if not name:
         return ""
-    return name.strip().lower().replace(" ", "_")
+    ascii_name = (
+        unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    )
+    normalized_name = ascii_name.strip().lower().replace(" ", "_")
+    normalized_name = re.sub(r"[^a-z0-9_]", "", normalized_name)
+    return normalized_name
 
 
 def normalize_subdirectory(subdirectory: Optional[str]) -> Optional[str]:
