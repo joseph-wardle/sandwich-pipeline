@@ -1,25 +1,26 @@
 from __future__ import annotations
 
 import logging
-import maya.cmds as mc
 import os
-
 from abc import abstractmethod
 from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import maya.cmds as mc
 from Qt import QtCore, QtWidgets
 from Qt.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QWidget
 
 from pipe.glui.dialogs import ButtonPair, MessageDialog
-from pipe.util import checkbox_callback_helper, Playblaster
+from pipe.util import Playblaster, checkbox_callback_helper
 
 from .playblaster import MPlayblaster
 from .struct import HudDefinition, SaveLocation
 
 if TYPE_CHECKING:
-    from .struct import MPlayblastConfig, MShotDialogConfig
     from typing import Callable, Iterable
+
+    from .struct import MPlayblastConfig, MShotDialogConfig, MShotPlayblastConfig
 
 log = logging.getLogger(__name__)
 
@@ -287,7 +288,8 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         paths: dict[Playblaster.PRESET, list[str | Path]] = defaultdict(list)
         for loc in locs:
             if self.is_location_enabled(dialog_id, loc.name):
-                paths[loc.preset].append(str(loc.path) + "/" + filename)
+                output_base = Path(str(loc.path)) / filename
+                paths[loc.preset].append(str(output_base))
 
         return paths
 
@@ -315,8 +317,62 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     def is_location_enabled(self, dialog_id: str, loc_name: str) -> bool:
         return self._enabled_loc_cbs[dialog_id][loc_name].isChecked()
 
-    def do_export(self):
-        self.playblaster.configure(self._generate_config()).playblast()
+    @staticmethod
+    def _output_count_for_shot(shot_cfg: MShotPlayblastConfig) -> int:
+        return sum(len(paths) for paths in shot_cfg.paths.values())
 
-        MessageDialog(self.parent(), "Playblast(s) successful!").exec_()
+    @staticmethod
+    def _collect_output_paths(config: MPlayblastConfig) -> list[str]:
+        output_paths: list[str] = []
+        for shot_cfg in config.shots:
+            for preset, bases in shot_cfg.paths.items():
+                for base in bases:
+                    output_paths.append(str(Path(str(base) + f".{preset.ext}")))
+        return output_paths
+
+    def _validate_config(self, config: MPlayblastConfig) -> str | None:
+        if not config.shots:
+            return "No playblast targets are enabled."
+
+        for shot_cfg in config.shots:
+            if self._output_count_for_shot(shot_cfg) < 1:
+                return (
+                    f"Target '{shot_cfg.shot.code}' has no output location selected. "
+                    "Please enable at least one destination."
+                )
+        return None
+
+    def do_export(self):
+        try:
+            config = self._generate_config()
+        except Exception as exc:
+            log.exception("Playblast config generation failed")
+            MessageDialog(
+                self.parent(),
+                f"Could not generate playblast settings.\n\n{exc}",
+                "Playblast Error",
+            ).exec_()
+            return
+
+        validation_error = self._validate_config(config)
+        if validation_error:
+            MessageDialog(self.parent(), validation_error, "Playblast").exec_()
+            return
+
+        try:
+            self.playblaster.configure(config).playblast()
+        except Exception as exc:
+            log.exception("Playblast export failed")
+            MessageDialog(
+                self.parent(),
+                f"Playblast failed.\n\n{exc}",
+                "Playblast Error",
+            ).exec_()
+            return
+
+        output_paths = self._collect_output_paths(config)
+        success_msg = "Playblast(s) successful!"
+        if output_paths:
+            success_msg += "\n\nOutputs:\n" + "\n".join(output_paths)
+        MessageDialog(self.parent(), success_msg).exec_()
         self.close()

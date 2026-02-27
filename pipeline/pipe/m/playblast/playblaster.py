@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import copy
 import logging
-import maya.cmds as mc
-
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+import maya.cmds as mc
 from mayacapture.capture import capture  # type: ignore[import-not-found]
+
 from pipe.m.util import maintain_selection
 from pipe.util import Playblaster
 
@@ -30,16 +30,29 @@ class MPlayblaster(Playblaster):
         self._config = config
         return self
 
+    @staticmethod
+    def _resolve_active_editor() -> str:
+        panel = str(mc.sequenceManager(query=True, modelPanel=True) or "")
+        if panel and mc.modelPanel(panel, exists=True):
+            return panel
+
+        model_panels = mc.getPanel(type="modelPanel") or []
+        if model_panels:
+            return str(model_panels[0])
+        return ""
+
     def _write_images(self, path: str) -> None:
         """Maya implementation of playblasting image frames"""
-        active_editor = str(mc.sequenceManager(query=True, modelPanel=True))
-        self._extra_kwargs["viewport_options"].update(
-            {
-                "twoSidedLighting": mc.modelEditor(
-                    active_editor, query=True, twoSidedLighting=True
-                ),
-            }
-        )
+        active_editor = self._resolve_active_editor()
+        if active_editor:
+            self._extra_kwargs["viewport_options"].update(
+                {
+                    "twoSidedLighting": mc.modelEditor(
+                        active_editor, query=True, twoSidedLighting=True
+                    ),
+                }
+            )
+
         self._extra_kwargs["viewport2_options"].update(
             {
                 **{
@@ -78,9 +91,10 @@ class MPlayblaster(Playblaster):
         )
 
     def playblast(self) -> None:
-        with applied_hud(
-            self._config.builtin_huds, self._config.custom_huds
-        ), maintain_selection():
+        with (
+            applied_hud(self._config.builtin_huds, self._config.custom_huds),
+            maintain_selection(),
+        ):
             mc.select(clear=True)
 
             # assemble kwargs from config options
