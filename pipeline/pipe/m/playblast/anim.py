@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -93,8 +94,7 @@ class AnimPlayblastDialog(PlayblastDialog):
         )
         anim_settings_layout.addWidget(QLabel("Pass"), 0, 0)
         anim_settings_layout.addWidget(self._shot_pass, 0, 1, 1, 2)
-
-        self._main_layout.insertWidget(2, anim_settings_widget)
+        self.add_context_widget(anim_settings_widget)
 
         # Create UI for custom shot
         custom_shot_widget = QWidget(self)
@@ -108,9 +108,14 @@ class AnimPlayblastDialog(PlayblastDialog):
         custom_shot_layout.addWidget(self._custom_out, 1, 4)
 
         self._custom_camera = QComboBox(self)
-        self._custom_camera.addItems(cameras := mc.ls(cameras=True, visible=True))
+        camera_names = (
+            mc.ls(cameras=True, visible=True) or mc.ls(cameras=True) or ["persp"]
+        )
+        self._custom_camera.addItems(camera_names)
         self._custom_camera.setCurrentIndex(0)
-        self._custom_camera.setValidator(QRegExpValidator(QRegExp("|".join(cameras))))
+        escaped_names = [re.escape(camera_name) for camera_name in camera_names]
+        validator_pattern = f"(?:{'|'.join(escaped_names)})"
+        self._custom_camera.setValidator(QRegExpValidator(QRegExp(validator_pattern)))
         custom_shot_layout.addWidget(QLabel("Custom Camera"), 2, 1)
         custom_shot_layout.addWidget(self._custom_camera, 2, 2, 1, 2)
 
@@ -118,8 +123,7 @@ class AnimPlayblastDialog(PlayblastDialog):
         (escb := self._enabled_shot_cbs[self.CUSTOM_ID]).toggled.connect(
             checkbox_callback_helper(escb, custom_shot_widget)
         )
-
-        self._main_layout.insertWidget(3, custom_shot_widget)
+        self.add_context_widget(custom_shot_widget)
 
     def _generate_config(self) -> MPlayblastConfig:
         timestamp = datetime.now().strftime("%m-%d-%y_%H:%M:%S")
@@ -178,9 +182,9 @@ class AnimPlayblastDialog(PlayblastDialog):
                 PlayblastDialog.CUSTOM_HUDS.ARTIST,
                 HudDefinition(
                     "LnDshot",
-                    command=lambda: self._shot.code
-                    if self._shot
-                    else "No shot code found",
+                    command=lambda: (
+                        self._shot.code if self._shot else "No shot code found"
+                    ),
                     section=7,
                     event="SceneSaved",
                 ),
