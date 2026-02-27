@@ -30,7 +30,7 @@ from .playblaster import MPlayblaster
 from .struct import HudDefinition, SaveLocation
 
 if TYPE_CHECKING:
-    from typing import Iterable
+    from typing import Callable, Iterable
 
     from .struct import (
         MPlayblastConfig,
@@ -44,12 +44,21 @@ log = logging.getLogger(__name__)
 class ClickableQLabel(QLabel):
     clicked = QtCore.Signal()
 
-    def mousePressEvent(self, _event):  # type: ignore[override]
+    def mousePressEvent(self, event):  # type: ignore[override]
         self.clicked.emit()
+        super().mousePressEvent(event)
 
 
 class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
-    """Shared Maya playblast dialog with clear target selection and export summary."""
+    """Shared Maya playblast dialog.
+
+    The dialog is intentionally organized into linear sections so artists can
+    understand and configure exports quickly:
+    1) choose export targets + destinations
+    2) configure shot-specific options (subclass provided)
+    3) configure viewport and folder options
+    4) review a live export summary
+    """
 
     _central_widget: QWidget
     _context_group: QGroupBox
@@ -125,7 +134,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         self._central_widget.setLayout(self._main_layout)
 
         self._build_header_section()
-        self._build_target_section()
+        self._build_targets_section()
         self._build_context_section()
         self._build_render_options_section()
         self._build_summary_section()
@@ -145,22 +154,41 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         self._main_layout.addWidget(title)
         self._main_layout.addWidget(subtitle)
 
-    def _build_target_section(self) -> None:
+    def _build_targets_section(self) -> None:
         target_group = QGroupBox("1. Targets and Destinations")
         target_layout = QVBoxLayout(target_group)
 
         description = QLabel(
-            "Enable each target you want to export, then select one or more destinations."
+            "Enable each target you want to export, then choose one or more destinations."
         )
         description.setStyleSheet("color: #666;")
         target_layout.addWidget(description)
 
+        location_order = self._collect_location_order()
+        targets_grid = self._build_targets_grid(location_order)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        scroll.setWidget(targets_grid)
+        target_layout.addWidget(scroll)
+
+        self._main_layout.addWidget(target_group)
+
+    def _build_targets_grid(self, location_order: list[SaveLocation]) -> QWidget:
         grid_container = QWidget()
         grid = QGridLayout(grid_container)
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(8)
 
-        location_order = self._collect_location_order()
+        self._add_targets_grid_header(grid, location_order)
+        self._add_targets_grid_bulk_controls(grid, location_order)
+        self._add_targets_grid_rows(grid, location_order)
+        return grid_container
+
+    def _add_targets_grid_header(
+        self, grid: QGridLayout, location_order: list[SaveLocation]
+    ) -> None:
         grid.addWidget(QLabel("Export"), 0, 0)
         grid.addWidget(QLabel("Target"), 0, 1)
 
@@ -169,82 +197,124 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             header.setAlignment(QtCore.Qt.AlignCenter)
             grid.addWidget(header, 0, column)
 
+    def _add_targets_grid_bulk_controls(
+        self, grid: QGridLayout, location_order: list[SaveLocation]
+    ) -> None:
         select_all_targets = QPushButton("All Targets")
-        select_all_targets.clicked.connect(lambda: self._set_all_targets(True))
+        select_all_targets.clicked.connect(self._make_set_all_targets_callback(True))
         grid.addWidget(select_all_targets, 1, 0)
 
         select_no_targets = QPushButton("No Targets")
-        select_no_targets.clicked.connect(lambda: self._set_all_targets(False))
+        select_no_targets.clicked.connect(self._make_set_all_targets_callback(False))
         grid.addWidget(select_no_targets, 1, 1)
 
         for column, location in enumerate(location_order, start=2):
-            toggle_widget = QWidget()
-            toggle_layout = QHBoxLayout(toggle_widget)
-            toggle_layout.setContentsMargins(0, 0, 0, 0)
+            location_controls = self._build_location_bulk_controls(location.name)
+            grid.addWidget(location_controls, 1, column)
 
-            loc_all = QPushButton("All")
-            loc_all.clicked.connect(
-                lambda _checked=False, loc_name=location.name: (
-                    self._set_location_for_all(loc_name, True)
-                )
-            )
-            toggle_layout.addWidget(loc_all)
+    def _build_location_bulk_controls(self, location_name: str) -> QWidget:
+        controls_widget = QWidget()
+        controls_layout = QHBoxLayout(controls_widget)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
 
-            loc_none = QPushButton("None")
-            loc_none.clicked.connect(
-                lambda _checked=False, loc_name=location.name: (
-                    self._set_location_for_all(loc_name, False)
-                )
-            )
-            toggle_layout.addWidget(loc_none)
+        enable_all = QPushButton("All")
+        enable_all.clicked.connect(
+            self._make_set_all_location_destinations_callback(location_name, True)
+        )
+        controls_layout.addWidget(enable_all)
 
-            grid.addWidget(toggle_widget, 1, column)
+        enable_none = QPushButton("None")
+        enable_none.clicked.connect(
+            self._make_set_all_location_destinations_callback(location_name, False)
+        )
+        controls_layout.addWidget(enable_none)
+        return controls_widget
 
+    def _add_targets_grid_rows(
+        self, grid: QGridLayout, location_order: list[SaveLocation]
+    ) -> None:
         for row, config in enumerate(self.shot_configs, start=2):
-            shot_toggle = QCheckBox()
-            shot_toggle.setChecked(True)
-            shot_toggle.toggled.connect(
-                lambda enabled, shot_id=config.id: self._set_shot_locations_enabled(
-                    shot_id, enabled
-                )
+            self._add_target_row(grid, row, config, location_order)
+
+    def _add_target_row(
+        self,
+        grid: QGridLayout,
+        row: int,
+        config: MShotDialogConfig,
+        location_order: list[SaveLocation],
+    ) -> None:
+        target_toggle = self._build_target_toggle(config.id)
+        self._enabled_shot_cbs[config.id] = target_toggle
+        grid.addWidget(target_toggle, row, 0, alignment=QtCore.Qt.AlignCenter)
+
+        target_label = ClickableQLabel(f"<b>{config.name}</b>", target_toggle)
+        target_label.clicked.connect(lambda cb=target_toggle: cb.click())
+        grid.addWidget(target_label, row, 1)
+
+        config_locations = {
+            location.name: (location, enabled) for location, enabled in config.save_locs
+        }
+        for column, location in enumerate(location_order, start=2):
+            location_data = config_locations.get(location.name)
+            if location_data is None:
+                placeholder = self._build_destination_placeholder()
+                grid.addWidget(placeholder, row, column)
+                continue
+
+            _, enabled_by_default = location_data
+            destination_toggle = self._build_destination_toggle(
+                config.id, location.name
             )
-            shot_toggle.toggled.connect(self._refresh_summary)
-            self._enabled_shot_cbs[config.id] = shot_toggle
-            grid.addWidget(shot_toggle, row, 0, alignment=QtCore.Qt.AlignCenter)
+            destination_toggle.setChecked(enabled_by_default)
+            grid.addWidget(
+                destination_toggle, row, column, alignment=QtCore.Qt.AlignCenter
+            )
 
-            shot_label = ClickableQLabel(f"<b>{config.name}</b>", shot_toggle)
-            shot_label.clicked.connect(lambda cb=shot_toggle: cb.click())
-            grid.addWidget(shot_label, row, 1)
+        self._set_shot_locations_enabled(config.id, target_toggle.isChecked())
 
-            config_locations = {
-                loc.name: (loc, enabled) for loc, enabled in config.save_locs
-            }
-            for column, location in enumerate(location_order, start=2):
-                location_config = config_locations.get(location.name)
-                if location_config is None:
-                    placeholder = QLabel("-")
-                    placeholder.setAlignment(QtCore.Qt.AlignCenter)
-                    placeholder.setEnabled(False)
-                    grid.addWidget(placeholder, row, column)
-                    continue
+    def _build_target_toggle(self, shot_id: str) -> QCheckBox:
+        target_toggle = QCheckBox()
+        target_toggle.setChecked(True)
+        target_toggle.toggled.connect(
+            self._make_set_shot_locations_enabled_callback(shot_id)
+        )
+        target_toggle.toggled.connect(self._refresh_summary)
+        return target_toggle
 
-                _, enabled_by_default = location_config
-                location_toggle = QCheckBox()
-                location_toggle.setChecked(enabled_by_default)
-                location_toggle.toggled.connect(self._refresh_summary)
-                self._enabled_loc_cbs[config.id][location.name] = location_toggle
-                grid.addWidget(
-                    location_toggle, row, column, alignment=QtCore.Qt.AlignCenter
-                )
+    def _build_destination_toggle(self, shot_id: str, location_name: str) -> QCheckBox:
+        destination_toggle = QCheckBox()
+        destination_toggle.toggled.connect(self._refresh_summary)
+        self._enabled_loc_cbs[shot_id][location_name] = destination_toggle
+        return destination_toggle
 
-            self._set_shot_locations_enabled(config.id, shot_toggle.isChecked())
+    @staticmethod
+    def _build_destination_placeholder() -> QLabel:
+        placeholder = QLabel("-")
+        placeholder.setAlignment(QtCore.Qt.AlignCenter)
+        placeholder.setEnabled(False)
+        return placeholder
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-        scroll.setWidget(grid_container)
-        target_layout.addWidget(scroll)
-        self._main_layout.addWidget(target_group)
+    def _make_set_all_targets_callback(self, enabled: bool) -> Callable[[], None]:
+        def callback() -> None:
+            self._set_all_targets(enabled)
+
+        return callback
+
+    def _make_set_all_location_destinations_callback(
+        self, location_name: str, enabled: bool
+    ) -> Callable[[], None]:
+        def callback() -> None:
+            self._set_location_for_all(location_name, enabled)
+
+        return callback
+
+    def _make_set_shot_locations_enabled_callback(
+        self, shot_id: str
+    ) -> Callable[[bool], None]:
+        def callback(enabled: bool) -> None:
+            self._set_shot_locations_enabled(shot_id, enabled)
+
+        return callback
 
     def _build_context_section(self) -> None:
         self._context_group = QGroupBox("2. Shot Settings")
@@ -263,54 +333,71 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         options_layout = QVBoxLayout(options_group)
 
         active_panel = self._resolve_active_model_panel()
+        options_layout.addWidget(self._build_viewport_options_widget(active_panel))
+        options_layout.addWidget(self._build_custom_folder_widget())
+        self._main_layout.addWidget(options_group)
 
+    def _build_viewport_options_widget(self, active_panel: str) -> QWidget:
         viewport_widget = QWidget()
         viewport_layout = QHBoxLayout(viewport_widget)
         viewport_layout.setContentsMargins(0, 0, 0, 0)
 
-        self._use_lighting = QCheckBox("Use Lighting")
-        self._use_lighting.setChecked(self._query_lighting(active_panel))
-        self._use_lighting.toggled.connect(self._refresh_summary)
+        self._use_lighting = self._build_option_checkbox(
+            "Use Lighting",
+            self._query_lighting(active_panel),
+        )
         viewport_layout.addWidget(self._use_lighting)
 
-        self._use_shadows = QCheckBox("Use Shadows")
-        self._use_shadows.setChecked(self._query_shadows(active_panel))
-        self._use_shadows.toggled.connect(self._refresh_summary)
+        self._use_shadows = self._build_option_checkbox(
+            "Use Shadows",
+            self._query_shadows(active_panel),
+        )
         viewport_layout.addWidget(self._use_shadows)
 
-        self._use_ssao = QCheckBox("Use Anti-aliasing")
-        self._use_ssao.setChecked(self._query_ssao())
-        self._use_ssao.toggled.connect(self._refresh_summary)
+        self._use_ssao = self._build_option_checkbox(
+            "Use Anti-aliasing",
+            self._query_ssao(),
+        )
         viewport_layout.addWidget(self._use_ssao)
 
-        self._use_hardware_fog = QCheckBox("Use Hardware Fog")
-        self._use_hardware_fog.setChecked(self._query_hardware_fog(active_panel))
-        self._use_hardware_fog.toggled.connect(self._refresh_summary)
+        self._use_hardware_fog = self._build_option_checkbox(
+            "Use Hardware Fog",
+            self._query_hardware_fog(active_panel),
+        )
         viewport_layout.addWidget(self._use_hardware_fog)
 
-        self._use_dof = QCheckBox("Use DoF")
-        self._use_dof.setChecked(self._query_dof(active_panel))
-        self._use_dof.toggled.connect(self._refresh_summary)
+        self._use_dof = self._build_option_checkbox(
+            "Use DoF",
+            self._query_dof(active_panel),
+        )
         viewport_layout.addWidget(self._use_dof)
+        return viewport_widget
 
-        options_layout.addWidget(viewport_widget)
-
+    def _build_custom_folder_widget(self) -> QWidget:
         custom_folder_widget = QWidget()
         custom_folder_layout = QHBoxLayout(custom_folder_widget)
         custom_folder_layout.setContentsMargins(0, 0, 0, 0)
 
         self._custom_folder_field = QLineEdit()
         self._custom_folder_field.setReadOnly(True)
-        self._custom_folder_field.setText(os.getenv("TMPDIR", os.getenv("TEMP", "tmp")))
+        self._custom_folder_field.setText(self._default_custom_folder_path())
         self._custom_folder_field.textChanged.connect(self._refresh_summary)
         custom_folder_layout.addWidget(self._custom_folder_field)
 
         browse_button = QPushButton("Browse Custom Folder")
         browse_button.clicked.connect(self._set_custom_folder)
         custom_folder_layout.addWidget(browse_button)
+        return custom_folder_widget
 
-        options_layout.addWidget(custom_folder_widget)
-        self._main_layout.addWidget(options_group)
+    def _build_option_checkbox(self, label: str, enabled_by_default: bool) -> QCheckBox:
+        option_toggle = QCheckBox(label)
+        option_toggle.setChecked(enabled_by_default)
+        option_toggle.toggled.connect(self._refresh_summary)
+        return option_toggle
+
+    @staticmethod
+    def _default_custom_folder_path() -> str:
+        return os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))
 
     def _build_summary_section(self) -> None:
         summary_group = QGroupBox("4. Export Summary")
@@ -433,38 +520,45 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
 
     def _refresh_summary(self, *_args) -> None:
         lines: list[str] = []
+        lines.extend(self._summary_target_lines())
+        lines.append("")
+        lines.extend(self._summary_render_option_lines())
+        self._summary_field.setPlainText("\n".join(lines))
 
+    def _summary_target_lines(self) -> list[str]:
+        lines: list[str] = []
         enabled_configs = [
-            cfg for cfg in self.shot_configs if self.is_shot_enabled(cfg.id)
+            config for config in self.shot_configs if self.is_shot_enabled(config.id)
         ]
         if not enabled_configs:
             lines.append("No targets selected.")
-        else:
-            lines.append("Selected targets:")
-            for config in enabled_configs:
-                lines.append(f"- {config.name}")
+            return lines
 
-                enabled_locations = [
-                    location
-                    for location in self._save_locs_by_shot[config.id]
-                    if self.is_location_enabled(config.id, location.name)
-                ]
-                if not enabled_locations:
-                    lines.append("  (no destination selected)")
-                    continue
+        lines.append("Selected targets:")
+        for config in enabled_configs:
+            lines.append(f"- {config.name}")
+            enabled_locations = [
+                location
+                for location in self._save_locs_by_shot[config.id]
+                if self.is_location_enabled(config.id, location.name)
+            ]
+            if not enabled_locations:
+                lines.append("  (no destination selected)")
+                continue
 
-                for location in enabled_locations:
-                    lines.append(f"  -> {location.name}: {location.path}")
+            for location in enabled_locations:
+                lines.append(f"  -> {location.name}: {location.path}")
+        return lines
 
-        lines.append("")
-        lines.append("Viewport options:")
-        lines.append(f"- Lighting: {'On' if self.use_lighting else 'Off'}")
-        lines.append(f"- Shadows: {'On' if self.use_shadows else 'Off'}")
-        lines.append(f"- Anti-aliasing: {'On' if self.use_ssao else 'Off'}")
-        lines.append(f"- Hardware Fog: {'On' if self.use_hardware_fog else 'Off'}")
-        lines.append(f"- Depth of Field: {'On' if self.use_dof else 'Off'}")
-
-        self._summary_field.setPlainText("\n".join(lines))
+    def _summary_render_option_lines(self) -> list[str]:
+        return [
+            "Viewport options:",
+            f"- Lighting: {'On' if self.use_lighting else 'Off'}",
+            f"- Shadows: {'On' if self.use_shadows else 'Off'}",
+            f"- Anti-aliasing: {'On' if self.use_ssao else 'Off'}",
+            f"- Hardware Fog: {'On' if self.use_hardware_fog else 'Off'}",
+            f"- Depth of Field: {'On' if self.use_dof else 'Off'}",
+        ]
 
     def save_locations_to_paths(
         self, dialog_id: str, locs: Iterable[SaveLocation], filename: str
