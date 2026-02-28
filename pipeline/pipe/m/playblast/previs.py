@@ -692,15 +692,17 @@ class PrevisPlayblastDialog(PlayblastDialog):
         config: MPlayblastConfig,
     ) -> list[str]:
         if not config.shots:
-            return ["ShotGrid upload skipped: no shot output was generated."]
+            return ["ShotGrid Upload: Skipped - no shot output was generated."]
 
         shot_code = str(config.shots[0].shot.code or "").strip()
         if not shot_code:
-            return ["ShotGrid upload skipped: shot code is missing."]
+            return ["ShotGrid Upload: Skipped - shot code is missing."]
 
         movie_path = self._resolve_shotgrid_upload_movie_path(config)
         if movie_path is None:
-            return ["ShotGrid upload skipped: no valid playblast movie file was found."]
+            return [
+                "ShotGrid Upload: Skipped - no valid playblast movie file was found."
+            ]
 
         version_name = default_version_name_from_movie_path(movie_path)
         if not version_name:
@@ -720,12 +722,12 @@ class PrevisPlayblastDialog(PlayblastDialog):
             upload_result = upload_playblast_version(upload_request)
         except Exception as exc:
             log.exception("ShotGrid upload failed for shot '%s'", shot_code)
-            return [f"ShotGrid upload failed: {exc}"]
+            return [f"ShotGrid Upload: Failed - {exc}"]
 
         message_lines: list[str] = []
         if upload_result.ok:
             success_message = (
-                f"ShotGrid upload successful: {upload_result.version_name}"
+                f"ShotGrid Upload: Success - {upload_result.version_name}"
                 f" (shot {upload_result.shot_code})."
             )
             if upload_result.version_id is not None:
@@ -734,10 +736,10 @@ class PrevisPlayblastDialog(PlayblastDialog):
                 )
             message_lines.append(success_message)
         else:
-            message_lines.append(f"ShotGrid upload failed: {upload_result.message}")
+            message_lines.append(f"ShotGrid Upload: Failed - {upload_result.message}")
 
         for warning in upload_result.warnings:
-            message_lines.append(f"ShotGrid warning: {warning}")
+            message_lines.append(f"ShotGrid Warning: {warning}")
 
         return message_lines
 

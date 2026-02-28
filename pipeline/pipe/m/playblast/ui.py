@@ -704,6 +704,22 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         del config
         return []
 
+    @staticmethod
+    def _build_success_message(
+        output_paths: list[str],
+        post_playblast_messages: list[str],
+    ) -> str:
+        message_lines = ["Local playblast export successful."]
+        if output_paths:
+            message_lines.append("")
+            message_lines.append("Outputs:")
+            message_lines.extend(output_paths)
+        if post_playblast_messages:
+            message_lines.append("")
+            message_lines.append("Post-export:")
+            message_lines.extend(post_playblast_messages)
+        return "\n".join(message_lines)
+
     def do_export(self) -> None:
         try:
             config = self._generate_config()
@@ -737,13 +753,12 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             post_playblast_messages = self._after_local_playblast(config)
         except Exception as exc:
             log.exception("Post-playblast actions failed")
-            post_playblast_messages = [f"Post-playblast actions failed: {exc}"]
+            post_playblast_messages = [
+                "Post-export actions failed. Local playblast files were still written.",
+                f"Reason: {exc}",
+            ]
 
         output_paths = self._collect_output_paths(config)
-        success_msg = "Playblast(s) successful!"
-        if output_paths:
-            success_msg += "\n\nOutputs:\n" + "\n".join(output_paths)
-        if post_playblast_messages:
-            success_msg += "\n\n" + "\n".join(post_playblast_messages)
+        success_msg = self._build_success_message(output_paths, post_playblast_messages)
         MessageDialog(self.parent(), success_msg).exec_()
         self.close()
