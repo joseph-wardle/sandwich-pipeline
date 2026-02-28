@@ -45,11 +45,13 @@ _GUIDES_TO_DISABLE = (
 
 
 class HPlayblaster(Playblaster):
+    _camera_path: str | None
     _out_paths: dict[Playblaster.PRESET, list[Path | str]]
     _tails: tuple[int, int]
 
     def __init__(self) -> None:
         super().__init__()
+        self._camera_path = None
         self._out_paths = {}
         self._tails = (0, 0)
         try:
@@ -62,10 +64,12 @@ class HPlayblaster(Playblaster):
         shot: Shot,
         out_paths: dict[Playblaster.PRESET, list[Path | str]],
         tails: tuple[int, int] = (0, 0),
+        camera_path: str | None = None,
     ) -> "HPlayblaster":
         self._shot = shot
         self._out_paths = out_paths
         self._tails = tails
+        self._camera_path = str(camera_path).strip() or None
         return self
 
     def _run_postprocess(self, video_path: Path) -> None:
@@ -79,7 +83,10 @@ class HPlayblaster(Playblaster):
         flip = scene_viewer.flipbookSettings().stash()
         _configure_flipbook(flip, path, start_frame, end_frame)
 
-        with _clean_viewport(scene_viewer, viewport):
+        with (
+            _applied_viewport_camera(viewport, self._camera_path),
+            _clean_viewport(scene_viewer, viewport),
+        ):
             _run_flipbook(scene_viewer, viewport, flip)
 
     def playblast(self) -> None:
@@ -135,6 +142,55 @@ def _configure_flipbook(
 
     if USE_BEAUTY_ONLY:
         settings.beautyPassOnly(True)
+
+
+@contextmanager
+def _applied_viewport_camera(
+    viewport: hou.GeometryViewport,
+    camera_path: str | None,
+) -> Iterator[None]:
+    if not camera_path:
+        yield
+        return
+
+    try:
+        camera_node = hou.node(camera_path)
+    except Exception:
+        camera_node = None
+
+    if camera_node is None:
+        log.warning(
+            "Could not find camera '%s'; using current viewport camera.", camera_path
+        )
+        yield
+        return
+
+    try:
+        original_camera = viewport.camera()
+    except Exception:
+        original_camera = None
+
+    try:
+        viewport.setCamera(camera_node)
+    except Exception:
+        log.warning(
+            "Could not set viewport camera to '%s'; using current viewport camera.",
+            camera_path,
+            exc_info=True,
+        )
+        yield
+        return
+
+    try:
+        yield
+    finally:
+        try:
+            if original_camera is None:
+                viewport.setDefaultCamera()
+            else:
+                viewport.setCamera(original_camera)
+        except Exception:
+            pass
 
 
 @contextmanager
