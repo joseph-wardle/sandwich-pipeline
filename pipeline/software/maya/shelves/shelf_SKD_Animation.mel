@@ -14,28 +14,28 @@ global proc shelf_SKD_Animation () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Open Anim File" 
+        -annotation "Open Anim File"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "OpenAnim" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "OpenAnim"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -imageOverlayLabel "Open Anim" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "openLoadGeneric.png" 
-        -image1 "openLoadGeneric.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -imageOverlayLabel "Open Anim"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "openLoadGeneric.png"
+        -image1 "openLoadGeneric.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.shotfile import MAnimShotFileManager; fm = MAnimShotFileManager(); fm.open_file()" 
-        -sourceType "python" 
+        -command "from pipe.m.shotfile import MAnimShotFileManager; fm = MAnimShotFileManager(); fm.open_file()"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -49,27 +49,27 @@ global proc shelf_SKD_Animation () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Picker" 
+        -annotation "Picker"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Pickers" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Pickers"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "picker.svg" 
-        -image1 "picker.svg" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "picker.svg"
+        -image1 "picker.svg"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import pipe.m.picker; pipe.m.picker.run()" 
-        -sourceType "python" 
+        -command "import pipe.m.picker; pipe.m.picker.run()"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -83,28 +83,28 @@ global proc shelf_SKD_Animation () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Studio Library" 
+        -annotation "Studio Library"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Studio Library" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Studio Library"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -imageOverlayLabel "Studio Library" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "logo_high.png" 
-        -image1 "logo_high.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -imageOverlayLabel "Studio Library"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "logo_high.png"
+        -image1 "logo_high.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import pipe.m.studiolibrary; pipe.m.studiolibrary.run()" 
-        -sourceType "python" 
+        -command "import pipe.m.studiolibrary; pipe.m.studiolibrary.run()"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -118,28 +118,28 @@ global proc shelf_SKD_Animation () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Dynamic Space Switch" 
+        -annotation "Dynamic Space Switch"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Dynamic_Space_Switch" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Dynamic_Space_Switch"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -imageOverlayLabel "Sp Sw" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "createContainer.png" 
-        -image1 "createContainer.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -imageOverlayLabel "Sp Sw"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "createContainer.png"
+        -image1 "createContainer.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import pipe.m.space_switch as spsw; spsw.run()" 
-        -sourceType "python" 
+        -command "import pipe.m.space_switch as spsw; spsw.run()"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -153,28 +153,28 @@ global proc shelf_SKD_Animation () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Preview Textures" 
+        -annotation "Preview Textures"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Preview_Textures" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Preview_Textures"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -imageOverlayLabel "Textures" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "createContainer.png" 
-        -image1 "createContainer.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -imageOverlayLabel "Textures"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "createContainer.png"
+        -image1 "createContainer.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "colorManagementFileRules -e -colorSpace ACEScg PNG; colorManagementFileRules -save; generateAllUvTilePreviews;" 
-        -sourceType "mel" 
+        -command "colorManagementFileRules -e -colorSpace ACEScg PNG; colorManagementFileRules -save; generateAllUvTilePreviews;"
+        -sourceType "mel"
         -commandRepeatable 1
         -flat 1
     ;
@@ -188,28 +188,28 @@ global proc shelf_SKD_Animation () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Anim Playblast" 
+        -annotation "Anim Playblast"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Publish" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Publish"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -imageOverlayLabel "Anim Playblast" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "playblast.png" 
-        -image1 "playblast.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -imageOverlayLabel "Anim Playblast"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "playblast.png"
+        -image1 "playblast.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.playblast import AnimPlayblastDialog; from pipe.m.local import get_main_qt_window; AnimPlayblastDialog(get_main_qt_window()).show();" 
-        -sourceType "python" 
+        -command "from pipe.m.playblast import AnimPlayblastDialog; from pipe.m.local import get_main_qt_window; AnimPlayblastDialog(get_main_qt_window()).show();"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -223,28 +223,28 @@ global proc shelf_SKD_Animation () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Anim Publish" 
+        -annotation "Anim Publish"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Publish" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Publish"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -imageOverlayLabel "Anim Publish" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "publish.png" 
-        -image1 "publish.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -imageOverlayLabel "Anim Publish"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "publish.png"
+        -image1 "publish.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.publish import AnimPublisher; AnimPublisher().publish();" 
-        -sourceType "python" 
+        -command "from pipe.m.publish import AnimPublisher; AnimPublisher().publish();"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -258,28 +258,28 @@ global proc shelf_SKD_Animation () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Wrangler" 
+        -annotation "Wrangler"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Wrangler" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Wrangler"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -imageOverlayLabel "Wrangler" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "createContainer.png" 
-        -image1 "createContainer.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -imageOverlayLabel "Wrangler"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "createContainer.png"
+        -image1 "createContainer.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import pipe.m.wrangler; pipe.m.wrangler.run()" 
-        -sourceType "python" 
+        -command "import pipe.m.wrangler; pipe.m.wrangler.run()"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -293,28 +293,28 @@ global proc shelf_SKD_Animation () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "from rjg.libs.softMod import *; from rjg.libs.softMod import ui as smui; smui();" 
+        -annotation "File Snapshot and Autosave Tool"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "SoftMod" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Aperture"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -imageOverlayLabel "SofMod" 
-        -overlayLabelColor 2.6281 0.7848 0.0125001 
-        -overlayLabelBackColor 0 0 0 0.5 
-        -image "softMod.png" 
-        -image1 "softMod.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -imageOverlayLabel "Aperture"
+        -overlayLabelColor 1.1914 0.7988 0.3944
+        -overlayLabelBackColor 0.172974 0.169201 0.166475 0.5
+        -image "vortexField.svg"
+        -image1 "vortexField.svg"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from rjg.libs.softMod import *; from rjg.libs.softMod import ui as smui; smui();" 
-        -sourceType "python" 
+        -command "import aperture\naperture.ui.launch()"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -328,65 +328,30 @@ global proc shelf_SKD_Animation () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "File Snapshot and Autosave Tool" 
+        -annotation "Crank Shot Sculpt Tool"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Aperture" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Crank"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -imageOverlayLabel "Aperture" 
-        -overlayLabelColor 1.1914 0.7988 0.3944 
-        -overlayLabelBackColor 0.172974 0.169201 0.166475 0.5 
-        -image "vortexField.svg" 
-        -image1 "vortexField.svg" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -imageOverlayLabel "Crank"
+        -overlayLabelColor 2.6968 0.8089 0.1076
+        -overlayLabelBackColor 0 0 0 0.1
+        -image "mgear_crank.svg"
+        -image1 "mgear_crank.svg"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import aperture\naperture.ui.launch()" 
-        -sourceType "python" 
-        -commandRepeatable 1
-        -flat 1
-    ;
-    shelfButton
-        -enableCommandRepeat 1
-        -flexibleWidthType 3
-        -flexibleWidthValue 32
-        -enable 1
-        -width 35
-        -height 34
-        -manage 1
-        -visible 1
-        -preventOverride 0
-        -annotation "Crank Shot Sculpt Tool" 
-        -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Crank" 
-        -labelOffset 0
-        -rotation 0
-        -flipX 0
-        -flipY 0
-        -useAlpha 1
-        -font "plainLabelFont" 
-        -imageOverlayLabel "Crank" 
-        -overlayLabelColor 2.6968 0.8089 0.1076 
-        -overlayLabelBackColor 0 0 0 0.1 
-        -image "mgear_crank.svg" 
-        -image1 "mgear_crank.svg" 
-        -style "iconOnly" 
-        -marginWidth 0
-        -marginHeight 1
-        -command "from mgear.crank import crank_tool\ncrank_tool.openUI()" 
-        -sourceType "python" 
+        -command "from mgear.crank import crank_tool\ncrank_tool.openUI()"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
 
-} 
+}
