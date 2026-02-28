@@ -28,6 +28,7 @@ from shared.util import get_edit_path
 
 from pipe.db import DB
 from pipe.m.shotfile.anim import _find_usd_shotcam
+from pipe.playblast_artist import resolve_artist_display_name
 from pipe.playblast_naming import (
     playblast_date_folder,
     resolve_versioned_playblast_basename,
@@ -47,7 +48,7 @@ from .struct import (
     SaveLocation,
     dummy_shot,
 )
-from .ui import PlayblastDialog, resolve_artist_display_name
+from .ui import PlayblastDialog
 
 if TYPE_CHECKING:
     from pipe.struct.db import Shot
