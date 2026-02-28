@@ -89,6 +89,16 @@ class ResolvedOutputDestination:
     output_base: Path
 
 
+@dataclass(frozen=True)
+class HoudiniPlayblastExportConfig:
+    """Fully resolved export configuration used by launch orchestration."""
+
+    context: HoudiniPlayblastLaunchContext
+    shot: Shot
+    out_paths: dict[Playblaster.PRESET, list[Path | str]]
+    final_movies: tuple[Path, ...]
+
+
 def launch_playblast() -> None:
     if local.is_headless():
         MessageDialog(None, "Playblast requires the Houdini UI.", "Playblast").exec_()
@@ -105,34 +115,32 @@ def launch_playblast() -> None:
     if not dialog.exec_():
         return
 
-    context = _build_launch_context_or_report(dialog, parent)
-    if context is None:
+    export_config = _generate_export_config_or_report(dialog, conn, parent)
+    if export_config is None:
         return
 
-    shot = _resolve_source_shot_or_report(conn, context, parent)
-    if shot is None:
+    validation_error = _validate_export_config(export_config)
+    if validation_error:
+        MessageDialog(parent, validation_error, "Playblast").exec_()
         return
 
-    out_paths = _build_output_paths(context)
-    playblaster = HPlayblaster().configure(
-        shot,
-        out_paths,
-        camera_path=context.custom_camera_path,
+    if not _run_local_playblast_or_report(export_config, parent):
+        return
+
+    try:
+        post_export_messages = _run_post_export_actions(export_config)
+    except Exception as exc:
+        log.exception("Post-playblast actions failed")
+        post_export_messages = [
+            "Post-export actions failed. Local playblast files were still written.",
+            f"Reason: {exc}",
+        ]
+
+    success_message = _build_success_message(
+        output_paths=list(export_config.final_movies),
+        post_export_messages=post_export_messages,
     )
-    if not _run_local_playblast_or_report(playblaster, parent):
-        return
-
-    final_movies = _ordered_final_movie_paths_for_upload(context)
-    if context.source_mode == "shot" and context.upload_to_shotgrid:
-        upload_movie = _resolve_shotgrid_upload_movie_path(context)
-        if upload_movie is None:
-            log.warning(
-                "ShotGrid upload requested but no valid movie output was found in selected destinations."
-            )
-        else:
-            _upload_stub(parent, upload_movie)
-
-    _show_success_dialog(parent, final_movies)
+    MessageDialog(parent, success_message, "Playblast").exec_()
 
 
 def _resolve_connection_or_report(parent: QtWidgets.QWidget | None) -> Any | None:
@@ -144,14 +152,45 @@ def _resolve_connection_or_report(parent: QtWidgets.QWidget | None) -> Any | Non
         return None
 
 
-def _build_launch_context_or_report(
+def _generate_export_config_or_report(
     dialog: HPlayblastDialog,
+    conn: Any,
     parent: QtWidgets.QWidget | None,
-) -> HoudiniPlayblastLaunchContext | None:
+) -> HoudiniPlayblastExportConfig | None:
+    try:
+        return _generate_export_config(dialog, conn)
+    except Exception as exc:
+        log.exception("Playblast config generation failed")
+        MessageDialog(
+            parent,
+            f"Could not generate playblast settings.\n\n{exc}",
+            "Playblast Error",
+        ).exec_()
+        return None
+
+
+def _generate_export_config(
+    dialog: HPlayblastDialog,
+    conn: Any,
+) -> HoudiniPlayblastExportConfig:
+    context = _build_launch_context(dialog)
+    shot = _resolve_source_shot(conn, context)
+    out_paths = _build_output_paths(context)
+    final_movies = tuple(_ordered_final_movie_paths_for_upload(context))
+    return HoudiniPlayblastExportConfig(
+        context=context,
+        shot=shot,
+        out_paths=out_paths,
+        final_movies=final_movies,
+    )
+
+
+def _build_launch_context(
+    dialog: HPlayblastDialog,
+) -> HoudiniPlayblastLaunchContext:
     output_bases_by_destination = dialog.resolve_output_bases_by_destination()
     if not output_bases_by_destination:
-        MessageDialog(parent, "Unable to build export path.", "Playblast").exec_()
-        return None
+        raise ValueError("Unable to build export path.")
 
     output_destinations = tuple(
         ResolvedOutputDestination(
@@ -162,16 +201,12 @@ def _build_launch_context_or_report(
         if destination_name in output_bases_by_destination
     )
     if not output_destinations:
-        MessageDialog(parent, "Unable to build export path.", "Playblast").exec_()
-        return None
+        raise ValueError("Unable to build export path.")
 
     source_mode = dialog.selected_source_mode
     shot_code = dialog.shot_code if source_mode == "shot" else None
     if source_mode == "shot" and not shot_code:
-        MessageDialog(
-            parent, "No shot code was found for Shot Playblast.", "Playblast"
-        ).exec_()
-        return None
+        raise ValueError("No shot code was found for Shot Playblast.")
 
     custom_frame_range = dialog.custom_frame_range if source_mode == "custom" else None
 
@@ -186,23 +221,22 @@ def _build_launch_context_or_report(
     )
 
 
-def _resolve_source_shot_or_report(
+def _resolve_source_shot(
     conn: Any,
     context: HoudiniPlayblastLaunchContext,
-    parent: QtWidgets.QWidget | None,
-) -> Shot | None:
+) -> Shot:
     if context.source_mode == "custom":
-        return _build_custom_mode_shot(context)
+        custom_mode_shot = _build_custom_mode_shot(context)
+        if custom_mode_shot is None:
+            raise ValueError("Could not build custom shot context.")
+        return custom_mode_shot
 
     shot_code = context.shot_code or ""
     try:
         return conn.get_shot_by_code(shot_code)
     except Exception as exc:
         log.error("Shot lookup failed for %s: %s", shot_code, exc, exc_info=True)
-        MessageDialog(
-            parent, f"Shot '{shot_code}' not found in ShotGrid.", "Playblast"
-        ).exec_()
-        return None
+        raise ValueError(f"Shot '{shot_code}' not found in ShotGrid.") from exc
 
 
 def _build_custom_mode_shot(context: HoudiniPlayblastLaunchContext) -> Shot | None:
@@ -236,16 +270,37 @@ def _build_output_paths(
     }
 
 
+def _validate_export_config(config: HoudiniPlayblastExportConfig) -> str | None:
+    if not config.out_paths:
+        return "No playblast outputs are configured."
+
+    output_count = sum(len(paths) for paths in config.out_paths.values())
+    if output_count < 1:
+        return "No playblast outputs are configured."
+
+    if not config.final_movies:
+        return "No output movie paths were resolved for this export."
+
+    return None
+
+
 def _run_local_playblast_or_report(
-    playblaster: HPlayblaster,
+    config: HoudiniPlayblastExportConfig,
     parent: QtWidgets.QWidget | None,
 ) -> bool:
+    playblaster = HPlayblaster().configure(
+        config.shot,
+        config.out_paths,
+        camera_path=config.context.custom_camera_path,
+    )
     try:
         playblaster.playblast()
     except Exception as exc:
-        log.error("Playblast failed: %s", exc, exc_info=True)
+        log.exception("Playblast export failed")
         MessageDialog(
-            parent, "Playblast failed. Check the console for details.", "Playblast"
+            parent,
+            f"Playblast failed.\n\n{exc}",
+            "Playblast Error",
         ).exec_()
         return False
     return True
@@ -286,18 +341,35 @@ def _resolve_shotgrid_upload_movie_path(
     )
 
 
-def _show_success_dialog(
-    parent: QtWidgets.QWidget | None, final_movies: list[Path]
-) -> None:
-    if not final_movies:
-        message = "Playblast export completed, but no output files were resolved."
-        MessageDialog(parent, message, "Playblast").exec_()
-        return
+def _run_post_export_actions(config: HoudiniPlayblastExportConfig) -> list[str]:
+    context = config.context
+    if context.source_mode != "shot" or not context.upload_to_shotgrid:
+        return []
 
-    message_lines = ["Playblast saved to:"]
-    message_lines.extend(str(path) for path in final_movies)
-    message = "\n".join(message_lines)
-    MessageDialog(parent, message, "Playblast").exec_()
+    upload_movie = _resolve_shotgrid_upload_movie_path(context)
+    if upload_movie is None:
+        log.warning(
+            "ShotGrid upload requested but no valid movie output was found in selected destinations."
+        )
+        return ["ShotGrid Upload: Skipped - no valid playblast movie file was found."]
+
+    return [_upload_stub(upload_movie)]
+
+
+def _build_success_message(
+    output_paths: list[Path],
+    post_export_messages: list[str],
+) -> str:
+    message_lines = ["Local playblast export successful."]
+    if output_paths:
+        message_lines.append("")
+        message_lines.append("Outputs:")
+        message_lines.extend(str(path) for path in output_paths)
+    if post_export_messages:
+        message_lines.append("")
+        message_lines.append("Post-export:")
+        message_lines.extend(post_export_messages)
+    return "\n".join(message_lines)
 
 
 def _resolve_shot_code() -> str | None:
@@ -325,7 +397,7 @@ def _resolve_shot_code() -> str | None:
     return None
 
 
-def _upload_stub(parent: QtWidgets.QWidget | None, movie_path: Path) -> None:
+def _upload_stub(movie_path: Path) -> str:
     artist_display_name = resolve_artist_display_name().strip()
     if artist_display_name:
         log.info(
@@ -335,6 +407,6 @@ def _upload_stub(parent: QtWidgets.QWidget | None, movie_path: Path) -> None:
         )
     else:
         log.info("ShotGrid upload requested for %s (not implemented yet).", movie_path)
-    MessageDialog(
-        parent, "ShotGrid upload is not implemented yet.", "Playblast"
-    ).exec_()
+    return (
+        f"ShotGrid Upload: Skipped - not implemented yet (requested for {movie_path})."
+    )
