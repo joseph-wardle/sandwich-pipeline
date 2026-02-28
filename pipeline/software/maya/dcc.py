@@ -53,7 +53,7 @@ class MayaDCC(DCC):
 
         env_vars = {
             "DCC": str(this_path.parent.name),
-            "DWPICKER_PROJECT_DIRECTORY": str(get_rigging_path() / "Pickers"),
+            "DWPICKER_PROJECT_DIRECTORY": str(get_production_path() / "pickers"),
             "MAYA_SHELF_PATH": self.shelf_path,
             "MAYAUSD_EXPORT_MAP1_AS_PRIMARY_UV_SET": 1,
             "MAYAUSD_IMPORT_PRIMARY_UV_SET_AS_MAP1": 1,
