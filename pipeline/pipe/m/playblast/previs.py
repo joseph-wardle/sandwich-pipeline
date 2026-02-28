@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 
 import maya.cmds as mc
+from env_sg import DB_Config
 from Qt import QtCore
 from Qt.QtWidgets import (
     QCheckBox,
@@ -23,6 +26,7 @@ from Qt.QtWidgets import (
 )
 from shared.util import get_edit_path
 
+from pipe.db import DB
 from pipe.playblast_naming import (
     playblast_date_folder,
     resolve_versioned_playblast_basename,
@@ -38,6 +42,11 @@ from .struct import (
 )
 from .ui import PlayblastDialog
 
+if TYPE_CHECKING:
+    from pipe.struct.db import Shot
+
+log = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class SequencerShotContext:
@@ -50,7 +59,6 @@ class SequencerShotContext:
 
 
 class PrevisPlayblastDialog(PlayblastDialog):
-    _context_banner: QLabel
     _custom_camera: QComboBox
     _custom_folder_row: QWidget
     _custom_in: QSpinBox
@@ -58,18 +66,21 @@ class PrevisPlayblastDialog(PlayblastDialog):
     _destination_checkboxes: dict[str, QCheckBox]
     _destination_path_labels: dict[str, QLabel]
     _save_locations_by_name: dict[str, SaveLocation]
-    _sequencer_shot_nodes: list[str]
-    _source_tabs: QTabWidget
-    _shot_camera_value: QLabel
-    _shot_name_value: QLabel
+    _sequencer_camera_value: QLabel
+    _sequencer_name_value: QLabel
+    _sequencer_range_value: QLabel
+    _shot: Shot | None
+    _shot_camera: QComboBox
+    _shot_code_value: QLabel
     _shot_range_value: QLabel
+    _source_tabs: QTabWidget
     _validation_label: QLabel
 
     SHOT_TAB_INDEX = 0
-    CUSTOM_TAB_INDEX = 1
-    CONTEXT_BANNER_STYLE = (
-        "padding: 8px; border: 1px solid #c3cfdb; background: #e3ebf5; color: #666;"
-    )
+    SEQUENCER_TAB_INDEX = 1
+    CUSTOM_TAB_INDEX = 2
+
+    SOURCE_MODE = Literal["shot", "sequencer", "custom"]
 
     class SAVE_LOCS(PlayblastDialog.SAVE_LOCS):
         EDIT = SaveLocation(
@@ -79,12 +90,7 @@ class PrevisPlayblastDialog(PlayblastDialog):
         )
 
     def __init__(self, parent) -> None:
-        self._sequencer_shot_nodes = [
-            str(shot_node)
-            for shot_node in (mc.sequenceManager(listShots=True) or [])
-            if mc.objExists(shot_node)
-            and not bool(mc.shot(shot_node, query=True, mute=True))
-        ]
+        self._shot = self._resolve_pipeline_shot_context()
         self._destination_checkboxes = {}
         self._destination_path_labels = {}
         self._save_locations_by_name = {
@@ -110,10 +116,10 @@ class PrevisPlayblastDialog(PlayblastDialog):
         title.setStyleSheet("font-size: 24px; font-weight: 700;")
         title.setAlignment(QtCore.Qt.AlignCenter)
 
-        subtitle = QLabel("Choose source mode, choose destinations, then export.")
+        subtitle = QLabel("Choose source mode, choose destinations, then export")
         subtitle.setAlignment(QtCore.Qt.AlignCenter)
         subtitle.setToolTip(
-            "High-level workflow: choose source, choose destinations, then export."
+            "Playblast flow: choose the source mode, choose destinations, then export."
         )
 
         self._main_layout.addWidget(title)
@@ -123,21 +129,13 @@ class PrevisPlayblastDialog(PlayblastDialog):
         setup_group = QGroupBox("1. Export Setup")
         setup_layout = QVBoxLayout(setup_group)
 
-        self._context_banner = QLabel()
-        self._context_banner.setWordWrap(True)
-        self._context_banner.setStyleSheet(self.CONTEXT_BANNER_STYLE)
-        self._context_banner.setToolTip(
-            "Live context for the selected export mode: shot, camera, and frame range."
-        )
-        setup_layout.addWidget(self._context_banner)
-
         setup_layout.addWidget(self._build_export_source_section())
         setup_layout.addWidget(self._build_destination_section())
 
         self._validation_label = QLabel()
         self._validation_label.setStyleSheet("color: #b00020;")
         self._validation_label.setToolTip(
-            "Validation feedback. Export is disabled until this message is cleared."
+            "Validation feedback. Export stays disabled until all required inputs are valid."
         )
         self._validation_label.setVisible(False)
         setup_layout.addWidget(self._validation_label)
@@ -149,8 +147,10 @@ class PrevisPlayblastDialog(PlayblastDialog):
         source_layout = QVBoxLayout(source_group)
 
         self._source_tabs = QTabWidget()
+        self._source_tabs.addTab(self._build_shot_source_tab(), "Shot Playblast")
         self._source_tabs.addTab(
-            self._build_shot_source_tab(), "Shot Playblast (Current Sequencer Shot)"
+            self._build_sequencer_source_tab(),
+            "Sequencer Playblast",
         )
         self._source_tabs.addTab(
             self._build_custom_source_tab(),
@@ -158,17 +158,23 @@ class PrevisPlayblastDialog(PlayblastDialog):
         )
         self._source_tabs.currentChanged.connect(self._on_source_mode_changed)
         self._source_tabs.setToolTip(
-            "Choose whether to export the current sequencer shot or a custom range."
+            "Select how the playblast source is resolved: pipeline shot metadata, sequencer shot, or manual custom settings."
         )
+
         source_tab_bar = self._source_tabs.tabBar()
         source_tab_bar.setTabToolTip(
             self.SHOT_TAB_INDEX,
-            "Exports the shot under the current timeline frame in the camera sequencer.",
+            "Uses shot code metadata from the current Maya file (fileInfo 'code') and ShotGrid cut range.",
+        )
+        source_tab_bar.setTabToolTip(
+            self.SEQUENCER_TAB_INDEX,
+            "Uses the camera sequencer shot under the current timeline frame.",
         )
         source_tab_bar.setTabToolTip(
             self.CUSTOM_TAB_INDEX,
-            "Exports a manually selected camera and frame range.",
+            "Uses manual camera and manual frame range, independent of shot metadata.",
         )
+
         source_layout.addWidget(self._source_tabs)
         return source_group
 
@@ -177,31 +183,69 @@ class PrevisPlayblastDialog(PlayblastDialog):
         shot_layout = QGridLayout(shot_tab)
 
         shot_layout.addWidget(QLabel("Source"), 0, 0)
-        shot_source_value = QLabel("Current Sequencer Shot")
+        shot_source_value = QLabel("Pipeline Shot File")
         shot_source_value.setToolTip(
-            "This mode uses the sequencer shot at the current timeline frame."
+            "Source is derived from this Maya scene's pipeline shot metadata."
         )
         shot_layout.addWidget(shot_source_value, 0, 1)
 
         shot_layout.addWidget(QLabel("Shot"), 1, 0)
-        self._shot_name_value = QLabel("-")
-        self._shot_name_value.setToolTip("Resolved shot name for the current frame.")
-        shot_layout.addWidget(self._shot_name_value, 1, 1)
+        self._shot_code_value = QLabel("-")
+        self._shot_code_value.setToolTip("Resolved pipeline shot code.")
+        shot_layout.addWidget(self._shot_code_value, 1, 1)
 
         shot_layout.addWidget(QLabel("Camera"), 2, 0)
-        self._shot_camera_value = QLabel("-")
-        self._shot_camera_value.setToolTip(
-            "Resolved camera from the active sequencer shot."
+        self._shot_camera = QComboBox(self)
+        self._shot_camera.addItems(self._available_custom_cameras())
+        self._shot_camera.setToolTip(
+            "Camera used for shot playblast output in Shot mode."
         )
-        shot_layout.addWidget(self._shot_camera_value, 2, 1)
+        self._shot_camera.currentTextChanged.connect(self._on_source_settings_changed)
+        shot_layout.addWidget(self._shot_camera, 2, 1)
 
         shot_layout.addWidget(QLabel("Frame Range"), 3, 0)
         self._shot_range_value = QLabel("-")
         self._shot_range_value.setToolTip(
-            "Resolved frame range from the active sequencer shot."
+            "Resolved cut range from ShotGrid for the detected pipeline shot."
         )
         shot_layout.addWidget(self._shot_range_value, 3, 1)
+
+        self._set_default_shot_camera()
         return shot_tab
+
+    def _build_sequencer_source_tab(self) -> QWidget:
+        sequencer_tab = QWidget()
+        sequencer_layout = QGridLayout(sequencer_tab)
+
+        sequencer_layout.addWidget(QLabel("Source"), 0, 0)
+        sequencer_source_value = QLabel("Current Sequencer Shot")
+        sequencer_source_value.setToolTip(
+            "Uses the sequencer shot at the current timeline frame."
+        )
+        sequencer_layout.addWidget(sequencer_source_value, 0, 1)
+
+        sequencer_layout.addWidget(QLabel("Shot"), 1, 0)
+        self._sequencer_name_value = QLabel("-")
+        self._sequencer_name_value.setToolTip(
+            "Resolved sequencer shot name for the current frame."
+        )
+        sequencer_layout.addWidget(self._sequencer_name_value, 1, 1)
+
+        sequencer_layout.addWidget(QLabel("Camera"), 2, 0)
+        self._sequencer_camera_value = QLabel("-")
+        self._sequencer_camera_value.setToolTip(
+            "Resolved camera from the active sequencer shot."
+        )
+        sequencer_layout.addWidget(self._sequencer_camera_value, 2, 1)
+
+        sequencer_layout.addWidget(QLabel("Frame Range"), 3, 0)
+        self._sequencer_range_value = QLabel("-")
+        self._sequencer_range_value.setToolTip(
+            "Resolved frame range from the active sequencer shot."
+        )
+        sequencer_layout.addWidget(self._sequencer_range_value, 3, 1)
+
+        return sequencer_tab
 
     def _build_custom_source_tab(self) -> QWidget:
         custom_tab = QWidget()
@@ -221,9 +265,8 @@ class PrevisPlayblastDialog(PlayblastDialog):
         custom_layout.addWidget(QLabel("Custom Out"), 0, 2)
         custom_layout.addWidget(self._custom_out, 0, 3)
 
-        camera_list = self._available_custom_cameras()
         self._custom_camera = QComboBox(self)
-        self._custom_camera.addItems(camera_list)
+        self._custom_camera.addItems(self._available_custom_cameras())
         self._custom_camera.setToolTip("Camera used for custom playblast output.")
         self._custom_camera.currentTextChanged.connect(self._on_source_settings_changed)
         custom_layout.addWidget(QLabel("Custom Camera"), 1, 0)
@@ -307,14 +350,17 @@ class PrevisPlayblastDialog(PlayblastDialog):
         self._init_buttons(has_cancel_button=True, ok_name="Playblast Shot")
         self.buttons.rejected.connect(self.close)
         self.buttons.accepted.connect(self.do_export)
+
         ok_button = self.buttons.button(QDialogButtonBox.Ok)
         if ok_button is not None:
             ok_button.setToolTip(
-                "Start playblast with current source and destination selections."
+                "Start playblast with the current source and destination selections."
             )
+
         cancel_button = self.buttons.button(QDialogButtonBox.Cancel)
         if cancel_button is not None:
             cancel_button.setToolTip("Close without exporting.")
+
         self._main_layout.addWidget(self.buttons)
 
     def _apply_viewport_option_tooltips(self) -> None:
@@ -329,23 +375,55 @@ class PrevisPlayblastDialog(PlayblastDialog):
         self._use_dof.setToolTip("Include camera depth of field in playblast.")
 
     def _set_default_source_tab(self) -> None:
-        has_shot_context = bool(self._sequencer_shot_nodes)
+        self._refresh_source_tab_availability()
+
+        self._source_tabs.setCurrentIndex(self._default_source_tab_index())
+
+    def _refresh_source_tab_availability(self) -> None:
+        has_shot_context = self._shot is not None
+        has_sequencer_context = self._has_sequencer_shot_context()
+
         self._source_tabs.setTabEnabled(self.SHOT_TAB_INDEX, has_shot_context)
-        default_index = (
-            self.SHOT_TAB_INDEX if has_shot_context else self.CUSTOM_TAB_INDEX
+        self._source_tabs.setTabEnabled(
+            self.SEQUENCER_TAB_INDEX,
+            has_sequencer_context,
         )
-        self._source_tabs.setCurrentIndex(default_index)
+
+        selected_mode = self._selected_source_mode()
+        if selected_mode == "shot" and not has_shot_context:
+            self._source_tabs.setCurrentIndex(self._default_source_tab_index())
+        if selected_mode == "sequencer" and not has_sequencer_context:
+            self._source_tabs.setCurrentIndex(self._default_source_tab_index())
+
+    def _default_source_tab_index(self) -> int:
+        has_shot_context = self._shot is not None
+        has_sequencer_context = self._has_sequencer_shot_context()
+
+        if has_shot_context:
+            return self.SHOT_TAB_INDEX
+        if has_sequencer_context:
+            return self.SEQUENCER_TAB_INDEX
+        return self.CUSTOM_TAB_INDEX
 
     @staticmethod
-    def _destination_locations() -> list[SaveLocation]:
-        return [
-            PrevisPlayblastDialog.SAVE_LOCS.EDIT,
-            PrevisPlayblastDialog.SAVE_LOCS.CURRENT,
-            PrevisPlayblastDialog.SAVE_LOCS.CUSTOM,
-        ]
+    def _resolve_pipeline_shot_context() -> Shot | None:
+        try:
+            conn = DB.Get(DB_Config)
+        except Exception:
+            return None
 
-    def _default_destination_enabled(self, location: SaveLocation) -> bool:
-        return location.name == self.SAVE_LOCS.EDIT.name
+        try:
+            code = str(mc.fileInfo("code", query=True)[0]).strip()
+        except Exception:
+            return None
+
+        if not code:
+            return None
+
+        try:
+            return conn.get_shot_by_code(code)
+        except Exception:
+            return None
 
     @staticmethod
     def _timeline_range() -> tuple[int, int]:
@@ -364,8 +442,104 @@ class PrevisPlayblastDialog(PlayblastDialog):
             )
         ]
 
-    def _is_shot_mode_selected(self) -> bool:
-        return self._source_tabs.currentIndex() == self.SHOT_TAB_INDEX
+    @staticmethod
+    def _active_camera_name() -> str:
+        panel = PlayblastDialog._resolve_active_model_panel()
+        if not panel:
+            return ""
+
+        try:
+            camera = str(mc.modelEditor(panel, query=True, camera=True) or "")
+        except Exception:
+            return ""
+
+        return camera.strip()
+
+    @staticmethod
+    def _camera_name_variants(camera_name: str) -> set[str]:
+        if not camera_name:
+            return set()
+
+        variants = {camera_name, camera_name.split("|")[-1], camera_name.split(":")[-1]}
+
+        if not mc.objExists(camera_name):
+            return variants
+
+        node_type = str(mc.nodeType(camera_name) or "")
+        if node_type == "transform":
+            shapes = (
+                mc.listRelatives(
+                    camera_name,
+                    shapes=True,
+                    type="camera",
+                    fullPath=True,
+                )
+                or []
+            )
+            for shape in shapes:
+                shape_name = str(shape)
+                variants.add(shape_name)
+                variants.add(shape_name.split("|")[-1])
+                variants.add(shape_name.split(":")[-1])
+
+        if node_type == "camera":
+            parents = mc.listRelatives(camera_name, parent=True, fullPath=True) or []
+            for parent in parents:
+                parent_name = str(parent)
+                variants.add(parent_name)
+                variants.add(parent_name.split("|")[-1])
+                variants.add(parent_name.split(":")[-1])
+
+        return variants
+
+    @staticmethod
+    def _set_combo_to_camera(combo: QComboBox, camera_name: str) -> None:
+        variants = PrevisPlayblastDialog._camera_name_variants(camera_name)
+        if not variants:
+            return
+
+        for index in range(combo.count()):
+            item_text = combo.itemText(index)
+            if item_text in variants:
+                combo.setCurrentIndex(index)
+                return
+
+    def _set_default_shot_camera(self) -> None:
+        self._set_combo_to_camera(self._shot_camera, self._active_camera_name())
+
+    @staticmethod
+    def _list_sequencer_shot_nodes() -> list[str]:
+        return [
+            str(shot_node)
+            for shot_node in (mc.sequenceManager(listShots=True) or [])
+            if mc.objExists(shot_node)
+            and not bool(mc.shot(shot_node, query=True, mute=True))
+        ]
+
+    def _has_sequencer_shot_context(self) -> bool:
+        return bool(self._list_sequencer_shot_nodes())
+
+    @staticmethod
+    def _destination_locations() -> list[SaveLocation]:
+        return [
+            PrevisPlayblastDialog.SAVE_LOCS.EDIT,
+            PrevisPlayblastDialog.SAVE_LOCS.CURRENT,
+            PrevisPlayblastDialog.SAVE_LOCS.CUSTOM,
+        ]
+
+    def _default_destination_enabled(self, location: SaveLocation) -> bool:
+        return location.name == self.SAVE_LOCS.EDIT.name
+
+    def _selected_source_mode(self) -> SOURCE_MODE:
+        current_index = self._source_tabs.currentIndex()
+        if current_index == self.SHOT_TAB_INDEX:
+            return "shot"
+        if current_index == self.SEQUENCER_TAB_INDEX:
+            return "sequencer"
+        return "custom"
+
+    def _selected_shot_camera(self) -> str:
+        return str(self._shot_camera.currentText()).strip()
 
     def _selected_destination_locations(self) -> list[SaveLocation]:
         selected: list[SaveLocation] = []
@@ -414,38 +588,29 @@ class PrevisPlayblastDialog(PlayblastDialog):
             location = self._save_locations_by_name[location_name]
             path_label.setText(f"-> {self._resolved_destination_path(location)}")
 
-    def _refresh_context_banner(self) -> None:
+    def _refresh_shot_context_fields(self) -> None:
+        if self._shot is None:
+            self._shot_code_value.setText("-")
+            self._shot_range_value.setText("-")
+            return
+
+        self._shot_code_value.setText(self._shot.code)
+        self._shot_range_value.setText(f"{self._shot.cut_in} - {self._shot.cut_out}")
+
+    def _refresh_sequencer_context_fields(self) -> SequencerShotContext | None:
         shot_context = self._resolve_current_sequencer_shot_context()
-        if self._is_shot_mode_selected():
-            if shot_context is None:
-                current_frame = int(mc.currentTime(query=True))
-                banner_text = (
-                    "No current sequencer shot found at frame "
-                    f"{current_frame}. Move the timeline into a shot or switch to Custom Playblast."
-                )
-                self._shot_name_value.setText("-")
-                self._shot_camera_value.setText("-")
-                self._shot_range_value.setText("-")
-            else:
-                banner_text = (
-                    f"Detected shot: {shot_context.name} | "
-                    f"Camera: {shot_context.camera} | "
-                    f"Range: {shot_context.cut_in}-{shot_context.cut_out}"
-                )
-                self._shot_name_value.setText(shot_context.name)
-                self._shot_camera_value.setText(shot_context.camera)
-                self._shot_range_value.setText(
-                    f"{shot_context.cut_in} - {shot_context.cut_out}"
-                )
-        else:
-            if shot_context is None:
-                banner_text = "No shot context detected. Custom Playblast is active."
-            else:
-                banner_text = (
-                    f"Detected shot: {shot_context.name}. "
-                    "Custom Playblast is active and will use manual camera/range settings."
-                )
-        self._context_banner.setText(banner_text)
+        if shot_context is None:
+            self._sequencer_name_value.setText("-")
+            self._sequencer_camera_value.setText("-")
+            self._sequencer_range_value.setText("-")
+            return None
+
+        self._sequencer_name_value.setText(shot_context.name)
+        self._sequencer_camera_value.setText(shot_context.camera)
+        self._sequencer_range_value.setText(
+            f"{shot_context.cut_in} - {shot_context.cut_out}"
+        )
+        return shot_context
 
     def _sync_custom_path_row_visibility(self) -> None:
         is_visible = self._is_custom_destination_selected()
@@ -453,13 +618,27 @@ class PrevisPlayblastDialog(PlayblastDialog):
         self._custom_folder_field.setEnabled(is_visible)
 
     def _validate_target_destination_state(self) -> str | None:
-        if self._is_shot_mode_selected():
+        mode = self._selected_source_mode()
+
+        if mode == "shot":
+            if self._shot is None:
+                return (
+                    "No pipeline shot context was found. Open a pipeline shot file "
+                    "or switch to Sequencer or Custom Playblast."
+                )
+            if self._shot.cut_out < self._shot.cut_in:
+                return "Shot cut range is invalid (Cut Out must be >= Cut In)."
+            if not self._selected_shot_camera():
+                return "Choose a camera for Shot Playblast."
+
+        if mode == "sequencer":
             shot_context = self._resolve_current_sequencer_shot_context()
             if shot_context is None:
-                return "No current sequencer shot was found. Move timeline to a shot or use Custom Playblast."
+                return "No current sequencer shot was found. Move timeline to a shot or use another source mode."
             if not shot_context.camera:
                 return "Current sequencer shot has no camera assigned."
-        else:
+
+        if mode == "custom":
             if self._custom_out.value() < self._custom_in.value():
                 return "Custom Out must be greater than or equal to Custom In."
             if not str(self._custom_camera.currentText()).strip():
@@ -476,23 +655,31 @@ class PrevisPlayblastDialog(PlayblastDialog):
 
         return None
 
+    def _action_button_text(self) -> str:
+        mode = self._selected_source_mode()
+        if mode == "shot":
+            return "Playblast Shot"
+        if mode == "sequencer":
+            return "Playblast Sequencer"
+        return "Playblast Custom"
+
     def _update_action_state(self) -> None:
         ok_button = self.buttons.button(QDialogButtonBox.Ok)
         if ok_button is None:
             return
 
-        ok_button.setText(
-            "Playblast Shot" if self._is_shot_mode_selected() else "Playblast Custom"
-        )
+        ok_button.setText(self._action_button_text())
         validation_error = self._validate_target_destination_state()
         ok_button.setEnabled(validation_error is None)
         self._validation_label.setText(validation_error or "")
         self._validation_label.setVisible(validation_error is not None)
 
     def _update_ui_state(self) -> None:
+        self._refresh_source_tab_availability()
+        self._refresh_shot_context_fields()
+        self._refresh_sequencer_context_fields()
         self._sync_custom_path_row_visibility()
         self._refresh_destination_path_labels()
-        self._refresh_context_banner()
         self._update_action_state()
 
     def _on_source_mode_changed(self, _index: int) -> None:
@@ -543,11 +730,9 @@ class PrevisPlayblastDialog(PlayblastDialog):
         )
 
     def _resolve_current_shot_node(self) -> str | None:
-        if not self._sequencer_shot_nodes:
-            return None
-
         current_frame = int(mc.currentTime(query=True))
-        for shot_node in self._sequencer_shot_nodes:
+
+        for shot_node in self._list_sequencer_shot_nodes():
             if not mc.objExists(shot_node):
                 continue
             try:
@@ -565,9 +750,19 @@ class PrevisPlayblastDialog(PlayblastDialog):
         return scene_name or "previs_playblast"
 
     def _hud_shot_label(self) -> str:
-        shot_context = self._resolve_current_sequencer_shot_context()
-        if shot_context:
-            return shot_context.name
+        mode = self._selected_source_mode()
+
+        if mode == "shot" and self._shot is not None:
+            return self._shot.code
+
+        if mode == "sequencer":
+            shot_context = self._resolve_current_sequencer_shot_context()
+            if shot_context is not None:
+                return shot_context.name
+
+        if self._shot is not None:
+            return self._shot.code
+
         return "Custom"
 
     def _validate_config(self, config: MPlayblastConfig) -> str | None:
@@ -576,44 +771,70 @@ class PrevisPlayblastDialog(PlayblastDialog):
             return validation_error
         return super()._validate_config(config)
 
+    def _build_shot_playblast_config(self) -> MShotPlayblastConfig:
+        if self._shot is None:
+            raise ValueError("No pipeline shot context was found.")
+
+        shot_camera = self._selected_shot_camera()
+        if not shot_camera:
+            raise ValueError("Choose a camera for Shot Playblast.")
+
+        output_name = self._resolve_output_name(self._shot.code)
+        return MShotPlayblastConfig(
+            camera=shot_camera,
+            shot=self._shot,
+            paths=self._paths_for_filename(output_name),
+            use_sequencer=False,
+        )
+
+    def _build_sequencer_playblast_config(self) -> MShotPlayblastConfig:
+        shot_context = self._resolve_current_sequencer_shot_context()
+        if shot_context is None:
+            raise ValueError("No current sequencer shot was found.")
+
+        output_name = self._resolve_output_name(shot_context.name)
+        return MShotPlayblastConfig(
+            camera=shot_context.camera,
+            shot=dummy_shot(
+                code=shot_context.name,
+                cut_in=shot_context.cut_in,
+                cut_out=shot_context.cut_out,
+                cut_duration=shot_context.cut_duration,
+            ),
+            paths=self._paths_for_filename(output_name),
+            use_sequencer=False,
+        )
+
+    def _build_custom_playblast_config(self) -> MShotPlayblastConfig:
+        custom_in = self._custom_in.value()
+        custom_out = self._custom_out.value()
+        custom_code = self._scene_stem()
+        output_name = self._resolve_output_name(f"{custom_code}_custom")
+
+        return MShotPlayblastConfig(
+            camera=str(self._custom_camera.currentText()),
+            shot=dummy_shot(
+                code=custom_code,
+                cut_in=custom_in,
+                cut_out=custom_out,
+                cut_duration=max(0, custom_out - custom_in),
+            ),
+            paths=self._paths_for_filename(output_name),
+            use_sequencer=False,
+        )
+
     def _generate_config(self) -> MPlayblastConfig:
         validation_error = self._validate_target_destination_state()
         if validation_error:
             raise ValueError(validation_error)
 
-        if self._is_shot_mode_selected():
-            shot_context = self._resolve_current_sequencer_shot_context()
-            if shot_context is None:
-                raise ValueError("No current sequencer shot was found.")
-
-            output_name = self._resolve_output_name(shot_context.name)
-            shot_config = MShotPlayblastConfig(
-                camera=shot_context.camera,
-                shot=dummy_shot(
-                    code=shot_context.name,
-                    cut_in=shot_context.cut_in,
-                    cut_out=shot_context.cut_out,
-                    cut_duration=shot_context.cut_duration,
-                ),
-                paths=self._paths_for_filename(output_name),
-                use_sequencer=False,
-            )
+        mode = self._selected_source_mode()
+        if mode == "shot":
+            shot_config = self._build_shot_playblast_config()
+        elif mode == "sequencer":
+            shot_config = self._build_sequencer_playblast_config()
         else:
-            custom_in = self._custom_in.value()
-            custom_out = self._custom_out.value()
-            custom_code = self._scene_stem()
-            output_name = self._resolve_output_name(f"{custom_code}_custom")
-            shot_config = MShotPlayblastConfig(
-                camera=str(self._custom_camera.currentText()),
-                shot=dummy_shot(
-                    code=custom_code,
-                    cut_in=custom_in,
-                    cut_out=custom_out,
-                    cut_duration=max(0, custom_out - custom_in),
-                ),
-                paths=self._paths_for_filename(output_name),
-                use_sequencer=False,
-            )
+            shot_config = self._build_custom_playblast_config()
 
         return MPlayblastConfig(
             builtin_huds=[
