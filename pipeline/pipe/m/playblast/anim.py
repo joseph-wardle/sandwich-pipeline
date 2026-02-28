@@ -50,7 +50,6 @@ log = logging.getLogger(__name__)
 
 
 class AnimPlayblastDialog(PlayblastDialog):
-    _context_banner: QLabel
     _custom_camera: QComboBox
     _custom_folder_row: QWidget
     _custom_in: QSpinBox
@@ -68,13 +67,8 @@ class AnimPlayblastDialog(PlayblastDialog):
 
     SHOT_TAB_INDEX = 0
     CUSTOM_TAB_INDEX = 1
-    BOTH_TAB_INDEX = 2
 
-    SOURCE_MODE = Literal["shot", "custom", "both"]
-
-    CONTEXT_BANNER_STYLE = (
-        "padding: 8px; border: 1px solid #c3cfdb; background: #e3ebf5; color: #666;"
-    )
+    SOURCE_MODE = Literal["shot", "custom"]
 
     PASS_PATTERN = re.compile(r"^(?:Blocking|Polish) #\d+$")
 
@@ -112,7 +106,7 @@ class AnimPlayblastDialog(PlayblastDialog):
         title.setStyleSheet("font-size: 24px; font-weight: 700;")
         title.setAlignment(QtCore.Qt.AlignCenter)
 
-        subtitle = QLabel("Choose source mode, choose destinations, then export.")
+        subtitle = QLabel("Choose source mode, choose destinations, then export")
         subtitle.setAlignment(QtCore.Qt.AlignCenter)
         subtitle.setToolTip(
             "High-level workflow: choose source, choose destinations, then export."
@@ -124,14 +118,6 @@ class AnimPlayblastDialog(PlayblastDialog):
     def _build_targets_section(self) -> None:
         setup_group = QGroupBox("1. Export Setup")
         setup_layout = QVBoxLayout(setup_group)
-
-        self._context_banner = QLabel()
-        self._context_banner.setWordWrap(True)
-        self._context_banner.setStyleSheet(self.CONTEXT_BANNER_STYLE)
-        self._context_banner.setToolTip(
-            "Live context for selected export mode: shot, camera, and frame range."
-        )
-        setup_layout.addWidget(self._context_banner)
 
         setup_layout.addWidget(self._build_export_source_section())
         setup_layout.addWidget(self._build_destination_section())
@@ -151,28 +137,24 @@ class AnimPlayblastDialog(PlayblastDialog):
         source_layout = QVBoxLayout(source_group)
 
         self._source_tabs = QTabWidget()
-        self._source_tabs.addTab(
-            self._build_shot_source_tab(), "Shot Playblast (Pipeline Shot File)"
-        )
+        self._source_tabs.addTab(self._build_shot_source_tab(), "Shot Playblast")
         self._source_tabs.addTab(
             self._build_custom_source_tab(),
             "Custom Playblast",
         )
-        self._source_tabs.addTab(self._build_both_source_tab(), "Both")
         self._source_tabs.currentChanged.connect(self._on_source_mode_changed)
+        self._source_tabs.setToolTip(
+            "Select how exports are generated: shot context or manual custom range."
+        )
 
         source_tab_bar = self._source_tabs.tabBar()
         source_tab_bar.setTabToolTip(
             self.SHOT_TAB_INDEX,
-            "Export the pipeline shot loaded in this Maya scene.",
+            "Uses shot code metadata from this Maya scene and resolved shot camera/range.",
         )
         source_tab_bar.setTabToolTip(
             self.CUSTOM_TAB_INDEX,
-            "Export a manual camera and frame range.",
-        )
-        source_tab_bar.setTabToolTip(
-            self.BOTH_TAB_INDEX,
-            "Export both the pipeline shot and custom range in one run.",
+            "Uses manual camera and manual frame range.",
         )
 
         source_layout.addWidget(self._source_tabs)
@@ -190,7 +172,7 @@ class AnimPlayblastDialog(PlayblastDialog):
         self._shot_pass.addItems(["Blocking #1", "Polish #1"])
         self._shot_pass.setEditable(True)
         self._shot_pass.setToolTip(
-            "Pass text shown in the HUD. Format: Blocking #<n> or Polish #<n>."
+            "Pass text shown in the HUD for shot exports. Format: Blocking #<n> or Polish #<n>."
         )
         self._shot_pass.currentTextChanged.connect(self._on_source_settings_changed)
         pass_layout.addWidget(self._shot_pass)
@@ -205,7 +187,7 @@ class AnimPlayblastDialog(PlayblastDialog):
         shot_layout.addWidget(QLabel("Source"), 0, 0)
         source_value = QLabel("Pipeline Shot File")
         source_value.setToolTip(
-            "Uses shot context from this scene's pipeline shot code."
+            "Source is resolved from this scene's pipeline shot metadata."
         )
         shot_layout.addWidget(source_value, 0, 1)
 
@@ -221,7 +203,9 @@ class AnimPlayblastDialog(PlayblastDialog):
 
         shot_layout.addWidget(QLabel("Frame Range"), 3, 0)
         self._shot_range_value = QLabel("-")
-        self._shot_range_value.setToolTip("Resolved shot cut range from pipeline shot.")
+        self._shot_range_value.setToolTip(
+            "Resolved cut range from the detected pipeline shot."
+        )
         shot_layout.addWidget(self._shot_range_value, 3, 1)
 
         return shot_tab
@@ -252,23 +236,6 @@ class AnimPlayblastDialog(PlayblastDialog):
         custom_layout.addWidget(self._custom_camera, 1, 1, 1, 3)
 
         return custom_tab
-
-    def _build_both_source_tab(self) -> QWidget:
-        both_tab = QWidget()
-        both_layout = QVBoxLayout(both_tab)
-
-        message = QLabel(
-            "Both mode exports:\n"
-            "1) Shot Playblast (Pipeline Shot File)\n"
-            "2) Custom Playblast (manual camera + range)"
-        )
-        message.setWordWrap(True)
-        message.setToolTip(
-            "This mode exports both sources in one run using the same destination selection."
-        )
-        both_layout.addWidget(message)
-        both_layout.addStretch()
-        return both_tab
 
     def _build_destination_section(self) -> QGroupBox:
         destination_group = QGroupBox("Save Destinations")
@@ -369,18 +336,29 @@ class AnimPlayblastDialog(PlayblastDialog):
         self._use_dof.setToolTip("Include camera depth of field in playblast.")
 
     def _set_default_source_tab(self) -> None:
+        self._refresh_source_tab_availability()
+        self._source_tabs.setCurrentIndex(self._default_source_tab_index())
+
+    def _refresh_source_tab_availability(self) -> None:
         has_shot_context = self._shot is not None
         self._source_tabs.setTabEnabled(self.SHOT_TAB_INDEX, has_shot_context)
-        self._source_tabs.setTabEnabled(self.BOTH_TAB_INDEX, has_shot_context)
 
-        default_index = (
-            self.SHOT_TAB_INDEX if has_shot_context else self.CUSTOM_TAB_INDEX
-        )
-        self._source_tabs.setCurrentIndex(default_index)
+        selected_mode = self._selected_source_mode()
+        if selected_mode == "shot" and not has_shot_context:
+            self._source_tabs.setCurrentIndex(self._default_source_tab_index())
+
+    def _default_source_tab_index(self) -> int:
+        if self._shot is not None:
+            return self.SHOT_TAB_INDEX
+        return self.CUSTOM_TAB_INDEX
 
     @staticmethod
     def _resolve_pipeline_shot_context() -> Shot | None:
-        conn = DB.Get(DB_Config)
+        try:
+            conn = DB.Get(DB_Config)
+        except Exception:
+            return None
+
         try:
             code = str(mc.fileInfo("code", query=True)[0]).strip()
         except Exception:
@@ -426,9 +404,7 @@ class AnimPlayblastDialog(PlayblastDialog):
         current_index = self._source_tabs.currentIndex()
         if current_index == self.SHOT_TAB_INDEX:
             return "shot"
-        if current_index == self.CUSTOM_TAB_INDEX:
-            return "custom"
-        return "both"
+        return "custom"
 
     def _selected_destination_locations(self) -> list[SaveLocation]:
         selected: list[SaveLocation] = []
@@ -477,40 +453,17 @@ class AnimPlayblastDialog(PlayblastDialog):
             location = self._save_locations_by_name[location_name]
             path_label.setText(f"-> {self._resolved_destination_path(location)}")
 
-    def _refresh_context_banner(self) -> None:
-        mode = self._selected_source_mode()
+    def _refresh_shot_context_fields(self) -> None:
+        if self._shot is None:
+            self._shot_code_value.setText("-")
+            self._shot_camera_value.setText("-")
+            self._shot_range_value.setText("-")
+            return
 
-        if mode in {"shot", "both"}:
-            if self._shot is None:
-                banner_text = (
-                    "No pipeline shot context detected. Open a pipeline shot file "
-                    "or switch to Custom Playblast."
-                )
-                self._shot_code_value.setText("-")
-                self._shot_camera_value.setText("-")
-                self._shot_range_value.setText("-")
-            else:
-                camera_path = self._get_shot_camera_path() or "<missing camera>"
-                banner_text = (
-                    f"Detected shot: {self._shot.code} | "
-                    f"Camera: {camera_path} | "
-                    f"Range: {self._shot.cut_in}-{self._shot.cut_out}"
-                )
-                self._shot_code_value.setText(self._shot.code)
-                self._shot_camera_value.setText(camera_path)
-                self._shot_range_value.setText(
-                    f"{self._shot.cut_in} - {self._shot.cut_out}"
-                )
-        else:
-            if self._shot is None:
-                banner_text = "No shot context detected. Custom Playblast is active."
-            else:
-                banner_text = (
-                    f"Detected shot: {self._shot.code}. "
-                    "Custom Playblast is active and will use manual camera/range settings."
-                )
-
-        self._context_banner.setText(banner_text)
+        camera_path = self._get_shot_camera_path() or "-"
+        self._shot_code_value.setText(self._shot.code)
+        self._shot_camera_value.setText(camera_path)
+        self._shot_range_value.setText(f"{self._shot.cut_in} - {self._shot.cut_out}")
 
     def _sync_custom_path_row_visibility(self) -> None:
         is_visible = self._is_custom_destination_selected()
@@ -526,7 +479,7 @@ class AnimPlayblastDialog(PlayblastDialog):
     def _validate_target_destination_state(self) -> str | None:
         mode = self._selected_source_mode()
 
-        if mode in {"shot", "both"}:
+        if mode == "shot":
             if self._shot is None:
                 return (
                     "No pipeline shot context was found. Use a pipeline shot file "
@@ -535,15 +488,16 @@ class AnimPlayblastDialog(PlayblastDialog):
             if not self._get_shot_camera_path():
                 return "Could not resolve a shot camera path for this shot."
 
-        if mode in {"custom", "both"}:
+        if mode == "custom":
             if self._custom_out.value() < self._custom_in.value():
                 return "Custom Out must be greater than or equal to Custom In."
             if not str(self._custom_camera.currentText()).strip():
                 return "Choose a camera for Custom Playblast."
 
-        pass_error = self._validate_pass_text()
-        if pass_error:
-            return pass_error
+        if mode == "shot":
+            pass_error = self._validate_pass_text()
+            if pass_error:
+                return pass_error
 
         if not self._selected_destination_locations():
             return "Select at least one save destination."
@@ -560,9 +514,7 @@ class AnimPlayblastDialog(PlayblastDialog):
         mode = self._selected_source_mode()
         if mode == "shot":
             return "Playblast Shot"
-        if mode == "custom":
-            return "Playblast Custom"
-        return "Playblast Shot + Custom"
+        return "Playblast Custom"
 
     def _update_action_state(self) -> None:
         ok_button = self.buttons.button(QDialogButtonBox.Ok)
@@ -576,9 +528,10 @@ class AnimPlayblastDialog(PlayblastDialog):
         self._validation_label.setVisible(validation_error is not None)
 
     def _update_ui_state(self) -> None:
+        self._refresh_source_tab_availability()
+        self._refresh_shot_context_fields()
         self._sync_custom_path_row_visibility()
         self._refresh_destination_path_labels()
-        self._refresh_context_banner()
         self._update_action_state()
 
     def _on_source_mode_changed(self, _index: int) -> None:
@@ -642,13 +595,10 @@ class AnimPlayblastDialog(PlayblastDialog):
             raise ValueError(validation_error)
 
         mode = self._selected_source_mode()
-        shots: list[MShotPlayblastConfig] = []
-
-        if mode in {"shot", "both"}:
-            shots.append(self._build_shot_playblast_config())
-
-        if mode in {"custom", "both"}:
-            shots.append(self._build_custom_playblast_config())
+        if mode == "shot":
+            shot_config = self._build_shot_playblast_config()
+        else:
+            shot_config = self._build_custom_playblast_config()
 
         return MPlayblastConfig(
             builtin_huds=[
@@ -677,7 +627,7 @@ class AnimPlayblastDialog(PlayblastDialog):
             hardware_fog=self.use_hardware_fog,
             lighting=self.use_lighting,
             shadows=self.use_shadows,
-            shots=shots,
+            shots=[shot_config],
             ssao=self.use_ssao,
         )
 
