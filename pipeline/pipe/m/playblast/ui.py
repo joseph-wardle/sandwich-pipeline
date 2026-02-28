@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import getpass
+import json
 import logging
 import os
 from abc import abstractmethod
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,6 +25,7 @@ from Qt.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from shared.util import get_production_path
 
 from pipe.glui.dialogs import ButtonPair, MessageDialog
 from pipe.util import Playblaster
@@ -39,6 +43,68 @@ if TYPE_CHECKING:
     )
 
 log = logging.getLogger(__name__)
+
+
+def _current_login_username() -> str:
+    """Return the current login username with a robust fallback."""
+    try:
+        return os.getlogin()
+    except OSError:
+        return getpass.getuser()
+
+
+@lru_cache(maxsize=1)
+def _username_display_map() -> dict[str, str]:
+    """Load username->display name mappings from production JSON."""
+    mapping_path = get_production_path() / "json" / "usernames.json"
+    if not mapping_path.exists():
+        log.warning(
+            "Username mapping file was not found at %s. Falling back to login usernames.",
+            mapping_path,
+        )
+        return {}
+
+    try:
+        raw_data = json.loads(mapping_path.read_text(encoding="utf-8"))
+    except Exception:
+        log.exception(
+            "Could not load username mapping from %s. Falling back to login usernames.",
+            mapping_path,
+        )
+        return {}
+
+    if not isinstance(raw_data, dict):
+        log.warning(
+            "Username mapping file at %s must be a JSON object. Falling back to login usernames.",
+            mapping_path,
+        )
+        return {}
+
+    display_map: dict[str, str] = {}
+    for username, display_name in raw_data.items():
+        if not isinstance(username, str) or not isinstance(display_name, str):
+            continue
+        normalized_username = username.strip()
+        normalized_display_name = display_name.strip()
+        if not normalized_username or not normalized_display_name:
+            continue
+        display_map[normalized_username] = normalized_display_name
+        display_map.setdefault(normalized_username.lower(), normalized_display_name)
+
+    return display_map
+
+
+def resolve_artist_display_name() -> str:
+    """Resolve the artist HUD display name with username fallback."""
+    username = _current_login_username().strip()
+    if not username:
+        return ""
+
+    mapped_name = _username_display_map().get(username)
+    if mapped_name:
+        return mapped_name
+
+    return _username_display_map().get(username.lower(), username)
 
 
 class ClickableQLabel(QLabel):
@@ -103,7 +169,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         )
         ARTIST = HudDefinition(
             "LnDartist",
-            command=lambda: os.getlogin(),
+            command=resolve_artist_display_name,
             event="SceneOpened",
             label="Artist:",
             section=5,
