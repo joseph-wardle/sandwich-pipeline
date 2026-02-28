@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import urllib.request
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass
@@ -70,8 +71,15 @@ class SGaaDB(DBInterface):
             return cls._conn_instances[config]
 
     def __init__(self, config: SG_Config) -> None:
+        self._apply_houdini_shotgrid_upload_runtime_patch()
+        ca_certs_path = self._resolve_shotgrid_ca_bundle_for_current_dcc()
+        if ca_certs_path:
+            log.info("ShotGrid CA bundle selected: %s", ca_certs_path)
         self._sg = shotgun_api3.Shotgun(
-            config.sg_server, config.sg_script, config.sg_key
+            config.sg_server,
+            config.sg_script,
+            config.sg_key,
+            ca_certs=ca_certs_path,
         )
         self._id = config.project_id
 
@@ -89,6 +97,108 @@ class SGaaDB(DBInterface):
             target=self._threaded_updater, daemon=True
         )
         self._update_thread.start()
+
+    @staticmethod
+    def _is_houdini_runtime() -> bool:
+        return os.environ.get("DCC", "").strip().lower() == "houdini"
+
+    @classmethod
+    def _apply_houdini_shotgrid_upload_runtime_patch(cls) -> None:
+        """Apply a Houdini-only runtime fix for ShotGrid API upload HTTPS classes.
+
+        We intentionally keep the vendored `shotgun_api3` source unmodified and
+        patch the legacy upload HTTPS classes at runtime from our DB wrapper.
+        """
+        if not cls._is_houdini_runtime():
+            return
+
+        from .shotgun_api3 import shotgun as shotgun_module
+
+        existing_handler_class = shotgun_module.CACertsHTTPSHandler
+        existing_connection_class = shotgun_module.CACertsHTTPSConnection
+
+        handler_already_fixed = issubclass(
+            existing_handler_class,
+            urllib.request.HTTPSHandler,
+        )
+        connection_init_fixed = (
+            existing_connection_class.__init__.__qualname__
+            == "_PipelineCACertsHTTPSConnection.__init__"
+        )
+
+        if handler_already_fixed and connection_init_fixed:
+            return
+
+        import http.client
+        import ssl
+
+        class _PipelineCACertsHTTPSConnection(http.client.HTTPConnection):
+            """Drop-in replacement with Python 3.11-compatible super() usage."""
+
+            default_port = http.client.HTTPS_PORT
+
+            def __init__(self, *args, **kwargs):
+                self.__ca_certs = kwargs.pop("ca_certs")
+                super().__init__(*args, **kwargs)
+
+            def connect(self):
+                super().connect()
+                if shotgun_module.six.PY38:
+                    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                    context.verify_mode = ssl.CERT_REQUIRED
+                    context.check_hostname = False
+                    if self.__ca_certs:
+                        context.load_verify_locations(self.__ca_certs)
+                    self.sock = context.wrap_socket(self.sock)
+                else:
+                    self.sock = ssl.wrap_socket(
+                        self.sock,
+                        ca_certs=self.__ca_certs,
+                        cert_reqs=ssl.CERT_REQUIRED,
+                    )
+
+        class _PipelineCACertsHTTPSHandler(urllib.request.HTTPSHandler):
+            """HTTPS opener that routes upload requests through custom CA certs."""
+
+            def __init__(self, ca_certs):
+                super().__init__()
+                self.__ca_certs = ca_certs
+
+            def https_open(self, req):
+                return self.do_open(self.create_https_connection, req)
+
+            def create_https_connection(self, *args, **kwargs):
+                return _PipelineCACertsHTTPSConnection(
+                    *args,
+                    ca_certs=self.__ca_certs,
+                    **kwargs,
+                )
+
+        shotgun_module.CACertsHTTPSConnection = _PipelineCACertsHTTPSConnection
+        shotgun_module.CACertsHTTPSHandler = _PipelineCACertsHTTPSHandler
+        log.info("Applied Houdini ShotGrid upload HTTPS runtime compatibility patch.")
+
+    @staticmethod
+    def _resolve_shotgrid_ca_bundle_for_current_dcc() -> str | None:
+        """Resolve CA bundle path for DCCs that need explicit TLS trust config."""
+        if not SGaaDB._is_houdini_runtime():
+            return None
+
+        explicit_path = os.environ.get("SHOTGUN_API_CACERTS", "").strip()
+        if explicit_path:
+            return explicit_path if os.path.isfile(explicit_path) else None
+
+        system_ca_bundle_candidates = (
+            "/etc/ssl/certs/ca-certificates.crt",
+            "/etc/pki/tls/certs/ca-bundle.crt",
+            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+            "/etc/ssl/cert.pem",
+            "/etc/ssl/certs/ca-bundle.crt",
+        )
+        for candidate_path in system_ca_bundle_candidates:
+            if os.path.isfile(candidate_path):
+                return candidate_path
+        return None
 
     def _threaded_updater(self) -> None:
         while True:
