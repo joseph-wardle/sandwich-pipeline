@@ -32,6 +32,12 @@ from pipe.playblast_naming import (
     playblast_date_folder,
     resolve_versioned_playblast_basename,
 )
+from pipe.playblast_shotgrid import (
+    PlayblastVersionUploadRequest,
+    default_version_name_from_movie_path,
+    resolve_preferred_upload_movie_path,
+    upload_playblast_version,
+)
 from pipe.util import Playblaster
 
 from .struct import (
@@ -41,7 +47,7 @@ from .struct import (
     SaveLocation,
     dummy_shot,
 )
-from .ui import PlayblastDialog
+from .ui import PlayblastDialog, resolve_artist_display_name
 
 if TYPE_CHECKING:
     from pipe.struct.db import Shot
@@ -60,6 +66,9 @@ class AnimPlayblastDialog(PlayblastDialog):
     _source_tabs: QTabWidget
     _shot_camera_value: QLabel
     _shot_code_value: QLabel
+    _shotgrid_description_field: QLineEdit
+    _shotgrid_description_row: QWidget
+    _shotgrid_upload_checkbox: QCheckBox
     _shot_range_value: QLabel
     _shot: Shot | None
     _shot_pass: QComboBox
@@ -207,6 +216,31 @@ class AnimPlayblastDialog(PlayblastDialog):
             "Resolved cut range from the detected pipeline shot."
         )
         shot_layout.addWidget(self._shot_range_value, 3, 1)
+
+        shot_layout.addWidget(QLabel("ShotGrid"), 4, 0)
+        self._shotgrid_upload_checkbox = QCheckBox("Upload to ShotGrid")
+        self._shotgrid_upload_checkbox.setChecked(False)
+        self._shotgrid_upload_checkbox.setToolTip(
+            "When enabled, this Shot playblast will also create a ShotGrid Version and upload the movie."
+        )
+        self._shotgrid_upload_checkbox.toggled.connect(self._on_shotgrid_upload_toggled)
+        shot_layout.addWidget(self._shotgrid_upload_checkbox, 4, 1)
+
+        self._shotgrid_description_row = QWidget()
+        shotgrid_description_layout = QHBoxLayout(self._shotgrid_description_row)
+        shotgrid_description_layout.setContentsMargins(0, 0, 0, 0)
+        shotgrid_description_layout.addWidget(QLabel("Description"))
+        self._shotgrid_description_field = QLineEdit()
+        self._shotgrid_description_field.setPlaceholderText(
+            "Optional ShotGrid version description"
+        )
+        self._shotgrid_description_field.setToolTip(
+            "Optional notes saved to the ShotGrid Version description when upload is enabled."
+        )
+        shotgrid_description_layout.addWidget(self._shotgrid_description_field)
+        shot_layout.addWidget(self._shotgrid_description_row, 5, 0, 1, 2)
+
+        self._sync_shotgrid_description_visibility()
 
         return shot_tab
 
@@ -429,6 +463,152 @@ class AnimPlayblastDialog(PlayblastDialog):
             paths[location.preset].append(str(Path(destination_dir) / filename))
         return paths
 
+    @staticmethod
+    def _final_movie_path_for_base(
+        output_base: str | Path,
+        preset: Playblaster.PRESET,
+    ) -> Path:
+        return Path(str(output_base) + f".{preset.ext}")
+
+    def _final_movie_paths_for_location(
+        self,
+        shot_config: MShotPlayblastConfig,
+        location: SaveLocation,
+    ) -> list[Path]:
+        destination_dir = Path(self._resolved_destination_path(location)).expanduser()
+        resolved_destination_dir = destination_dir.resolve()
+
+        matching_paths: list[Path] = []
+        for output_base in shot_config.paths.get(location.preset, []):
+            resolved_output_base = Path(str(output_base)).expanduser().resolve()
+            if resolved_output_base.parent != resolved_destination_dir:
+                continue
+            matching_paths.append(
+                self._final_movie_path_for_base(resolved_output_base, location.preset)
+            )
+        return matching_paths
+
+    def _ordered_final_movie_paths_for_upload(
+        self,
+        shot_config: MShotPlayblastConfig,
+    ) -> list[Path]:
+        """Return deterministic output path order for upload path resolution."""
+
+        ordered_paths: list[Path] = []
+        seen_paths: set[Path] = set()
+
+        for location in self._destination_locations():
+            for output_path in self._final_movie_paths_for_location(
+                shot_config, location
+            ):
+                if output_path in seen_paths:
+                    continue
+                seen_paths.add(output_path)
+                ordered_paths.append(output_path)
+
+        for preset, output_bases in shot_config.paths.items():
+            for output_base in output_bases:
+                output_path = self._final_movie_path_for_base(output_base, preset)
+                resolved_output_path = output_path.expanduser().resolve()
+                if resolved_output_path in seen_paths:
+                    continue
+                seen_paths.add(resolved_output_path)
+                ordered_paths.append(resolved_output_path)
+
+        return ordered_paths
+
+    def _preferred_edit_movie_paths_for_upload(
+        self,
+        shot_config: MShotPlayblastConfig,
+    ) -> list[Path]:
+        edit_location = self._save_locations_by_name.get(self.SAVE_LOCS.EDIT.name)
+        if edit_location is None:
+            return []
+        return self._final_movie_paths_for_location(shot_config, edit_location)
+
+    def _resolve_shotgrid_upload_movie_path(
+        self,
+        config: MPlayblastConfig,
+    ) -> Path | None:
+        """Resolve upload movie path with stable preference ordering.
+
+        Preference order:
+        1) valid `Send to Edit` output
+        2) first valid output from the deterministic export order
+        """
+        if not config.shots:
+            return None
+
+        shot_config = config.shots[0]
+        preferred_paths = self._preferred_edit_movie_paths_for_upload(shot_config)
+        output_paths = self._ordered_final_movie_paths_for_upload(shot_config)
+        return resolve_preferred_upload_movie_path(
+            output_paths,
+            preferred_paths=preferred_paths,
+        )
+
+    def _should_upload_shot_playblast_to_shotgrid(self) -> bool:
+        return (
+            self._selected_source_mode() == "shot"
+            and self._is_shotgrid_upload_requested()
+        )
+
+    def _upload_shot_playblast_to_shotgrid(
+        self,
+        config: MPlayblastConfig,
+    ) -> list[str]:
+        if not config.shots:
+            return ["ShotGrid Upload: Skipped - no shot output was generated."]
+
+        shot_code = str(config.shots[0].shot.code or "").strip()
+        if not shot_code:
+            return ["ShotGrid Upload: Skipped - shot code is missing."]
+
+        movie_path = self._resolve_shotgrid_upload_movie_path(config)
+        if movie_path is None:
+            return [
+                "ShotGrid Upload: Skipped - no valid playblast movie file was found."
+            ]
+
+        version_name = default_version_name_from_movie_path(movie_path)
+        if not version_name:
+            version_name = f"{shot_code}_playblast"
+
+        artist_name = resolve_artist_display_name().strip() or None
+        upload_request = PlayblastVersionUploadRequest(
+            shot_code=shot_code,
+            movie_path=movie_path,
+            version_name=version_name,
+            description=self._shotgrid_upload_description() or None,
+            path_to_frames=str(movie_path),
+            artist_display_name=artist_name,
+        )
+
+        try:
+            upload_result = upload_playblast_version(upload_request)
+        except Exception as exc:
+            log.exception("ShotGrid upload failed for shot '%s'", shot_code)
+            return [f"ShotGrid Upload: Failed - {exc}"]
+
+        message_lines: list[str] = []
+        if upload_result.ok:
+            success_message = (
+                f"ShotGrid Upload: Success - {upload_result.version_name}"
+                f" (shot {upload_result.shot_code})."
+            )
+            if upload_result.version_id is not None:
+                success_message = (
+                    f"{success_message} Version ID: {upload_result.version_id}."
+                )
+            message_lines.append(success_message)
+        else:
+            message_lines.append(f"ShotGrid Upload: Failed - {upload_result.message}")
+
+        for warning in upload_result.warnings:
+            message_lines.append(f"ShotGrid Warning: {warning}")
+
+        return message_lines
+
     def _selected_destination_directories(self) -> list[Path]:
         directories: list[Path] = []
         for location in self._selected_destination_locations():
@@ -469,6 +649,17 @@ class AnimPlayblastDialog(PlayblastDialog):
         is_visible = self._is_custom_destination_selected()
         self._custom_folder_row.setVisible(is_visible)
         self._custom_folder_field.setEnabled(is_visible)
+
+    def _sync_shotgrid_description_visibility(self) -> None:
+        show_description = self._is_shotgrid_upload_requested()
+        self._shotgrid_description_row.setVisible(show_description)
+        self._shotgrid_description_field.setEnabled(show_description)
+
+    def _is_shotgrid_upload_requested(self) -> bool:
+        return self._shotgrid_upload_checkbox.isChecked()
+
+    def _shotgrid_upload_description(self) -> str:
+        return self._shotgrid_description_field.text().strip()
 
     def _validate_pass_text(self) -> str | None:
         pass_text = str(self._shot_pass.currentText()).strip()
@@ -531,6 +722,7 @@ class AnimPlayblastDialog(PlayblastDialog):
         self._refresh_source_tab_availability()
         self._refresh_shot_context_fields()
         self._sync_custom_path_row_visibility()
+        self._sync_shotgrid_description_visibility()
         self._refresh_destination_path_labels()
         self._update_action_state()
 
@@ -550,8 +742,19 @@ class AnimPlayblastDialog(PlayblastDialog):
     def _on_source_settings_changed(self, *_args) -> None:
         self._update_ui_state()
 
+    def _on_shotgrid_upload_toggled(self, _enabled: bool) -> None:
+        self._update_ui_state()
+
     def _refresh_summary(self, *_args) -> None:
         self._update_ui_state()
+
+    def _after_local_playblast(
+        self,
+        config: MPlayblastConfig,
+    ) -> list[str]:
+        if not self._should_upload_shot_playblast_to_shotgrid():
+            return []
+        return self._upload_shot_playblast_to_shotgrid(config)
 
     def _hud_shot_label(self) -> str:
         if self._shot is not None:
