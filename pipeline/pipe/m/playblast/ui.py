@@ -693,6 +693,17 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
                 )
         return None
 
+    def _after_local_playblast(
+        self,
+        config: MPlayblastConfig,
+    ) -> list[str]:
+        """Run optional tool-specific actions after local playblast succeeds.
+
+        Returned lines are appended to the success dialog.
+        """
+        del config
+        return []
+
     def do_export(self) -> None:
         try:
             config = self._generate_config()
@@ -721,9 +732,18 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             ).exec_()
             return
 
+        post_playblast_messages: list[str] = []
+        try:
+            post_playblast_messages = self._after_local_playblast(config)
+        except Exception as exc:
+            log.exception("Post-playblast actions failed")
+            post_playblast_messages = [f"Post-playblast actions failed: {exc}"]
+
         output_paths = self._collect_output_paths(config)
         success_msg = "Playblast(s) successful!"
         if output_paths:
             success_msg += "\n\nOutputs:\n" + "\n".join(output_paths)
+        if post_playblast_messages:
+            success_msg += "\n\n" + "\n".join(post_playblast_messages)
         MessageDialog(self.parent(), success_msg).exec_()
         self.close()

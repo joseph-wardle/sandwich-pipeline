@@ -132,33 +132,20 @@ def upload_playblast_version(
             f"Shot '{normalized.shot_code}' is missing a valid ShotGrid id.",
         )
 
-    project_id = _resolve_project_id(connection)
-    if project_id is None:
-        return _failed_result(
-            normalized,
-            "Could not resolve ShotGrid project id from the DB connection.",
-        )
-
     warnings: list[str] = []
     user_id = _resolve_user_id(connection, normalized.artist_display_name, warnings)
 
-    payload = _build_version_payload(
-        normalized,
-        shot_id=shot_id,
-        project_id=project_id,
-        user_id=user_id,
-    )
-
-    shotgrid_client = _resolve_shotgrid_client(connection)
-    if shotgrid_client is None:
-        return _failed_result(
-            normalized,
-            "DB connection does not expose a ShotGrid client for Version creation.",
-            warnings=warnings,
-        )
-
     try:
-        created_version = shotgrid_client.create("Version", payload)
+        created_version = connection.create_version_for_shot(
+            shot=shot,
+            code=normalized.version_name,
+            user=user_id,
+            task=normalized.task_id,
+            video_path=normalized.path_to_frames,
+            description=normalized.description,
+            playlist_id=normalized.playlist_id,
+            extra_fields=normalized.extra_version_fields,
+        )
     except Exception as exc:
         log.exception(
             "ShotGrid Version creation failed for shot '%s'", normalized.shot_code
@@ -331,17 +318,6 @@ def _default_db_connection() -> Any:
     return DB.Get(DB_Config)
 
 
-def _resolve_project_id(connection: Any) -> int | None:
-    project_id = getattr(connection, "_id", None)
-    if isinstance(project_id, int) and project_id > 0:
-        return project_id
-    return None
-
-
-def _resolve_shotgrid_client(connection: Any) -> Any | None:
-    return getattr(connection, "_sg", None)
-
-
 def _resolve_user_id(
     connection: Any,
     artist_display_name: str | None,
@@ -365,34 +341,6 @@ def _resolve_user_id(
         )
         return None
     return user_id
-
-
-def _build_version_payload(
-    request: _NormalizedUploadRequest,
-    *,
-    shot_id: int,
-    project_id: int,
-    user_id: int | None,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "code": request.version_name,
-        "entity": {"type": "Shot", "id": shot_id},
-        "project": {"type": "Project", "id": project_id},
-    }
-
-    if request.description:
-        payload["description"] = request.description
-    if request.path_to_frames:
-        payload["sg_path_to_frames"] = request.path_to_frames
-    if user_id is not None:
-        payload["user"] = {"type": "HumanUser", "id": user_id}
-    if request.task_id is not None:
-        payload["sg_task"] = {"type": "Task", "id": request.task_id}
-    if request.playlist_id is not None:
-        payload["playlists"] = [{"type": "Playlist", "id": request.playlist_id}]
-
-    payload.update(request.extra_version_fields)
-    return payload
 
 
 def _extract_entity_id(entity: Any) -> int | None:

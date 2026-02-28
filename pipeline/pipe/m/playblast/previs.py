@@ -31,7 +31,12 @@ from pipe.playblast_naming import (
     playblast_date_folder,
     resolve_versioned_playblast_basename,
 )
-from pipe.playblast_shotgrid import resolve_preferred_upload_movie_path
+from pipe.playblast_shotgrid import (
+    PlayblastVersionUploadRequest,
+    default_version_name_from_movie_path,
+    resolve_preferred_upload_movie_path,
+    upload_playblast_version,
+)
 from pipe.util import Playblaster
 
 from .struct import (
@@ -41,7 +46,7 @@ from .struct import (
     SaveLocation,
     dummy_shot,
 )
-from .ui import PlayblastDialog
+from .ui import PlayblastDialog, resolve_artist_display_name
 
 if TYPE_CHECKING:
     from pipe.struct.db import Shot
@@ -676,6 +681,66 @@ class PrevisPlayblastDialog(PlayblastDialog):
             preferred_paths=preferred_paths,
         )
 
+    def _should_upload_shot_playblast_to_shotgrid(self) -> bool:
+        return (
+            self._selected_source_mode() == "shot"
+            and self._is_shotgrid_upload_requested()
+        )
+
+    def _upload_shot_playblast_to_shotgrid(
+        self,
+        config: MPlayblastConfig,
+    ) -> list[str]:
+        if not config.shots:
+            return ["ShotGrid upload skipped: no shot output was generated."]
+
+        shot_code = str(config.shots[0].shot.code or "").strip()
+        if not shot_code:
+            return ["ShotGrid upload skipped: shot code is missing."]
+
+        movie_path = self._resolve_shotgrid_upload_movie_path(config)
+        if movie_path is None:
+            return ["ShotGrid upload skipped: no valid playblast movie file was found."]
+
+        version_name = default_version_name_from_movie_path(movie_path)
+        if not version_name:
+            version_name = f"{shot_code}_playblast"
+
+        artist_name = resolve_artist_display_name().strip() or None
+        upload_request = PlayblastVersionUploadRequest(
+            shot_code=shot_code,
+            movie_path=movie_path,
+            version_name=version_name,
+            description=self._shotgrid_upload_description() or None,
+            path_to_frames=str(movie_path),
+            artist_display_name=artist_name,
+        )
+
+        try:
+            upload_result = upload_playblast_version(upload_request)
+        except Exception as exc:
+            log.exception("ShotGrid upload failed for shot '%s'", shot_code)
+            return [f"ShotGrid upload failed: {exc}"]
+
+        message_lines: list[str] = []
+        if upload_result.ok:
+            success_message = (
+                f"ShotGrid upload successful: {upload_result.version_name}"
+                f" (shot {upload_result.shot_code})."
+            )
+            if upload_result.version_id is not None:
+                success_message = (
+                    f"{success_message} Version ID: {upload_result.version_id}."
+                )
+            message_lines.append(success_message)
+        else:
+            message_lines.append(f"ShotGrid upload failed: {upload_result.message}")
+
+        for warning in upload_result.warnings:
+            message_lines.append(f"ShotGrid warning: {warning}")
+
+        return message_lines
+
     def _selected_destination_directories(self) -> list[Path]:
         directories: list[Path] = []
         for location in self._selected_destination_locations():
@@ -897,6 +962,14 @@ class PrevisPlayblastDialog(PlayblastDialog):
         if validation_error:
             return validation_error
         return super()._validate_config(config)
+
+    def _after_local_playblast(
+        self,
+        config: MPlayblastConfig,
+    ) -> list[str]:
+        if not self._should_upload_shot_playblast_to_shotgrid():
+            return []
+        return self._upload_shot_playblast_to_shotgrid(config)
 
     def _build_shot_playblast_config(self) -> MShotPlayblastConfig:
         if self._shot is None:
