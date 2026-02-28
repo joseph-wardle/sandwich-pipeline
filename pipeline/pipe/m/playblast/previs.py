@@ -72,6 +72,9 @@ class PrevisPlayblastDialog(PlayblastDialog):
     _shot: Shot | None
     _shot_camera: QComboBox
     _shot_code_value: QLabel
+    _shotgrid_description_field: QLineEdit
+    _shotgrid_description_row: QWidget
+    _shotgrid_upload_checkbox: QCheckBox
     _shot_range_value: QLabel
     _source_tabs: QTabWidget
     _validation_label: QLabel
@@ -210,7 +213,31 @@ class PrevisPlayblastDialog(PlayblastDialog):
         )
         shot_layout.addWidget(self._shot_range_value, 3, 1)
 
+        shot_layout.addWidget(QLabel("ShotGrid"), 4, 0)
+        self._shotgrid_upload_checkbox = QCheckBox("Upload to ShotGrid")
+        self._shotgrid_upload_checkbox.setChecked(False)
+        self._shotgrid_upload_checkbox.setToolTip(
+            "When enabled, this Shot playblast will also create a ShotGrid Version and upload the movie."
+        )
+        self._shotgrid_upload_checkbox.toggled.connect(self._on_shotgrid_upload_toggled)
+        shot_layout.addWidget(self._shotgrid_upload_checkbox, 4, 1)
+
+        self._shotgrid_description_row = QWidget()
+        shotgrid_description_layout = QHBoxLayout(self._shotgrid_description_row)
+        shotgrid_description_layout.setContentsMargins(0, 0, 0, 0)
+        shotgrid_description_layout.addWidget(QLabel("Description"))
+        self._shotgrid_description_field = QLineEdit()
+        self._shotgrid_description_field.setPlaceholderText(
+            "Optional ShotGrid version description"
+        )
+        self._shotgrid_description_field.setToolTip(
+            "Optional notes saved to the ShotGrid Version description when upload is enabled."
+        )
+        shotgrid_description_layout.addWidget(self._shotgrid_description_field)
+        shot_layout.addWidget(self._shotgrid_description_row, 5, 0, 1, 2)
+
         self._set_default_shot_camera()
+        self._sync_shotgrid_description_visibility()
         return shot_tab
 
     def _build_sequencer_source_tab(self) -> QWidget:
@@ -617,6 +644,17 @@ class PrevisPlayblastDialog(PlayblastDialog):
         self._custom_folder_row.setVisible(is_visible)
         self._custom_folder_field.setEnabled(is_visible)
 
+    def _sync_shotgrid_description_visibility(self) -> None:
+        show_description = self._is_shotgrid_upload_requested()
+        self._shotgrid_description_row.setVisible(show_description)
+        self._shotgrid_description_field.setEnabled(show_description)
+
+    def _is_shotgrid_upload_requested(self) -> bool:
+        return self._shotgrid_upload_checkbox.isChecked()
+
+    def _shotgrid_upload_description(self) -> str:
+        return self._shotgrid_description_field.text().strip()
+
     def _validate_target_destination_state(self) -> str | None:
         mode = self._selected_source_mode()
 
@@ -679,6 +717,7 @@ class PrevisPlayblastDialog(PlayblastDialog):
         self._refresh_shot_context_fields()
         self._refresh_sequencer_context_fields()
         self._sync_custom_path_row_visibility()
+        self._sync_shotgrid_description_visibility()
         self._refresh_destination_path_labels()
         self._update_action_state()
 
@@ -696,6 +735,9 @@ class PrevisPlayblastDialog(PlayblastDialog):
         self._update_ui_state()
 
     def _on_source_settings_changed(self, *_args) -> None:
+        self._update_ui_state()
+
+    def _on_shotgrid_upload_toggled(self, _enabled: bool) -> None:
         self._update_ui_state()
 
     def _refresh_summary(self, *_args) -> None:
