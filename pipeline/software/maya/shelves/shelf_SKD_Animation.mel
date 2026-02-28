@@ -1,4 +1,4 @@
-global proc shelf_Bobo_Animation () {
+global proc shelf_SKD_Animation () {
     global string $gBuffStr;
     global string $gBuffStr0;
     global string $gBuffStr1;
@@ -49,7 +49,7 @@ global proc shelf_Bobo_Animation () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Pickers" 
+        -annotation "Picker" 
         -enableBackground 0
         -backgroundColor 0 0 0 
         -highlightColor 0.321569 0.521569 0.65098 
@@ -61,11 +61,10 @@ global proc shelf_Bobo_Animation () {
         -flipY 0
         -useAlpha 1
         -font "plainLabelFont" 
-        -imageOverlayLabel "Pickers" 
         -overlayLabelColor 2.624876 0.801436 0.012446 
         -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "createContainer.png" 
-        -image1 "createContainer.png" 
+        -image "picker.svg" 
+        -image1 "picker.svg" 
         -style "iconOnly" 
         -marginWidth 0
         -marginHeight 1
