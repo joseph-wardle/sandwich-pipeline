@@ -19,6 +19,7 @@ from pipe.struct.db import (
     SGEntityStub,
     Shot,
     ShotStub,
+    Task,
     User,
 )
 
@@ -215,6 +216,21 @@ class DBInterface(metaclass=ABCMeta):
     @abstractmethod
     def update_asset(self, asset: Asset) -> bool:
         """Update an asset in the DB"""
+        raise NotImplementedError
+
+    @abstractmethod
+    def create_version_for_shot(
+        self,
+        shot: Shot | ShotStub | dict[str, typing.Any] | int,
+        code: str,
+        user: User | dict[str, typing.Any] | int | None = None,
+        task: Task | dict[str, typing.Any] | int | None = None,
+        video_path: str | None = None,
+        description: str | None = None,
+        playlist_id: int | None = None,
+        extra_fields: dict[str, typing.Any] | None = None,
+    ) -> dict[str, typing.Any]:
+        """Create a ShotGrid Version for a shot with optional links."""
         raise NotImplementedError
 
     @abstractmethod

@@ -19,7 +19,6 @@ from pipe.struct.db import (
     ShotStub,
     Task,
     User,
-    Version,
     build_asset_path,
     build_shot_path,
     normalize_display_name,
@@ -450,33 +449,111 @@ class SGaaDB(DBInterface):
 
     def create_version_for_shot(
         self,
-        shot: ShotStub,
+        shot: ShotStub | dict[str, Any] | int,
         code: str,
-        user: User,
-        task: Task,
+        user: User | dict[str, Any] | int | None = None,
+        task: Task | dict[str, Any] | int | None = None,
         video_path: Optional[str] = None,
         description: Optional[str] = None,
         playlist_id: Optional[int] = None,
+        extra_fields: Optional[dict[str, Any]] = None,
     ) -> dict[Any, Any]:
-        # Create Version instance
-        version = Version(
-            id=-1,
-            code=code,
-            shot=shot,
-            video_path=video_path,
-            user=user,
-            description=description,
-            task=task,
-        )
+        """Create a ShotGrid Version linked to a shot.
 
-        # Push to ShotGrid
-        sg_dict = version.to_sg(exclude=["id"])
-        sg_dict["project"] = {"type": "Project", "id": self._id}
-        sg_dict["playlists"] = [{"type": "Playlist", "id": playlist_id}]
-        new_version = self._sg.create("Version", sg_dict)
+        `code` and `shot` are required. `user`, `task`, and `playlist_id`
+        are optional and only included when valid ids are provided.
+        `extra_fields` can provide additional ShotGrid Version fields.
+        """
 
-        # Return structured object
-        return new_version
+        version_code = str(code).strip()
+        if not version_code:
+            raise ValueError("Version code is required.")
+
+        shot_ref = self._entity_ref("Shot", shot)
+        if shot_ref is None:
+            raise ValueError("A valid shot (with id) is required.")
+
+        version_payload: dict[str, Any] = {
+            "code": version_code,
+            "entity": shot_ref,
+            "project": {"type": "Project", "id": self._id},
+        }
+
+        normalized_video_path = str(video_path).strip() if video_path else ""
+        if normalized_video_path:
+            version_payload["sg_path_to_frames"] = normalized_video_path
+
+        normalized_description = str(description).strip() if description else ""
+        if normalized_description:
+            version_payload["description"] = normalized_description
+
+        user_ref = self._entity_ref("HumanUser", user)
+        if user_ref is not None:
+            version_payload["user"] = user_ref
+
+        task_ref = self._entity_ref("Task", task)
+        if task_ref is not None:
+            version_payload["sg_task"] = task_ref
+
+        playlist_ref = self._entity_ref("Playlist", playlist_id)
+        if playlist_ref is not None:
+            version_payload["playlists"] = [playlist_ref]
+
+        self._apply_extra_version_fields(version_payload, extra_fields)
+        return self._sg.create("Version", version_payload)
+
+    @staticmethod
+    def _entity_ref(entity_type: str, entity: Any) -> dict[str, int] | None:
+        entity_id = SGaaDB._extract_entity_id(entity)
+        if entity_id is None:
+            return None
+        return {"type": entity_type, "id": entity_id}
+
+    @staticmethod
+    def _extract_entity_id(entity: Any) -> int | None:
+        if entity is None:
+            return None
+
+        if isinstance(entity, int):
+            return entity if entity > 0 else None
+
+        if isinstance(entity, str):
+            token = entity.strip()
+            if not token:
+                return None
+            try:
+                parsed = int(token)
+            except ValueError:
+                return None
+            return parsed if parsed > 0 else None
+
+        if isinstance(entity, dict):
+            raw_id = entity.get("id")
+            return raw_id if isinstance(raw_id, int) and raw_id > 0 else None
+
+        raw_id = getattr(entity, "id", None)
+        return raw_id if isinstance(raw_id, int) and raw_id > 0 else None
+
+    def _apply_extra_version_fields(
+        self,
+        version_payload: dict[str, Any],
+        extra_fields: Optional[dict[str, Any]],
+    ) -> None:
+        if not extra_fields:
+            return
+
+        reserved_fields = {"code", "entity", "project"}
+        for raw_field_name, value in extra_fields.items():
+            field_name = str(raw_field_name).strip()
+            if not field_name or value is None:
+                continue
+            if field_name in reserved_fields:
+                log.warning(
+                    "Ignoring extra Version field '%s' because it is reserved.",
+                    field_name,
+                )
+                continue
+            version_payload[field_name] = value
 
     def upload_version_movie(self, version_id, path_to_file, field="sg_uploaded_movie"):
         display_name = os.path.basename(path_to_file)
