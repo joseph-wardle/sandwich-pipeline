@@ -113,7 +113,7 @@ def upload_playblast_version(
         log.exception("Could not resolve ShotGrid connection")
         return _failed_result(
             normalized,
-            f"Could not connect to ShotGrid: {exc}",
+            "Could not connect to ShotGrid: " f"{_format_exception_details(exc)}",
         )
 
     try:
@@ -122,7 +122,9 @@ def upload_playblast_version(
         log.exception("Could not resolve shot '%s' in ShotGrid", normalized.shot_code)
         return _failed_result(
             normalized,
-            f"Could not resolve shot '{normalized.shot_code}' in ShotGrid: {exc}",
+            "Could not resolve shot "
+            f"'{normalized.shot_code}' in ShotGrid: "
+            f"{_format_exception_details(exc)}",
         )
 
     shot_id = _extract_entity_id(shot)
@@ -152,7 +154,7 @@ def upload_playblast_version(
         )
         return _failed_result(
             normalized,
-            f"ShotGrid Version creation failed: {exc}",
+            "ShotGrid Version creation failed: " f"{_format_exception_details(exc)}",
             warnings=warnings,
         )
 
@@ -174,7 +176,7 @@ def upload_playblast_version(
         log.exception("ShotGrid movie upload failed for Version %s", version_id)
         return _failed_result(
             normalized,
-            f"ShotGrid movie upload failed: {exc}",
+            "ShotGrid movie upload failed: " f"{_format_exception_details(exc)}",
             version_id=version_id,
             warnings=warnings,
         )
@@ -308,6 +310,32 @@ def _optional_positive_int(value: Any) -> int | None:
     if parsed < 1:
         return None
     return parsed
+
+
+def _format_exception_details(exc: BaseException) -> str:
+    """Flatten exception/cause/context chain into one readable message."""
+    messages: list[str] = []
+    visited_exception_ids: set[int] = set()
+    current_exc: BaseException | None = exc
+
+    while current_exc is not None:
+        exception_id = id(current_exc)
+        if exception_id in visited_exception_ids:
+            break
+        visited_exception_ids.add(exception_id)
+
+        exception_name = type(current_exc).__name__
+        exception_message = str(current_exc).strip()
+        if exception_message:
+            messages.append(f"{exception_name}: {exception_message}")
+        else:
+            messages.append(exception_name)
+
+        current_exc = current_exc.__cause__ or current_exc.__context__
+
+    if not messages:
+        return "Unknown exception."
+    return " <- ".join(messages)
 
 
 def _default_db_connection() -> Any:
