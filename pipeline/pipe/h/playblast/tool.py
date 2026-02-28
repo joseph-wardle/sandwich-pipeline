@@ -61,12 +61,11 @@ def launch_playblast() -> None:
         ).exec_()
         return
 
-    output_base = dialog.output_base_path
+    output_base, custom_base = dialog.resolve_output_base_paths()
     if output_base is None:
         MessageDialog(parent, "Unable to build export path.", "Playblast").exec_()
         return
 
-    custom_base = dialog.custom_output_base_path
     out_paths: dict[Playblaster.PRESET, list[Path | str]] = {
         Playblaster.PRESET.EDIT_SQ: [output_base]
     }

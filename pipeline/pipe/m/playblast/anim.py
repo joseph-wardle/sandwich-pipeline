@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import maya.cmds as mc
@@ -14,6 +14,10 @@ from shared.util import get_edit_path
 
 from pipe.db import DB
 from pipe.m.shotfile.anim import _find_usd_shotcam
+from pipe.playblast_naming import (
+    playblast_date_folder,
+    resolve_versioned_playblast_basename,
+)
 from pipe.util import Playblaster, checkbox_callback_helper
 
 from .struct import (
@@ -39,7 +43,7 @@ class AnimPlayblastDialog(PlayblastDialog):
     class SAVE_LOCS(PlayblastDialog.SAVE_LOCS):
         EDIT = SaveLocation(
             "Send to Edit",
-            get_edit_path() / "anim" / datetime.now().strftime("%m-%d-%y"),
+            lambda: get_edit_path() / "anim" / playblast_date_folder(),
             Playblaster.PRESET.EDIT_SQ,
         )
 
@@ -142,24 +146,51 @@ class AnimPlayblastDialog(PlayblastDialog):
                 return dialog_config
         raise ValueError(f"Missing dialog config for id: {dialog_id}")
 
+    def _enabled_destination_directories(
+        self, dialog_id: str, locations: list[SaveLocation]
+    ) -> list[Path]:
+        directories: list[Path] = []
+        for location in locations:
+            if not self.is_location_enabled(dialog_id, location.name):
+                continue
+            destination_dir = str(location.path).strip()
+            if destination_dir:
+                directories.append(Path(destination_dir))
+        return directories
+
+    def _resolve_output_name(
+        self,
+        dialog_id: str,
+        locations: list[SaveLocation],
+        prefix: str,
+    ) -> str:
+        return resolve_versioned_playblast_basename(
+            prefix,
+            self._enabled_destination_directories(dialog_id, locations),
+        )
+
     def _generate_config(self) -> MPlayblastConfig:
-        timestamp = datetime.now().strftime("%m-%d-%y_%H:%M:%S")
         shots: list[MShotPlayblastConfig] = []
 
         if self.is_shot_enabled(self.SG_ID):
             assert self._shot is not None
             shotgrid_dialog_config = self._dialog_config_for_id(self.SG_ID)
+            shotgrid_locations = [
+                save_location for save_location, _ in shotgrid_dialog_config.save_locs
+            ]
+            shotgrid_output_name = self._resolve_output_name(
+                self.SG_ID,
+                shotgrid_locations,
+                self._shot.code,
+            )
             shots.append(
                 MShotPlayblastConfig(
                     camera=self._get_shot_camera_path(),
                     shot=self._shot,
                     paths=self.save_locations_to_paths(
                         self.SG_ID,
-                        (
-                            save_location
-                            for save_location, _ in shotgrid_dialog_config.save_locs
-                        ),
-                        f"{self._shot.code}_{timestamp}",
+                        shotgrid_locations,
+                        shotgrid_output_name,
                     ),
                     tails=(5, 5),
                 )
@@ -167,10 +198,14 @@ class AnimPlayblastDialog(PlayblastDialog):
 
         if self.is_shot_enabled(self.CUSTOM_ID):
             custom_dialog_config = self._dialog_config_for_id(self.CUSTOM_ID)
-            output_name = (
-                f"customPB_{self._shot.code}_{timestamp}"
-                if self._shot
-                else f"customPB_{timestamp}"
+            custom_locations = [
+                save_location for save_location, _ in custom_dialog_config.save_locs
+            ]
+            custom_prefix = f"customPB_{self._shot.code}" if self._shot else "customPB"
+            output_name = self._resolve_output_name(
+                self.CUSTOM_ID,
+                custom_locations,
+                custom_prefix,
             )
             custom_in_frame = self._custom_in.value()
             custom_out_frame = self._custom_out.value()
@@ -186,10 +221,7 @@ class AnimPlayblastDialog(PlayblastDialog):
                     ),
                     paths=self.save_locations_to_paths(
                         self.CUSTOM_ID,
-                        (
-                            save_location
-                            for save_location, _ in custom_dialog_config.save_locs
-                        ),
+                        custom_locations,
                         output_name,
                     ),
                 )

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
 import maya.cmds as mc
@@ -24,6 +23,10 @@ from Qt.QtWidgets import (
 )
 from shared.util import get_edit_path
 
+from pipe.playblast_naming import (
+    playblast_date_folder,
+    resolve_versioned_playblast_basename,
+)
 from pipe.util import Playblaster
 
 from .struct import (
@@ -71,7 +74,7 @@ class PrevisPlayblastDialog(PlayblastDialog):
     class SAVE_LOCS(PlayblastDialog.SAVE_LOCS):
         EDIT = SaveLocation(
             "Send to Edit",
-            get_edit_path() / "previs" / datetime.now().strftime("%m-%d-%y"),
+            lambda: get_edit_path() / "previs" / playblast_date_folder(),
             Playblaster.PRESET.EDIT_SQ,
         )
 
@@ -387,6 +390,20 @@ class PrevisPlayblastDialog(PlayblastDialog):
             paths[location.preset].append(str(Path(destination_dir) / filename))
         return paths
 
+    def _selected_destination_directories(self) -> list[Path]:
+        directories: list[Path] = []
+        for location in self._selected_destination_locations():
+            destination_dir = self._resolved_destination_path(location).strip()
+            if destination_dir:
+                directories.append(Path(destination_dir))
+        return directories
+
+    def _resolve_output_name(self, prefix: str) -> str:
+        return resolve_versioned_playblast_basename(
+            prefix,
+            self._selected_destination_directories(),
+        )
+
     def _resolved_destination_path(self, location: SaveLocation) -> str:
         if location.name == self.SAVE_LOCS.CUSTOM.name:
             return self._custom_folder_field.text().strip()
@@ -564,13 +581,12 @@ class PrevisPlayblastDialog(PlayblastDialog):
         if validation_error:
             raise ValueError(validation_error)
 
-        date_suffix = datetime.now().strftime("%m-%d-%y")
         if self._is_shot_mode_selected():
             shot_context = self._resolve_current_sequencer_shot_context()
             if shot_context is None:
                 raise ValueError("No current sequencer shot was found.")
 
-            output_name = f"{shot_context.name}_{date_suffix}"
+            output_name = self._resolve_output_name(shot_context.name)
             shot_config = MShotPlayblastConfig(
                 camera=shot_context.camera,
                 shot=dummy_shot(
@@ -586,7 +602,7 @@ class PrevisPlayblastDialog(PlayblastDialog):
             custom_in = self._custom_in.value()
             custom_out = self._custom_out.value()
             custom_code = self._scene_stem()
-            output_name = f"{custom_code}_custom_{date_suffix}"
+            output_name = self._resolve_output_name(f"{custom_code}_custom")
             shot_config = MShotPlayblastConfig(
                 camera=str(self._custom_camera.currentText()),
                 shot=dummy_shot(

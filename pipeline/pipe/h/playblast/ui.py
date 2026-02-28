@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -10,7 +9,7 @@ from shared.util import get_edit_path
 from pipe.glui.dialogs import DialogButtons
 
 from .constants import DEFAULT_RESOLUTION
-from .paths import build_custom_output_base_path, build_output_base_path
+from .paths import build_output_base_paths
 
 if TYPE_CHECKING:
     from pipe.db import DB
@@ -26,7 +25,6 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         default_shot_code: str | None = None,
     ) -> None:
         super().__init__(parent)
-        self._timestamp = datetime.now()
         self._conn = conn  # remove this if you remove the parameter
 
         self._init_buttons(True, "Playblast", "Cancel")
@@ -95,24 +93,29 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
     def upload_to_shotgrid(self) -> bool:
         return self._upload_cb.isChecked()
 
-    @property
-    def output_base_path(self) -> Path | None:
+    def resolve_output_base_paths(self) -> tuple[Path | None, Path | None]:
         shot_code = self.shot_code
         if not shot_code:
-            return None
-        return build_output_base_path(self.department, shot_code, self._timestamp)
+            return None, None
+
+        custom_dir = (
+            self._custom_export_dir() if self._custom_export_cb.isChecked() else None
+        )
+        return build_output_base_paths(
+            self.department,
+            shot_code,
+            custom_dir=custom_dir,
+        )
+
+    @property
+    def output_base_path(self) -> Path | None:
+        output_base, _ = self.resolve_output_base_paths()
+        return output_base
 
     @property
     def custom_output_base_path(self) -> Path | None:
-        if not self._custom_export_cb.isChecked():
-            return None
-        custom_dir = self._custom_export_dir()
-        if custom_dir is None:
-            return None
-        shot_code = self.shot_code
-        if not shot_code:
-            return None
-        return build_custom_output_base_path(custom_dir, shot_code, self._timestamp)
+        _, custom_output_base = self.resolve_output_base_paths()
+        return custom_output_base
 
     def _toggle_custom_export(self, enabled: bool) -> None:
         self._custom_export_row.setVisible(enabled)
@@ -136,7 +139,7 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         return Path(text).expanduser()
 
     def _update_export_paths(self) -> None:
-        output_base = self.output_base_path
+        output_base, _ = self.resolve_output_base_paths()
         if output_base is None:
             self._export_path_label.setText("No shot code available.")
         else:
