@@ -11,7 +11,12 @@ if TYPE_CHECKING:
     import typing
 
 from env import Executables
-from shared.util import get_production_path, get_rig_build_path, get_rigging_path
+from shared.util import (
+    get_production_path,
+    get_rig_build_path,
+    get_rigging_path,
+    get_shared_telemetry_spool_dir,
+)
 
 from ..baseclass import DCC
 
@@ -58,6 +63,7 @@ class MayaDCC(DCC):
             "MAYAUSD_EXPORT_MAP1_AS_PRIMARY_UV_SET": 1,
             "MAYAUSD_IMPORT_PRIMARY_UV_SET_AS_MAP1": 1,
             "MAYA_MODULE_PATH": os.pathsep.join(module_paths),
+            "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
             "PYTHONPATH": os.pathsep.join(
                 [
                     str(pipe_path),

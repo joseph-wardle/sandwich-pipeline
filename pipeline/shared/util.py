@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import getpass
 import os
 import platform
+import re
+import socket
 import subprocess
 from inspect import getmembers, isabstract, isclass
 from pathlib import Path
@@ -120,6 +123,30 @@ def get_previs_path() -> Path:
 
 def get_production_path() -> Path:
     return _prp
+
+
+def _sanitize_path_segment(value: str, *, fallback: str) -> str:
+    normalized = str(value).strip()
+    if not normalized:
+        return fallback
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", normalized)
+    sanitized = sanitized.strip("._-")
+    return sanitized or fallback
+
+
+def get_shared_telemetry_spool_dir() -> Path:
+    """Return the shared production telemetry spool directory for this user/host."""
+
+    try:
+        username = getpass.getuser()
+    except Exception:
+        username = os.getenv("USER") or os.getenv("USERNAME") or ""
+    host = socket.gethostname() or platform.node()
+    safe_user = _sanitize_path_segment(username, fallback="unknown_user")
+    safe_host = _sanitize_path_segment(host, fallback="unknown_host")
+    return resolve_mapped_path(
+        get_production_path() / ".telemetry" / "raw" / safe_host / safe_user
+    )
 
 
 def get_rigging_path() -> Path:

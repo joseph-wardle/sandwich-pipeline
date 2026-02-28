@@ -6,6 +6,7 @@ import platform
 from pathlib import Path
 
 from env import Executables
+from shared.util import get_shared_telemetry_spool_dir
 
 from ..baseclass import DCC
 
@@ -26,6 +27,7 @@ class SubstanceDesignerDCC(DCC):
         env_vars = {
             "DCC": str(this_path.parent.name),
             "OCIO": str(pipe_path / "lib/ocio/sandwich-v01/config.ocio"),
+            "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
             "PYTHONPATH": os.pathsep.join(
                 [
                     str(pipe_path),

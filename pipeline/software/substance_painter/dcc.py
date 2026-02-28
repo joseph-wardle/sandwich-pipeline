@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     import typing
 
 from env import Executables
-from shared.util import resolve_mapped_path
+from shared.util import get_shared_telemetry_spool_dir, resolve_mapped_path
 
 from ..baseclass import DCC
 
@@ -36,6 +36,7 @@ class SubstancePainterDCC(DCC):
             ),
             "PIPE_LOG_LEVEL": log.getEffectiveLevel(),
             "PIPE_PATH": str(pipe_path),
+            "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
             "PYTHONPATH": os.pathsep.join(
                 [
                     str(pipe_path),

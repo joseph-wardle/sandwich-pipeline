@@ -7,7 +7,11 @@ import sys
 from pathlib import Path
 
 from env import Executables
-from shared.util import get_production_path, resolve_mapped_path
+from shared.util import (
+    get_production_path,
+    get_shared_telemetry_spool_dir,
+    resolve_mapped_path,
+)
 
 from ..baseclass import DCC
 
@@ -28,6 +32,7 @@ class NukeDCC(DCC):
         env_vars = {
             "NUKE_PATH": str(resolve_mapped_path(this_path.parent / "tools")),
             "OCIO": str(pipe_path / "lib/ocio/sandwich-v01/config.ocio"),
+            "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
             "PYTHONPATH": os.pathsep.join(
                 [
                     str(pipe_path),

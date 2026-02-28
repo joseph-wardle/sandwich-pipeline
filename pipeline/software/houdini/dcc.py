@@ -16,7 +16,11 @@ if TYPE_CHECKING:
     import typing
 
 from env import Executables
-from shared.util import get_production_path, resolve_mapped_path
+from shared.util import (
+    get_production_path,
+    get_shared_telemetry_spool_dir,
+    resolve_mapped_path,
+)
 
 from ..baseclass import DCC
 
@@ -98,6 +102,7 @@ class HoudiniDCC(DCC):
             # Pass log level defined on commandline
             "PIPE_LOG_LEVEL": log.getEffectiveLevel(),
             "PIPE_PATH": str(pipe_path),
+            "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
             # Configure Asset Resolver
             "PXR_AR_DEFAULT_SEARCH_PATH": os.pathsep.join(
                 [
