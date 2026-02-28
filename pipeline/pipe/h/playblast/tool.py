@@ -13,6 +13,7 @@ from pipe.db import DB
 from pipe.glui.dialogs import MessageDialog
 from pipe.h import local
 from pipe.playblast_artist import resolve_artist_display_name
+from pipe.playblast_shotgrid import resolve_preferred_upload_movie_path
 from pipe.struct.db import Shot
 from pipe.util import Playblaster
 
@@ -76,8 +77,16 @@ class HoudiniPlayblastLaunchContext:
     custom_camera_path: str | None
     custom_frame_range: tuple[int, int] | None
     custom_shot_code: str
-    output_bases: tuple[Path, ...]
+    output_destinations: tuple["ResolvedOutputDestination", ...]
     upload_to_shotgrid: bool
+
+
+@dataclass(frozen=True)
+class ResolvedOutputDestination:
+    """Resolved output base path paired with its destination label."""
+
+    destination_name: str
+    output_base: Path
 
 
 def launch_playblast() -> None:
@@ -113,10 +122,15 @@ def launch_playblast() -> None:
     if not _run_local_playblast_or_report(playblaster, parent):
         return
 
-    final_movies = _final_movie_paths(context.output_bases, Playblaster.PRESET.EDIT_SQ)
-    primary_movie = final_movies[0]
+    final_movies = _ordered_final_movie_paths_for_upload(context)
     if context.source_mode == "shot" and context.upload_to_shotgrid:
-        _upload_stub(parent, primary_movie)
+        upload_movie = _resolve_shotgrid_upload_movie_path(context)
+        if upload_movie is None:
+            log.warning(
+                "ShotGrid upload requested but no valid movie output was found in selected destinations."
+            )
+        else:
+            _upload_stub(parent, upload_movie)
 
     _show_success_dialog(parent, final_movies)
 
@@ -134,8 +148,20 @@ def _build_launch_context_or_report(
     dialog: HPlayblastDialog,
     parent: QtWidgets.QWidget | None,
 ) -> HoudiniPlayblastLaunchContext | None:
-    output_bases = tuple(dialog.resolve_selected_output_bases())
-    if not output_bases:
+    output_bases_by_destination = dialog.resolve_output_bases_by_destination()
+    if not output_bases_by_destination:
+        MessageDialog(parent, "Unable to build export path.", "Playblast").exec_()
+        return None
+
+    output_destinations = tuple(
+        ResolvedOutputDestination(
+            destination_name=destination_name,
+            output_base=output_bases_by_destination[destination_name],
+        )
+        for destination_name in HPlayblastDialog.DESTINATION_ORDER
+        if destination_name in output_bases_by_destination
+    )
+    if not output_destinations:
         MessageDialog(parent, "Unable to build export path.", "Playblast").exec_()
         return None
 
@@ -155,7 +181,7 @@ def _build_launch_context_or_report(
         custom_camera_path=dialog.custom_camera_path,
         custom_frame_range=custom_frame_range,
         custom_shot_code=dialog.custom_shot_code,
-        output_bases=output_bases,
+        output_destinations=output_destinations,
         upload_to_shotgrid=dialog.upload_to_shotgrid,
     )
 
@@ -203,7 +229,11 @@ def _build_custom_mode_shot(context: HoudiniPlayblastLaunchContext) -> Shot | No
 def _build_output_paths(
     context: HoudiniPlayblastLaunchContext,
 ) -> dict[Playblaster.PRESET, list[Path | str]]:
-    return {Playblaster.PRESET.EDIT_SQ: list(context.output_bases)}
+    return {
+        Playblaster.PRESET.EDIT_SQ: [
+            destination.output_base for destination in context.output_destinations
+        ]
+    }
 
 
 def _run_local_playblast_or_report(
@@ -225,11 +255,35 @@ def _final_movie_path(output_base: str | Path, preset: Playblaster.PRESET) -> Pa
     return Path(str(output_base) + f".{preset.ext}")
 
 
-def _final_movie_paths(
-    output_bases: tuple[Path, ...],
-    preset: Playblaster.PRESET,
+def _ordered_final_movie_paths_for_upload(
+    context: HoudiniPlayblastLaunchContext,
 ) -> list[Path]:
-    return [_final_movie_path(base, preset) for base in output_bases]
+    return [
+        _final_movie_path(destination.output_base, Playblaster.PRESET.EDIT_SQ)
+        for destination in context.output_destinations
+    ]
+
+
+def _preferred_edit_movie_paths_for_upload(
+    context: HoudiniPlayblastLaunchContext,
+) -> list[Path]:
+    for destination in context.output_destinations:
+        if destination.destination_name != HPlayblastDialog.DESTINATION_EDIT:
+            continue
+        return [_final_movie_path(destination.output_base, Playblaster.PRESET.EDIT_SQ)]
+    return []
+
+
+def _resolve_shotgrid_upload_movie_path(
+    context: HoudiniPlayblastLaunchContext,
+) -> Path | None:
+    """Resolve upload path deterministically: prefer Edit, then destination order."""
+    ordered_paths = _ordered_final_movie_paths_for_upload(context)
+    preferred_paths = _preferred_edit_movie_paths_for_upload(context)
+    return resolve_preferred_upload_movie_path(
+        ordered_paths,
+        preferred_paths=preferred_paths,
+    )
 
 
 def _show_success_dialog(
