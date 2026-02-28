@@ -30,47 +30,7 @@ log = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from Qt import QtWidgets
 
-
-@dataclass(frozen=True)
-class MayaPlayblastParityTarget:
-    """Maya behavior that Houdini should mirror during feature unification."""
-
-    name: str
-    maya_reference: str
-    expected_houdini_behavior: str
-
-
-MAYA_PARITY_TARGETS: tuple[MayaPlayblastParityTarget, ...] = (
-    MayaPlayblastParityTarget(
-        name="export_orchestration",
-        maya_reference="pipe.m.playblast.ui.PlayblastDialog.do_export",
-        expected_houdini_behavior=(
-            "Use the same staged flow: generate config, validate, run local export, "
-            "run post-export actions, then show a single final summary dialog."
-        ),
-    ),
-    MayaPlayblastParityTarget(
-        name="post_export_hook",
-        maya_reference="pipe.m.playblast.ui.PlayblastDialog._after_local_playblast",
-        expected_houdini_behavior=(
-            "Keep local exports successful even when optional post-export actions fail."
-        ),
-    ),
-    MayaPlayblastParityTarget(
-        name="shot_mode_upload_wiring",
-        maya_reference="pipe.m.playblast.previs.PrevisPlayblastDialog._upload_shot_playblast_to_shotgrid",
-        expected_houdini_behavior=(
-            "Wire ShotGrid uploads as an optional step after successful local output."
-        ),
-    ),
-    MayaPlayblastParityTarget(
-        name="deterministic_upload_source_selection",
-        maya_reference="pipe.m.playblast.previs.PrevisPlayblastDialog._resolve_shotgrid_upload_movie_path",
-        expected_houdini_behavior=(
-            "Resolve upload movie path deterministically with explicit destination preference."
-        ),
-    ),
-)
+SHOT_CODE_FALLBACK_PATTERN = re.compile(r"[A-Za-z]+_\d{3}(?:_[A-Za-z0-9]+)*")
 
 
 @dataclass(frozen=True)
@@ -214,12 +174,13 @@ def _build_launch_context(
     if source_mode == "shot" and not shot_code:
         raise ValueError("No shot code was found for Shot Playblast.")
 
+    custom_camera_path = dialog.custom_camera_path if source_mode == "custom" else None
     custom_frame_range = dialog.custom_frame_range if source_mode == "custom" else None
 
     return HoudiniPlayblastLaunchContext(
         source_mode=source_mode,
         shot_code=shot_code,
-        custom_camera_path=dialog.custom_camera_path,
+        custom_camera_path=custom_camera_path,
         custom_frame_range=custom_frame_range,
         custom_shot_code=dialog.custom_shot_code,
         output_destinations=output_destinations,
@@ -433,20 +394,52 @@ def _resolve_shot_code() -> str | None:
     except Exception:
         shot_path = None
 
-    if isinstance(shot_path, (str, Path)) and str(shot_path):
-        try:
-            return Path(shot_path).name
-        except Exception:
-            pass
+    shot_code_from_context = _shot_code_from_context_option(shot_path)
+    if shot_code_from_context:
+        return shot_code_from_context
 
     try:
         hip_path = Path(hou.hipFile.path())
     except Exception:
         return None
 
-    pattern = re.compile(r"[A-Za-z]+_\d+")
-    for part in hip_path.parts:
-        if pattern.fullmatch(part):
-            return part
+    shot_code_from_path = _shot_code_from_hip_path(hip_path)
+    if shot_code_from_path:
+        return shot_code_from_path
+
+    return None
+
+
+def _shot_code_from_context_option(shot_path: Any) -> str | None:
+    if not isinstance(shot_path, (str, Path)):
+        return None
+
+    context_token = str(shot_path).strip()
+    if not context_token:
+        return None
+
+    try:
+        candidate = Path(context_token).name.strip()
+    except Exception:
+        return None
+
+    if candidate and SHOT_CODE_FALLBACK_PATTERN.fullmatch(candidate):
+        return candidate
+    return None
+
+
+def _shot_code_from_hip_path(hip_path: Path) -> str | None:
+    path_parts = list(hip_path.parts)
+    for index, part in enumerate(path_parts[:-1]):
+        if part.lower() != "shot":
+            continue
+        candidate = str(path_parts[index + 1]).strip()
+        if SHOT_CODE_FALLBACK_PATTERN.fullmatch(candidate):
+            return candidate
+
+    for part in path_parts:
+        candidate = str(part).strip()
+        if SHOT_CODE_FALLBACK_PATTERN.fullmatch(candidate):
+            return candidate
 
     return None

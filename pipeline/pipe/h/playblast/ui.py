@@ -134,14 +134,10 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         if not selected_destination_dirs:
             return {}
 
-        output_prefix = self._output_prefix_for_selected_mode()
-        if not output_prefix:
+        output_basename = self._resolved_output_basename(selected_destination_dirs)
+        if not output_basename:
             return {}
 
-        output_basename = resolve_versioned_playblast_basename(
-            output_prefix,
-            selected_destination_dirs.values(),
-        )
         return {
             destination_name: destination_dir / output_basename
             for destination_name, destination_dir in selected_destination_dirs.items()
@@ -588,28 +584,35 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         return "Playblast Custom"
 
     def _preview_output_paths_by_destination(self) -> dict[str, str]:
-        output_prefix = self._output_prefix_for_selected_mode()
-        if not output_prefix:
+        selected_destination_dirs = self._resolved_destination_directories(
+            include_unselected=False
+        )
+        if not selected_destination_dirs:
             return {}
 
-        destination_dirs = self._resolved_destination_directories(
-            include_unselected=True
-        )
-        if not destination_dirs:
-            return {}
+        output_basename = self._resolved_output_basename(selected_destination_dirs)
+        if not output_basename:
+            return {name: str(path) for name, path in selected_destination_dirs.items()}
+
+        return {
+            destination_name: str(destination_path / output_basename)
+            for destination_name, destination_path in selected_destination_dirs.items()
+        }
+
+    def _resolved_output_basename(
+        self, destination_dirs: dict[str, Path]
+    ) -> str | None:
+        output_prefix = self._output_prefix_for_selected_mode()
+        if not output_prefix or not destination_dirs:
+            return None
 
         try:
-            output_basename = resolve_versioned_playblast_basename(
+            return resolve_versioned_playblast_basename(
                 output_prefix,
                 destination_dirs.values(),
             )
         except Exception:
-            return {name: str(path) for name, path in destination_dirs.items()}
-
-        return {
-            destination_name: str(destination_path / output_basename)
-            for destination_name, destination_path in destination_dirs.items()
-        }
+            return None
 
     def _resolved_destination_directories(
         self,

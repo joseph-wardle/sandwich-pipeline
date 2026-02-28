@@ -114,19 +114,7 @@ class SGaaDB(DBInterface):
 
         from .shotgun_api3 import shotgun as shotgun_module
 
-        existing_handler_class = shotgun_module.CACertsHTTPSHandler
-        existing_connection_class = shotgun_module.CACertsHTTPSConnection
-
-        handler_already_fixed = issubclass(
-            existing_handler_class,
-            urllib.request.HTTPSHandler,
-        )
-        connection_init_fixed = (
-            existing_connection_class.__init__.__qualname__
-            == "_PipelineCACertsHTTPSConnection.__init__"
-        )
-
-        if handler_already_fixed and connection_init_fixed:
+        if getattr(shotgun_module, "_PIPELINE_HOUDINI_UPLOAD_PATCHED", False):
             return
 
         import http.client
@@ -176,6 +164,7 @@ class SGaaDB(DBInterface):
 
         shotgun_module.CACertsHTTPSConnection = _PipelineCACertsHTTPSConnection
         shotgun_module.CACertsHTTPSHandler = _PipelineCACertsHTTPSHandler
+        shotgun_module._PIPELINE_HOUDINI_UPLOAD_PATCHED = True
         log.info("Applied Houdini ShotGrid upload HTTPS runtime compatibility patch.")
 
     @staticmethod
@@ -186,7 +175,12 @@ class SGaaDB(DBInterface):
 
         explicit_path = os.environ.get("SHOTGUN_API_CACERTS", "").strip()
         if explicit_path:
-            return explicit_path if os.path.isfile(explicit_path) else None
+            if os.path.isfile(explicit_path):
+                return explicit_path
+            log.warning(
+                "SHOTGUN_API_CACERTS is set but file does not exist: %s",
+                explicit_path,
+            )
 
         system_ca_bundle_candidates = (
             "/etc/ssl/certs/ca-certificates.crt",
@@ -198,6 +192,10 @@ class SGaaDB(DBInterface):
         for candidate_path in system_ca_bundle_candidates:
             if os.path.isfile(candidate_path):
                 return candidate_path
+
+        log.warning(
+            "No system CA bundle candidate was found for Houdini ShotGrid uploads."
+        )
         return None
 
     def _threaded_updater(self) -> None:
@@ -695,7 +693,6 @@ class SGaaDB(DBInterface):
         ]
 
         raw_tasks = self._sg.find("Task", filters, fields)
-        print(raw_tasks)
         return [Task.from_sg(task) for task in raw_tasks]
 
     def get_asset_display_name_list_by_type(
