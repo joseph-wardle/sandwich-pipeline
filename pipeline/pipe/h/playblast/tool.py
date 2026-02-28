@@ -13,7 +13,12 @@ from pipe.db import DB
 from pipe.glui.dialogs import MessageDialog
 from pipe.h import local
 from pipe.playblast_artist import resolve_artist_display_name
-from pipe.playblast_shotgrid import resolve_preferred_upload_movie_path
+from pipe.playblast_shotgrid import (
+    PlayblastVersionUploadRequest,
+    default_version_name_from_movie_path,
+    resolve_preferred_upload_movie_path,
+    upload_playblast_version,
+)
 from pipe.struct.db import Shot
 from pipe.util import Playblaster
 
@@ -78,6 +83,7 @@ class HoudiniPlayblastLaunchContext:
     custom_frame_range: tuple[int, int] | None
     custom_shot_code: str
     output_destinations: tuple["ResolvedOutputDestination", ...]
+    shotgrid_description: str
     upload_to_shotgrid: bool
 
 
@@ -217,6 +223,7 @@ def _build_launch_context(
         custom_frame_range=custom_frame_range,
         custom_shot_code=dialog.custom_shot_code,
         output_destinations=output_destinations,
+        shotgrid_description=dialog.shotgrid_description,
         upload_to_shotgrid=dialog.upload_to_shotgrid,
     )
 
@@ -353,7 +360,55 @@ def _run_post_export_actions(config: HoudiniPlayblastExportConfig) -> list[str]:
         )
         return ["ShotGrid Upload: Skipped - no valid playblast movie file was found."]
 
-    return [_upload_stub(upload_movie)]
+    return _upload_shot_playblast_to_shotgrid(context, upload_movie)
+
+
+def _upload_shot_playblast_to_shotgrid(
+    context: HoudiniPlayblastLaunchContext,
+    movie_path: Path,
+) -> list[str]:
+    shot_code = str(context.shot_code or "").strip()
+    if not shot_code:
+        return ["ShotGrid Upload: Skipped - shot code is missing."]
+
+    version_name = default_version_name_from_movie_path(movie_path)
+    if not version_name:
+        version_name = f"{shot_code}_playblast"
+
+    artist_name = resolve_artist_display_name().strip() or None
+    upload_request = PlayblastVersionUploadRequest(
+        shot_code=shot_code,
+        movie_path=movie_path,
+        version_name=version_name,
+        description=context.shotgrid_description or None,
+        path_to_frames=str(movie_path),
+        artist_display_name=artist_name,
+    )
+
+    try:
+        upload_result = upload_playblast_version(upload_request)
+    except Exception as exc:
+        log.exception("ShotGrid upload failed for shot '%s'", shot_code)
+        return [f"ShotGrid Upload: Failed - {exc}"]
+
+    message_lines: list[str] = []
+    if upload_result.ok:
+        success_message = (
+            f"ShotGrid Upload: Success - {upload_result.version_name}"
+            f" (shot {upload_result.shot_code})."
+        )
+        if upload_result.version_id is not None:
+            success_message = (
+                f"{success_message} Version ID: {upload_result.version_id}."
+            )
+        message_lines.append(success_message)
+    else:
+        message_lines.append(f"ShotGrid Upload: Failed - {upload_result.message}")
+
+    for warning in upload_result.warnings:
+        message_lines.append(f"ShotGrid Warning: {warning}")
+
+    return message_lines
 
 
 def _build_success_message(
@@ -395,18 +450,3 @@ def _resolve_shot_code() -> str | None:
             return part
 
     return None
-
-
-def _upload_stub(movie_path: Path) -> str:
-    artist_display_name = resolve_artist_display_name().strip()
-    if artist_display_name:
-        log.info(
-            "ShotGrid upload requested for %s by %s (not implemented yet).",
-            movie_path,
-            artist_display_name,
-        )
-    else:
-        log.info("ShotGrid upload requested for %s (not implemented yet).", movie_path)
-    return (
-        f"ShotGrid Upload: Skipped - not implemented yet (requested for {movie_path})."
-    )
