@@ -64,6 +64,9 @@ class PrevisPlayblastDialog(PlayblastDialog):
 
     SHOT_TAB_INDEX = 0
     CUSTOM_TAB_INDEX = 1
+    CONTEXT_BANNER_STYLE = (
+        "padding: 8px; border: 1px solid #c3cfdb; background: #e3ebf5; color: #666;"
+    )
 
     class SAVE_LOCS(PlayblastDialog.SAVE_LOCS):
         EDIT = SaveLocation(
@@ -84,7 +87,7 @@ class PrevisPlayblastDialog(PlayblastDialog):
         self._save_locations_by_name = {
             location.name: location for location in self._destination_locations()
         }
-        super().__init__(parent, [], "Bobo Previs Playblast")
+        super().__init__(parent, [], "SKD Previs Playblast")
 
     def _setup_ui(self) -> None:
         self._central_widget = QWidget()
@@ -100,13 +103,15 @@ class PrevisPlayblastDialog(PlayblastDialog):
         self._update_ui_state()
 
     def _build_header_section(self) -> None:
-        title = QLabel("Bobo Previs Playblast")
+        title = QLabel("SKD Previs Playblast")
         title.setStyleSheet("font-size: 24px; font-weight: 700;")
         title.setAlignment(QtCore.Qt.AlignCenter)
 
         subtitle = QLabel("Choose source mode, choose destinations, then export.")
-        subtitle.setStyleSheet("color: #666;")
         subtitle.setAlignment(QtCore.Qt.AlignCenter)
+        subtitle.setToolTip(
+            "High-level workflow: choose source, choose destinations, then export."
+        )
 
         self._main_layout.addWidget(title)
         self._main_layout.addWidget(subtitle)
@@ -117,8 +122,9 @@ class PrevisPlayblastDialog(PlayblastDialog):
 
         self._context_banner = QLabel()
         self._context_banner.setWordWrap(True)
-        self._context_banner.setStyleSheet(
-            "padding: 6px; border: 1px solid #dcdcdc; background: #f7f7f7;"
+        self._context_banner.setStyleSheet(self.CONTEXT_BANNER_STYLE)
+        self._context_banner.setToolTip(
+            "Live context for the selected export mode: shot, camera, and frame range."
         )
         setup_layout.addWidget(self._context_banner)
 
@@ -127,13 +133,16 @@ class PrevisPlayblastDialog(PlayblastDialog):
 
         self._validation_label = QLabel()
         self._validation_label.setStyleSheet("color: #b00020;")
+        self._validation_label.setToolTip(
+            "Validation feedback. Export is disabled until this message is cleared."
+        )
         self._validation_label.setVisible(False)
         setup_layout.addWidget(self._validation_label)
 
         self._main_layout.addWidget(setup_group)
 
     def _build_export_source_section(self) -> QGroupBox:
-        source_group = QGroupBox("Export Source")
+        source_group = QGroupBox("")
         source_layout = QVBoxLayout(source_group)
 
         self._source_tabs = QTabWidget()
@@ -142,9 +151,21 @@ class PrevisPlayblastDialog(PlayblastDialog):
         )
         self._source_tabs.addTab(
             self._build_custom_source_tab(),
-            "Custom Playblast (Testing / Non-shot File)",
+            "Custom Playblast",
         )
         self._source_tabs.currentChanged.connect(self._on_source_mode_changed)
+        self._source_tabs.setToolTip(
+            "Choose whether to export the current sequencer shot or a custom range."
+        )
+        source_tab_bar = self._source_tabs.tabBar()
+        source_tab_bar.setTabToolTip(
+            self.SHOT_TAB_INDEX,
+            "Exports the shot under the current timeline frame in the camera sequencer.",
+        )
+        source_tab_bar.setTabToolTip(
+            self.CUSTOM_TAB_INDEX,
+            "Exports a manually selected camera and frame range.",
+        )
         source_layout.addWidget(self._source_tabs)
         return source_group
 
@@ -153,18 +174,29 @@ class PrevisPlayblastDialog(PlayblastDialog):
         shot_layout = QGridLayout(shot_tab)
 
         shot_layout.addWidget(QLabel("Source"), 0, 0)
-        shot_layout.addWidget(QLabel("Current Sequencer Shot"), 0, 1)
+        shot_source_value = QLabel("Current Sequencer Shot")
+        shot_source_value.setToolTip(
+            "This mode uses the sequencer shot at the current timeline frame."
+        )
+        shot_layout.addWidget(shot_source_value, 0, 1)
 
         shot_layout.addWidget(QLabel("Shot"), 1, 0)
         self._shot_name_value = QLabel("-")
+        self._shot_name_value.setToolTip("Resolved shot name for the current frame.")
         shot_layout.addWidget(self._shot_name_value, 1, 1)
 
         shot_layout.addWidget(QLabel("Camera"), 2, 0)
         self._shot_camera_value = QLabel("-")
+        self._shot_camera_value.setToolTip(
+            "Resolved camera from the active sequencer shot."
+        )
         shot_layout.addWidget(self._shot_camera_value, 2, 1)
 
         shot_layout.addWidget(QLabel("Frame Range"), 3, 0)
         self._shot_range_value = QLabel("-")
+        self._shot_range_value.setToolTip(
+            "Resolved frame range from the active sequencer shot."
+        )
         shot_layout.addWidget(self._shot_range_value, 3, 1)
         return shot_tab
 
@@ -176,6 +208,8 @@ class PrevisPlayblastDialog(PlayblastDialog):
         self._custom_in = QSpinBox(self, minimum=0, maximum=10000, value=timeline_in)
         self._custom_out = QSpinBox(self, minimum=0, maximum=10000, value=timeline_out)
         self._custom_out.setMinimum(self._custom_in.value())
+        self._custom_in.setToolTip("Start frame for custom playblast.")
+        self._custom_out.setToolTip("End frame for custom playblast.")
         self._custom_in.valueChanged.connect(self._on_custom_in_changed)
         self._custom_out.valueChanged.connect(self._on_source_settings_changed)
 
@@ -187,6 +221,7 @@ class PrevisPlayblastDialog(PlayblastDialog):
         camera_list = self._available_custom_cameras()
         self._custom_camera = QComboBox(self)
         self._custom_camera.addItems(camera_list)
+        self._custom_camera.setToolTip("Camera used for custom playblast output.")
         self._custom_camera.currentTextChanged.connect(self._on_source_settings_changed)
         custom_layout.addWidget(QLabel("Custom Camera"), 1, 0)
         custom_layout.addWidget(self._custom_camera, 1, 1, 1, 3)
@@ -195,10 +230,6 @@ class PrevisPlayblastDialog(PlayblastDialog):
     def _build_destination_section(self) -> QGroupBox:
         destination_group = QGroupBox("Save Destinations")
         destination_layout = QVBoxLayout(destination_group)
-
-        help_label = QLabel("Select one or more destinations.")
-        help_label.setStyleSheet("color: #666;")
-        destination_layout.addWidget(help_label)
 
         for save_location in self._destination_locations():
             row_widget = QWidget()
@@ -209,20 +240,35 @@ class PrevisPlayblastDialog(PlayblastDialog):
             destination_toggle.setChecked(
                 self._default_destination_enabled(save_location)
             )
+            destination_toggle.setToolTip(f"Enable export to {save_location.name}.")
             destination_toggle.toggled.connect(self._on_destination_changed)
             self._destination_checkboxes[save_location.name] = destination_toggle
             row_layout.addWidget(destination_toggle)
 
             path_label = QLabel("")
-            path_label.setStyleSheet("color: #666;")
+            path_label.setToolTip(
+                f"Resolved output directory for {save_location.name}."
+            )
             self._destination_path_labels[save_location.name] = path_label
             row_layout.addWidget(path_label)
             row_layout.addStretch()
             destination_layout.addWidget(row_widget)
 
+        self._align_destination_path_columns()
         self._custom_folder_row = self._build_destination_path_row()
         destination_layout.addWidget(self._custom_folder_row)
         return destination_group
+
+    def _align_destination_path_columns(self) -> None:
+        destination_column_width = max(
+            (
+                checkbox.sizeHint().width()
+                for checkbox in self._destination_checkboxes.values()
+            ),
+            default=0,
+        )
+        for checkbox in self._destination_checkboxes.values():
+            checkbox.setFixedWidth(destination_column_width)
 
     def _build_destination_path_row(self) -> QWidget:
         custom_path_row = QWidget()
@@ -233,10 +279,14 @@ class PrevisPlayblastDialog(PlayblastDialog):
 
         self._custom_folder_field = QLineEdit()
         self._custom_folder_field.setText(self._default_custom_folder_path())
+        self._custom_folder_field.setToolTip(
+            "Directory used when Custom Folder destination is enabled."
+        )
         self._custom_folder_field.textChanged.connect(self._on_custom_path_changed)
         custom_path_layout.addWidget(self._custom_folder_field)
 
         browse_button = QPushButton("Browse")
+        browse_button.setToolTip("Choose a custom output directory.")
         browse_button.clicked.connect(self._set_custom_folder)
         custom_path_layout.addWidget(browse_button)
         return custom_path_row
@@ -247,13 +297,33 @@ class PrevisPlayblastDialog(PlayblastDialog):
         options_layout.addWidget(
             self._build_viewport_options_widget(self._resolve_active_model_panel())
         )
+        self._apply_viewport_option_tooltips()
         self._main_layout.addWidget(options_group)
 
     def _build_buttons(self) -> None:
         self._init_buttons(has_cancel_button=True, ok_name="Playblast Shot")
         self.buttons.rejected.connect(self.close)
         self.buttons.accepted.connect(self.do_export)
+        ok_button = self.buttons.button(QDialogButtonBox.Ok)
+        if ok_button is not None:
+            ok_button.setToolTip(
+                "Start playblast with current source and destination selections."
+            )
+        cancel_button = self.buttons.button(QDialogButtonBox.Cancel)
+        if cancel_button is not None:
+            cancel_button.setToolTip("Close without exporting.")
         self._main_layout.addWidget(self.buttons)
+
+    def _apply_viewport_option_tooltips(self) -> None:
+        self._use_lighting.setToolTip("Use viewport lighting for playblast capture.")
+        self._use_shadows.setToolTip("Render viewport shadows in playblast.")
+        self._use_ssao.setToolTip(
+            "Enable viewport anti-aliasing (SSAO/multi-sample setting)."
+        )
+        self._use_hardware_fog.setToolTip(
+            "Include hardware fog from viewport settings."
+        )
+        self._use_dof.setToolTip("Include camera depth of field in playblast.")
 
     def _set_default_source_tab(self) -> None:
         has_shot_context = bool(self._sequencer_shot_nodes)
@@ -539,7 +609,7 @@ class PrevisPlayblastDialog(PlayblastDialog):
                 PlayblastDialog.CUSTOM_HUDS.FILENAME,
                 PlayblastDialog.CUSTOM_HUDS.ARTIST,
                 HudDefinition(
-                    "Boboshot",
+                    "SKD_shot",
                     command=self._hud_shot_label,
                     section=7,
                     idle_refresh=True,
