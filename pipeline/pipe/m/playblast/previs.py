@@ -31,6 +31,7 @@ from pipe.playblast_naming import (
     playblast_date_folder,
     resolve_versioned_playblast_basename,
 )
+from pipe.playblast_shotgrid import resolve_preferred_upload_movie_path
 from pipe.util import Playblaster
 
 from .struct import (
@@ -590,6 +591,90 @@ class PrevisPlayblastDialog(PlayblastDialog):
                 continue
             paths[location.preset].append(str(Path(destination_dir) / filename))
         return paths
+
+    @staticmethod
+    def _final_movie_path_for_base(
+        output_base: str | Path,
+        preset: Playblaster.PRESET,
+    ) -> Path:
+        return Path(str(output_base) + f".{preset.ext}")
+
+    def _final_movie_paths_for_location(
+        self,
+        shot_config: MShotPlayblastConfig,
+        location: SaveLocation,
+    ) -> list[Path]:
+        destination_dir = Path(self._resolved_destination_path(location)).expanduser()
+        resolved_destination_dir = destination_dir.resolve()
+
+        matching_paths: list[Path] = []
+        for output_base in shot_config.paths.get(location.preset, []):
+            resolved_output_base = Path(str(output_base)).expanduser().resolve()
+            if resolved_output_base.parent != resolved_destination_dir:
+                continue
+            matching_paths.append(
+                self._final_movie_path_for_base(resolved_output_base, location.preset)
+            )
+        return matching_paths
+
+    def _ordered_final_movie_paths_for_upload(
+        self,
+        shot_config: MShotPlayblastConfig,
+    ) -> list[Path]:
+        """Return deterministic output path order for upload path resolution."""
+
+        ordered_paths: list[Path] = []
+        seen_paths: set[Path] = set()
+
+        for location in self._destination_locations():
+            for output_path in self._final_movie_paths_for_location(
+                shot_config, location
+            ):
+                if output_path in seen_paths:
+                    continue
+                seen_paths.add(output_path)
+                ordered_paths.append(output_path)
+
+        for preset, output_bases in shot_config.paths.items():
+            for output_base in output_bases:
+                output_path = self._final_movie_path_for_base(output_base, preset)
+                resolved_output_path = output_path.expanduser().resolve()
+                if resolved_output_path in seen_paths:
+                    continue
+                seen_paths.add(resolved_output_path)
+                ordered_paths.append(resolved_output_path)
+
+        return ordered_paths
+
+    def _preferred_edit_movie_paths_for_upload(
+        self,
+        shot_config: MShotPlayblastConfig,
+    ) -> list[Path]:
+        edit_location = self._save_locations_by_name.get(self.SAVE_LOCS.EDIT.name)
+        if edit_location is None:
+            return []
+        return self._final_movie_paths_for_location(shot_config, edit_location)
+
+    def _resolve_shotgrid_upload_movie_path(
+        self,
+        config: MPlayblastConfig,
+    ) -> Path | None:
+        """Resolve upload movie path with stable preference ordering.
+
+        Preference order:
+        1) valid `Send to Edit` output
+        2) first valid output from the deterministic export order
+        """
+        if not config.shots:
+            return None
+
+        shot_config = config.shots[0]
+        preferred_paths = self._preferred_edit_movie_paths_for_upload(shot_config)
+        output_paths = self._ordered_final_movie_paths_for_upload(shot_config)
+        return resolve_preferred_upload_movie_path(
+            output_paths,
+            preferred_paths=preferred_paths,
+        )
 
     def _selected_destination_directories(self) -> list[Path]:
         directories: list[Path] = []
