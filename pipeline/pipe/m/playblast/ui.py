@@ -5,12 +5,15 @@ import os
 from abc import abstractmethod
 from collections import defaultdict
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import maya.cmds as mc
+from env_sg import DB_Config
 from Qt import QtCore, QtWidgets
 from Qt.QtWidgets import (
     QCheckBox,
+    QComboBox,
+    QDialogButtonBox,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -18,24 +21,36 @@ from Qt.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
+    QSpinBox,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from pipe.db import DB
 from pipe.glui.dialogs import ButtonPair, MessageDialog
 from pipe.playblast_artist import resolve_artist_display_name
+from pipe.playblast_naming import (
+    resolve_versioned_playblast_basename,
+)
+from pipe.playblast_shotgrid import (
+    PlayblastVersionUploadRequest,
+    default_version_name_from_movie_path,
+    resolve_preferred_upload_movie_path,
+    upload_playblast_version,
+)
 from pipe.util import Playblaster
 
 from .playblaster import MPlayblaster
-from .struct import HudDefinition, SaveLocation
+from .struct import HudDefinition, SaveLocation, dummy_shot
 
 if TYPE_CHECKING:
     from typing import Callable, Iterable
 
+    from pipe.struct.db import Shot
+
     from .struct import (
         MPlayblastConfig,
-        MShotDialogConfig,
         MShotPlayblastConfig,
     )
 
@@ -51,7 +66,7 @@ class ClickableQLabel(QLabel):
 
 
 class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
-    """Shared Maya playblast dialog.
+    """Shared Maya playblast dialog using a Tabbed interface.
 
     The dialog is intentionally organized into linear sections so artists can
     understand and configure exports quickly:
@@ -62,22 +77,34 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     """
 
     _central_widget: QWidget
-    _context_group: QGroupBox
-    _context_layout: QVBoxLayout
-    _custom_folder_field: QLineEdit
-    _enabled_loc_cbs: dict[str, dict[str, QCheckBox]]
-    _enabled_shot_cbs: dict[str, QCheckBox]
     _main_layout: QVBoxLayout
-    _save_locs_by_shot: dict[str, list[SaveLocation]]
-    _summary_field: QPlainTextEdit
+    _custom_camera: QComboBox
+    _custom_folder_row: QWidget
+    _custom_in: QSpinBox
+    _custom_out: QSpinBox
+    _destination_checkboxes: dict[str, QCheckBox]
+    _destination_path_labels: dict[str, QLabel]
+    _save_locations_by_name: dict[str, SaveLocation]
+    _shot_camera_widget: QWidget
+    _shot_code_value: QLabel
+    _shotgrid_description_field: QLineEdit
+    _shotgrid_description_row: QWidget
+    _shotgrid_upload_checkbox: QCheckBox
+    _shot_range_value: QLabel
+    _source_tabs: QTabWidget
+    _validation_label: QLabel
     _use_dof: QCheckBox
     _use_hardware_fog: QCheckBox
     _use_lighting: QCheckBox
     _use_shadows: QCheckBox
     _use_ssao: QCheckBox
+    _shot: Shot | None
+    _custom_folder_field: QLineEdit
+
+    SHOT_TAB_INDEX = 0
+    CUSTOM_TAB_INDEX: int
 
     playblaster = MPlayblaster()
-    shot_configs: list[MShotDialogConfig]
 
     class SAVE_LOCS:
         CUSTOM = SaveLocation("Custom Folder", "", Playblaster.PRESET.WEB)
@@ -113,20 +140,20 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     def __init__(
         self,
         parent: QWidget | None,
-        shot_configs: list[MShotDialogConfig],
-        windowTitle: str = "LnD Playblast",
+        shot_configs: list[Any] = None,  # Used by legacy UI, kept for sig compat
+        windowTitle: str = "Playblast",
     ) -> None:
         super().__init__(parent, windowTitle=windowTitle)
-        self.shot_configs = shot_configs
-        self._enabled_shot_cbs = {}
-        self._enabled_loc_cbs = defaultdict(dict)
-        self._save_locs_by_shot = {
-            cfg.id: [loc for loc, _ in cfg.save_locs] for cfg in self.shot_configs
+        self._shot = self._resolve_pipeline_shot_context()
+        self._destination_checkboxes = {}
+        self._destination_path_labels = {}
+        self._save_locations_by_name = {
+            location.name: location for location in self._destination_locations()
         }
 
         self._setup_ui()
         self.SAVE_LOCS.CUSTOM._path = lambda: self._custom_folder_field.text()
-        self._refresh_summary()
+        self._update_ui_state()
 
     def _setup_ui(self) -> None:
         self._central_widget = QWidget()
@@ -136,206 +163,247 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
 
         self._build_header_section()
         self._build_targets_section()
-        self._build_context_section()
         self._build_render_options_section()
-        self._build_summary_section()
         self._build_buttons()
+        self._set_default_source_tab()
 
     def _build_header_section(self) -> None:
-        title = QLabel("Playblast Export")
-        title.setAlignment(QtCore.Qt.AlignCenter)
+        title = QLabel(self.windowTitle())
         title.setStyleSheet("font-size: 24px; font-weight: 700;")
+        title.setAlignment(QtCore.Qt.AlignCenter)
 
-        subtitle = QLabel(
-            "Select targets, choose destinations, and verify outputs before exporting."
-        )
+        subtitle = QLabel("Choose source mode, choose destinations, then export")
         subtitle.setAlignment(QtCore.Qt.AlignCenter)
-        subtitle.setStyleSheet("color: #666;")
+        subtitle.setToolTip(
+            "High-level workflow: choose source, choose destinations, then export."
+        )
 
         self._main_layout.addWidget(title)
         self._main_layout.addWidget(subtitle)
 
     def _build_targets_section(self) -> None:
-        target_group = QGroupBox("1. Targets and Destinations")
-        target_layout = QVBoxLayout(target_group)
+        setup_group = QGroupBox("1. Export Setup")
+        setup_layout = QVBoxLayout(setup_group)
 
-        description = QLabel(
-            "Enable each target you want to export, then choose one or more destinations."
+        setup_layout.addWidget(self._build_export_source_section())
+        setup_layout.addWidget(self._build_destination_section())
+
+        self._validation_label = QLabel()
+        self._validation_label.setStyleSheet("color: #b00020;")
+        self._validation_label.setToolTip(
+            "Validation feedback. Export is disabled until this message is cleared."
         )
-        description.setStyleSheet("color: #666;")
-        target_layout.addWidget(description)
+        self._validation_label.setVisible(False)
+        setup_layout.addWidget(self._validation_label)
 
-        location_order = self._collect_location_order()
-        targets_grid = self._build_targets_grid(location_order)
+        self._main_layout.addWidget(setup_group)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-        scroll.setWidget(targets_grid)
-        target_layout.addWidget(scroll)
+    def _build_export_source_section(self) -> QGroupBox:
+        source_group = QGroupBox("")
+        source_layout = QVBoxLayout(source_group)
 
-        self._main_layout.addWidget(target_group)
+        self._source_tabs = QTabWidget()
 
-    def _build_targets_grid(self, location_order: list[SaveLocation]) -> QWidget:
-        grid_container = QWidget()
-        grid = QGridLayout(grid_container)
-        grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(8)
-
-        self._add_targets_grid_header(grid, location_order)
-        self._add_targets_grid_bulk_controls(grid, location_order)
-        self._add_targets_grid_rows(grid, location_order)
-        return grid_container
-
-    def _add_targets_grid_header(
-        self, grid: QGridLayout, location_order: list[SaveLocation]
-    ) -> None:
-        grid.addWidget(QLabel("Export"), 0, 0)
-        grid.addWidget(QLabel("Target"), 0, 1)
-
-        for column, location in enumerate(location_order, start=2):
-            header = QLabel(f"{location.name}\n(*.{location.preset.ext})")
-            header.setAlignment(QtCore.Qt.AlignCenter)
-            grid.addWidget(header, 0, column)
-
-    def _add_targets_grid_bulk_controls(
-        self, grid: QGridLayout, location_order: list[SaveLocation]
-    ) -> None:
-        select_all_targets = QPushButton("All Targets")
-        select_all_targets.clicked.connect(self._make_set_all_targets_callback(True))
-        grid.addWidget(select_all_targets, 1, 0)
-
-        select_no_targets = QPushButton("No Targets")
-        select_no_targets.clicked.connect(self._make_set_all_targets_callback(False))
-        grid.addWidget(select_no_targets, 1, 1)
-
-        for column, location in enumerate(location_order, start=2):
-            location_controls = self._build_location_bulk_controls(location.name)
-            grid.addWidget(location_controls, 1, column)
-
-    def _build_location_bulk_controls(self, location_name: str) -> QWidget:
-        controls_widget = QWidget()
-        controls_layout = QHBoxLayout(controls_widget)
-        controls_layout.setContentsMargins(0, 0, 0, 0)
-
-        enable_all = QPushButton("All")
-        enable_all.clicked.connect(
-            self._make_set_all_location_destinations_callback(location_name, True)
+        # 1. Standard Shot Tab
+        self._source_tabs.addTab(self._build_shot_source_tab(), "Shot Playblast")
+        source_tab_bar = self._source_tabs.tabBar()
+        source_tab_bar.setTabToolTip(
+            self.SHOT_TAB_INDEX,
+            "Uses shot code metadata from this Maya scene and resolved shot camera/range.",
         )
-        controls_layout.addWidget(enable_all)
 
-        enable_none = QPushButton("None")
-        enable_none.clicked.connect(
-            self._make_set_all_location_destinations_callback(location_name, False)
+        # 2. Hook: Subclasses can inject extra tabs here (e.g. Sequencer)
+        self._add_custom_tabs(self._source_tabs)
+
+        # 3. Standard Custom Tab
+        self.CUSTOM_TAB_INDEX = self._source_tabs.count()
+        self._source_tabs.addTab(self._build_custom_source_tab(), "Custom Playblast")
+        source_tab_bar.setTabToolTip(
+            self.CUSTOM_TAB_INDEX,
+            "Uses manual camera and manual frame range.",
         )
-        controls_layout.addWidget(enable_none)
-        return controls_widget
 
-    def _add_targets_grid_rows(
-        self, grid: QGridLayout, location_order: list[SaveLocation]
-    ) -> None:
-        for row, config in enumerate(self.shot_configs, start=2):
-            self._add_target_row(grid, row, config, location_order)
-
-    def _add_target_row(
-        self,
-        grid: QGridLayout,
-        row: int,
-        config: MShotDialogConfig,
-        location_order: list[SaveLocation],
-    ) -> None:
-        target_toggle = self._build_target_toggle(config.id)
-        self._enabled_shot_cbs[config.id] = target_toggle
-        grid.addWidget(target_toggle, row, 0, alignment=QtCore.Qt.AlignCenter)
-
-        target_label = ClickableQLabel(f"<b>{config.name}</b>", target_toggle)
-        target_label.clicked.connect(lambda cb=target_toggle: cb.click())
-        grid.addWidget(target_label, row, 1)
-
-        config_locations = {
-            location.name: (location, enabled) for location, enabled in config.save_locs
-        }
-        for column, location in enumerate(location_order, start=2):
-            location_data = config_locations.get(location.name)
-            if location_data is None:
-                placeholder = self._build_destination_placeholder()
-                grid.addWidget(placeholder, row, column)
-                continue
-
-            _, enabled_by_default = location_data
-            destination_toggle = self._build_destination_toggle(
-                config.id, location.name
-            )
-            destination_toggle.setChecked(enabled_by_default)
-            grid.addWidget(
-                destination_toggle, row, column, alignment=QtCore.Qt.AlignCenter
-            )
-
-        self._set_shot_locations_enabled(config.id, target_toggle.isChecked())
-
-    def _build_target_toggle(self, shot_id: str) -> QCheckBox:
-        target_toggle = QCheckBox()
-        target_toggle.setChecked(True)
-        target_toggle.toggled.connect(
-            self._make_set_shot_locations_enabled_callback(shot_id)
+        self._source_tabs.currentChanged.connect(self._on_source_mode_changed)
+        self._source_tabs.setToolTip(
+            "Select how exports are generated: shot context or manual custom range."
         )
-        target_toggle.toggled.connect(self._refresh_summary)
-        return target_toggle
 
-    def _build_destination_toggle(self, shot_id: str, location_name: str) -> QCheckBox:
-        destination_toggle = QCheckBox()
-        destination_toggle.toggled.connect(self._refresh_summary)
-        self._enabled_loc_cbs[shot_id][location_name] = destination_toggle
-        return destination_toggle
+        source_layout.addWidget(self._source_tabs)
 
-    @staticmethod
-    def _build_destination_placeholder() -> QLabel:
-        placeholder = QLabel("-")
-        placeholder.setAlignment(QtCore.Qt.AlignCenter)
-        placeholder.setEnabled(False)
-        return placeholder
+        # 4. Hook: Subclasses can inject widgets below the tabs (e.g. Anim Pass)
+        extra_options = self._build_extra_source_options()
+        if extra_options:
+            source_layout.addWidget(extra_options)
 
-    def _make_set_all_targets_callback(self, enabled: bool) -> Callable[[], None]:
-        def callback() -> None:
-            self._set_all_targets(enabled)
+        return source_group
 
-        return callback
+    def _add_custom_tabs(self, tabs: QTabWidget) -> None:
+        """Override to inject tabs between Shot and Custom."""
+        pass
 
-    def _make_set_all_location_destinations_callback(
-        self, location_name: str, enabled: bool
-    ) -> Callable[[], None]:
-        def callback() -> None:
-            self._set_location_for_all(location_name, enabled)
+    def _build_extra_source_options(self) -> QWidget | None:
+        """Override to add options below the tabs."""
+        return None
 
-        return callback
+    @abstractmethod
+    def _build_shot_camera_widget(self) -> QWidget:
+        """Return the camera widget for the Shot tab (QLabel or QComboBox)."""
+        pass
 
-    def _make_set_shot_locations_enabled_callback(
-        self, shot_id: str
-    ) -> Callable[[bool], None]:
-        def callback(enabled: bool) -> None:
-            self._set_shot_locations_enabled(shot_id, enabled)
+    @abstractmethod
+    def _validate_source_state(self, mode: str) -> str | None:
+        """Return a validation error string for the currently selected source mode, or None."""
+        pass
 
-        return callback
+    def _build_shot_source_tab(self) -> QWidget:
+        shot_tab = QWidget()
+        shot_layout = QGridLayout(shot_tab)
 
-    def _build_context_section(self) -> None:
-        self._context_group = QGroupBox("2. Shot Settings")
-        self._context_layout = QVBoxLayout()
-        self._context_layout.setContentsMargins(8, 8, 8, 8)
-        self._context_group.setLayout(self._context_layout)
-        self._context_group.setVisible(False)
-        self._main_layout.addWidget(self._context_group)
+        shot_layout.addWidget(QLabel("Source"), 0, 0)
+        source_value = QLabel("Pipeline Shot File")
+        source_value.setToolTip(
+            "Source is resolved from this scene's pipeline shot metadata."
+        )
+        shot_layout.addWidget(source_value, 0, 1)
 
-    def add_context_widget(self, widget: QWidget) -> None:
-        self._context_group.setVisible(True)
-        self._context_layout.addWidget(widget)
+        shot_layout.addWidget(QLabel("Shot"), 1, 0)
+        self._shot_code_value = QLabel("-")
+        self._shot_code_value.setToolTip("Resolved pipeline shot code.")
+        shot_layout.addWidget(self._shot_code_value, 1, 1)
+
+        shot_layout.addWidget(QLabel("Camera"), 2, 0)
+        self._shot_camera_widget = self._build_shot_camera_widget()
+        shot_layout.addWidget(self._shot_camera_widget, 2, 1)
+
+        shot_layout.addWidget(QLabel("Frame Range"), 3, 0)
+        self._shot_range_value = QLabel("-")
+        self._shot_range_value.setToolTip(
+            "Resolved cut range from the detected pipeline shot."
+        )
+        shot_layout.addWidget(self._shot_range_value, 3, 1)
+
+        shot_layout.addWidget(QLabel("ShotGrid"), 4, 0)
+        self._shotgrid_upload_checkbox = QCheckBox("Upload to ShotGrid")
+        self._shotgrid_upload_checkbox.setChecked(False)
+        self._shotgrid_upload_checkbox.setToolTip(
+            "When enabled, this Shot playblast will also create a ShotGrid Version and upload the movie."
+        )
+        self._shotgrid_upload_checkbox.toggled.connect(self._on_shotgrid_upload_toggled)
+        shot_layout.addWidget(self._shotgrid_upload_checkbox, 4, 1)
+
+        self._shotgrid_description_row = QWidget()
+        shotgrid_description_layout = QHBoxLayout(self._shotgrid_description_row)
+        shotgrid_description_layout.setContentsMargins(0, 0, 0, 0)
+        shotgrid_description_layout.addWidget(QLabel("Description"))
+        self._shotgrid_description_field = QLineEdit()
+        self._shotgrid_description_field.setPlaceholderText(
+            "Optional ShotGrid version description"
+        )
+        self._shotgrid_description_field.setToolTip(
+            "Optional notes saved to the ShotGrid Version description when upload is enabled."
+        )
+        shotgrid_description_layout.addWidget(self._shotgrid_description_field)
+        shot_layout.addWidget(self._shotgrid_description_row, 5, 0, 1, 2)
+
+        self._sync_shotgrid_description_visibility()
+
+        return shot_tab
+
+    def _build_custom_source_tab(self) -> QWidget:
+        custom_tab = QWidget()
+        custom_layout = QGridLayout(custom_tab)
+
+        timeline_in, timeline_out = self._timeline_range()
+        self._custom_in = QSpinBox(self, minimum=0, maximum=10000, value=timeline_in)
+        self._custom_out = QSpinBox(self, minimum=0, maximum=10000, value=timeline_out)
+        self._custom_out.setMinimum(self._custom_in.value())
+        self._custom_in.setToolTip("Start frame for custom playblast.")
+        self._custom_out.setToolTip("End frame for custom playblast.")
+        self._custom_in.valueChanged.connect(self._on_custom_in_changed)
+        self._custom_out.valueChanged.connect(self._on_source_settings_changed)
+
+        custom_layout.addWidget(QLabel("Custom In"), 0, 0)
+        custom_layout.addWidget(self._custom_in, 0, 1)
+        custom_layout.addWidget(QLabel("Custom Out"), 0, 2)
+        custom_layout.addWidget(self._custom_out, 0, 3)
+
+        self._custom_camera = QComboBox(self)
+        self._custom_camera.addItems(self._available_custom_cameras())
+        self._custom_camera.setToolTip("Camera used for custom playblast output.")
+        self._custom_camera.currentTextChanged.connect(self._on_source_settings_changed)
+        custom_layout.addWidget(QLabel("Custom Camera"), 1, 0)
+        custom_layout.addWidget(self._custom_camera, 1, 1, 1, 3)
+
+        return custom_tab
+
+    def _build_destination_section(self) -> QGroupBox:
+        destination_group = QGroupBox("Save Destinations")
+        destination_layout = QVBoxLayout(destination_group)
+
+        for location in self._destination_locations():
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+
+            toggle = QCheckBox(location.name)
+            toggle.setChecked(self._default_destination_enabled(location))
+            toggle.setToolTip(f"Enable export to {location.name}.")
+            toggle.toggled.connect(self._on_destination_changed)
+            self._destination_checkboxes[location.name] = toggle
+            row_layout.addWidget(toggle)
+
+            path_label = QLabel("")
+            path_label.setToolTip(f"Resolved output directory for {location.name}.")
+            self._destination_path_labels[location.name] = path_label
+            row_layout.addWidget(path_label)
+            row_layout.addStretch()
+            destination_layout.addWidget(row_widget)
+
+        self._align_destination_path_columns()
+
+        self._custom_folder_row = self._build_destination_path_row()
+        destination_layout.addWidget(self._custom_folder_row)
+        return destination_group
+
+    def _align_destination_path_columns(self) -> None:
+        destination_column_width = max(
+            (
+                checkbox.sizeHint().width()
+                for checkbox in self._destination_checkboxes.values()
+            ),
+            default=0,
+        )
+        for checkbox in self._destination_checkboxes.values():
+            checkbox.setFixedWidth(destination_column_width)
+
+    def _build_destination_path_row(self) -> QWidget:
+        custom_path_row = QWidget()
+        custom_path_layout = QHBoxLayout(custom_path_row)
+        custom_path_layout.setContentsMargins(24, 0, 0, 0)
+
+        custom_path_layout.addWidget(QLabel("Custom Folder Path"))
+
+        self._custom_folder_field = QLineEdit()
+        self._custom_folder_field.setText(self._default_custom_folder_path())
+        self._custom_folder_field.setToolTip(
+            "Directory used when Custom Folder destination is enabled."
+        )
+        self._custom_folder_field.textChanged.connect(self._on_custom_path_changed)
+        custom_path_layout.addWidget(self._custom_folder_field)
+
+        browse_button = QPushButton("Browse")
+        browse_button.setToolTip("Choose a custom output directory.")
+        browse_button.clicked.connect(self._set_custom_folder)
+        custom_path_layout.addWidget(browse_button)
+        return custom_path_row
 
     def _build_render_options_section(self) -> None:
-        options_group = QGroupBox("3. Render Options")
+        options_group = QGroupBox("2. Viewport Options")
         options_layout = QVBoxLayout(options_group)
-
-        active_panel = self._resolve_active_model_panel()
-        options_layout.addWidget(self._build_viewport_options_widget(active_panel))
-        options_layout.addWidget(self._build_custom_folder_widget())
+        options_layout.addWidget(
+            self._build_viewport_options_widget(self._resolve_active_model_panel())
+        )
+        self._apply_viewport_option_tooltips()
         self._main_layout.addWidget(options_group)
 
     def _build_viewport_options_widget(self, active_panel: str) -> QWidget:
@@ -374,75 +442,428 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         viewport_layout.addWidget(self._use_dof)
         return viewport_widget
 
-    def _build_custom_folder_widget(self) -> QWidget:
-        custom_folder_widget = QWidget()
-        custom_folder_layout = QHBoxLayout(custom_folder_widget)
-        custom_folder_layout.setContentsMargins(0, 0, 0, 0)
-
-        self._custom_folder_field = QLineEdit()
-        self._custom_folder_field.setReadOnly(True)
-        self._custom_folder_field.setText(self._default_custom_folder_path())
-        self._custom_folder_field.textChanged.connect(self._refresh_summary)
-        custom_folder_layout.addWidget(self._custom_folder_field)
-
-        browse_button = QPushButton("Browse Custom Folder")
-        browse_button.clicked.connect(self._set_custom_folder)
-        custom_folder_layout.addWidget(browse_button)
-        return custom_folder_widget
-
     def _build_option_checkbox(self, label: str, enabled_by_default: bool) -> QCheckBox:
         option_toggle = QCheckBox(label)
         option_toggle.setChecked(enabled_by_default)
-        option_toggle.toggled.connect(self._refresh_summary)
+        option_toggle.toggled.connect(self._on_source_settings_changed)
         return option_toggle
 
     @staticmethod
     def _default_custom_folder_path() -> str:
         return os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))
 
-    def _build_summary_section(self) -> None:
-        summary_group = QGroupBox("4. Export Summary")
-        summary_layout = QVBoxLayout(summary_group)
-
-        self._summary_field = QPlainTextEdit()
-        self._summary_field.setReadOnly(True)
-        self._summary_field.setMinimumHeight(150)
-        summary_layout.addWidget(self._summary_field)
-
-        self._main_layout.addWidget(summary_group)
-
     def _build_buttons(self) -> None:
-        self._init_buttons(has_cancel_button=True, ok_name="Playblast")
+        self._init_buttons(has_cancel_button=True, ok_name="Playblast Shot")
         self.buttons.rejected.connect(self.close)
         self.buttons.accepted.connect(self.do_export)
+
+        ok_button = self.buttons.button(QDialogButtonBox.Ok)
+        if ok_button is not None:
+            ok_button.setToolTip(
+                "Start playblast with current source and destination selections."
+            )
+
+        cancel_button = self.buttons.button(QDialogButtonBox.Cancel)
+        if cancel_button is not None:
+            cancel_button.setToolTip("Close without exporting.")
+
         self._main_layout.addWidget(self.buttons)
 
-    def _collect_location_order(self) -> list[SaveLocation]:
-        ordered_locations: list[SaveLocation] = []
-        seen_names: set[str] = set()
+    def _apply_viewport_option_tooltips(self) -> None:
+        self._use_lighting.setToolTip("Use viewport lighting for playblast capture.")
+        self._use_shadows.setToolTip("Render viewport shadows in playblast.")
+        self._use_ssao.setToolTip(
+            "Enable viewport anti-aliasing (SSAO/multi-sample setting)."
+        )
+        self._use_hardware_fog.setToolTip(
+            "Include hardware fog from viewport settings."
+        )
+        self._use_dof.setToolTip("Include camera depth of field in playblast.")
 
-        for config in self.shot_configs:
-            for location, _enabled in config.save_locs:
-                if location.name in seen_names:
+    def _set_default_source_tab(self) -> None:
+        self._refresh_source_tab_availability()
+        self._source_tabs.setCurrentIndex(self._default_source_tab_index())
+
+    def _refresh_source_tab_availability(self) -> None:
+        has_shot_context = self._shot is not None
+        self._source_tabs.setTabEnabled(self.SHOT_TAB_INDEX, has_shot_context)
+
+        selected_mode = self._selected_source_mode()
+        if selected_mode == "shot" and not has_shot_context:
+            self._source_tabs.setCurrentIndex(self._default_source_tab_index())
+
+    def _default_source_tab_index(self) -> int:
+        if self._shot is not None:
+            return self.SHOT_TAB_INDEX
+        return self.CUSTOM_TAB_INDEX
+
+    @staticmethod
+    def _resolve_pipeline_shot_context() -> Shot | None:
+        try:
+            conn = DB.Get(DB_Config)
+        except Exception:
+            return None
+
+        try:
+            code = str(mc.fileInfo("code", query=True)[0]).strip()
+        except Exception:
+            return None
+
+        if not code:
+            return None
+
+        try:
+            return conn.get_shot_by_code(code)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _timeline_range() -> tuple[int, int]:
+        cut_in = int(mc.playbackOptions(minTime=True, query=True))
+        cut_out = int(mc.playbackOptions(maxTime=True, query=True))
+        if cut_out < cut_in:
+            cut_out = cut_in
+        return cut_in, cut_out
+
+    @staticmethod
+    def _available_custom_cameras() -> list[str]:
+        return [
+            str(c)
+            for c in (
+                mc.ls(cameras=True, visible=True) or mc.ls(cameras=True) or ["persp"]
+            )
+        ]
+
+    def _destination_locations(self) -> list[SaveLocation]:
+        return [
+            self.SAVE_LOCS.EDIT,  # type: ignore
+            self.SAVE_LOCS.CURRENT,
+            self.SAVE_LOCS.CUSTOM,
+        ]
+
+    def _default_destination_enabled(self, location: SaveLocation) -> bool:
+        return location.name == self.SAVE_LOCS.CURRENT.name
+
+    def _selected_source_mode(self) -> str:
+        current_index = self._source_tabs.currentIndex()
+        if current_index == self.SHOT_TAB_INDEX:
+            return "shot"
+        if getattr(self, "SEQUENCER_TAB_INDEX", -1) == current_index:
+            return "sequencer"
+        return "custom"
+
+    def _selected_destination_locations(self) -> list[SaveLocation]:
+        selected: list[SaveLocation] = []
+        for location in self._destination_locations():
+            toggle = self._destination_checkboxes.get(location.name)
+            if toggle and toggle.isChecked():
+                selected.append(location)
+        return selected
+
+    def _is_custom_destination_selected(self) -> bool:
+        custom_checkbox = self._destination_checkboxes.get(self.SAVE_LOCS.CUSTOM.name)
+        return bool(custom_checkbox and custom_checkbox.isChecked())
+
+    def _paths_for_filename(
+        self, filename: str
+    ) -> dict[Playblaster.PRESET, list[str | Path]]:
+        paths: dict[Playblaster.PRESET, list[str | Path]] = defaultdict(list)
+        for location in self._selected_destination_locations():
+            destination_dir = self._resolved_destination_path(location).strip()
+            if not destination_dir:
+                continue
+            paths[location.preset].append(str(Path(destination_dir) / filename))
+        return paths
+
+    @staticmethod
+    def _final_movie_path_for_base(
+        output_base: str | Path,
+        preset: Playblaster.PRESET,
+    ) -> Path:
+        return Path(str(output_base) + f".{preset.ext}")
+
+    def _final_movie_paths_for_location(
+        self,
+        shot_config: MShotPlayblastConfig,
+        location: SaveLocation,
+    ) -> list[Path]:
+        destination_dir = Path(self._resolved_destination_path(location)).expanduser()
+        resolved_destination_dir = destination_dir.resolve()
+
+        matching_paths: list[Path] = []
+        for output_base in shot_config.paths.get(location.preset, []):
+            resolved_output_base = Path(str(output_base)).expanduser().resolve()
+            if resolved_output_base.parent != resolved_destination_dir:
+                continue
+            matching_paths.append(
+                self._final_movie_path_for_base(resolved_output_base, location.preset)
+            )
+        return matching_paths
+
+    def _ordered_final_movie_paths_for_upload(
+        self,
+        shot_config: MShotPlayblastConfig,
+    ) -> list[Path]:
+        """Return deterministic output path order for upload path resolution."""
+
+        ordered_paths: list[Path] = []
+        seen_paths: set[Path] = set()
+
+        for location in self._destination_locations():
+            for output_path in self._final_movie_paths_for_location(
+                shot_config, location
+            ):
+                if output_path in seen_paths:
                     continue
-                seen_names.add(location.name)
-                ordered_locations.append(location)
-        return ordered_locations
+                seen_paths.add(output_path)
+                ordered_paths.append(output_path)
 
-    def _set_all_targets(self, enabled: bool) -> None:
-        for checkbox in self._enabled_shot_cbs.values():
-            if checkbox.isEnabled():
-                checkbox.setChecked(enabled)
+        for preset, output_bases in shot_config.paths.items():
+            for output_base in output_bases:
+                output_path = self._final_movie_path_for_base(output_base, preset)
+                resolved_output_path = output_path.expanduser().resolve()
+                if resolved_output_path in seen_paths:
+                    continue
+                seen_paths.add(resolved_output_path)
+                ordered_paths.append(resolved_output_path)
 
-    def _set_location_for_all(self, location_name: str, enabled: bool) -> None:
-        for location_map in self._enabled_loc_cbs.values():
-            checkbox = location_map.get(location_name)
-            if checkbox is not None:
-                checkbox.setChecked(enabled)
+        return ordered_paths
 
-    def _set_shot_locations_enabled(self, shot_id: str, enabled: bool) -> None:
-        for checkbox in self._enabled_loc_cbs.get(shot_id, {}).values():
-            checkbox.setEnabled(enabled)
+    def _preferred_edit_movie_paths_for_upload(
+        self,
+        shot_config: MShotPlayblastConfig,
+    ) -> list[Path]:
+        edit_location = self._save_locations_by_name.get(self.SAVE_LOCS.EDIT.name)  # type: ignore
+        if edit_location is None:
+            return []
+        return self._final_movie_paths_for_location(shot_config, edit_location)
+
+    def _resolve_shotgrid_upload_movie_path(
+        self,
+        config: MPlayblastConfig,
+    ) -> Path | None:
+        """Resolve upload movie path with stable preference ordering.
+
+        Preference order:
+        1) valid `Send to Edit` output
+        2) first valid output from the deterministic export order
+        """
+        if not config.shots:
+            return None
+
+        shot_config = config.shots[0]
+        preferred_paths = self._preferred_edit_movie_paths_for_upload(shot_config)
+        output_paths = self._ordered_final_movie_paths_for_upload(shot_config)
+        return resolve_preferred_upload_movie_path(
+            output_paths,
+            preferred_paths=preferred_paths,
+        )
+
+    def _should_upload_shot_playblast_to_shotgrid(self) -> bool:
+        return (
+            self._selected_source_mode() == "shot"
+            and self._is_shotgrid_upload_requested()
+        )
+
+    def _upload_shot_playblast_to_shotgrid(
+        self,
+        config: MPlayblastConfig,
+    ) -> list[str]:
+        if not config.shots:
+            return ["ShotGrid Upload: Skipped - no shot output was generated."]
+
+        shot_code = str(config.shots[0].shot.code or "").strip()
+        if not shot_code:
+            return ["ShotGrid Upload: Skipped - shot code is missing."]
+
+        movie_path = self._resolve_shotgrid_upload_movie_path(config)
+        if movie_path is None:
+            return [
+                "ShotGrid Upload: Skipped - no valid playblast movie file was found."
+            ]
+
+        version_name = default_version_name_from_movie_path(movie_path)
+        if not version_name:
+            version_name = f"{shot_code}_playblast"
+
+        artist_name = resolve_artist_display_name().strip() or None
+        upload_request = PlayblastVersionUploadRequest(
+            shot_code=shot_code,
+            movie_path=movie_path,
+            version_name=version_name,
+            description=self._shotgrid_upload_description() or None,
+            path_to_frames=str(movie_path),
+            artist_display_name=artist_name,
+        )
+
+        try:
+            upload_result = upload_playblast_version(upload_request)
+        except Exception as exc:
+            log.exception("ShotGrid upload failed for shot '%s'", shot_code)
+            return [f"ShotGrid Upload: Failed - {exc}"]
+
+        message_lines: list[str] = []
+        if upload_result.ok:
+            success_message = (
+                f"ShotGrid Upload: Success - {upload_result.version_name}"
+                f" (shot {upload_result.shot_code})."
+            )
+            if upload_result.version_id is not None:
+                success_message = (
+                    f"{success_message} Version ID: {upload_result.version_id}."
+                )
+            message_lines.append(success_message)
+        else:
+            message_lines.append(f"ShotGrid Upload: Failed - {upload_result.message}")
+
+        for warning in upload_result.warnings:
+            message_lines.append(f"ShotGrid Warning: {warning}")
+
+        return message_lines
+
+    def _selected_destination_directories(self) -> list[Path]:
+        directories: list[Path] = []
+        for location in self._selected_destination_locations():
+            destination_dir = self._resolved_destination_path(location).strip()
+            if destination_dir:
+                directories.append(Path(destination_dir))
+        return directories
+
+    def _resolve_output_name(self, prefix: str) -> str:
+        return resolve_versioned_playblast_basename(
+            prefix,
+            self._selected_destination_directories(),
+        )
+
+    def _resolved_destination_path(self, location: SaveLocation) -> str:
+        if location.name == self.SAVE_LOCS.CUSTOM.name:
+            return self._custom_folder_field.text().strip()
+        return str(location.path)
+
+    def _refresh_destination_path_labels(self) -> None:
+        for location_name, path_label in self._destination_path_labels.items():
+            location = self._save_locations_by_name[location_name]
+            path_label.setText(f"-> {self._resolved_destination_path(location)}")
+
+    def _refresh_shot_context_fields(self) -> None:
+        if self._shot is None:
+            self._shot_code_value.setText("-")
+            self._shot_range_value.setText("-")
+            return
+
+        self._shot_code_value.setText(self._shot.code)
+        self._shot_range_value.setText(f"{self._shot.cut_in} - {self._shot.cut_out}")
+
+    def _sync_custom_path_row_visibility(self) -> None:
+        is_visible = self._is_custom_destination_selected()
+        self._custom_folder_row.setVisible(is_visible)
+        self._custom_folder_field.setEnabled(is_visible)
+
+    def _sync_shotgrid_description_visibility(self) -> None:
+        show_description = self._is_shotgrid_upload_requested()
+        self._shotgrid_description_row.setVisible(show_description)
+        self._shotgrid_description_field.setEnabled(show_description)
+
+    def _is_shotgrid_upload_requested(self) -> bool:
+        return self._shotgrid_upload_checkbox.isChecked()
+
+    def _shotgrid_upload_description(self) -> str:
+        return self._shotgrid_description_field.text().strip()
+
+    def _validate_target_destination_state(self) -> str | None:
+        mode = self._selected_source_mode()
+
+        if mode == "shot":
+            if self._shot is None:
+                return (
+                    "No pipeline shot context was found. Use a pipeline shot file "
+                    "or switch to Custom Playblast."
+                )
+
+        if mode == "custom":
+            if self._custom_out.value() < self._custom_in.value():
+                return "Custom Out must be greater than or equal to Custom In."
+            if not str(self._custom_camera.currentText()).strip():
+                return "Choose a camera for Custom Playblast."
+
+        # Let subclasses run their own validation
+        subclass_error = self._validate_source_state(mode)
+        if subclass_error:
+            return subclass_error
+
+        if not self._selected_destination_locations():
+            return "Select at least one save destination."
+
+        if (
+            self._is_custom_destination_selected()
+            and not self._custom_folder_field.text().strip()
+        ):
+            return "Custom Folder path is required when Custom Folder destination is enabled."
+
+        return None
+
+    def _action_button_text(self) -> str:
+        mode = self._selected_source_mode()
+        if mode == "shot":
+            return "Playblast Shot"
+        if mode == "sequencer":
+            return "Playblast Sequencer"
+        return "Playblast Custom"
+
+    def _update_action_state(self) -> None:
+        ok_button = self.buttons.button(QDialogButtonBox.Ok)
+        if ok_button is None:
+            return
+
+        ok_button.setText(self._action_button_text())
+        validation_error = self._validate_target_destination_state()
+        ok_button.setEnabled(validation_error is None)
+        self._validation_label.setText(validation_error or "")
+        self._validation_label.setVisible(validation_error is not None)
+
+    def _update_ui_state(self) -> None:
+        self._refresh_source_tab_availability()
+        self._refresh_shot_context_fields()
+        # Allows subclasses to hook into the update state to refresh their custom fields
+        self._refresh_custom_ui_state()
+        self._sync_custom_path_row_visibility()
+        self._sync_shotgrid_description_visibility()
+        self._refresh_destination_path_labels()
+        self._update_action_state()
+
+    def _refresh_custom_ui_state(self) -> None:
+        """Override to update subclass specific UI fields"""
+        pass
+
+    def _on_source_mode_changed(self, _index: int) -> None:
+        self._update_ui_state()
+
+    def _on_destination_changed(self, _checked: bool) -> None:
+        self._update_ui_state()
+
+    def _on_custom_path_changed(self, _path: str) -> None:
+        self._update_ui_state()
+
+    def _on_custom_in_changed(self, in_frame: int) -> None:
+        self._custom_out.setMinimum(in_frame)
+        self._update_ui_state()
+
+    def _on_source_settings_changed(self, *_args) -> None:
+        self._update_ui_state()
+
+    def _on_shotgrid_upload_toggled(self, _enabled: bool) -> None:
+        self._update_ui_state()
+
+    def _set_custom_folder(self) -> None:
+        path_list = mc.fileDialog2(
+            caption="Select a custom playblast folder",
+            fileMode=2,
+            hideNameEdit=True,
+            okCaption="Select",
+            setProjectBtnEnabled=False,
+        )
+        if path_list:
+            self._custom_folder_field.setText(path_list[0])
 
     @staticmethod
     def _resolve_active_model_panel() -> str:
@@ -519,109 +940,21 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     def use_ssao(self) -> bool:
         return self._use_ssao.isChecked()
 
-    def _refresh_summary(self, *_args) -> None:
-        lines: list[str] = []
-        lines.extend(self._summary_target_lines())
-        lines.append("")
-        lines.extend(self._summary_render_option_lines())
-        self._summary_field.setPlainText("\n".join(lines))
-
-    def _summary_target_lines(self) -> list[str]:
-        lines: list[str] = []
-        enabled_configs = [
-            config for config in self.shot_configs if self.is_shot_enabled(config.id)
-        ]
-        if not enabled_configs:
-            lines.append("No targets selected.")
-            return lines
-
-        lines.append("Selected targets:")
-        for config in enabled_configs:
-            lines.append(f"- {config.name}")
-            enabled_locations = [
-                location
-                for location in self._save_locs_by_shot[config.id]
-                if self.is_location_enabled(config.id, location.name)
-            ]
-            if not enabled_locations:
-                lines.append("  (no destination selected)")
-                continue
-
-            for location in enabled_locations:
-                lines.append(f"  -> {location.name}: {location.path}")
-        return lines
-
-    def _summary_render_option_lines(self) -> list[str]:
-        return [
-            "Viewport options:",
-            f"- Lighting: {'On' if self.use_lighting else 'Off'}",
-            f"- Shadows: {'On' if self.use_shadows else 'Off'}",
-            f"- Anti-aliasing: {'On' if self.use_ssao else 'Off'}",
-            f"- Hardware Fog: {'On' if self.use_hardware_fog else 'Off'}",
-            f"- Depth of Field: {'On' if self.use_dof else 'Off'}",
-        ]
-
-    def save_locations_to_paths(
-        self, dialog_id: str, locs: Iterable[SaveLocation], filename: str
-    ) -> dict[Playblaster.PRESET, list[str | Path]]:
-        paths: dict[Playblaster.PRESET, list[str | Path]] = defaultdict(list)
-        for location in locs:
-            if not self.is_location_enabled(dialog_id, location.name):
-                continue
-
-            destination_dir = str(location.path).strip()
-            if not destination_dir:
-                continue
-
-            output_base = Path(destination_dir) / filename
-            paths[location.preset].append(str(output_base))
-        return paths
-
-    def _set_custom_folder(self) -> None:
-        path_list = mc.fileDialog2(
-            caption="Select a custom playblast folder",
-            fileMode=2,
-            hideNameEdit=True,
-            okCaption="Select",
-            setProjectBtnEnabled=False,
-        )
-        if path_list:
-            self._custom_folder_field.setText(path_list[0])
-
     @abstractmethod
     def _generate_config(self) -> MPlayblastConfig:
         raise NotImplementedError
 
-    def is_shot_enabled(self, dialog_id: str) -> bool:
-        checkbox = self._enabled_shot_cbs.get(dialog_id)
-        return bool(checkbox and checkbox.isChecked())
-
-    def is_location_enabled(self, dialog_id: str, loc_name: str) -> bool:
-        location_map = self._enabled_loc_cbs.get(dialog_id)
-        if not location_map:
-            return False
-        checkbox = location_map.get(loc_name)
-        return bool(checkbox and checkbox.isChecked())
-
-    @staticmethod
-    def _output_count_for_shot(shot_cfg: MShotPlayblastConfig) -> int:
-        return sum(len(paths) for paths in shot_cfg.paths.values())
-
-    @staticmethod
-    def _collect_output_paths(config: MPlayblastConfig) -> list[str]:
-        output_paths: list[str] = []
-        for shot_cfg in config.shots:
-            for preset, bases in shot_cfg.paths.items():
-                for base in bases:
-                    output_paths.append(str(Path(str(base) + f".{preset.ext}")))
-        return output_paths
-
     def _validate_config(self, config: MPlayblastConfig) -> str | None:
+        validation_error = self._validate_target_destination_state()
+        if validation_error:
+            return validation_error
+
         if not config.shots:
-            return "No playblast targets are enabled."
+            return "No playblast targets are configured."
 
         for shot_cfg in config.shots:
-            if self._output_count_for_shot(shot_cfg) < 1:
+            output_count = sum(len(paths) for paths in shot_cfg.paths.values())
+            if output_count < 1:
                 return (
                     f"Target '{shot_cfg.shot.code}' has no output location selected. "
                     "Please enable at least one destination."
@@ -636,8 +969,18 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
 
         Returned lines are appended to the success dialog.
         """
-        del config
-        return []
+        if not self._should_upload_shot_playblast_to_shotgrid():
+            return []
+        return self._upload_shot_playblast_to_shotgrid(config)
+
+    @staticmethod
+    def _collect_output_paths(config: MPlayblastConfig) -> list[str]:
+        output_paths: list[str] = []
+        for shot_cfg in config.shots:
+            for preset, bases in shot_cfg.paths.items():
+                for base in bases:
+                    output_paths.append(str(Path(str(base) + f".{preset.ext}")))
+        return output_paths
 
     @staticmethod
     def _build_success_message(
@@ -697,3 +1040,32 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         success_msg = self._build_success_message(output_paths, post_playblast_messages)
         MessageDialog(self.parent(), success_msg).exec_()
         self.close()
+
+    def _build_custom_playblast_config(self) -> MShotPlayblastConfig:
+        custom_in = self._custom_in.value()
+        custom_out = self._custom_out.value()
+        custom_code = self._scene_stem()
+        output_name = self._resolve_output_name(
+            f"{custom_code}_custom"
+            if self._selected_source_mode() == "custom" and custom_code != "custom"
+            else f"customPB_{self._shot.code}"
+            if self._shot
+            else "customPB"
+        )
+
+        return MShotPlayblastConfig(
+            camera=str(self._custom_camera.currentText()),
+            shot=dummy_shot(
+                code=custom_code,
+                cut_in=custom_in,
+                cut_out=custom_out,
+                cut_duration=max(0, custom_out - custom_in),
+            ),
+            paths=self._paths_for_filename(output_name),
+            use_sequencer=False,
+        )
+
+    @staticmethod
+    def _scene_stem() -> str:
+        scene_name = Path(str(mc.file(query=True, sceneName=True) or "")).stem
+        return scene_name or "playblast"
