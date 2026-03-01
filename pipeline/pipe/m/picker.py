@@ -2,7 +2,6 @@ import logging
 from contextlib import contextmanager
 from pathlib import Path
 
-import dwpicker
 from shared.util import get_production_path
 
 log = logging.getLogger(__name__)
@@ -44,6 +43,8 @@ def run():
 
 
 def open_picker(picker_files: list[Path] | None = None):
+    import dwpicker
+
     with custom_picker_title(CUSTOM_PICKER_TITLE):
         if picker_files:
             picker_filepath_strings = [str(picker_file) for picker_file in picker_files]
