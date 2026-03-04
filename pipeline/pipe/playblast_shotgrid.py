@@ -187,11 +187,6 @@ def upload_playblast_version(
     user_id = _resolve_user_id(connection, normalized.artist_display_name, warnings)
 
     try:
-        review_playlist_id = (
-            normalized.review_playlist_id
-            if normalized.upload_target == UPLOAD_TARGET_REVIEW
-            else None
-        )
         created_version = connection.create_version_for_shot(
             shot=shot,
             code=normalized.version_name,
@@ -199,7 +194,9 @@ def upload_playblast_version(
             task=normalized.task_id,
             video_path=normalized.path_to_frames,
             description=normalized.description,
-            playlist_id=review_playlist_id,
+            # Review linking is handled as a separate final step so upload success
+            # is preserved even if playlist linking fails.
+            playlist_id=None,
             extra_fields=normalized.extra_version_fields,
         )
     except Exception as exc:
@@ -235,9 +232,35 @@ def upload_playblast_version(
             warnings=warnings,
         )
 
+    review_linked = False
+    if (
+        normalized.upload_target == UPLOAD_TARGET_REVIEW
+        and normalized.review_playlist_id is not None
+    ):
+        try:
+            connection.link_version_to_playlist(
+                version_id=version_id,
+                playlist_id=normalized.review_playlist_id,
+            )
+            review_linked = True
+        except Exception as exc:
+            log.exception(
+                "ShotGrid review link failed for Version %s and Playlist %s",
+                version_id,
+                normalized.review_playlist_id,
+            )
+            warnings.append(
+                "Version upload succeeded, but linking to review playlist "
+                f"{normalized.review_playlist_id} failed: "
+                f"{_format_exception_details(exc)}"
+            )
+
     return PlayblastVersionUploadResult(
         status=UPLOAD_STATUS_SUCCESS,
-        message=_success_message_for_upload_target(normalized.upload_target),
+        message=_success_message_for_upload_outcome(
+            normalized.upload_target,
+            review_linked=review_linked,
+        ),
         shot_code=normalized.shot_code,
         version_name=normalized.version_name,
         movie_path=normalized.movie_path,
@@ -418,9 +441,21 @@ def _optional_positive_int(value: Any) -> int | None:
     return parsed
 
 
-def _success_message_for_upload_target(upload_target: str) -> str:
+def _success_message_for_upload_outcome(
+    upload_target: str,
+    *,
+    review_linked: bool,
+) -> str:
     if upload_target == UPLOAD_TARGET_REVIEW:
-        return "Version created, linked to review playlist, and movie uploaded to ShotGrid."
+        if review_linked:
+            return (
+                "Version created, movie uploaded, and linked to the selected review "
+                "playlist."
+            )
+        return (
+            "Version created and movie uploaded to ShotGrid. Review playlist linking "
+            "was not completed."
+        )
     return "Version created and movie uploaded to ShotGrid."
 
 
