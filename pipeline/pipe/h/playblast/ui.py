@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import hou
 from Qt import QtCore, QtWidgets
@@ -955,7 +955,7 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
     @staticmethod
     def _current_viewport_camera_label() -> str:
         try:
-            scene_viewer = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
+            scene_viewer: Any = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
             if scene_viewer is None:
                 return "Current Viewport Camera"
 

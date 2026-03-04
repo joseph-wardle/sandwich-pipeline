@@ -19,7 +19,6 @@ from Qt.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -48,8 +47,6 @@ from .playblaster import MPlayblaster
 from .struct import HudDefinition, MShotPlayblastConfig, SaveLocation, dummy_shot
 
 if TYPE_CHECKING:
-    from typing import Callable, Iterable
-
     from pipe.struct.db import Shot
 
     from .struct import MPlayblastConfig
@@ -148,7 +145,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     def __init__(
         self,
         parent: QWidget | None,
-        shot_configs: list[Any] = None,  # Used by legacy UI, kept for sig compat
+        shot_configs: list[Any] | None = None,  # Used by legacy UI, kept for sig compat
         windowTitle: str = "Playblast",
     ) -> None:
         super().__init__(parent, windowTitle=windowTitle)

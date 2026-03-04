@@ -48,6 +48,8 @@ exclude = [
     'rjg',
     'y-rig',
     'shotgun_api3',
+    '.*shotgun_api3.*',
+    '^pipeline/pipe/db/shotgun_api3/.*',
     'studiolibrary',
     'timeline_marker',
     'houdini/scripts',
@@ -56,7 +58,7 @@ exclude = [
 files = 'pipeline'
 
 [[tool.mypy.overrides]]
-module = "dwpicker"
+module = "dwpicker.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
@@ -70,6 +72,14 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "yrig.*"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tractor.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pipe.db.shotgun_api3.*"
+ignore_errors = true
 
 [tool.ruff]
 exclude = [
