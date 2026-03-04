@@ -767,6 +767,17 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             if upload_target == UPLOAD_TARGET_REVIEW
             else None
         )
+        pre_upload_warning = self._shotgrid_review_fallback_warning_for_upload()
+        if pre_upload_warning:
+            log.warning(
+                "ShotGrid review upload fallback to version upload "
+                "(shot_code=%s, version_id=%s, playlist_id=%s, reason=%s)",
+                shot_code,
+                None,
+                self._selected_shotgrid_review_playlist_id(),
+                self._shotgrid_review_load_error or "review list unavailable",
+            )
+
         upload_request = PlayblastVersionUploadRequest(
             shot_code=shot_code,
             movie_path=movie_path,
@@ -798,6 +809,8 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         else:
             message_lines.append(f"ShotGrid Upload: Failed - {upload_result.message}")
 
+        if pre_upload_warning:
+            message_lines.append(f"ShotGrid Warning: {pre_upload_warning}")
         for warning in upload_result.warnings:
             message_lines.append(f"ShotGrid Warning: {warning}")
 
@@ -865,7 +878,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         return self._shotgrid_upload_checkbox.isChecked()
 
     def _shotgrid_upload_target(self) -> str:
-        if self._is_shotgrid_review_upload_enabled():
+        if self._can_upload_to_selected_shotgrid_review():
             return UPLOAD_TARGET_REVIEW
         return UPLOAD_TARGET_VERSION_ONLY
 
@@ -880,6 +893,28 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         if isinstance(selected, int) and selected > 0:
             return selected
         return None
+
+    def _can_upload_to_selected_shotgrid_review(self) -> bool:
+        return (
+            self._is_shotgrid_review_upload_enabled()
+            and self._selected_shotgrid_review_playlist_id() is not None
+        )
+
+    def _shotgrid_review_fallback_warning_for_upload(self) -> str | None:
+        if not self._is_shotgrid_upload_requested():
+            return None
+        if not self._is_shotgrid_version_upload_enabled():
+            return None
+        if not self._is_shotgrid_review_upload_enabled():
+            return None
+        if self._selected_shotgrid_review_playlist_id() is not None:
+            return None
+        if not self._shotgrid_review_load_error:
+            return None
+        return (
+            "Review upload skipped because recent reviews could not be loaded. "
+            "Version upload continued."
+        )
 
     def _set_review_combo_placeholder(self, label: str) -> None:
         previous_signal_state = self._shotgrid_review_combo.blockSignals(True)
@@ -903,7 +938,10 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             review_options = list_recent_review_playlists(limit=10)
         except Exception as exc:
             self._shotgrid_review_load_error = str(exc).strip() or type(exc).__name__
-            log.exception("Could not load ShotGrid review playlists")
+            log.exception(
+                "Could not load ShotGrid review playlists for shot '%s'",
+                self._shot_code_value.text().strip() or "<unknown>",
+            )
             self._set_review_combo_placeholder("Could not load reviews. Click Refresh.")
             return
 
@@ -982,6 +1020,8 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             and self._selected_shotgrid_review_playlist_id() is None
         ):
             if self._shotgrid_review_load_error:
+                if self._is_shotgrid_version_upload_enabled():
+                    return None
                 return (
                     "Could not load ShotGrid reviews. Click Refresh, or disable "
                     "'Upload to review for dailies'."

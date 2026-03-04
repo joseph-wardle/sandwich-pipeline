@@ -244,15 +244,19 @@ def upload_playblast_version(
             )
             review_linked = True
         except Exception as exc:
+            failure_reason = _format_exception_details(exc)
             log.exception(
-                "ShotGrid review link failed for Version %s and Playlist %s",
+                "ShotGrid review link failed "
+                "(shot_code=%s, version_id=%s, playlist_id=%s, reason=%s)",
+                normalized.shot_code,
                 version_id,
                 normalized.review_playlist_id,
+                failure_reason,
             )
             warnings.append(
                 "Version upload succeeded, but linking to review playlist "
                 f"{normalized.review_playlist_id} failed: "
-                f"{_format_exception_details(exc)}"
+                f"{failure_reason}"
             )
 
     return PlayblastVersionUploadResult(

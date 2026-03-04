@@ -14,6 +14,8 @@ from pipe.glui.dialogs import MessageDialog
 from pipe.h import local
 from pipe.playblast_artist import resolve_artist_display_name
 from pipe.playblast_shotgrid import (
+    UPLOAD_TARGET_REVIEW,
+    UPLOAD_TARGET_VERSION_ONLY,
     PlayblastVersionUploadRequest,
     default_version_name_from_movie_path,
     resolve_preferred_upload_movie_path,
@@ -341,6 +343,11 @@ def _upload_shot_playblast_to_shotgrid(
         version_name = f"{shot_code}_playblast"
 
     artist_name = resolve_artist_display_name().strip() or None
+    (
+        upload_target,
+        review_playlist_id,
+        pre_upload_warning,
+    ) = _resolve_upload_target_for_request(context, shot_code=shot_code)
     upload_request = PlayblastVersionUploadRequest(
         shot_code=shot_code,
         movie_path=movie_path,
@@ -348,8 +355,8 @@ def _upload_shot_playblast_to_shotgrid(
         description=context.shotgrid_description or None,
         path_to_frames=str(movie_path),
         artist_display_name=artist_name,
-        upload_target=context.shotgrid_upload_target,
-        review_playlist_id=context.shotgrid_review_playlist_id,
+        upload_target=upload_target,
+        review_playlist_id=review_playlist_id,
     )
 
     try:
@@ -372,10 +379,40 @@ def _upload_shot_playblast_to_shotgrid(
     else:
         message_lines.append(f"ShotGrid Upload: Failed - {upload_result.message}")
 
+    if pre_upload_warning:
+        message_lines.append(f"ShotGrid Warning: {pre_upload_warning}")
     for warning in upload_result.warnings:
         message_lines.append(f"ShotGrid Warning: {warning}")
 
     return message_lines
+
+
+def _resolve_upload_target_for_request(
+    context: HoudiniPlayblastLaunchContext,
+    *,
+    shot_code: str,
+) -> tuple[str, int | None, str | None]:
+    normalized_target = str(context.shotgrid_upload_target or "").strip().lower()
+    if normalized_target != UPLOAD_TARGET_REVIEW:
+        return (UPLOAD_TARGET_VERSION_ONLY, None, None)
+
+    playlist_id = context.shotgrid_review_playlist_id
+    if isinstance(playlist_id, int) and playlist_id > 0:
+        return (UPLOAD_TARGET_REVIEW, playlist_id, None)
+
+    warning = (
+        "Review upload skipped because no valid review playlist was selected. "
+        "Version upload continued."
+    )
+    log.warning(
+        "ShotGrid review upload fallback to version upload "
+        "(shot_code=%s, version_id=%s, playlist_id=%s, reason=%s)",
+        shot_code,
+        None,
+        playlist_id,
+        "missing review playlist id",
+    )
+    return (UPLOAD_TARGET_VERSION_ONLY, None, warning)
 
 
 def _build_success_message(
