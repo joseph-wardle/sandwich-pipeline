@@ -48,8 +48,6 @@ exclude = [
     'rjg',
     'y-rig',
     'shotgun_api3',
-    '.*shotgun_api3.*',
-    '^pipeline/pipe/db/shotgun_api3/.*',
     'studiolibrary',
     'timeline_marker',
     'houdini/scripts',
