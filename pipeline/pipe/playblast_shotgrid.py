@@ -9,6 +9,12 @@ log = logging.getLogger(__name__)
 
 UPLOAD_STATUS_SUCCESS = "success"
 UPLOAD_STATUS_FAILED = "failed"
+UPLOAD_TARGET_VERSION_ONLY = "version_only"
+UPLOAD_TARGET_REVIEW = "review"
+_SUPPORTED_UPLOAD_TARGETS = {
+    UPLOAD_TARGET_VERSION_ONLY,
+    UPLOAD_TARGET_REVIEW,
+}
 
 
 @dataclass(frozen=True)
@@ -22,9 +28,27 @@ class PlayblastVersionUploadRequest:
     path_to_frames: str | None = None
     artist_display_name: str | None = None
     task_id: int | None = None
-    playlist_id: int | None = None
+    upload_target: str = UPLOAD_TARGET_VERSION_ONLY
+    review_playlist_id: int | None = None
     upload_field: str = "sg_uploaded_movie"
     extra_version_fields: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PlayblastReviewPlaylistOption:
+    """Normalized review playlist option for UI selection lists."""
+
+    playlist_id: int
+    code: str
+    updated_at: Any | None = None
+    created_at: Any | None = None
+
+    @property
+    def display_name(self) -> str:
+        code = self.code.strip()
+        if code:
+            return code
+        return f"Playlist {self.playlist_id}"
 
 
 @dataclass(frozen=True)
@@ -54,7 +78,8 @@ class _NormalizedUploadRequest:
     path_to_frames: str | None
     artist_display_name: str | None
     task_id: int | None
-    playlist_id: int | None
+    upload_target: str
+    review_playlist_id: int | None
     upload_field: str
     extra_version_fields: dict[str, Any]
 
@@ -90,6 +115,30 @@ def resolve_preferred_upload_movie_path(
             return path
 
     return None
+
+
+def list_recent_review_playlists(
+    *,
+    conn: Any | None = None,
+    limit: int = 10,
+) -> tuple[PlayblastReviewPlaylistOption, ...]:
+    """Return normalized recent review playlists for UI upload target selectors."""
+
+    connection = conn or _default_db_connection()
+    raw_rows = connection.get_recent_review_playlists(limit=limit)
+
+    normalized_options: list[PlayblastReviewPlaylistOption] = []
+    seen_playlist_ids: set[int] = set()
+    for raw_row in raw_rows:
+        option = _normalize_review_playlist_option(raw_row)
+        if option is None:
+            continue
+        if option.playlist_id in seen_playlist_ids:
+            continue
+        seen_playlist_ids.add(option.playlist_id)
+        normalized_options.append(option)
+
+    return tuple(normalized_options)
 
 
 def upload_playblast_version(
@@ -138,6 +187,11 @@ def upload_playblast_version(
     user_id = _resolve_user_id(connection, normalized.artist_display_name, warnings)
 
     try:
+        review_playlist_id = (
+            normalized.review_playlist_id
+            if normalized.upload_target == UPLOAD_TARGET_REVIEW
+            else None
+        )
         created_version = connection.create_version_for_shot(
             shot=shot,
             code=normalized.version_name,
@@ -145,7 +199,7 @@ def upload_playblast_version(
             task=normalized.task_id,
             video_path=normalized.path_to_frames,
             description=normalized.description,
-            playlist_id=normalized.playlist_id,
+            playlist_id=review_playlist_id,
             extra_fields=normalized.extra_version_fields,
         )
     except Exception as exc:
@@ -183,7 +237,7 @@ def upload_playblast_version(
 
     return PlayblastVersionUploadResult(
         status=UPLOAD_STATUS_SUCCESS,
-        message="Version created and movie uploaded to ShotGrid.",
+        message=_success_message_for_upload_target(normalized.upload_target),
         shot_code=normalized.shot_code,
         version_name=normalized.version_name,
         movie_path=normalized.movie_path,
@@ -245,11 +299,36 @@ def _normalize_request(
             movie_path=movie_path,
         )
 
+    upload_target = _normalize_upload_target(request.upload_target)
+    if upload_target is None:
+        return PlayblastVersionUploadResult(
+            status=UPLOAD_STATUS_FAILED,
+            message=(
+                "Upload target must be 'version_only' or 'review' for ShotGrid upload."
+            ),
+            shot_code=shot_code,
+            version_name=version_name,
+            movie_path=movie_path,
+        )
+
+    review_playlist_id = _optional_positive_int(request.review_playlist_id)
+    if upload_target == UPLOAD_TARGET_REVIEW and review_playlist_id is None:
+        return PlayblastVersionUploadResult(
+            status=UPLOAD_STATUS_FAILED,
+            message=(
+                "A valid review playlist id is required when upload target is 'review'."
+            ),
+            shot_code=shot_code,
+            version_name=version_name,
+            movie_path=movie_path,
+        )
+    if upload_target == UPLOAD_TARGET_VERSION_ONLY:
+        review_playlist_id = None
+
     description = _optional_text(request.description)
     path_to_frames = _optional_text(request.path_to_frames) or str(movie_path)
     artist_display_name = _optional_text(request.artist_display_name)
     task_id = _optional_positive_int(request.task_id)
-    playlist_id = _optional_positive_int(request.playlist_id)
 
     normalized_extra_fields: dict[str, Any] = {}
     for field_name, value in request.extra_version_fields.items():
@@ -268,7 +347,8 @@ def _normalize_request(
         path_to_frames=path_to_frames,
         artist_display_name=artist_display_name,
         task_id=task_id,
-        playlist_id=playlist_id,
+        upload_target=upload_target,
+        review_playlist_id=review_playlist_id,
         upload_field=upload_field,
         extra_version_fields=normalized_extra_fields,
     )
@@ -293,6 +373,32 @@ def _is_valid_movie_file(path: Path) -> bool:
         return False
 
 
+def _normalize_review_playlist_option(
+    raw_row: Any,
+) -> PlayblastReviewPlaylistOption | None:
+    if not isinstance(raw_row, Mapping):
+        return None
+
+    playlist_id = _extract_entity_id(raw_row)
+    if playlist_id is None:
+        return None
+
+    code = str(raw_row.get("code") or "").strip()
+    return PlayblastReviewPlaylistOption(
+        playlist_id=playlist_id,
+        code=code,
+        updated_at=raw_row.get("updated_at"),
+        created_at=raw_row.get("created_at"),
+    )
+
+
+def _normalize_upload_target(value: Any) -> str | None:
+    normalized = str(value).strip().lower()
+    if normalized in _SUPPORTED_UPLOAD_TARGETS:
+        return normalized
+    return None
+
+
 def _optional_text(value: Any) -> str | None:
     if value is None:
         return None
@@ -310,6 +416,12 @@ def _optional_positive_int(value: Any) -> int | None:
     if parsed < 1:
         return None
     return parsed
+
+
+def _success_message_for_upload_target(upload_target: str) -> str:
+    if upload_target == UPLOAD_TARGET_REVIEW:
+        return "Version created, linked to review playlist, and movie uploaded to ShotGrid."
+    return "Version created and movie uploaded to ShotGrid."
 
 
 def _format_exception_details(exc: BaseException) -> str:
@@ -405,11 +517,15 @@ def _failed_result(
 
 
 __all__ = [
+    "PlayblastReviewPlaylistOption",
     "PlayblastVersionUploadRequest",
     "PlayblastVersionUploadResult",
     "UPLOAD_STATUS_FAILED",
     "UPLOAD_STATUS_SUCCESS",
+    "UPLOAD_TARGET_REVIEW",
+    "UPLOAD_TARGET_VERSION_ONLY",
     "default_version_name_from_movie_path",
+    "list_recent_review_playlists",
     "resolve_preferred_upload_movie_path",
     "upload_playblast_version",
 ]
