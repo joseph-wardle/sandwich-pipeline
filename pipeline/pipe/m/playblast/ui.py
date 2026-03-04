@@ -34,8 +34,11 @@ from pipe.playblast_naming import (
     resolve_versioned_playblast_basename,
 )
 from pipe.playblast_shotgrid import (
+    UPLOAD_TARGET_REVIEW,
+    UPLOAD_TARGET_VERSION_ONLY,
     PlayblastVersionUploadRequest,
     default_version_name_from_movie_path,
+    list_recent_review_playlists,
     resolve_preferred_upload_movie_path,
     upload_playblast_version,
 )
@@ -86,7 +89,13 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     _shot_code_value: QLabel
     _shotgrid_description_field: QLineEdit
     _shotgrid_description_row: QWidget
+    _shotgrid_review_combo: QComboBox
+    _shotgrid_review_refresh_button: QPushButton
+    _shotgrid_review_row: QWidget
     _shotgrid_upload_checkbox: QCheckBox
+    _shotgrid_upload_review_checkbox: QCheckBox
+    _shotgrid_upload_version_checkbox: QCheckBox
+    _shotgrid_upload_target_row: QWidget
     _shot_range_value: QLabel
     _source_tabs: QTabWidget
     _validation_label: QLabel
@@ -97,6 +106,8 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     _use_ssao: QCheckBox
     _shot: Shot | None
     _custom_folder_field: QLineEdit
+    _shotgrid_review_lazy_load_attempted: bool
+    _shotgrid_review_load_error: str | None
 
     SHOT_TAB_INDEX = 0
     CUSTOM_TAB_INDEX: int
@@ -147,6 +158,8 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         self._save_locations_by_name = {
             location.name: location for location in self._destination_locations()
         }
+        self._shotgrid_review_lazy_load_attempted = False
+        self._shotgrid_review_load_error = None
 
         self._setup_ui()
         self.SAVE_LOCS.CUSTOM._path = lambda: self._custom_folder_field.text()
@@ -288,6 +301,12 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         self._shotgrid_upload_checkbox.toggled.connect(self._on_shotgrid_upload_toggled)
         shot_layout.addWidget(self._shotgrid_upload_checkbox, 4, 1)
 
+        self._shotgrid_upload_target_row = self._build_shotgrid_upload_target_row()
+        shot_layout.addWidget(self._shotgrid_upload_target_row, 5, 0, 1, 2)
+
+        self._shotgrid_review_row = self._build_shotgrid_review_row()
+        shot_layout.addWidget(self._shotgrid_review_row, 6, 0, 1, 2)
+
         self._shotgrid_description_row = QWidget()
         shotgrid_description_layout = QHBoxLayout(self._shotgrid_description_row)
         shotgrid_description_layout.setContentsMargins(0, 0, 0, 0)
@@ -300,11 +319,69 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             "Optional notes saved to the ShotGrid Version description when upload is enabled."
         )
         shotgrid_description_layout.addWidget(self._shotgrid_description_field)
-        shot_layout.addWidget(self._shotgrid_description_row, 5, 0, 1, 2)
+        shot_layout.addWidget(self._shotgrid_description_row, 7, 0, 1, 2)
 
         self._sync_shotgrid_description_visibility()
 
         return shot_tab
+
+    def _build_shotgrid_upload_target_row(self) -> QWidget:
+        row_widget = QWidget()
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.addWidget(QLabel("Upload Options"))
+
+        self._shotgrid_upload_version_checkbox = QCheckBox("Upload as new shot version")
+        self._shotgrid_upload_version_checkbox.setChecked(True)
+        self._shotgrid_upload_version_checkbox.setToolTip(
+            "Create a new ShotGrid Version for this shot upload."
+        )
+        self._shotgrid_upload_version_checkbox.toggled.connect(
+            self._on_shotgrid_upload_mode_changed
+        )
+        row_layout.addWidget(self._shotgrid_upload_version_checkbox)
+
+        self._shotgrid_upload_review_checkbox = QCheckBox(
+            "Upload to review for dailies"
+        )
+        self._shotgrid_upload_review_checkbox.setChecked(False)
+        self._shotgrid_upload_review_checkbox.setToolTip(
+            "Also link the uploaded Version to a review playlist."
+        )
+        self._shotgrid_upload_review_checkbox.toggled.connect(
+            self._on_shotgrid_upload_mode_changed
+        )
+        row_layout.addWidget(self._shotgrid_upload_review_checkbox)
+
+        row_layout.addStretch()
+        return row_widget
+
+    def _build_shotgrid_review_row(self) -> QWidget:
+        row_widget = QWidget()
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.addWidget(QLabel("Review"))
+
+        self._shotgrid_review_combo = QComboBox(self)
+        self._shotgrid_review_combo.setToolTip(
+            "Select the ShotGrid review playlist to link this Version to."
+        )
+        self._shotgrid_review_combo.currentIndexChanged.connect(
+            self._on_source_settings_changed
+        )
+        row_layout.addWidget(self._shotgrid_review_combo)
+
+        self._shotgrid_review_refresh_button = QPushButton("Refresh")
+        self._shotgrid_review_refresh_button.setToolTip(
+            "Reload the recent ShotGrid review playlist options."
+        )
+        self._shotgrid_review_refresh_button.clicked.connect(
+            self._on_refresh_shotgrid_reviews_clicked
+        )
+        row_layout.addWidget(self._shotgrid_review_refresh_button)
+
+        self._set_review_combo_placeholder("No reviews loaded yet.")
+        return row_widget
 
     def _build_custom_source_tab(self) -> QWidget:
         custom_tab = QWidget()
@@ -684,6 +761,12 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             version_name = f"{shot_code}_playblast"
 
         artist_name = resolve_artist_display_name().strip() or None
+        upload_target = self._shotgrid_upload_target()
+        review_playlist_id = (
+            self._selected_shotgrid_review_playlist_id()
+            if upload_target == UPLOAD_TARGET_REVIEW
+            else None
+        )
         upload_request = PlayblastVersionUploadRequest(
             shot_code=shot_code,
             movie_path=movie_path,
@@ -691,6 +774,8 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             description=self._shotgrid_upload_description() or None,
             path_to_frames=str(movie_path),
             artist_display_name=artist_name,
+            upload_target=upload_target,
+            review_playlist_id=review_playlist_id,
         )
 
         try:
@@ -761,8 +846,81 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         self._shotgrid_description_row.setVisible(show_description)
         self._shotgrid_description_field.setEnabled(show_description)
 
+    def _sync_shotgrid_upload_target_visibility(self) -> None:
+        show_target = self._is_shotgrid_upload_requested()
+        self._shotgrid_upload_target_row.setVisible(show_target)
+        self._shotgrid_upload_version_checkbox.setEnabled(show_target)
+        self._shotgrid_upload_review_checkbox.setEnabled(show_target)
+
+    def _sync_shotgrid_review_visibility(self) -> None:
+        show_review = (
+            self._is_shotgrid_upload_requested()
+            and self._is_shotgrid_review_upload_enabled()
+        )
+        self._shotgrid_review_row.setVisible(show_review)
+        self._shotgrid_review_combo.setEnabled(show_review)
+        self._shotgrid_review_refresh_button.setEnabled(show_review)
+
     def _is_shotgrid_upload_requested(self) -> bool:
         return self._shotgrid_upload_checkbox.isChecked()
+
+    def _shotgrid_upload_target(self) -> str:
+        if self._is_shotgrid_review_upload_enabled():
+            return UPLOAD_TARGET_REVIEW
+        return UPLOAD_TARGET_VERSION_ONLY
+
+    def _is_shotgrid_version_upload_enabled(self) -> bool:
+        return self._shotgrid_upload_version_checkbox.isChecked()
+
+    def _is_shotgrid_review_upload_enabled(self) -> bool:
+        return self._shotgrid_upload_review_checkbox.isChecked()
+
+    def _selected_shotgrid_review_playlist_id(self) -> int | None:
+        selected = self._shotgrid_review_combo.currentData()
+        if isinstance(selected, int) and selected > 0:
+            return selected
+        return None
+
+    def _set_review_combo_placeholder(self, label: str) -> None:
+        self._shotgrid_review_combo.clear()
+        self._shotgrid_review_combo.addItem(label, None)
+        self._shotgrid_review_combo.setCurrentIndex(0)
+
+    def _ensure_shotgrid_reviews_loaded_lazily(self) -> None:
+        if self._shotgrid_review_lazy_load_attempted:
+            return
+        self._load_shotgrid_reviews(force_refresh=False)
+
+    def _load_shotgrid_reviews(self, *, force_refresh: bool) -> None:
+        self._shotgrid_review_lazy_load_attempted = True
+        previous_playlist_id = self._selected_shotgrid_review_playlist_id()
+
+        try:
+            review_options = list_recent_review_playlists(limit=10)
+        except Exception as exc:
+            self._shotgrid_review_load_error = str(exc).strip() or type(exc).__name__
+            log.exception("Could not load ShotGrid review playlists")
+            self._set_review_combo_placeholder("Could not load reviews. Click Refresh.")
+            return
+
+        self._shotgrid_review_load_error = None
+        self._shotgrid_review_combo.clear()
+
+        if not review_options:
+            self._set_review_combo_placeholder("No recent reviews found.")
+            return
+
+        selected_index = 0
+        for index, option in enumerate(review_options):
+            label = f"{option.display_name} (#{option.playlist_id})"
+            self._shotgrid_review_combo.addItem(label, option.playlist_id)
+            if (
+                previous_playlist_id is not None
+                and option.playlist_id == previous_playlist_id
+            ):
+                selected_index = index
+
+        self._shotgrid_review_combo.setCurrentIndex(selected_index)
 
     def _shotgrid_upload_description(self) -> str:
         return self._shotgrid_description_field.text().strip()
@@ -797,6 +955,33 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         ):
             return "Custom Folder path is required when Custom Folder destination is enabled."
 
+        if (
+            mode == "shot"
+            and self._is_shotgrid_upload_requested()
+            and not self._is_shotgrid_version_upload_enabled()
+            and not self._is_shotgrid_review_upload_enabled()
+        ):
+            return (
+                "Select at least one ShotGrid upload option: 'Upload as new shot "
+                "version' or 'Upload to review for dailies'."
+            )
+
+        if (
+            mode == "shot"
+            and self._is_shotgrid_upload_requested()
+            and self._is_shotgrid_review_upload_enabled()
+            and self._selected_shotgrid_review_playlist_id() is None
+        ):
+            if self._shotgrid_review_load_error:
+                return (
+                    "Could not load ShotGrid reviews. Click Refresh, or disable "
+                    "'Upload to review for dailies'."
+                )
+            return (
+                "Select a ShotGrid review before exporting, or disable 'Upload to "
+                "review for dailies'."
+            )
+
         return None
 
     def _action_button_text(self) -> str:
@@ -824,6 +1009,13 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         # Allows subclasses to hook into the update state to refresh their custom fields
         self._refresh_custom_ui_state()
         self._sync_custom_path_row_visibility()
+        if (
+            self._is_shotgrid_upload_requested()
+            and self._is_shotgrid_review_upload_enabled()
+        ):
+            self._ensure_shotgrid_reviews_loaded_lazily()
+        self._sync_shotgrid_upload_target_visibility()
+        self._sync_shotgrid_review_visibility()
         self._sync_shotgrid_description_visibility()
         self._refresh_destination_path_labels()
         self._update_action_state()
@@ -849,6 +1041,13 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         self._update_ui_state()
 
     def _on_shotgrid_upload_toggled(self, _enabled: bool) -> None:
+        self._update_ui_state()
+
+    def _on_shotgrid_upload_mode_changed(self, _enabled: bool) -> None:
+        self._update_ui_state()
+
+    def _on_refresh_shotgrid_reviews_clicked(self) -> None:
+        self._load_shotgrid_reviews(force_refresh=True)
         self._update_ui_state()
 
     def _set_custom_folder(self) -> None:
