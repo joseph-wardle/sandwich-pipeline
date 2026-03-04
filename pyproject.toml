@@ -30,6 +30,7 @@ dev = [
     "types-pyside2>=5.15.2.1.7,<6",
     "types-substance-painter>=2023.8.3.0.0,<2024",
     "nptyping>=2.5.0,<3",
+    "ty>=0.0.20",
 ]
 
 [tool.mypy]
@@ -106,6 +107,17 @@ exclude = [
 [tool.ty.rules]
 unused-type-ignore-comment = "ignore"
 
+[tool.ty.analysis]
+allowed-unresolved-imports = [
+    "dwpicker.**",
+    "modelChecker.**",
+    "substance_painter_plugins.**",
+    "yrig.**",
+    "tractor.**",
+    "pipe.db.shotgun_api3.**",
+]
+replace-imports-with-any = ["pipe.db.shotgun_api3.**"]
+
 [tool.ty.environment]
 extra-paths = [
     "pipeline/software/maya/scripts/",
@@ -113,26 +125,29 @@ extra-paths = [
 ]
 
 [tool.ty.src]
+include = ["pipeline"]
+respect-ignore-files = false
 exclude = [
     ".git",
-    "MOPS",
+    "pipeline/lib/MOPS/**",
     "pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease",
-    "VFX-LYNX",
-    "ae_SVG",
-    "dwpicker",
-    "dwpicker_git",
-    "lib/python",
-    "mayacapture",
-    "maya-timeline-marker_git",
-    "modelChecker",
-    "modelChecker_git",
-    'pin_shift.py',
-    "rjg",
-    'y-rig',
-    "shotgun_api3",
-    "studiolibrary",
-    "timeline_marker",
-    "pipeline/software/maya/scripts/*"
+    "pipeline/lib/VFX-LYNX/**",
+    "pipeline/lib/ae_SVG/**",
+    "pipeline/**/dwpicker*",
+    "pipeline/**/dwpicker*/**",
+    "pipeline/lib/python/**",
+    "pipeline/**/mayacapture/**",
+    "pipeline/**/maya-timeline-marker_git/**",
+    "pipeline/**/modelChecker*",
+    "pipeline/**/modelChecker*/**",
+    "pipeline/**/pin_shift.py",
+    "pipeline/**/rjg/**",
+    "pipeline/lib/y-rig/**",
+    "pipeline/lib/shotgun_api3/**",
+    "pipeline/**/studiolibrary/**",
+    "pipeline/**/timeline_marker/**",
+    "pipeline/**/houdini/scripts/**",
+    "pipeline/**/maya/scripts/**"
 ]
 
 
