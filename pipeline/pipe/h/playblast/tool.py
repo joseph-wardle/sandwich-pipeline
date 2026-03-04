@@ -45,6 +45,8 @@ class HoudiniPlayblastLaunchContext:
     output_destinations: tuple["ResolvedOutputDestination", ...]
     shotgrid_description: str
     upload_to_shotgrid: bool
+    shotgrid_upload_target: str
+    shotgrid_review_playlist_id: int | None
 
 
 @dataclass(frozen=True)
@@ -186,6 +188,8 @@ def _build_launch_context(
         output_destinations=output_destinations,
         shotgrid_description=dialog.shotgrid_description,
         upload_to_shotgrid=dialog.upload_to_shotgrid,
+        shotgrid_upload_target=dialog.shotgrid_upload_target,
+        shotgrid_review_playlist_id=dialog.shotgrid_review_playlist_id,
     )
 
 
@@ -344,6 +348,8 @@ def _upload_shot_playblast_to_shotgrid(
         description=context.shotgrid_description or None,
         path_to_frames=str(movie_path),
         artist_display_name=artist_name,
+        upload_target=context.shotgrid_upload_target,
+        review_playlist_id=context.shotgrid_review_playlist_id,
     )
 
     try:
