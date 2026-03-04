@@ -234,6 +234,26 @@ class DBInterface(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
+    def get_recent_review_playlists(
+        self, limit: int = 10
+    ) -> list[dict[str, typing.Any]]:
+        """Return recent active project review playlists.
+
+        The returned rows are intentionally lightweight and include only:
+        ``id``, ``code``, ``updated_at``, and ``created_at``.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def link_version_to_playlist(
+        self,
+        version_id: int | dict[str, typing.Any],
+        playlist_id: int | dict[str, typing.Any],
+    ) -> dict[str, typing.Any]:
+        """Link an existing Version to a Playlist review."""
+        raise NotImplementedError
+
+    @abstractmethod
     def get_env_by_attr(self, attr: str, attr_val: str | int) -> Environment:
         """Get an environment based off of an attribute"""
         raise NotImplementedError

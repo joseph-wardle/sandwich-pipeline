@@ -610,12 +610,98 @@ class SGaaDB(DBInterface):
         self._apply_extra_version_fields(version_payload, extra_fields)
         return self._sg.create("Version", version_payload)
 
+    def get_recent_review_playlists(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Return recent active project playlists for review workflows.
+
+        The result rows are intentionally lightweight and only include
+        ``id``, ``code``, ``updated_at``, and ``created_at``.
+        """
+
+        normalized_limit = self._normalize_query_limit(limit, default_limit=10)
+
+        filters: list[Filter] = [
+            ("project", "is", {"type": "Project", "id": self._id}),
+            # Closed review playlists should not be presented as active options.
+            ("sg_status", "is_not", "clsd"),
+        ]
+        fields = ["id", "code", "updated_at", "created_at"]
+        order = [{"field_name": "updated_at", "direction": "desc"}]
+
+        raw_playlists = self._sg.find(
+            "Playlist",
+            filters,
+            fields,
+            order=order,
+            limit=normalized_limit,
+            include_archived_projects=False,
+        )
+
+        normalized_rows: list[dict[str, Any]] = []
+        for raw_playlist in raw_playlists:
+            row = self._normalize_review_playlist_row(raw_playlist)
+            if row is None:
+                continue
+            normalized_rows.append(row)
+        return normalized_rows
+
+    def link_version_to_playlist(
+        self,
+        version_id: int | dict[str, Any],
+        playlist_id: int | dict[str, Any],
+    ) -> dict[str, Any]:
+        """Link an existing Version to a Playlist without replacing prior links."""
+
+        resolved_version_id = self._extract_entity_id(version_id)
+        if resolved_version_id is None:
+            raise ValueError("A valid Version id is required.")
+
+        playlist_ref = self._entity_ref("Playlist", playlist_id)
+        if playlist_ref is None:
+            raise ValueError("A valid Playlist id is required.")
+
+        return self._sg.update(
+            "Version",
+            resolved_version_id,
+            {"playlists": [playlist_ref]},
+            multi_entity_update_modes={"playlists": "add"},
+        )
+
     @staticmethod
     def _entity_ref(entity_type: str, entity: Any) -> dict[str, int] | None:
         entity_id = SGaaDB._extract_entity_id(entity)
         if entity_id is None:
             return None
         return {"type": entity_type, "id": entity_id}
+
+    @staticmethod
+    def _normalize_query_limit(limit: Any, *, default_limit: int) -> int:
+        if limit is None:
+            return default_limit
+
+        try:
+            normalized = int(limit)
+        except Exception as exc:
+            raise ValueError("Limit must be a positive integer.") from exc
+
+        if normalized < 1:
+            raise ValueError("Limit must be a positive integer.")
+        return normalized
+
+    @staticmethod
+    def _normalize_review_playlist_row(
+        raw_playlist: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        playlist_id = SGaaDB._extract_entity_id(raw_playlist)
+        if playlist_id is None:
+            return None
+
+        code = str(raw_playlist.get("code") or "").strip()
+        return {
+            "id": playlist_id,
+            "code": code,
+            "updated_at": raw_playlist.get("updated_at"),
+            "created_at": raw_playlist.get("created_at"),
+        }
 
     @staticmethod
     def _extract_entity_id(entity: Any) -> int | None:
