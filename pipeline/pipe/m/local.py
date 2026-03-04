@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import re
 import sys
+from typing import cast
 
-from Qt import QtCompat, QtWidgets
 import maya.OpenMayaUI as omUI
-
+from Qt import QtCompat, QtWidgets
 from software.baseclass import DCCLocalizer
 
 
@@ -17,7 +17,10 @@ class _MayaLocalizer(DCCLocalizer):
         if not self.is_headless():
             ptr = omUI.MQtUtil.mainWindow()
             if ptr is not None:
-                return QtCompat.wrapInstance(int(ptr), QtWidgets.QWidget)  # type: ignore[attr-defined]
+                return cast(
+                    QtWidgets.QWidget,
+                    QtCompat.wrapInstance(int(ptr), QtWidgets.QWidget),
+                )
         return None
 
     def is_headless(self) -> bool:

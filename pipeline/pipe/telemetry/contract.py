@@ -119,13 +119,13 @@ def _sanitize_value(
 
     if isinstance(value, Mapping):
         items = list(value.items())
-        out: dict[str, Any] = {}
+        sanitized_map: dict[str, Any] = {}
         for index, (child_key, child_value) in enumerate(items):
             if index >= max_mapping_items:
-                out["_truncated_keys_count"] = len(items) - max_mapping_items
+                sanitized_map["_truncated_keys_count"] = len(items) - max_mapping_items
                 break
             normalized_key = str(child_key)
-            out[normalized_key] = _sanitize_value(
+            sanitized_map[normalized_key] = _sanitize_value(
                 child_value,
                 key_name=normalized_key,
                 depth=depth + 1,
@@ -134,16 +134,18 @@ def _sanitize_value(
                 max_sequence_items=max_sequence_items,
                 max_depth=max_depth,
             )
-        return out
+        return sanitized_map
 
     if isinstance(value, (list, tuple, set)):
         sequence = list(value)
-        out: list[Any] = []
+        sanitized_sequence: list[Any] = []
         for index, item in enumerate(sequence):
             if index >= max_sequence_items:
-                out.append(f"<truncated_items:{len(sequence) - max_sequence_items}>")
+                sanitized_sequence.append(
+                    f"<truncated_items:{len(sequence) - max_sequence_items}>"
+                )
                 break
-            out.append(
+            sanitized_sequence.append(
                 _sanitize_value(
                     item,
                     key_name=key_name,
@@ -154,7 +156,7 @@ def _sanitize_value(
                     max_depth=max_depth,
                 )
             )
-        return out
+        return sanitized_sequence
 
     return _truncate_text(str(value), max_string_chars)
 

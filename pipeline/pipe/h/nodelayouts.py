@@ -3,17 +3,13 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, Optional, cast
 
 # mypy: disable-error-code="union-attr"
 import hou
 import loptoolutils  # type: ignore[import-not-found]
 
 from . import variants
-
-if TYPE_CHECKING:
-    from typing import Optional
-
 
 """Node-graph builders for Houdini Solaris tools.
 
@@ -156,9 +152,7 @@ def _resolve_stage_context(parent: hou.Node | None) -> hou.Node:
     return root.createNode("lopnet", "stage")
 
 
-def _create_component_output_node(
-    *, kwargs: dict, parent: hou.Node | None
-) -> hou.LopNode:
+def _create_component_output_node(*, kwargs: dict, parent: hou.Node | None) -> hou.Node:
     node_type = _resolve_component_output_type()
 
     if parent is not None:
@@ -180,9 +174,9 @@ def _create_component_output_node(
     # Shelf tools may rely on genericTool kwargs insertion behavior.
     if node_type:
         try:
-            out: hou.LopNode = loptoolutils.genericTool(kwargs, node_type)
-            out.setName(SKD_BUILDER_NODE_NAME, unique_name=True)
-            return out
+            created_node = cast(hou.Node, loptoolutils.genericTool(kwargs, node_type))
+            created_node.setName(SKD_BUILDER_NODE_NAME, unique_name=True)
+            return created_node
         except hou.OperationFailed:
             log.warning(
                 "Failed to create SKD Component Output type %s via shelf tool; falling back to componentoutput",
@@ -194,9 +188,9 @@ def _create_component_output_node(
             "SKD Component Output HDA is not installed; shelf tool is creating stock componentoutput"
         )
 
-    out: hou.LopNode = loptoolutils.genericTool(kwargs, "componentoutput")
-    out.setName(SKD_BUILDER_NODE_NAME, unique_name=True)
-    return out
+    fallback_node = cast(hou.Node, loptoolutils.genericTool(kwargs, "componentoutput"))
+    fallback_node.setName(SKD_BUILDER_NODE_NAME, unique_name=True)
+    return fallback_node
 
 
 def _is_component_output_like(node: hou.Node) -> bool:
@@ -209,11 +203,9 @@ def _is_skd_matlib_like(node: hou.Node) -> bool:
     return "skd_matlib" in node_type or "lnd_matlib" in node_type
 
 
-def _find_managed_builder_outputs(stage: hou.Node) -> list[hou.LopNode]:
-    outputs: list[hou.LopNode] = []
+def _find_managed_builder_outputs(stage: hou.Node) -> list[hou.Node]:
+    outputs: list[hou.Node] = []
     for node in stage.children():
-        if not isinstance(node, hou.LopNode):
-            continue
         if not _is_component_output_like(node):
             continue
         if node.userData(SKD_BUILDER_MANAGED_KEY) == SKD_BUILDER_MANAGED_VALUE:
@@ -221,18 +213,16 @@ def _find_managed_builder_outputs(stage: hou.Node) -> list[hou.LopNode]:
     return outputs
 
 
-def _find_existing_skd_builder_outputs(stage: hou.Node) -> list[hou.LopNode]:
-    outputs: list[hou.LopNode] = []
+def _find_existing_skd_builder_outputs(stage: hou.Node) -> list[hou.Node]:
+    outputs: list[hou.Node] = []
     for node in stage.children():
-        if not isinstance(node, hou.LopNode):
-            continue
         if not _looks_like_skd_builder_output(node):
             continue
         outputs.append(node)
     return outputs
 
 
-def _looks_like_skd_builder_output(node: hou.LopNode) -> bool:
+def _looks_like_skd_builder_output(node: hou.Node) -> bool:
     if not _is_component_output_like(node):
         return False
 
@@ -273,7 +263,7 @@ def _looks_like_skd_builder_output(node: hou.LopNode) -> bool:
     return True
 
 
-def _mark_managed_builder(output: hou.LopNode) -> None:
+def _mark_managed_builder(output: hou.Node) -> None:
     output.setUserData(SKD_BUILDER_MANAGED_KEY, SKD_BUILDER_MANAGED_VALUE)
 
 
@@ -309,18 +299,19 @@ def _clear_managed_variant_boxes(parent: hou.Node, *, owner_path: str) -> None:
     if not hasattr(parent, "networkBoxes"):
         return
     for net_box in parent.networkBoxes():
+        net_box_any = cast(Any, net_box)
         box_name = ""
         try:
-            box_name = net_box.name()
+            box_name = net_box_any.name()
         except Exception:
             box_name = ""
 
         try:
             managed = (
-                net_box.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
+                net_box_any.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
                 == SKD_VARIANT_GRAPH_MANAGED_VALUE
             )
-            owner = net_box.userData(SKD_VARIANT_GRAPH_OWNER_KEY)
+            owner = net_box_any.userData(SKD_VARIANT_GRAPH_OWNER_KEY)
         except Exception:
             managed = False
             owner = ""
@@ -330,7 +321,7 @@ def _clear_managed_variant_boxes(parent: hou.Node, *, owner_path: str) -> None:
         if managed and owner not in ("", owner_path):
             continue
         try:
-            net_box.destroy()
+            net_box_any.destroy()
         except Exception:
             continue
 
@@ -351,11 +342,12 @@ def _create_managed_variant_box(
     except Exception:
         return
 
+    net_box_any = cast(Any, net_box)
     try:
-        net_box.setUserData(
+        net_box_any.setUserData(
             SKD_VARIANT_GRAPH_MANAGED_KEY, SKD_VARIANT_GRAPH_MANAGED_VALUE
         )
-        net_box.setUserData(SKD_VARIANT_GRAPH_OWNER_KEY, owner_path)
+        net_box_any.setUserData(SKD_VARIANT_GRAPH_OWNER_KEY, owner_path)
     except Exception:
         pass
 
@@ -369,7 +361,12 @@ def _create_managed_variant_box(
             net_box.setComment(label)
             if hasattr(net_box, "setGenericFlag"):
                 try:
-                    net_box.setGenericFlag(hou.networkItemFlag.DisplayComment, True)
+                    network_item_flag = getattr(hou, "networkItemFlag", None)
+                    display_comment_flag = getattr(
+                        network_item_flag, "DisplayComment", None
+                    )
+                    if display_comment_flag is not None:
+                        net_box_any.setGenericFlag(display_comment_flag, True)
                 except Exception:
                     pass
         except Exception:
@@ -395,7 +392,7 @@ def _create_managed_variant_box(
             min_y = min(point.y() for point in points) - 1.2
             max_y = max(point.y() for point in points) + 1.8
             net_box.setPosition(hou.Vector2(min_x, max_y))
-            net_box.setSize(hou.Vector2(max_x - min_x, max_y - min_y))
+            net_box_any.setSize((max_x - min_x, max_y - min_y))
         except Exception:
             pass
 
@@ -437,7 +434,7 @@ def _set_variant_generation_warnings(node: hou.Node, warnings: list[str]) -> Non
 
 
 def lnd_clustersetup(kwargs: dict, parent: Optional[hou.Node] = None) -> hou.Node:
-    out: hou.LopNode = loptoolutils.genericTool(kwargs, "componentoutput")
+    out = cast(hou.Node, loptoolutils.genericTool(kwargs, "componentoutput"))
     out.setColor(hou.Color((0.616, 0.871, 0.769)))
 
     out_pos = out.position()
@@ -758,8 +755,9 @@ def _first_managed_geometry_node(
 
 
 def _set_node_bypass(node: hou.Node, enabled: bool) -> None:
+    node_any = cast(Any, node)
     try:
-        node.bypass(enabled)
+        node_any.bypass(enabled)
         return
     except Exception:
         pass
@@ -778,7 +776,7 @@ def _set_pending_state(node: hou.Node, *, pending: bool, reason: str = "") -> No
         node.setComment("")
 
 
-def rebuild_managed_skd_variant_graph(output: hou.LopNode) -> tuple[str, ...]:
+def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
     """Rebuild a deterministic managed variant graph around an output node."""
     parent = output.parent()
     out_pos = output.position()

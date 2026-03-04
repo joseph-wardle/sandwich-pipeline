@@ -13,7 +13,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Mapping, TypedDict
 
 import hou
 
@@ -52,7 +52,7 @@ class HeadlessPublishResult(TypedDict):
     ensure_builder: bool
     publish_requested: bool
     summary: BuilderSummary | None
-    publish: dict[str, Any] | None
+    publish: Mapping[str, Any] | None
     warnings: list[ResultMessage]
     errors: list[ResultMessage]
 
@@ -172,8 +172,8 @@ def run_headless_publish(
                 )
                 return _finalize(result)
 
-            for warning in warnings:
-                _warn(result, "VariantGraphWarning", warning)
+            for variant_warning in warnings:
+                _warn(result, "VariantGraphWarning", variant_warning)
 
     if ensure_requested and not publish:
         if not _save_hip(hip_path=hip_path, result=result):
@@ -218,17 +218,17 @@ def run_headless_publish(
             return _finalize(result)
 
         result["publish"] = publish_result
-        for warning in publish_result.get("warnings", []):
+        for publish_warning in publish_result.get("warnings", []):
             _warn(
                 result,
-                f"Publish::{warning.get('code', 'Warning')}",
-                str(warning.get("message", "")),
+                f"Publish::{publish_warning.get('code', 'Warning')}",
+                str(publish_warning.get("message", "")),
             )
-        for error in publish_result.get("errors", []):
+        for publish_error in publish_result.get("errors", []):
             _error(
                 result,
-                f"Publish::{error.get('code', 'Error')}",
-                str(error.get("message", "")),
+                f"Publish::{publish_error.get('code', 'Error')}",
+                str(publish_error.get("message", "")),
             )
 
     result["summary"] = {

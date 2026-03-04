@@ -213,8 +213,15 @@ class Publisher:
             "publish_type": str(telemetry_state["publish_type"]),
             "publish_path": str(publish_path_value or ""),
         }
+        started_at_raw = telemetry_state.get("started_at")
+        started_at = (
+            float(started_at_raw)
+            if isinstance(started_at_raw, (int, float))
+            else time.perf_counter()
+        )
         duration_ms = max(
-            0, int((time.perf_counter() - float(telemetry_state["started_at"])) * 1000)
+            0,
+            int((time.perf_counter() - started_at) * 1000),
         )
 
         error_data = None

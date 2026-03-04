@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import maya.cmds as mc
 from Qt.QtWidgets import (
@@ -210,9 +209,16 @@ class PrevisPlayblastDialog(PlayblastDialog):
 
     @staticmethod
     def _list_sequencer_shot_nodes() -> list[str]:
+        shot_nodes = mc.sequenceManager(listShots=True)
+        if isinstance(shot_nodes, str):
+            candidate_nodes = [shot_nodes]
+        elif isinstance(shot_nodes, (list, tuple)):
+            candidate_nodes = [str(node) for node in shot_nodes]
+        else:
+            candidate_nodes = []
         return [
-            str(shot_node)
-            for shot_node in (mc.sequenceManager(listShots=True) or [])
+            shot_node
+            for shot_node in candidate_nodes
             if mc.objExists(shot_node)
             and not bool(mc.shot(shot_node, query=True, mute=True))
         ]

@@ -14,7 +14,6 @@ from env import Executables
 from shared.util import (
     get_production_path,
     get_rig_build_path,
-    get_rigging_path,
     get_shared_telemetry_spool_dir,
 )
 
@@ -157,7 +156,7 @@ class MayaDCC(DCC):
             launch_command = str(Executables.maya)
             launch_args.extend(("-name", "Mayo"))
             if extra_args:
-                launch_args.append(extra_args)
+                launch_args.extend(extra_args)
 
         super().__init__(launch_command, launch_args, env_vars, self._pre_launch_tasks)
 

@@ -1252,7 +1252,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         except Exception as exc:
             log.exception("Playblast config generation failed")
             MessageDialog(
-                self.parent(),
+                self,
                 f"Could not generate playblast settings.\n\n{exc}",
                 "Playblast Error",
             ).exec_()
@@ -1260,7 +1260,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
 
         validation_error = self._validate_config(config)
         if validation_error:
-            MessageDialog(self.parent(), validation_error, "Playblast").exec_()
+            MessageDialog(self, validation_error, "Playblast").exec_()
             return
 
         try:
@@ -1268,7 +1268,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         except Exception as exc:
             log.exception("Playblast export failed")
             MessageDialog(
-                self.parent(),
+                self,
                 f"Playblast failed.\n\n{exc}",
                 "Playblast Error",
             ).exec_()
@@ -1286,7 +1286,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
 
         output_paths = self._collect_output_paths(config)
         success_msg = self._build_success_message(output_paths, post_playblast_messages)
-        MessageDialog(self.parent(), success_msg).exec_()
+        MessageDialog(self, success_msg).exec_()
         self.close()
 
     def _build_custom_playblast_config(self) -> MShotPlayblastConfig:

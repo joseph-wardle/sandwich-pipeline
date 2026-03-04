@@ -8,7 +8,10 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass
 from functools import partialmethod as pm
-from typing import TYPE_CHECKING, Optional
+from typing import Any, Callable, Iterable, Optional
+from typing import Sequence as SequenceT
+
+from typing_extensions import Unpack
 
 from pipe.struct.db import (
     Asset,
@@ -25,17 +28,41 @@ from pipe.struct.db import (
     normalize_display_name,
 )
 
-if TYPE_CHECKING:
-    import typing
-    from typing import Any, Callable, Iterable, Optional
-
-    from typing_extensions import Unpack
-
-    from .typing import *  # noqa: F403
-    from .typing import AttrMappingKwargs, Filter
-
 from . import shotgun_api3
 from .interface import DBInterface
+from .typing import (
+    AttrMappingKwargs,
+    Filter,
+    T_GetAssetAttrList,
+    T_GetAssetByAttr,
+    T_GetAssetByDisplayName,
+    T_GetAssetById,
+    T_GetAssetByStub,
+    T_GetAssetDisplayNameList,
+    T_GetAssetsByStub,
+    T_GetAttrList,
+    T_GetCodeList,
+    T_GetEntityByCode,
+    T_GetEntityCodeList,
+    T_GetEnvByAttr,
+    T_GetEnvByCode,
+    T_GetEnvById,
+    T_GetEnvByStub,
+    T_GetEnvsByStub,
+    T_GetSeqByAttr,
+    T_GetSeqByCode,
+    T_GetSeqById,
+    T_GetSeqByStub,
+    T_GetSeqsByStub,
+    T_GetShotByAttr,
+    T_GetShotByCode,
+    T_GetShotById,
+    T_GetShotByStub,
+    T_GetShotsByStub,
+    T_GetUserByAttr,
+    T_GetUserByName,
+    T_GetUserNameList,
+)
 
 log = logging.getLogger(__name__)
 
@@ -162,9 +189,17 @@ class SGaaDB(DBInterface):
                     **kwargs,
                 )
 
-        shotgun_module.CACertsHTTPSConnection = _PipelineCACertsHTTPSConnection
-        shotgun_module.CACertsHTTPSHandler = _PipelineCACertsHTTPSHandler
-        shotgun_module._PIPELINE_HOUDINI_UPLOAD_PATCHED = True
+        setattr(
+            shotgun_module,
+            "CACertsHTTPSConnection",
+            _PipelineCACertsHTTPSConnection,
+        )
+        setattr(
+            shotgun_module,
+            "CACertsHTTPSHandler",
+            _PipelineCACertsHTTPSHandler,
+        )
+        setattr(shotgun_module, "_PIPELINE_HOUDINI_UPLOAD_PATCHED", True)
         log.info("Applied Houdini ShotGrid upload HTTPS runtime compatibility patch.")
 
     @staticmethod
@@ -431,12 +466,12 @@ class SGaaDB(DBInterface):
                 arr.sort()
             return arr
         if entity_type is Shot and attr == "path":
-            arr: list[str] = []
+            shot_paths: list[str] = []
             for shot in self._sg_entity_lists[Shot.__name__]:
                 if not shot.get("code"):
                     continue
                 try:
-                    arr.append(self._canonical_shot_path_from_sg(shot))
+                    shot_paths.append(self._canonical_shot_path_from_sg(shot))
                 except ValueError as exc:
                     log.error(
                         "Invalid shot code in ShotGrid (id=%s code=%r): %s",
@@ -445,18 +480,18 @@ class SGaaDB(DBInterface):
                         exc,
                     )
             if sorted:
-                arr.sort()
-            return arr
+                shot_paths.sort()
+            return shot_paths
 
         mapper = self._entity_attr_custom_mappers.get(
             entity_type.__name__, self._default_entity_attr_mapper
         )
         internal_attr = entity_type.map_sg_field_names(attr)
         entity_list = self._sg_entity_lists[entity_type.__name__]
-        arr = mapper(entity_list, internal_attr, **kwargs)
+        values = mapper(entity_list, internal_attr, **kwargs)
         if sorted:
-            arr.sort()
-        return arr
+            values.sort()
+        return values
 
     def _get_entity_attr_list_swap(
         self,
@@ -491,7 +526,7 @@ class SGaaDB(DBInterface):
     get_asset_by_display_name: T_GetAssetByDisplayName = pm(get_asset_by_attr, "code")  # type: ignore[assignment] # noqa: F405
     get_asset_by_id: T_GetAssetById = pm(get_asset_by_attr, "id")  # type: ignore[assignment] # noqa: F405
     get_asset_by_stub: T_GetAssetByStub = pm(get_entity_by_stub, Asset)  # type: ignore[assignment] # noqa: F405
-    get_asset_display_name_list: T_GetAssetDisplayNameList = pm(
+    get_asset_display_name_list: T_GetAssetDisplayNameList = pm(  # noqa: F405
         get_asset_attr_list, "code"
     )  # type: ignore[assignment] # noqa: F405
     get_assets_by_stub: T_GetAssetsByStub = pm(get_entities_by_stub, Asset)  # type: ignore[assignment] # noqa: F405
@@ -557,7 +592,7 @@ class SGaaDB(DBInterface):
 
     def create_version_for_shot(
         self,
-        shot: ShotStub | dict[str, Any] | int,
+        shot: Shot | ShotStub | dict[str, Any] | int,
         code: str,
         user: User | dict[str, Any] | int | None = None,
         task: Task | dict[str, Any] | int | None = None,
@@ -667,7 +702,7 @@ class SGaaDB(DBInterface):
                 "Playlist",
                 filters,
                 fields,
-                order=order,
+                order=order,  # type: ignore[arg-type]
                 limit=limit,
                 include_archived_projects=False,
             )
@@ -682,7 +717,7 @@ class SGaaDB(DBInterface):
                 "Playlist",
                 base_filters,
                 fields,
-                order=order,
+                order=order,  # type: ignore[arg-type]
                 limit=limit,
                 include_archived_projects=False,
             )
@@ -728,7 +763,7 @@ class SGaaDB(DBInterface):
         )
 
     @staticmethod
-    def _entity_ref(entity_type: str, entity: Any) -> dict[str, int] | None:
+    def _entity_ref(entity_type: str, entity: Any) -> dict[str, str | int] | None:
         entity_id = SGaaDB._extract_entity_id(entity)
         if entity_id is None:
             return None
@@ -845,14 +880,11 @@ class SGaaDB(DBInterface):
     def get_asset_display_name_list_by_type(
         self, types: list[str], sorted: bool = False
     ) -> list[str]:
-        mapper = self._entity_attr_custom_mappers.get(
-            Asset.__name__, self._default_entity_attr_mapper
-        )
         internal_attr = Asset.map_sg_field_names("code")
         asset_list = self._sg_entity_lists[Asset.__name__]
         filtered_assets = [a for a in asset_list if a.get("sg_asset_type") in types]
 
-        arr = mapper(
+        arr = self._asset_attr_mapper(
             filtered_assets, internal_attr, child_mode=DBInterface.ChildQueryMode.ALL
         )
 
@@ -910,7 +942,7 @@ class _Query(ABC):
         self,
         project_id: int,
         *,
-        extra_fields: typing.Sequence[str] | None = None,
+        extra_fields: SequenceT[str] | None = None,
         override_default_fields: bool = False,
     ) -> None:
         if extra_fields is None:
@@ -920,7 +952,7 @@ class _Query(ABC):
         self.filters = self._construct_filters()
 
     def _construct_fields(
-        self, extra_fields: typing.Sequence[str], override_default_fields: bool
+        self, extra_fields: SequenceT[str], override_default_fields: bool
     ) -> list[str]:
         """Construct the fields needed for the ShotGrid query"""
         if override_default_fields:

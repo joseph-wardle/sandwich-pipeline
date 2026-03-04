@@ -4,6 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 import hou
 from env_sg import DB_Config
@@ -375,7 +376,7 @@ class MatlibNodeBuilder:
             )
             return
 
-        y_cursor = 0
+        y_cursor = 0.0
         for material in spec.materials:
             builder = self._create_material_builder(material, y=-y_cursor)
             rm_surface, rm_nodes = self._build_renderman_graph(
@@ -415,13 +416,13 @@ class MatlibNodeBuilder:
 
         for net_box in self._matlib.networkBoxes():
             try:
-                marked = net_box.userData(_AUTO_TAG_KEY) == _AUTO_TAG_VALUE
+                marked = cast(Any, net_box).userData(_AUTO_TAG_KEY) == _AUTO_TAG_VALUE
             except Exception:
                 marked = False
             if marked:
                 net_box.destroy()
 
-    def _create_material_builder(self, material: MaterialSpec, *, y: int) -> hou.Node:
+    def _create_material_builder(self, material: MaterialSpec, *, y: float) -> hou.Node:
         tex_set_id = _sanitize_node_name(material.texture_set)
         mat_name = f"MAT_{tex_set_id}"
         builder = self._create_first_supported_node(
@@ -862,7 +863,7 @@ class MatlibNodeBuilder:
             return None
         net_box.setName(name, unique_name=True)
         try:
-            net_box.setUserData(_AUTO_TAG_KEY, _AUTO_TAG_VALUE)
+            cast(Any, net_box).setUserData(_AUTO_TAG_KEY, _AUTO_TAG_VALUE)
         except Exception:
             pass
         return net_box

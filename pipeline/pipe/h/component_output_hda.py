@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import hou
 
@@ -162,7 +162,7 @@ def preflight(node: hou.Node) -> dict[str, Any]:
     return result
 
 
-def publish(node: hou.Node) -> dict[str, Any]:
+def publish(node: hou.Node) -> Mapping[str, Any]:
     """Publish using the shared pipe.h.publish service."""
     _repair_broken_output_paths(node)
 
@@ -377,7 +377,7 @@ def _empty_to_none(value: str) -> str | None:
     return text or None
 
 
-def _write_status(node: hou.Node, *, title: str, payload: dict[str, Any]) -> None:
+def _write_status(node: hou.Node, *, title: str, payload: Mapping[str, Any]) -> None:
     summary = _format_summary(title, payload)
     _set_if_exists(node, STATUS_SUMMARY_PARM, summary)
     _set_if_exists(
@@ -387,7 +387,7 @@ def _write_status(node: hou.Node, *, title: str, payload: dict[str, Any]) -> Non
     node.setGenericFlag(hou.nodeFlag.DisplayComment, True)
 
 
-def _format_summary(title: str, payload: dict[str, Any]) -> str:
+def _format_summary(title: str, payload: Mapping[str, Any]) -> str:
     warnings = payload.get("warnings", [])
     errors = payload.get("errors", [])
     status = str(payload.get("status", "unknown")).upper()
@@ -417,7 +417,7 @@ def _first_message_code(messages: Any) -> str:
     return ""
 
 
-def _apply_node_color(node: hou.Node, payload: dict[str, Any]) -> None:
+def _apply_node_color(node: hou.Node, payload: Mapping[str, Any]) -> None:
     has_errors = bool(payload.get("errors"))
     has_warnings = bool(payload.get("warnings"))
     if has_errors:
@@ -428,7 +428,7 @@ def _apply_node_color(node: hou.Node, payload: dict[str, Any]) -> None:
         node.setColor(hou.Color((0.25, 0.55, 0.32)))
 
 
-def _show_ui_message(payload: dict[str, Any], *, title: str) -> None:
+def _show_ui_message(payload: Mapping[str, Any], *, title: str) -> None:
     if not getattr(hou, "isUIAvailable", lambda: False)():
         return
 

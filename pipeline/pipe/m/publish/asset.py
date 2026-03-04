@@ -51,6 +51,13 @@ _HOUDINI_RESULT_END = "--END-BUILD-RESULT--"
 _TELEMETRY_ACTION_ID_ENV = "PIPE_TELEMETRY_ACTION_ID"
 
 
+def _current_scene_path() -> Path | None:
+    raw_path = mc.file(query=True, sceneName=True)
+    if isinstance(raw_path, str) and raw_path:
+        return Path(raw_path)
+    return None
+
+
 class HoudiniBuildError(RuntimeError):
     """Raised when the Houdini asset build fails"""
 
@@ -62,7 +69,7 @@ class _PublishAssetVariantControls:
     _conn: Optional[DB]
 
     def _init_variant_controls(self) -> None:
-        geo_var_widget = QWidget(self)  # type: ignore[misc]
+        geo_var_widget = QWidget(cast(QWidget, self))
         geo_var_layout = QHBoxLayout(geo_var_widget)
         geo_var_layout.setContentsMargins(0, 0, 0, 0)
         geo_var_layout.setSpacing(0)
@@ -224,12 +231,12 @@ class AssetPublisher(Publisher):
         if metadata.asset:
             return metadata.asset
 
-        scene_path = mc.file(query=True, sn=True) or ""
-        if not scene_path:
+        scene_path = _current_scene_path()
+        if scene_path is None:
             log.warning("No scene path; cannot resolve asset metadata.")
             return None
 
-        asset = resolve_asset_from_scene_path(self._conn, Path(scene_path))
+        asset = resolve_asset_from_scene_path(self._conn, scene_path)
         if asset:
             log.info("Resolved asset from scene path; writing file metadata.")
             write_asset_metadata(asset)
@@ -238,8 +245,8 @@ class AssetPublisher(Publisher):
         return asset
 
     def _ensure_scene_saved(self) -> bool:
-        scene_path = mc.file(query=True, sn=True) or ""
-        if not scene_path:
+        scene_path = _current_scene_path()
+        if scene_path is None:
             MessageDialog(
                 self._window,
                 "Scene must be saved before publishing. Please save the asset file and try again.",
@@ -280,15 +287,15 @@ class AssetPublisher(Publisher):
         self._backup_result = None
         self._backup_status = None
 
-        scene_path = mc.file(query=True, sn=True) or ""
-        if not scene_path:
+        scene_path = _current_scene_path()
+        if scene_path is None:
             self._backup_status = "Backup skipped: scene has no file path."
             log.warning("Backup skipped: scene has no file path.")
             return
 
         asset_paths = paths_for_asset(asset)
         result = backup_if_changed(
-            source_path=Path(scene_path),
+            source_path=scene_path,
             backup_dir=asset_paths.backup_dir,
             manifest_path=asset_paths.manifest_path,
             dcc=DCC_MAYA,

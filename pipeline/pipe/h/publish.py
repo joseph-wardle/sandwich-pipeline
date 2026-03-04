@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, NotRequired, TypedDict
+from typing import Any, Mapping, NotRequired, TypedDict, cast
 
 import hou
 
@@ -1100,7 +1100,9 @@ def _sync_gallery(
                 datasource.setOwnsFile(added_item_id, False)
                 datasource.setMetadata(added_item_id, metadata)
                 if thumbnail_bytes:
-                    set_result = datasource.setThumbnail(added_item_id, thumbnail_bytes)
+                    set_result = cast(Any, datasource).setThumbnail(
+                        added_item_id, thumbnail_bytes
+                    )
                     if set_result is False:
                         _warn(
                             result,
@@ -1231,12 +1233,18 @@ def _find_gallery_matches(
 ) -> list[str]:
     matches: list[str] = []
     export_str = str(export_path)
-    for item_id in datasource.itemIds():
+    item_ids = cast(Any, datasource).itemIds()
+    for item_id in item_ids:
         item_path = datasource.filePath(item_id)
         if item_path == export_str:
             matches.append(item_id)
             continue
-        metadata = datasource.metadata(item_id) or {}
+        metadata_raw = datasource.metadata(item_id)
+        metadata: Mapping[str, Any]
+        if isinstance(metadata_raw, Mapping):
+            metadata = metadata_raw
+        else:
+            metadata = {}
         if str(metadata.get(GALLERY_META_POLICY_KEY, "")).strip() == policy_key:
             matches.append(item_id)
             continue

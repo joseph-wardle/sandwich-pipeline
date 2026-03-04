@@ -55,12 +55,15 @@ def _normalize_value(value: Optional[str]) -> Optional[str]:
 
 def _get_file_info_value(key: str) -> Optional[str]:
     try:
-        value = mc.fileInfo(key, query=True)
+        raw_value = mc.fileInfo(key, query=True)
     except Exception:
         return None
-    if isinstance(value, (list, tuple)):
-        value = value[0] if value else None
-    return _normalize_value(value)
+    if isinstance(raw_value, (list, tuple)):
+        first_value = raw_value[0] if raw_value else None
+        return _normalize_value(str(first_value) if first_value is not None else None)
+    if isinstance(raw_value, str):
+        return _normalize_value(raw_value)
+    return None
 
 
 def _set_file_info_value(key: str, value: Optional[str]) -> None:
@@ -94,7 +97,7 @@ def write_asset_metadata(asset: Asset) -> None:
     )
 
 
-def read_asset_metadata(conn: DB | None = None) -> AssetMetadata:
+def read_asset_metadata(conn: DBInterface | None = None) -> AssetMetadata:
     """Read asset metadata from fileInfo and resolve to an Asset when possible."""
     asset_id_raw = _get_file_info_value(FILEINFO_ASSET_ID)
     asset_name = _get_file_info_value(FILEINFO_ASSET_NAME)
@@ -156,7 +159,9 @@ def _asset_path_from_root(asset_root: Path) -> Optional[str]:
     return rel_path.as_posix()
 
 
-def resolve_asset_from_scene_path(conn: DB, scene_path: Path) -> Optional[Asset]:
+def resolve_asset_from_scene_path(
+    conn: DBInterface, scene_path: Path
+) -> Optional[Asset]:
     asset_root = _asset_root_from_scene_path(scene_path)
     if not asset_root:
         return None
@@ -173,12 +178,12 @@ def resolve_asset_from_scene_path(conn: DB, scene_path: Path) -> Optional[Asset]
 class AssetOpenDialog(FilteredListDialog):
     """Dialog for selecting an asset and previewing manifest metadata."""
 
-    _conn: DB
+    _conn: DBInterface
     _open_backup_cb: QtWidgets.QCheckBox
     _info_label: QtWidgets.QLabel
 
     def __init__(
-        self, parent: QtWidgets.QWidget | None, items: list[str], conn: DB
+        self, parent: QtWidgets.QWidget | None, items: list[str], conn: DBInterface
     ) -> None:
         super().__init__(
             parent,
@@ -254,13 +259,6 @@ class AssetOpenDialog(FilteredListDialog):
                 parts.append(f"at {timestamp}")
             publish_summary = " ".join(parts)
 
-        backup_versions = list_versions(paths.backup_dir, "model", "mb")
-        if backup_versions:
-            backup_label = ", ".join(f"v{v:03d}" for v in backup_versions)
-        else:
-            backup_label = "none"
-
-        manifest_state = "present" if manifest_path.exists() else "missing"
         info_lines = [
             f"Path: {paths.root}",
             f"Last publish: {publish_summary}",
@@ -297,7 +295,7 @@ class MAssetFileManager(FileManager):
         mc.file(str(path), open=True, force=True)
 
     def _setup_file(self, path: Path, entity: SGEntity) -> None:
-        mc.file(new=True, force=True)
+        mc.file(newFile=True, force=True)
         mc.file(rename=str(path))
         mc.file(save=True, type="mayaBinary")
         asset = entity if isinstance(entity, Asset) else None
@@ -321,8 +319,8 @@ class MAssetFileManager(FileManager):
             return
 
         if scene_path is None:
-            raw_path = mc.file(query=True, sn=True) or ""
-            if not raw_path:
+            raw_path = mc.file(query=True, sceneName=True)
+            if not isinstance(raw_path, str) or not raw_path:
                 log.debug("Scene has no file path; cannot infer asset metadata.")
                 return
             scene_path = Path(raw_path)
@@ -496,10 +494,20 @@ def install_asset_menu(
     if not main_window:
         return
 
+    menu: str
     if mc.menu(menu_name, exists=True):
         menu = menu_name
     elif create_menu:
-        menu = mc.menu(menu_name, label=menu_name, parent=main_window, tearOff=True)
+        created_menu = mc.menu(
+            menu_name,
+            label=menu_name,
+            parent=main_window,
+            tearOff=True,
+        )
+        if not isinstance(created_menu, str):
+            log.warning("Failed to create menu %s; skipping menu install", menu_name)
+            return
+        menu = created_menu
     else:
         log.debug("Menu %s not found; skipping menu install", menu_name)
         return
@@ -507,13 +515,15 @@ def install_asset_menu(
     if mc.menuItem(menu_item_name, exists=True, parent=menu):
         mc.deleteUI(menu_item_name)
 
+    def _open_asset_model(*_args) -> None:
+        MAssetFileManager().open_file()
+
     mc.menuItem(
         menu_item_name,
         parent=menu,
         label="Open Asset Model",
         annotation="Open or create the asset model file",
-        command="from pipe.m.assetfile import MAssetFileManager; "
-        "MAssetFileManager().open_file()",
+        command=_open_asset_model,
     )
 
 

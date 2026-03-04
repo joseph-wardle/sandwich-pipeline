@@ -65,7 +65,7 @@ def _texture_set_name(tex_set: sp.textureset.TextureSet) -> str:
 
 
 class SubstanceExportWindow(QMainWindow, ButtonPair):
-    _curr_asset: Asset
+    _curr_asset: Asset | None
     _central_widget: QtWidgets.QWidget
     _conn: DB
     _main_layout: QLayout
@@ -104,6 +104,9 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         self._setup_publish_ui()
 
     def _setup_publish_ui(self) -> None:
+        asset = self._curr_asset
+        assert asset is not None
+
         self.setWindowTitle("Publish Textures")
         self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
         self.resize(560, 700)
@@ -119,9 +122,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         title.setStyleSheet("font-size: 15px; font-weight: bold;")
         self._main_layout.addWidget(title)
 
-        asset_display_name = (
-            self._curr_asset.display_name or self._curr_asset.name or "Unknown Asset"
-        )
+        asset_display_name = asset.display_name or asset.name or "Unknown Asset"
         asset_label = QLabel(f"Asset: {asset_display_name}")
         asset_label.setStyleSheet("font-size: 12px; font-weight: bold;")
         asset_label.setToolTip(
@@ -154,7 +155,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         texture_set_scroll_area.setWidgetResizable(True)
         self._main_layout.addWidget(texture_set_scroll_area, 1)
 
-        mat_items = self._variant_items(self._curr_asset.material_variants, "default")
+        mat_items = self._variant_items(asset.material_variants, "default")
         mat_default = "default" if "default" in mat_items else mat_items[0]
         self._mat_var_dropdown = self._build_variant_dropdown(
             label_text="Material Variant:",
@@ -168,9 +169,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             validator=QRegExpValidator(QRegExp("[a-z][a-z_\\d]*")),
         )
 
-        geo_items = sorted(v for v in self._curr_asset.geometry_variants if v) or [
-            "main"
-        ]
+        geo_items = sorted(v for v in asset.geometry_variants if v) or ["main"]
         geo_default = "main" if "main" in geo_items else geo_items[0]
         self._geo_var_dropdown = self._build_variant_dropdown(
             label_text="Geometry Variant:",
@@ -180,9 +179,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             editable=False,
         )
 
-        material_layer_items = self._variant_items(
-            self._curr_asset.material_layers, "default"
-        )
+        material_layer_items = self._variant_items(asset.material_layers, "default")
         material_layer_default = (
             "default" if "default" in material_layer_items else material_layer_items[0]
         )
@@ -408,17 +405,16 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             ).exec_()
 
     def _run_houdini_asset_builder(self, *, geo_variant: str) -> dict[str, Any]:
+        asset = self._curr_asset
+        assert asset is not None
+
         if not Executables.hython.exists():
             raise HoudiniPublishError(
                 f"Houdini executable not found at {Executables.hython}"
             )
 
-        asset_paths = paths_for_asset(self._curr_asset)
-        asset_name = (
-            self._curr_asset.name
-            or self._curr_asset.display_name
-            or asset_paths.root.name
-        )
+        asset_paths = paths_for_asset(asset)
+        asset_name = asset.name or asset.display_name or asset_paths.root.name
         command = [
             str(Executables.hython),
             "-m",
@@ -434,10 +430,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             "--respect-existing",
         ]
 
-        if self._curr_asset.asset_path:
-            command.extend(["--asset-path", self._curr_asset.asset_path])
-        if self._curr_asset.id is not None:
-            command.extend(["--asset-id", str(self._curr_asset.id)])
+        if asset.asset_path:
+            command.extend(["--asset-path", asset.asset_path])
+        if asset.id is not None:
+            command.extend(["--asset-id", str(asset.id)])
 
         dcc = HoudiniDCC(is_python_shell=True)
         env = dcc._get_env_vars()
@@ -843,6 +839,8 @@ class TexSetWidget(QtWidgets.QWidget):
 
     def _setup_extra_channel_layout(self) -> bool:
         """Sets up extra channel layout. Returns False if there are no extra channels"""
+        if self._stack is None:
+            return False
         has_channels: bool = False
         for channel_type, channel in self._stack.all_channels().items():
             if channel_type not in self.DEFAULT_CHANNELS:

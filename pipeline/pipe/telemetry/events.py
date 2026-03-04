@@ -43,4 +43,12 @@ def event_constant_name(event_type: str) -> str:
     return constant_name
 
 
+def __getattr__(name: str) -> str:
+    """Resolve generated event constants for static analyzers and runtime access."""
+    try:
+        return EVENT_CONSTANTS[name]
+    except KeyError as exc:
+        raise AttributeError(name) from exc
+
+
 __all__ = ["EVENT_CONSTANTS", "event_constant_name", *sorted(EVENT_CONSTANTS.keys())]

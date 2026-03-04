@@ -43,7 +43,9 @@ ERROR_USD_EXPORT_FAILED: Final[str] = "USD_EXPORT_FAILED"
 ERROR_PUBLISH_COPY_FAILED: Final[str] = "PUBLISH_COPY_FAILED"
 ERROR_WINDOWS_MOVE_FAILED: Final[str] = "WINDOWS_MOVE_FAILED"
 ERROR_HOUDINI_BUILD_FAILED: Final[str] = "HOUDINI_BUILD_FAILED"
-ERROR_HOUDINI_BUILD_RESULT_PARSE_FAILED: Final[str] = "HOUDINI_BUILD_RESULT_PARSE_FAILED"
+ERROR_HOUDINI_BUILD_RESULT_PARSE_FAILED: Final[str] = (
+    "HOUDINI_BUILD_RESULT_PARSE_FAILED"
+)
 ERROR_TEXTURE_EXPORT_FAILED: Final[str] = "TEXTURE_EXPORT_FAILED"
 ERROR_TEXTURE_CONVERSION_FAILED: Final[str] = "TEXTURE_CONVERSION_FAILED"
 ERROR_FILE_OPEN_FAILED: Final[str] = "FILE_OPEN_FAILED"
@@ -200,7 +202,10 @@ _EVENT_DEFINITIONS: Final[tuple[EventDefinition, ...]] = (
             "errors_count",
         ),
         required_metrics_fields=("duration_ms",),
-        error_codes=(ERROR_HOUDINI_BUILD_FAILED, ERROR_HOUDINI_BUILD_RESULT_PARSE_FAILED),
+        error_codes=(
+            ERROR_HOUDINI_BUILD_FAILED,
+            ERROR_HOUDINI_BUILD_RESULT_PARSE_FAILED,
+        ),
     ),
     _event(
         "texture.export.substance",
@@ -253,7 +258,13 @@ _EVENT_DEFINITIONS: Final[tuple[EventDefinition, ...]] = (
         "playblast.create",
         "Playblast creation terminal event.",
         "pipe.util.playblaster",
-        required_payload_fields=("preset", "output_count", "frame_start", "frame_end", "fps"),
+        required_payload_fields=(
+            "preset",
+            "output_count",
+            "frame_start",
+            "frame_end",
+            "fps",
+        ),
         required_metrics_fields=("duration_ms",),
         error_codes=(ERROR_PLAYBLAST_FAILED,),
     ),
@@ -321,7 +332,11 @@ _EVENT_DEFINITIONS: Final[tuple[EventDefinition, ...]] = (
             "buckets_emitted_count",
             "scan_duration_ms",
         ),
-        required_metrics_fields=("size_bytes_total", "file_count_total", "dir_count_total"),
+        required_metrics_fields=(
+            "size_bytes_total",
+            "file_count_total",
+            "dir_count_total",
+        ),
         error_codes=(ERROR_STORAGE_SCAN_FAILED,),
     ),
     _event(
@@ -344,14 +359,18 @@ _EVENT_DEFINITIONS: Final[tuple[EventDefinition, ...]] = (
 )
 
 
-def _validate_unique_fields(label: str, values: tuple[str, ...], event_type: str) -> None:
+def _validate_unique_fields(
+    label: str, values: tuple[str, ...], event_type: str
+) -> None:
     if len(set(values)) != len(values):
         raise ValueError(f"Duplicate {label} for event '{event_type}'")
 
 
 def _validate_definitions(definitions: tuple[EventDefinition, ...]) -> None:
     if not definitions:
-        raise ValueError("Telemetry registry must declare at least one event definition")
+        raise ValueError(
+            "Telemetry registry must declare at least one event definition"
+        )
 
     seen_event_types: set[str] = set()
     known_error_codes = set(ERROR_CODES)
@@ -376,7 +395,9 @@ def _validate_definitions(definitions: tuple[EventDefinition, ...]) -> None:
             raise ValueError(f"Event '{event_type}' must define owner_module")
 
         if not definition.status_values:
-            raise ValueError(f"Event '{event_type}' must define at least one status value")
+            raise ValueError(
+                f"Event '{event_type}' must define at least one status value"
+            )
 
         if len(set(definition.status_values)) != len(definition.status_values):
             raise ValueError(f"Event '{event_type}' has duplicate status values")

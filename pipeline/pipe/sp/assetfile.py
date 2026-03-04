@@ -55,7 +55,7 @@ def _default_project_settings() -> sp.project.Settings:
         normal_map_format=NormalMapFormat.OpenGL,
         tangent_space_mode=TangentSpace.PerVertex,
         project_workflow=ProjectWorkflow.UVTile,
-    )
+    )  # type: ignore[call-arg]
 
 
 def _substance_docs_url() -> str:
@@ -84,7 +84,7 @@ def _metadata() -> sp.project.Metadata:
 def _run_once_on_project_edition_entered(callback: Callable[[], None]) -> None:
     """Run callback once the project enters edition state."""
 
-    def _on_project_edition_entered(_event: sp.event.ProjectEditionEntered) -> None:
+    def _on_project_edition_entered(_event: sp.event.Event) -> None:
         try:
             sp.event.DISPATCHER.disconnect(
                 sp.event.ProjectEditionEntered, _on_project_edition_entered

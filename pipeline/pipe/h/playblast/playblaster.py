@@ -166,12 +166,16 @@ def _applied_viewport_camera(
         return
 
     try:
-        original_camera = viewport.camera()
+        original_camera_path = viewport.cameraPath()
     except Exception:
-        original_camera = None
+        original_camera_path = ""
+    try:
+        default_camera = viewport.defaultCamera()
+    except Exception:
+        default_camera = None
 
     try:
-        viewport.setCamera(camera_node)
+        viewport.setCamera(camera_node.path())
     except Exception:
         log.warning(
             "Could not set viewport camera to '%s'; using current viewport camera.",
@@ -185,10 +189,12 @@ def _applied_viewport_camera(
         yield
     finally:
         try:
-            if original_camera is None:
-                viewport.setDefaultCamera()
+            if original_camera_path:
+                viewport.setCamera(original_camera_path)
+            elif default_camera is not None:
+                viewport.setDefaultCamera(default_camera)
             else:
-                viewport.setCamera(original_camera)
+                viewport.useDefaultCamera()
         except Exception:
             pass
 
