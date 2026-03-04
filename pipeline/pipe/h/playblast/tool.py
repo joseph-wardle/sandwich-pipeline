@@ -49,6 +49,7 @@ class HoudiniPlayblastLaunchContext:
     upload_to_shotgrid: bool
     shotgrid_upload_target: str
     shotgrid_review_playlist_id: int | None
+    shotgrid_review_load_error: str | None
 
 
 @dataclass(frozen=True)
@@ -192,6 +193,7 @@ def _build_launch_context(
         upload_to_shotgrid=dialog.upload_to_shotgrid,
         shotgrid_upload_target=dialog.shotgrid_upload_target,
         shotgrid_review_playlist_id=dialog.shotgrid_review_playlist_id,
+        shotgrid_review_load_error=dialog.shotgrid_review_load_error,
     )
 
 
@@ -347,7 +349,9 @@ def _upload_shot_playblast_to_shotgrid(
         upload_target,
         review_playlist_id,
         pre_upload_warning,
-    ) = _resolve_upload_target_for_request(context, shot_code=shot_code)
+        fallback_reason,
+        selected_playlist_id,
+    ) = _resolve_upload_target_for_request(context)
     upload_request = PlayblastVersionUploadRequest(
         shot_code=shot_code,
         movie_path=movie_path,
@@ -379,8 +383,17 @@ def _upload_shot_playblast_to_shotgrid(
     else:
         message_lines.append(f"ShotGrid Upload: Failed - {upload_result.message}")
 
-    if pre_upload_warning:
+    if pre_upload_warning and upload_result.ok:
         message_lines.append(f"ShotGrid Warning: {pre_upload_warning}")
+    if pre_upload_warning:
+        log.warning(
+            "ShotGrid review upload fallback to version upload "
+            "(shot_code=%s, version_id=%s, playlist_id=%s, reason=%s)",
+            shot_code,
+            upload_result.version_id,
+            selected_playlist_id,
+            fallback_reason or "review playlist unavailable",
+        )
     for warning in upload_result.warnings:
         message_lines.append(f"ShotGrid Warning: {warning}")
 
@@ -389,30 +402,33 @@ def _upload_shot_playblast_to_shotgrid(
 
 def _resolve_upload_target_for_request(
     context: HoudiniPlayblastLaunchContext,
-    *,
-    shot_code: str,
-) -> tuple[str, int | None, str | None]:
+) -> tuple[str, int | None, str | None, str | None, int | None]:
     normalized_target = str(context.shotgrid_upload_target or "").strip().lower()
     if normalized_target != UPLOAD_TARGET_REVIEW:
-        return (UPLOAD_TARGET_VERSION_ONLY, None, None)
+        return (UPLOAD_TARGET_VERSION_ONLY, None, None, None, None)
 
     playlist_id = context.shotgrid_review_playlist_id
     if isinstance(playlist_id, int) and playlist_id > 0:
-        return (UPLOAD_TARGET_REVIEW, playlist_id, None)
+        return (UPLOAD_TARGET_REVIEW, playlist_id, None, None, playlist_id)
 
-    warning = (
-        "Review upload skipped because no valid review playlist was selected. "
-        "Version upload continued."
-    )
-    log.warning(
-        "ShotGrid review upload fallback to version upload "
-        "(shot_code=%s, version_id=%s, playlist_id=%s, reason=%s)",
-        shot_code,
+    if context.shotgrid_review_load_error:
+        return (
+            UPLOAD_TARGET_VERSION_ONLY,
+            None,
+            "Review upload skipped because recent reviews could not be loaded. "
+            "Version upload continued.",
+            context.shotgrid_review_load_error,
+            playlist_id,
+        )
+
+    return (
+        UPLOAD_TARGET_VERSION_ONLY,
         None,
-        playlist_id,
+        "Review upload skipped because no valid review playlist was selected. "
+        "Version upload continued.",
         "missing review playlist id",
+        playlist_id,
     )
-    return (UPLOAD_TARGET_VERSION_ONLY, None, warning)
 
 
 def _build_success_message(

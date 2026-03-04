@@ -135,6 +135,10 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         return self._selected_shotgrid_review_playlist_id()
 
     @property
+    def shotgrid_review_load_error(self) -> str | None:
+        return self._shotgrid_review_load_error
+
+    @property
     def shotgrid_description(self) -> str:
         return self._shotgrid_description_field.text().strip()
 
@@ -652,7 +656,10 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
             review_options = list_recent_review_playlists(conn=self._conn, limit=10)
         except Exception as exc:
             self._shotgrid_review_load_error = str(exc).strip() or type(exc).__name__
-            log.exception("Could not load ShotGrid review playlists")
+            log.exception(
+                "Could not load ShotGrid review playlists for shot '%s'",
+                self._shot_code_value.text().strip() or "<unknown>",
+            )
             self._set_review_combo_placeholder("Could not load reviews. Click Refresh.")
             return
 
@@ -748,6 +755,8 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
             and self._selected_shotgrid_review_playlist_id() is None
         ):
             if self._shotgrid_review_load_error:
+                if self._is_shotgrid_version_upload_enabled():
+                    return None
                 return (
                     "Could not load ShotGrid reviews. Click Refresh, or disable "
                     "'Upload to review for dailies'."
