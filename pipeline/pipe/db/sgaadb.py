@@ -621,19 +621,15 @@ class SGaaDB(DBInterface):
 
         filters: list[Filter] = [
             ("project", "is", {"type": "Project", "id": self._id}),
-            # Closed review playlists should not be presented as active options.
-            ("sg_status", "is_not", "clsd"),
         ]
         fields = ["id", "code", "updated_at", "created_at"]
         order = [{"field_name": "updated_at", "direction": "desc"}]
 
-        raw_playlists = self._sg.find(
-            "Playlist",
-            filters,
-            fields,
+        raw_playlists = self._find_recent_project_playlists(
+            base_filters=filters,
+            fields=fields,
             order=order,
             limit=normalized_limit,
-            include_archived_projects=False,
         )
 
         normalized_rows: list[dict[str, Any]] = []
@@ -643,6 +639,71 @@ class SGaaDB(DBInterface):
                 continue
             normalized_rows.append(row)
         return normalized_rows
+
+    def _find_recent_project_playlists(
+        self,
+        *,
+        base_filters: list[Filter],
+        fields: list[str],
+        order: list[dict[str, str]],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Query recent project playlists with a schema-safe active filter.
+
+        Some projects expose a Playlist status field, while others do not.
+        We first try adding an explicit "not closed" status filter when the
+        schema reports a supported status field. If that query fails because
+        the field/value is not valid for the current site schema, we retry
+        without the status filter so review loading never hard-fails.
+        """
+
+        status_filter = self._playlist_active_status_filter()
+        filters = list(base_filters)
+        if status_filter is not None:
+            filters.append(status_filter)
+
+        try:
+            return self._sg.find(
+                "Playlist",
+                filters,
+                fields,
+                order=order,
+                limit=limit,
+                include_archived_projects=False,
+            )
+        except shotgun_api3.Fault:
+            if status_filter is None:
+                raise
+            log.warning(
+                "Playlist active-status filter failed; retrying without status filter.",
+                exc_info=True,
+            )
+            return self._sg.find(
+                "Playlist",
+                base_filters,
+                fields,
+                order=order,
+                limit=limit,
+                include_archived_projects=False,
+            )
+
+    def _playlist_active_status_filter(self) -> Filter | None:
+        """Return a best-effort Playlist status filter, if schema supports one."""
+
+        try:
+            schema = self._sg.schema_field_read("Playlist")
+        except Exception:
+            log.debug("Could not read Playlist schema; skipping status filter.")
+            return None
+
+        if not isinstance(schema, dict):
+            return None
+
+        if "sg_status_list" in schema:
+            return ("sg_status_list", "is_not", "clsd")
+        if "sg_status" in schema:
+            return ("sg_status", "is_not", "clsd")
+        return None
 
     def link_version_to_playlist(
         self,

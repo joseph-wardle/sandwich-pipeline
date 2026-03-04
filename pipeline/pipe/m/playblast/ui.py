@@ -366,9 +366,6 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         self._shotgrid_review_combo.setToolTip(
             "Select the ShotGrid review playlist to link this Version to."
         )
-        self._shotgrid_review_combo.currentIndexChanged.connect(
-            self._on_source_settings_changed
-        )
         row_layout.addWidget(self._shotgrid_review_combo)
 
         self._shotgrid_review_refresh_button = QPushButton("Refresh")
@@ -381,6 +378,9 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         row_layout.addWidget(self._shotgrid_review_refresh_button)
 
         self._set_review_combo_placeholder("No reviews loaded yet.")
+        self._shotgrid_review_combo.currentIndexChanged.connect(
+            self._on_source_settings_changed
+        )
         return row_widget
 
     def _build_custom_source_tab(self) -> QWidget:
@@ -882,9 +882,13 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         return None
 
     def _set_review_combo_placeholder(self, label: str) -> None:
-        self._shotgrid_review_combo.clear()
-        self._shotgrid_review_combo.addItem(label, None)
-        self._shotgrid_review_combo.setCurrentIndex(0)
+        previous_signal_state = self._shotgrid_review_combo.blockSignals(True)
+        try:
+            self._shotgrid_review_combo.clear()
+            self._shotgrid_review_combo.addItem(label, None)
+            self._shotgrid_review_combo.setCurrentIndex(0)
+        finally:
+            self._shotgrid_review_combo.blockSignals(previous_signal_state)
 
     def _ensure_shotgrid_reviews_loaded_lazily(self) -> None:
         if self._shotgrid_review_lazy_load_attempted:
@@ -904,23 +908,28 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             return
 
         self._shotgrid_review_load_error = None
-        self._shotgrid_review_combo.clear()
+        previous_signal_state = self._shotgrid_review_combo.blockSignals(True)
+        try:
+            self._shotgrid_review_combo.clear()
 
-        if not review_options:
-            self._set_review_combo_placeholder("No recent reviews found.")
-            return
+            if not review_options:
+                self._shotgrid_review_combo.addItem("No recent reviews found.", None)
+                self._shotgrid_review_combo.setCurrentIndex(0)
+                return
 
-        selected_index = 0
-        for index, option in enumerate(review_options):
-            label = f"{option.display_name} (#{option.playlist_id})"
-            self._shotgrid_review_combo.addItem(label, option.playlist_id)
-            if (
-                previous_playlist_id is not None
-                and option.playlist_id == previous_playlist_id
-            ):
-                selected_index = index
+            selected_index = 0
+            for index, option in enumerate(review_options):
+                label = f"{option.display_name} (#{option.playlist_id})"
+                self._shotgrid_review_combo.addItem(label, option.playlist_id)
+                if (
+                    previous_playlist_id is not None
+                    and option.playlist_id == previous_playlist_id
+                ):
+                    selected_index = index
 
-        self._shotgrid_review_combo.setCurrentIndex(selected_index)
+            self._shotgrid_review_combo.setCurrentIndex(selected_index)
+        finally:
+            self._shotgrid_review_combo.blockSignals(previous_signal_state)
 
     def _shotgrid_upload_description(self) -> str:
         return self._shotgrid_description_field.text().strip()
