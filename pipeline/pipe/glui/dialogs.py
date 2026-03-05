@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from Qt import QtCore, QtWidgets
 
@@ -43,16 +43,10 @@ class DialogButtons(ButtonPair):
     reject: typing.Callable[..., None]
 
     def _init_buttons(
-        self,
-        has_cancel_button: bool,
-        ok_name: str = "OK",
-        cancel_name: str = "Cancel",
-    ) -> None:
-        super(DialogButtons, self)._init_buttons(
-            has_cancel_button,
-            ok_name=ok_name,
-            cancel_name=cancel_name,
-        )
+        self, has_cancel_button: bool, *args: object
+    ) -> None:  # ty:ignore[invalid-method-override]
+        super_init_buttons = cast(Any, super(DialogButtons, self)._init_buttons)
+        super_init_buttons(has_cancel_button, *args)
 
         self.buttons.accepted.connect(self.accept)
         if has_cancel_button:
@@ -458,7 +452,8 @@ class PaddedSpinBox(QtWidgets.QSpinBox):
         regExp = QtCore.QRegExp(("(\\d+)(\\s*[xx]\\s*\\d+)?"))
 
         if regExp.exactMatch(text):
-            return int(regExp.cap(1))
+            cap_value = cast(Any, regExp.cap(1))
+            return cast(int, cap_value.toInt())
         else:
             return 0
 

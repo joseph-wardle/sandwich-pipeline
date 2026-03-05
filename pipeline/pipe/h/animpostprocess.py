@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import hou
 from env_sg import DB_Config
 
 from pipe.db import DB
+from pipe.struct.db import EnvironmentStub, SequenceStub
 
 if TYPE_CHECKING:
     pass
@@ -42,10 +43,13 @@ class AnimPostProcessor:
                 load_layers.append(load_layer)
         else:
             # Fallback to single set logic
-            env_stub = shot.set or self._conn.get_sequence_by_stub(shot.sequence).set  # type: ignore[assignment, arg-type]
-            if env_stub is None:
-                hou.ui.displayMessage("No environment set found for shot.")
-                return
+            env_stub = cast(
+                EnvironmentStub,
+                shot.set
+                or self._conn.get_sequence_by_stub(
+                    cast(SequenceStub, shot.sequence)
+                ).set,
+            )
             layout = self._conn.get_env_by_stub(env_stub)
             load_layer = stage_ctx.createNode("dbclark::main::Bobo_Load_Layers::1.0")
             load_layer.parm("shot").set(f"$JOB/{shot_path}")  # type: ignore[union-attr]

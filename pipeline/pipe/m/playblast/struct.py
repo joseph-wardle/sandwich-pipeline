@@ -162,8 +162,6 @@ class SaveLocation:
 
     @property
     def path(self) -> str | Path:
-        path_value = self._path
-        if isinstance(path_value, (str, Path)):
-            return path_value
-        path_factory = cast(Callable[[], str | Path], path_value)
-        return path_factory()
+        if callable(self._path):
+            return cast(Callable[[], str | Path], self._path)()
+        return self._path

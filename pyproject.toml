@@ -19,7 +19,6 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ruff>=0.5.7,<0.6",
-    "mypy>=1.11.1,<2",
     "maya-stubs>=0.4.1,<0.5",
     "types-usd>=24.5.1,<25",
     "types-houdini>=19.5.1,<20",
@@ -32,54 +31,6 @@ dev = [
     "nptyping>=2.5.0,<3",
     "ty>=0.0.20",
 ]
-
-[tool.mypy]
-exclude = [
-    ".git",
-    'MOPS',
-    "NukeSurvivalToolkit_publicRelease",
-    'VFX-LYNX',
-    'ae_SVG',
-    'dwpicker.*',
-    'lib/python',
-    'maya-timeline-marker_git',
-    "mayacapture",
-    'modelChecker',
-    'pin_shift.py',
-    'rjg',
-    'y-rig',
-    'shotgun_api3',
-    'studiolibrary',
-    'timeline_marker',
-    'houdini/scripts',
-    'maya/scripts'
-]
-files = 'pipeline'
-
-[[tool.mypy.overrides]]
-module = "dwpicker.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "modelChecker.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "substance_painter_plugins"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "yrig.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "tractor.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "pipe.db.shotgun_api3.*"
-follow_imports = "skip"
-ignore_errors = true
 
 [tool.ruff]
 exclude = [
@@ -117,19 +68,17 @@ allowed-unresolved-imports = [
     "pipe.db.shotgun_api3.**",
 ]
 replace-imports-with-any = [
-    # Existing parity setting with mypy's shotgun handling.
+    # Keep known dynamic legacy boundaries as `Any`.
     "pipe.db.shotgun_api3.**",
-    # Global DCC boundaries: treat dynamic host APIs as Any
+    # Keep Maya command modules dynamic to avoid high-volume legacy churn.
     "maya.cmds",
     "maya.cmds.**",
     "maya.mel",
     "maya.mel.**",
+    # `mayaUsd` remains dynamic and is not fully typed.
     "mayaUsd",
     "mayaUsd.**",
-    "hou",
-    "hou.**",
-    "nuke",
-    "nuke.**",
+    # Substance API surface is partially dynamic in plugin runtime.
     "substance_painter",
     "substance_painter.**",
 ]

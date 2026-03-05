@@ -3,6 +3,7 @@ import random
 import re
 import time
 from functools import partial
+from typing import Any, cast
 
 import nuke
 from env_sg import DB_Config
@@ -125,30 +126,7 @@ class CascadingComboBox(QtWidgets.QWidget):
 
         item = selected_items[0]
         widget = self.thumbnail_list.itemWidget(item)
-        if widget is None:
-            QtWidgets.QMessageBox.warning(
-                self, "Missing Widget", "Could not resolve selected render folder."
-            )
-            return
-        layout = widget.layout()
-        if layout is None:
-            QtWidgets.QMessageBox.warning(
-                self, "Missing Layout", "Could not resolve selected render folder."
-            )
-            return
-        first_item = layout.itemAt(0)
-        if first_item is None:
-            QtWidgets.QMessageBox.warning(
-                self, "Missing Label", "Could not resolve selected render folder."
-            )
-            return
-        label_widget = first_item.widget()
-        if not isinstance(label_widget, QtWidgets.QLabel):
-            QtWidgets.QMessageBox.warning(
-                self, "Missing Label", "Could not resolve selected render folder."
-            )
-            return
-        render_folder = label_widget.text()
+        render_folder = cast(Any, widget).layout().itemAt(0).widget().text()
 
         base_path = "/groups/bobo/production/shot"
         render_dir = os.path.join(base_path, self.default_shot, "render", render_folder)
@@ -308,30 +286,7 @@ class CascadingComboBox(QtWidgets.QWidget):
 
         item = selected_items[0]
         widget = self.thumbnail_list.itemWidget(item)
-        if widget is None:
-            QtWidgets.QMessageBox.warning(
-                self, "Missing Widget", "Could not resolve selected render folder."
-            )
-            return
-        layout = widget.layout()
-        if layout is None:
-            QtWidgets.QMessageBox.warning(
-                self, "Missing Layout", "Could not resolve selected render folder."
-            )
-            return
-        first_item = layout.itemAt(0)
-        if first_item is None:
-            QtWidgets.QMessageBox.warning(
-                self, "Missing Label", "Could not resolve selected render folder."
-            )
-            return
-        label_widget = first_item.widget()
-        if not isinstance(label_widget, QtWidgets.QLabel):
-            QtWidgets.QMessageBox.warning(
-                self, "Missing Label", "Could not resolve selected render folder."
-            )
-            return
-        render_folder = label_widget.text()
+        render_folder = cast(Any, widget).layout().itemAt(0).widget().text()
         self.current_render = render_folder
 
         base_path = "/groups/bobo/production/shot"
@@ -382,20 +337,13 @@ class CascadingComboBox(QtWidgets.QWidget):
             return
 
         base_path = "/groups/dungeons/production/shot"
-        if self.current_render is None:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "No Render Selected",
-                "Please select a render folder before importing layers.",
-            )
-            return
         for item in selected_items:
             layer_folder = item.text()
             images_dn_path = os.path.join(
                 base_path,
                 self.default_shot,
                 "render",
-                self.current_render,
+                cast(str, self.current_render),
                 layer_folder,
                 "images_dn",
             )

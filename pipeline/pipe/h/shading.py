@@ -866,7 +866,9 @@ class MatlibNodeBuilder:
             return None
         net_box.setName(name, unique_name=True)
         try:
-            cast(Any, net_box).setUserData(_AUTO_TAG_KEY, _AUTO_TAG_VALUE)
+            net_box.setUserData(
+                _AUTO_TAG_KEY, _AUTO_TAG_VALUE
+            )  # ty:ignore[unresolved-attribute]
         except Exception:
             pass
         return net_box
@@ -896,7 +898,7 @@ class MatlibNodeBuilder:
     def _set_material_flag(node: hou.Node, state: bool) -> None:
         try:
             if hasattr(node, "setMaterialFlag"):
-                node.setMaterialFlag(state)
+                node.setMaterialFlag(state)  # ty:ignore[call-non-callable]
         except hou.OperationFailed:
             pass
 
