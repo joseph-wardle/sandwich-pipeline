@@ -8,7 +8,7 @@ import time
 import traceback
 from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import maya.cmds as mc
 from env_sg import DB_Config
@@ -20,8 +20,6 @@ from pipe.m.util import maintain_selection
 from pipe.struct.db import SGEntity
 
 if TYPE_CHECKING:
-    from typing import Any
-
     from Qt.QtWidgets import QWidget
 
 log = logging.getLogger(__name__)
@@ -319,13 +317,14 @@ class Publisher:
                     )
                     from pipe.m.publish.previs_asset import PublishPrevisAssetDialog
 
+                    dialog_type = cast(Any, self._dialog_T)
                     if self._dialog_T in (
                         PublishAssetOptionsDialog,
                         PublishAssetPickerDialog,
                         PublishPrevisAssetDialog,
                     ):
                         # Pass extra parameter (conn) if dialog needs DB access
-                        self._dialog = self._dialog_T(
+                        self._dialog = dialog_type(
                             self._window, entity_list, self._conn
                         )
                     else:
@@ -335,9 +334,8 @@ class Publisher:
                     if not self._dialog.exec_():
                         return
 
-                    self._selected_item = self._dialog.get_selected_item()
-
-                    if self._selected_item is None:
+                    selected_item = self._dialog.get_selected_item()
+                    if selected_item is None:
                         error = MessageDialog(
                             self._window,
                             "Error: Nothing selected. Nothing exported",
@@ -352,6 +350,7 @@ class Publisher:
                             publish_path=publish_path,
                         )
                         return
+                    self._selected_item = selected_item
 
                     # get the corresponding SGEntity object
                     if self._use_sg_entity:

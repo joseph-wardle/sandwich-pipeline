@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-import attrs
-
 from typing import TYPE_CHECKING
+
+import attrs
 
 if TYPE_CHECKING:
     from .db import Shot
 
 from .util import JsonSerializable
 
-
 PREROLL_DURATION = 55
 
 
-@attrs.define(frozen=True)
+@attrs.define
 class Timeline(JsonSerializable):
     start: int
     end: int

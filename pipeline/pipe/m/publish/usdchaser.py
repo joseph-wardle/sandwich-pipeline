@@ -78,17 +78,17 @@ def scale_down_geo(stage: Usd.Stage, scale_factor: float = 0.01) -> None:
 
             if xform_type == UsdGeom.XformOpTypes.translate:
                 for frame in get_frames_from_attr(xformop):
-                    data: Gf.Vec3d = xformop.Get(frame)  # type: ignore[no-redef]
-                    data *= scale_factor
-                    xformop.Set(data, frame)
+                    translate_data: Gf.Vec3d = xformop.Get(frame)
+                    translate_data *= scale_factor
+                    xformop.Set(translate_data, frame)
 
             elif xform_type == UsdGeom.XformOpTypes.transform:
                 for frame in get_frames_from_attr(xformop):
-                    data: Gf.Matrix4d = xformop.GetOpTransform(frame)  # type: ignore[no-redef]
-                    translate = data.ExtractTranslation()
+                    matrix_data: Gf.Matrix4d = xformop.GetOpTransform(frame)
+                    translate = matrix_data.ExtractTranslation()
                     translate *= scale_factor
-                    data.SetTranslateOnly(translate)
-                    xformop.Set(data, frame)
+                    matrix_data.SetTranslateOnly(translate)
+                    xformop.Set(matrix_data, frame)
 
         if not (prim.IsA(UsdGeom.Mesh) or prim.IsA(UsdGeom.BasisCurves)):  # type: ignore[call-overload]
             continue

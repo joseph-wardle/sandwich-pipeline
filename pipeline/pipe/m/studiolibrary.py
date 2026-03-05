@@ -1,8 +1,11 @@
-import studiolibrary
+from typing import Any, cast
+
+import studiolibrary  # type: ignore[import-not-found]
 from shared.util import get_anim_path
 
 
 def run():
+    studio_module = cast(Any, studiolibrary)
     libraries = [
         {
             "name": "Bobo Poses",
@@ -13,5 +16,5 @@ def run():
             },
         },
     ]
-    studiolibrary.setLibraries(libraries)
-    studiolibrary.main()
+    studio_module.setLibraries(libraries)
+    studio_module.main()

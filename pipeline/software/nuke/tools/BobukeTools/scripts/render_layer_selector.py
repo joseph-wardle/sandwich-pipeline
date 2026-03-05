@@ -1,13 +1,15 @@
-import nuke
-from Qt import QtWidgets, QtCore, QtGui
-
 import os
 import random
+import re
 import time
 from functools import partial
-from pipe.db import DB
+
+import nuke
 from env_sg import DB_Config
-import re
+from pipe.db import DB
+from Qt import QtCore, QtGui, QtWidgets
+
+simple_window = None
 
 
 class CascadingComboBox(QtWidgets.QWidget):
@@ -268,7 +270,7 @@ class CascadingComboBox(QtWidgets.QWidget):
                         "%m-%d-%Y", time.localtime(creation_time)
                     )
                     item.setText(f"{folder_name}\n{creation_date}")
-                    item.setTextAlignment(QtCore.Qt.AlignCenter)
+                    item.setTextAlignment(int(QtCore.Qt.AlignCenter))
                     items_list.append((creation_time, item))
 
         # Sort items by creation time descending (newest first).
@@ -341,7 +343,7 @@ class CascadingComboBox(QtWidgets.QWidget):
                     )
                     item.setIcon(QtGui.QIcon(scaled_pixmap))
                     item.setText(layer_name)
-                    item.setTextAlignment(QtCore.Qt.AlignCenter)
+                    item.setTextAlignment(int(QtCore.Qt.AlignCenter))
                     layer_items.append(item)
 
             for item in layer_items:
@@ -397,6 +399,13 @@ class CascadingComboBox(QtWidgets.QWidget):
             return
 
         base_path = r"/groups/dungeons/production/shot"
+        if self.current_render is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "No Render Selected",
+                "Please select a render folder before importing layers.",
+            )
+            return
         for item in selected_items:
             layer_folder = (
                 item.text()

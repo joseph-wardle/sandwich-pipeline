@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import logging
-
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Callable, cast
 
 from pipe.struct.db import Shot
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from typing import Literal
+
     from pipe.util import Playblaster
-    from typing import Callable, Literal
 
 
 log = logging.getLogger(__name__)
@@ -162,7 +162,8 @@ class SaveLocation:
 
     @property
     def path(self) -> str | Path:
-        if callable(self._path):
-            return self._path()
-        else:
-            return self._path
+        path_value = self._path
+        if isinstance(path_value, (str, Path)):
+            return path_value
+        path_factory = cast(Callable[[], str | Path], path_value)
+        return path_factory()

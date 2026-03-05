@@ -345,7 +345,8 @@ def _restore_guides(
     ):
         return
 
-    for name, enabled in guides_state.items():
+    typed_guides_state = cast(dict[str, bool], guides_state)
+    for name, enabled in typed_guides_state.items():
         guide = getattr(guide_enum, name, None)
         if guide is None:
             continue

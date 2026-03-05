@@ -191,7 +191,7 @@ class SGEntityStub(SGDiffable):
     id: int
 
 
-@attrs.frozen
+@attrs.define
 class AssetStub(SGEntityStub):
     """Represent "stubs" that come from ShotGrid
     Stubs are JSON objects with 3 fields: id, name (display name), and type
@@ -302,7 +302,7 @@ class EnvironmentStub(AssetStub):
     pass
 
 
-@attrs.frozen
+@attrs.define
 class SequenceStub(SGEntityStub):
     """Represent sequence "stubs" that come from ShotGrid"""
 
@@ -331,7 +331,7 @@ class Sequence(SGEntity):
     )
 
 
-@attrs.frozen
+@attrs.define
 class ShotStub(SGEntityStub):
     """Represent shot "stubs" that come from ShotGrid"""
 
@@ -395,7 +395,7 @@ class Shot(SGEntity):
         return diff
 
 
-@attrs.frozen
+@attrs.define
 class UserStub(SGEntityStub):
     """Represent user "stubs" that come from ShotGrid"""
 
@@ -411,7 +411,7 @@ class User(SGEntity):
     login: Optional[str] = field(metadata={_SG_NAME: "login"})
 
 
-@attrs.frozen
+@attrs.define
 class TaskStub(SGEntityStub):
     """Represent shot "stubs" that come from ShotGrid"""
 

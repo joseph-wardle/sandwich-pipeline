@@ -51,10 +51,12 @@ if TYPE_CHECKING:
 from .publisher import Publisher
 
 try:
-    from modelChecker.modelChecker_UI import UI as MCUI
+    from modelChecker.modelChecker_UI import UI as ImportedMCUI
 except TypeError:
     # this external code throws errors when in headless mode
-    MCUI = object
+    ImportedMCUI = cast(Any, object)
+
+MCUI: type[Any] = cast(type[Any], ImportedMCUI)
 
 log = logging.getLogger(__name__)
 ENABLE_HOUDINI_ASSET_BUILD = True
@@ -712,11 +714,12 @@ class AssetPublisher(Publisher):
                     return
 
                 if entity_list := self._get_entity_list():
+                    dialog_type = cast(Any, self._dialog_T)
                     if self._dialog_T in (
                         PublishAssetOptionsDialog,
                         PublishAssetPickerDialog,
                     ):
-                        self._dialog = self._dialog_T(
+                        self._dialog = dialog_type(
                             self._window, entity_list, self._conn
                         )
                     else:
@@ -725,8 +728,8 @@ class AssetPublisher(Publisher):
                     if not self._dialog.exec_():
                         return
 
-                    self._selected_item = self._dialog.get_selected_item()
-                    if self._selected_item is None:
+                    selected_item = self._dialog.get_selected_item()
+                    if selected_item is None:
                         MessageDialog(
                             self._window,
                             "Error: Nothing selected. Nothing exported",
@@ -740,12 +743,16 @@ class AssetPublisher(Publisher):
                             publish_path=publish_path,
                         )
                         return
+                    self._selected_item = selected_item
 
                     if self._use_sg_entity:
                         try:
-                            self._entity = self._get_entity_from_name(
-                                self._selected_item
-                            )
+                            entity = self._get_entity_from_name(self._selected_item)
+                            if entity is None:
+                                raise AssertionError(
+                                    "Selected item is not a valid SG entity"
+                                )
+                            self._entity = entity
                         except AssertionError as exc:
                             entity_label = Asset.__name__
                             MessageDialog(
@@ -766,9 +773,8 @@ class AssetPublisher(Publisher):
                             return
 
                 self._restart_publish_telemetry_timer(publish_telemetry)
-                self._publish_path = self._get_save_path()
-                publish_path = self._publish_path
-                if not self._publish_path:
+                save_path = self._get_save_path()
+                if not save_path:
                     self._emit_publish_error(
                         publish_telemetry,
                         error_code_name="precheck",
@@ -778,6 +784,8 @@ class AssetPublisher(Publisher):
                     )
                     mc.error("No save path found!")
                     return
+                self._publish_path = save_path
+                publish_path = save_path
 
                 if not self._presave():
                     self._emit_publish_error(

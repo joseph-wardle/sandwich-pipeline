@@ -1,5 +1,4 @@
-from collections import Counter
-from typing import DefaultDict
+from collections import Counter, defaultdict
 
 from maya.api.OpenMaya import MItDag
 
@@ -18,7 +17,7 @@ class TestDuplicateDagNames(RigBuildTest):
     def run(self) -> bool:
         dag_iterator = MItDag(MItDag.kDepthFirst)
         short_name_counter: Counter[str] = Counter()
-        name_to_paths: DefaultDict[str, list[str]] = DefaultDict(list[str])
+        name_to_paths: defaultdict[str, list[str]] = defaultdict(list)
         for dag_fn in iter_dag_nodes(dag_iterator):
             short_name = dag_fn.name()
             full_path = dag_fn.fullPathName()

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 import re
-
-from Qt import QtWidgets, QtCore
 from typing import TYPE_CHECKING
+
+from Qt import QtCore, QtWidgets
 
 if TYPE_CHECKING:
     import typing
@@ -42,8 +42,17 @@ class DialogButtons(ButtonPair):
     accept: typing.Callable[..., None]
     reject: typing.Callable[..., None]
 
-    def _init_buttons(self, has_cancel_button: bool, *args) -> None:
-        super(DialogButtons, self)._init_buttons(has_cancel_button, *args)
+    def _init_buttons(
+        self,
+        has_cancel_button: bool,
+        ok_name: str = "OK",
+        cancel_name: str = "Cancel",
+    ) -> None:
+        super(DialogButtons, self)._init_buttons(
+            has_cancel_button,
+            ok_name=ok_name,
+            cancel_name=cancel_name,
+        )
 
         self.buttons.accepted.connect(self.accept)
         if has_cancel_button:
@@ -164,8 +173,8 @@ class FilteredListDialog(QtWidgets.QDialog, DialogButtons, DialogFilteredList):
         title: str = "Filtered List",
         list_label: str | None = None,
         include_filter_field: bool | None = True,
-        accept_button_name: str | None = "OK",
-        reject_button_name: str | None = "Cancel",
+        accept_button_name: str = "OK",
+        reject_button_name: str = "Cancel",
     ) -> None:
         super(FilteredListDialog, self).__init__(parent)
 
@@ -441,21 +450,21 @@ class VersionWindow(QtWidgets.QMainWindow):
 # PySide2 UI - custom QSpinBox that supports a zero padded syntax
 # Subclass PySide2.QtWidgets.QSpinBox
 class PaddedSpinBox(QtWidgets.QSpinBox):
-    def __init__(self, parent=None):
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super(PaddedSpinBox, self).__init__(parent)
 
     # Custom format of the actual value returned from the text
-    def valueFromText(self, text):
+    def valueFromText(self, text: str) -> int:
         regExp = QtCore.QRegExp(("(\\d+)(\\s*[xx]\\s*\\d+)?"))
 
         if regExp.exactMatch(text):
-            return regExp.cap(1).toInt()
+            return int(regExp.cap(1))
         else:
             return 0
 
     # Custom format of the text displayed from the value
-    def textFromValue(self, value):
-        return str(value).zfill(3)
+    def textFromValue(self, val: int) -> str:
+        return str(val).zfill(3)
 
 
 # def large_input(label, title='Input', text=None):
@@ -477,7 +486,13 @@ class PaddedSpinBox(QtWidgets.QSpinBox):
 class CheckboxSelect(QtWidgets.QDialog):
     submitted = QtCore.Signal(list)
 
-    def __init__(self, text, options, title="", parent=None):
+    def __init__(
+        self,
+        text: str,
+        options: list[str],
+        title: str = "",
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
         """Creates check box options based on the given list of strings"""
         """returns a list of booleans, each one correstponding to its respective option"""
         super(CheckboxSelect, self).__init__(parent=parent)
@@ -485,11 +500,11 @@ class CheckboxSelect(QtWidgets.QDialog):
         # window = QtWidgets.QDialog(parent=parent)
         # self.setWindowTitle(title)
 
-        self.layout = QtWidgets.QVBoxLayout()
+        self._layout = QtWidgets.QVBoxLayout()
 
         label = QtWidgets.QLabel()
         label.setText(text)
-        self.layout.addWidget(label)
+        self._layout.addWidget(label)
 
         self.boxes = []
 
@@ -499,22 +514,22 @@ class CheckboxSelect(QtWidgets.QDialog):
             newBox.setText(option)
             newBox.setChecked(True)
             self.boxes.append(newBox)
-            self.layout.addWidget(newBox)
+            self._layout.addWidget(newBox)
 
         self.initializeSubmitButton()
 
-        self.setLayout(self.layout)
+        self.setLayout(self._layout)
         self.show()
 
-    def initializeSubmitButton(self):
+    def initializeSubmitButton(self) -> None:
         self.button = QtWidgets.QPushButton("Accept")
         self.button.setSizePolicy(
             QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.Minimum
         )
         self.button.clicked.connect(self.submit)
-        self.layout.addWidget(self.button)
+        self._layout.addWidget(self.button)
 
-    def submit(self):
+    def submit(self) -> None:
         values = []
         for box in self.boxes:
             values.append(box.isChecked())
