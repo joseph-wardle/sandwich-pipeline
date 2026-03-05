@@ -1,0 +1,377 @@
+pipeline/pipe/db/sgaadb.py:169:37: warning[deprecated] The function `wrap_socket` is deprecated: Deprecated since Python 3.7; removed in Python 3.12. Use `SSLContext.wrap_socket()` instead.
+pipeline/pipe/glui/dialogs.py:45:9: error[invalid-method-override] Invalid override of method `_init_buttons`: Definition is incompatible with `ButtonPair._init_buttons`
+pipeline/pipe/glui/dialogs.py:452:20: error[unresolved-attribute] Object of type `str` has no attribute `toInt`
+pipeline/pipe/glui/dialogs.py:457:9: error[invalid-method-override] Invalid override of method `textFromValue`: Definition is incompatible with `QSpinBox.textFromValue`
+pipeline/pipe/glui/dialogs.py:488:9: error[invalid-assignment] Object of type `QVBoxLayout` is not assignable to attribute `layout` of type `def layout(self) -> QLayout`
+pipeline/pipe/glui/dialogs.py:515:9: error[unresolved-attribute] Attribute `addWidget` is not defined on `bound method Self@initializeSubmitButton.layout() -> QLayout` in union `(bound method Self@initializeSubmitButton.layout() -> QLayout) | Unknown | QVBoxLayout`
+pipeline/pipe/h/animpostprocess.py:46:49: error[invalid-argument-type] Argument to bound method `__call__` is incorrect: Expected `EnvironmentStub`, found `EnvironmentStub | None`
+pipeline/pipe/h/hipfile/filemanager.py:31:9: error[invalid-method-override] Invalid override of method `_check_unsaved_changes`: Definition is incompatible with `FileManager._check_unsaved_changes`
+pipeline/pipe/h/hipfile/filemanager.py:44:9: error[invalid-method-override] Invalid override of method `_open_file`: Definition is incompatible with `FileManager._open_file`
+pipeline/pipe/h/hipfile/shot.py:48:9: error[invalid-assignment] Object of type `str | None` is not assignable to attribute `_department` of type `DEPARTMENT`
+pipeline/pipe/h/nodelayouts.py:356:13: error[call-non-callable] Object of type `object` is not callable
+pipeline/pipe/h/nodelayouts.py:472:5: error[unresolved-attribute] Attribute `set` is not defined on `None` in union `Parm | None`
+pipeline/pipe/h/nodelayouts.py:475:5: error[unresolved-attribute] Attribute `set` is not defined on `None` in union `Parm | None`
+pipeline/pipe/h/nodelayouts.py:476:5: error[unresolved-attribute] Attribute `set` is not defined on `None` in union `Parm | None`
+pipeline/pipe/h/nodelayouts.py:477:5: error[unresolved-attribute] Attribute `set` is not defined on `None` in union `Parm | None`
+pipeline/pipe/h/nodelayouts.py:478:5: error[unresolved-attribute] Attribute `set` is not defined on `None` in union `Parm | None`
+pipeline/pipe/h/nodelayouts.py:479:5: error[unresolved-attribute] Attribute `set` is not defined on `None` in union `Parm | None`
+pipeline/pipe/h/nodelayouts.py:480:5: error[unresolved-attribute] Attribute `set` is not defined on `None` in union `Parm | None`
+pipeline/pipe/h/nodelayouts.py:481:5: error[unresolved-attribute] Attribute `set` is not defined on `None` in union `Parm | None`
+pipeline/pipe/h/nodelayouts.py:482:5: error[unresolved-attribute] Attribute `set` is not defined on `None` in union `Parm | None`
+pipeline/pipe/h/nodelayouts.py:485:5: error[unresolved-attribute] Attribute `setExpression` is not defined on `None` in union `Parm | None`
+pipeline/pipe/h/playblast/playblaster.py:349:17: error[no-matching-overload] No overload of function `getattr` matches arguments
+pipeline/pipe/h/playblast/ui.py:962:24: error[unresolved-attribute] Object of type `PaneTab` has no attribute `curViewport`
+pipeline/pipe/h/publish.py:624:16: error[call-top-callable] Object of type `Top[(...) -> object]` is not safe to call; its signature is not known
+pipeline/pipe/h/publish.py:998:56: error[invalid-argument-type] Argument to function `setContextOption` is incorrect: Expected `str`, found `Literal[1]`
+pipeline/pipe/h/publish.py:1007:64: error[invalid-argument-type] Argument to function `setContextOption` is incorrect: Expected `str`, found `None | int | float | str`
+pipeline/pipe/h/publish.py:1243:9: error[invalid-declaration] Cannot declare type `Mapping[str, Any]` for inferred type `dict[str, str] | (int & Top[Mapping[Unknown, object]]) | (float & Top[Mapping[Unknown, object]]) | dict[Unknown, Unknown]`
+pipeline/pipe/h/publish.py:1248:16: error[no-matching-overload] No overload of bound method `get` matches arguments
+pipeline/pipe/h/publish.py:1252:16: error[no-matching-overload] No overload of bound method `get` matches arguments
+pipeline/pipe/h/shading.py:41:16: error[no-matching-overload] No overload of bound method `join` matches arguments
+pipeline/pipe/h/shading.py:896:17: error[call-non-callable] Object of type `object` is not callable
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:25:21: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `(list[str] & ~AlwaysFalsy) | (list[Unknown] & ~AlwaysFalsy)`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:31:21: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `(list[str] & ~AlwaysFalsy) | (list[Unknown] & ~AlwaysFalsy)`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:48:25: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `list[Unknown | str] & ~AlwaysFalsy`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:53:17: error[invalid-argument-type] Argument to function `delete` is incorrect: Expected `str`, found `list[str]`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:122:9: error[invalid-argument-type] Argument to function `nurbsSquare` is incorrect: Expected `bool`, found `Literal[1]`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:125:51: error[unknown-argument] Argument `r` does not match any known parameter of function `select`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:133:39: error[unknown-argument] Argument `r` does not match any known parameter of function `select`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:139:16: error[invalid-argument-type] Argument to function `group` is incorrect: Expected `str`, found `list[str] | int | tuple[int | float, int | float, int | float] | float`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:144:19: error[not-subscriptable] Cannot subscript object of type `int` with no `__getitem__` method
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:244:21: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `list[Unknown | str]`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:250:21: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `list[Unknown | str]`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:263:43: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:275:25: error[invalid-argument-type] Argument to function `delete` is incorrect: Expected `str`, found `list[str] | str | int | float`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:281:25: error[invalid-argument-type] Argument to function `delete` is incorrect: Expected `str`, found `list[str] | str | int | float`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:285:25: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `list[str]`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:290:13: error[unresolved-attribute] Module `maya.cmds` has no member `CenterPivot`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:309:22: error[unknown-argument] Argument `tsb` does not match any known parameter of function `skinCluster`
+pipeline/pipe/m/ToolBox/EyeSocket_V1_01.py:313:22: error[unknown-argument] Argument `tsb` does not match any known parameter of function `skinCluster`
+pipeline/pipe/m/ToolBox/Katie_Toolbox_GUI.py:64:23: error[unknown-argument] Argument `adj` does not match any known parameter of function `columnLayout`
+pipeline/pipe/m/ToolBox/Katie_Toolbox_GUI.py:73:21: error[invalid-argument-type] Argument to function `showWindow` is incorrect: Expected `str`, found `str | int | tuple[str, str] | tuple[int, int]`
+pipeline/pipe/m/ToolBox/Updating_Scripts.py:7:24: error[invalid-argument-type] Argument to function `move` is incorrect: Expected `str`, found `str | int | float`
+pipeline/pipe/m/ToolBox/Updating_Scripts.py:37:16: error[unknown-argument] Argument `em` does not match any known parameter of function `group`
+pipeline/pipe/m/ToolBox/Updating_Scripts.py:93:21: error[invalid-argument-type] Argument to function `showWindow` is incorrect: Expected `str`, found `str | int | tuple[str, str] | tuple[int, int]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:29:21: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `(list[str] & ~AlwaysFalsy) | (list[Unknown] & ~AlwaysFalsy)`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:35:21: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `(list[str] & ~AlwaysFalsy) | (list[Unknown] & ~AlwaysFalsy)`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:52:25: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `list[Unknown | str] & ~AlwaysFalsy`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:57:17: error[invalid-argument-type] Argument to function `delete` is incorrect: Expected `str`, found `list[str]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:128:9: error[invalid-argument-type] Argument to function `nurbsSquare` is incorrect: Expected `bool`, found `Literal[1]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:131:51: error[unknown-argument] Argument `r` does not match any known parameter of function `select`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:139:39: error[unknown-argument] Argument `r` does not match any known parameter of function `select`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:145:16: error[invalid-argument-type] Argument to function `group` is incorrect: Expected `str`, found `list[str] | int | tuple[int | float, int | float, int | float] | float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:158:17: error[not-subscriptable] Cannot subscript object of type `None` with no `__getitem__` method
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:161:13: error[invalid-argument-type] Argument to function `polyToCurve` is incorrect: Expected `bool`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:168:19: error[not-subscriptable] Cannot subscript object of type `int` with no `__getitem__` method
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:329:21: error[invalid-argument-type] Argument to function `delete` is incorrect: Expected `str`, found `list[str] | str | int | float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:332:21: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `list[str]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:337:9: error[unresolved-attribute] Module `maya.cmds` has no member `CenterPivot`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:363:44: error[invalid-argument-type] Argument to function `parentConstraint` is incorrect: Expected `str`, found `str | int | float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:364:44: error[invalid-argument-type] Argument to function `parentConstraint` is incorrect: Expected `str`, found `str | int | float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:371:21: error[invalid-argument-type] Argument to function `delete` is incorrect: Expected `str`, found `list[str] | str | int | float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:378:21: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `list[str]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:383:21: error[invalid-argument-type] Argument to function `delete` is incorrect: Expected `str`, found `str | int | float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:388:19: error[not-subscriptable] Cannot subscript object of type `int` with no `__getitem__` method
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:484:21: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `list[Unknown | str]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:490:21: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `list[Unknown | str]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:498:47: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:499:47: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:500:47: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:503:47: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:504:47: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:505:47: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:511:47: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:525:29: error[invalid-argument-type] Argument to function `delete` is incorrect: Expected `str`, found `list[str] | str | int | float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:532:29: error[invalid-argument-type] Argument to function `delete` is incorrect: Expected `str`, found `list[str] | str | int | float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:539:29: error[invalid-argument-type] Argument to function `delete` is incorrect: Expected `str`, found `list[str] | str | int | float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:551:26: error[unknown-argument] Argument `tsb` does not match any known parameter of function `skinCluster`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:555:26: error[unknown-argument] Argument `tsb` does not match any known parameter of function `skinCluster`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:755:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:756:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:758:60: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:759:65: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:764:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:765:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:767:60: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[10]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:768:65: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[10]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:774:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:775:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:777:60: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[15]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:778:65: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[15]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:784:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:785:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:787:60: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[23]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:788:65: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[23]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:794:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:795:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[1]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:797:60: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[25]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:798:65: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[25]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:804:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:805:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:807:60: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[23]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:808:65: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[23]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:814:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:815:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:817:60: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[15]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:818:65: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[15]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:824:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:825:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `float`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:827:60: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:828:65: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:835:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:836:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[1]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:838:60: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[-10]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:839:65: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[-10]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:845:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:846:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[1]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:848:60: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[-15]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:849:65: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[-15]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:855:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:856:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[1]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:858:60: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[-17]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:859:65: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[-17]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:865:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:866:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[1]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:868:60: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[-15]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:869:65: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[-15]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:875:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:876:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[1]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:878:60: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[-10]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:879:65: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[-10]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:885:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:886:59: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[1]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:888:60: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[-5]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:889:65: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[-5]`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:922:23: error[unknown-argument] Argument `adj` does not match any known parameter of function `columnLayout`
+pipeline/pipe/m/ToolBox/V2_EyeUIandBasics.py:929:21: error[invalid-argument-type] Argument to function `showWindow` is incorrect: Expected `str`, found `str | int | tuple[str, str] | tuple[int, int]`
+pipeline/pipe/m/ToolBox/select_face_bind_joints.py:20:21: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `list[Unknown] & ~AlwaysFalsy`
+pipeline/pipe/m/layout/file_manager.py:10:6: error[unresolved-import] Cannot resolve imported module `mayaUsd.lib`
+pipeline/pipe/m/layout/maker.py:86:47: error[unknown-argument] Argument `q` does not match any known parameter of function `pluginInfo`
+pipeline/pipe/m/layout/maker.py:124:47: error[unknown-argument] Argument `q` does not match any known parameter of function `pluginInfo`
+pipeline/pipe/m/layout/maker.py:244:28: error[unsupported-operator] Operator `/` is not supported between objects of type `Path` and `str | None`
+pipeline/pipe/m/layout/maker.py:245:25: error[unsupported-operator] Operator `/` is not supported between objects of type `Path` and `str | None`
+pipeline/pipe/m/picker.py:18:9: error[invalid-assignment] Object of type `str` is not assignable to attribute `WINDOW_TITLE` of type `Literal["DreamWall - Picker"]`
+pipeline/pipe/m/playblast/struct.py:166:20: error[call-top-callable] Object of type `Top[(...) -> object]` is not safe to call; its signature is not known
+pipeline/pipe/m/playblast/struct.py:166:20: error[call-top-callable] Object of type `Top[(...) -> object]` is not safe to call; its signature is not known
+pipeline/pipe/m/publish/asset.py:45:12: error[invalid-assignment] Object of type `<class 'object'>` is not assignable to `<class 'UI'>`
+pipeline/pipe/m/publish/asset.py:575:56: error[invalid-argument-type] Argument to bound method `__init__` is incorrect: Expected `str`, found `SGaaDB`
+pipeline/pipe/m/publish/asset.py:583:21: error[invalid-assignment] Object of type `str | None` is not assignable to attribute `_selected_item` of type `str`
+pipeline/pipe/m/publish/asset.py:601:29: error[invalid-assignment] Object of type `SGEntity | None` is not assignable to attribute `_entity` of type `SGEntity`
+pipeline/pipe/m/publish/asset.py:624:17: error[invalid-assignment] Object of type `Path | None` is not assignable to attribute `_publish_path` of type `Path`
+pipeline/pipe/m/publish/previs_asset.py:86:45: error[unknown-argument] Argument `dag` does not match any known parameter of function `ls`
+pipeline/pipe/m/publish/publisher.py:329:56: error[invalid-argument-type] Argument to bound method `__init__` is incorrect: Expected `str`, found `SGaaDB`
+pipeline/pipe/m/publish/publisher.py:338:21: error[invalid-assignment] Object of type `str | None` is not assignable to attribute `_selected_item` of type `str`
+pipeline/pipe/m/publish/usdchaser.py:105:17: error[conflicting-declarations] Conflicting declared types for `data`: `Any`, `Vec3d` and `Matrix4d`
+pipeline/pipe/m/publish/usdchaser.py:106:17: error[conflicting-declarations] Conflicting declared types for `data`: `Any`, `Vec3d` and `Matrix4d`
+pipeline/pipe/m/rig_builder/test/tests/duplicate.py:21:54: error[call-non-callable] Object of type `<special-form 'typing.DefaultDict'>` is not callable
+pipeline/pipe/m/rig_publish.py:98:17: error[invalid-argument-type] Argument to function `file` is incorrect: Expected `str`, found `Path`
+pipeline/pipe/m/rig_publish.py:99:25: error[unknown-argument] Argument `s` does not match any known parameter of function `file`
+pipeline/pipe/m/rig_publish.py:99:33: error[unknown-argument] Argument `f` does not match any known parameter of function `file`
+pipeline/pipe/m/rig_publish.py:99:41: error[unknown-argument] Argument `typ` does not match any known parameter of function `file`
+pipeline/pipe/m/scripts/ALT_Camera.py:33:25: error[invalid-argument-type] Argument to function `showWindow` is incorrect: Expected `str`, found `str | int | tuple[str, str] | tuple[int, int]`
+pipeline/pipe/m/scripts/ALT_Camera.py:37:20: error[not-iterable] Object of type `(str & ~AlwaysFalsy) | Literal[True] | tuple[str, str] | (list[tuple[str, str]] & ~AlwaysFalsy) | list[Unknown]` may not be iterable
+pipeline/pipe/m/scripts/ALT_Camera.py:38:25: error[unresolved-attribute] Attribute `replace` is not defined on `list[str]` in union `list[str] | str`
+pipeline/pipe/m/scripts/ALT_Camera.py:38:45: error[invalid-argument-type] Argument to function `referenceQuery` is incorrect: Expected `str`, found `str | tuple[str, str] | Unknown`
+pipeline/pipe/m/scripts/ALT_Camera.py:72:59: error[unknown-argument] Argument `ws` does not match any known parameter of function `xform`
+pipeline/pipe/m/scripts/ALT_Camera.py:72:68: error[unknown-argument] Argument `t` does not match any known parameter of function `xform`
+pipeline/pipe/m/scripts/ALT_Camera.py:73:59: error[unknown-argument] Argument `ws` does not match any known parameter of function `xform`
+pipeline/pipe/m/scripts/ALT_Camera.py:73:68: error[unknown-argument] Argument `ro` does not match any known parameter of function `xform`
+pipeline/pipe/m/scripts/ALT_Camera.py:75:41: error[unknown-argument] Argument `ws` does not match any known parameter of function `xform`
+pipeline/pipe/m/scripts/ALT_Camera.py:75:50: error[unknown-argument] Argument `t` does not match any known parameter of function `xform`
+pipeline/pipe/m/scripts/ALT_Camera.py:76:41: error[unknown-argument] Argument `ws` does not match any known parameter of function `xform`
+pipeline/pipe/m/scripts/ALT_Camera.py:76:50: error[unknown-argument] Argument `ro` does not match any known parameter of function `xform`
+pipeline/pipe/m/scripts/ALT_Camera.py:87:43: error[invalid-argument-type] Argument to function `optionMenu` is incorrect: Expected `str`, found `Unknown | str | int | tuple[int | float, int | float, int | float] | ((...) -> Any)`
+pipeline/pipe/m/scripts/ALT_Camera.py:91:19: error[invalid-argument-type] Argument to function `file` is incorrect: Expected `str`, found `Path`
+pipeline/pipe/m/scripts/Assign_FX_Material.py:34:21: error[invalid-argument-type] Argument to function `showWindow` is incorrect: Expected `str`, found `str | int | tuple[str, str] | tuple[int, int]`
+pipeline/pipe/m/scripts/Camera.py:13:22: error[unknown-argument] Argument `q` does not match any known parameter of function `file`
+pipeline/pipe/m/scripts/Camera.py:19:16: error[not-iterable] Object of type `str | bool | tuple[str, str] | list[tuple[str, str]]` may not be iterable
+pipeline/pipe/m/scripts/Camera.py:20:24: error[invalid-argument-type] Argument to function `file` is incorrect: Expected `str`, found `str | tuple[str, str]`
+pipeline/pipe/m/scripts/Camera.py:20:29: error[unknown-argument] Argument `q` does not match any known parameter of function `file`
+pipeline/pipe/m/scripts/Camera.py:20:37: error[invalid-argument-type] Argument to function `file` is incorrect: Expected `str`, found `Literal[True]`
+pipeline/pipe/m/scripts/Camera.py:21:17: error[no-matching-overload] No overload of bound method `search` matches arguments
+pipeline/pipe/m/scripts/Camera.py:113:21: error[invalid-argument-type] Argument to function `showWindow` is incorrect: Expected `str`, found `str | int | tuple[str, str] | tuple[int, int]`
+pipeline/pipe/m/scripts/FX_Card.py:41:13: error[not-subscriptable] Cannot subscript object of type `int` with no `__getitem__` method
+pipeline/pipe/m/scripts/FX_Card.py:41:13: error[not-subscriptable] Cannot subscript object of type `float` with no `__getitem__` method
+pipeline/pipe/m/scripts/FX_Card.py:47:21: error[invalid-argument-type] Argument to function `delete` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/FX_Card.py:53:21: error[invalid-argument-type] Argument to function `delete` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/FX_Card.py:115:15: error[invalid-argument-type] Argument to function `sets` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/FX_Card.py:115:22: error[unknown-argument] Argument `e` does not match any known parameter of function `sets`
+pipeline/pipe/m/scripts/FX_Card.py:115:30: error[invalid-argument-type] Argument to function `sets` is incorrect: Expected `str`, found `str | list[str] | int | tuple[int | float, int | float, int | float]`
+pipeline/pipe/m/scripts/FX_Card_Rig.py:23:13: error[unknown-argument] Argument `amg` does not match any known parameter of function `inViewMessage`
+pipeline/pipe/m/scripts/FX_Card_Rig.py:24:13: error[unknown-argument] Argument `pos` does not match any known parameter of function `inViewMessage`
+pipeline/pipe/m/scripts/FX_Card_Rig.py:48:35: error[invalid-argument-type] Argument to function `textField` is incorrect: Expected `str`, found `str | int | tuple[int | float, int | float, int | float] | ((...) -> Any)`
+pipeline/pipe/m/scripts/FX_Card_Rig.py:48:51: error[unknown-argument] Argument `q` does not match any known parameter of function `textField`
+pipeline/pipe/m/scripts/FX_Card_Rig.py:49:42: error[invalid-argument-type] Argument to function `optionMenuGrp` is incorrect: Expected `str`, found `str | tuple[int | float, int | float, int | float] | int | ((...) -> Any)`
+pipeline/pipe/m/scripts/FX_Card_Rig.py:49:51: error[unknown-argument] Argument `q` does not match any known parameter of function `optionMenuGrp`
+pipeline/pipe/m/scripts/FX_Card_Rig.py:65:21: error[invalid-argument-type] Argument to function `showWindow` is incorrect: Expected `str`, found `str | int | tuple[str, str] | tuple[int, int]`
+pipeline/pipe/m/scripts/Pointlight_Rig.py:23:12: error[not-subscriptable] Cannot subscript object of type `int` with no `__getitem__` method
+pipeline/pipe/m/scripts/Pointlight_Rig.py:23:12: error[not-subscriptable] Cannot subscript object of type `float` with no `__getitem__` method
+pipeline/pipe/m/scripts/Pointlight_Rig.py:23:40: error[invalid-argument-type] Argument to function `circle` is incorrect: Expected `bool | tuple[int | float, int | float, int | float]`, found `list[Unknown | int]`
+pipeline/pipe/m/scripts/Pointlight_Rig.py:24:28: error[invalid-argument-type] Argument to function `scale` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/Pointlight_Rig.py:25:23: error[invalid-argument-type] Argument to function `makeIdentity` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/Pointlight_Rig.py:26:17: error[invalid-argument-type] Argument to function `delete` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/Pointlight_Rig.py:32:29: error[invalid-argument-type] Argument to function `parent` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/Pointlight_Rig.py:36:42: error[invalid-argument-type] Argument to function `listRelatives` is incorrect: Expected `str`, found `str | int | float | tuple[int | float, int | float, int | float]`
+pipeline/pipe/m/scripts/Pointlight_Rig.py:41:46: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[2]`
+pipeline/pipe/m/scripts/Pointlight_Rig.py:42:46: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[100000]`
+pipeline/pipe/m/scripts/Pointlight_Rig.py:43:55: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[1]`
+pipeline/pipe/m/scripts/Pointlight_Rig.py:44:51: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[16384]`
+pipeline/pipe/m/scripts/Pointlight_Rig.py:51:43: error[invalid-argument-type] Argument to function `attributeQuery` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/Pointlight_Rig.py:52:22: error[invalid-argument-type] Argument to function `addAttr` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/Pointlight_Rig.py:56:41: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[100000]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:34:46: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[2]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:35:46: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[100000]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:36:55: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[1]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:37:51: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[16384]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:38:46: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[72]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:38:50: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[72]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:38:54: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[72]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:41:17: error[not-subscriptable] Cannot subscript object of type `int` with no `__getitem__` method
+pipeline/pipe/m/scripts/Spotlight_Rig.py:41:17: error[not-subscriptable] Cannot subscript object of type `float` with no `__getitem__` method
+pipeline/pipe/m/scripts/Spotlight_Rig.py:42:40: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[67]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:42:44: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[67]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:42:48: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[67]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:43:45: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[-8]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:44:23: error[invalid-argument-type] Argument to function `makeIdentity` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:44:46: error[unknown-argument] Argument `t` does not match any known parameter of function `makeIdentity`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:44:51: error[unknown-argument] Argument `r` does not match any known parameter of function `makeIdentity`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:44:56: error[unknown-argument] Argument `s` does not match any known parameter of function `makeIdentity`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:47:19: error[not-subscriptable] Cannot subscript object of type `int` with no `__getitem__` method
+pipeline/pipe/m/scripts/Spotlight_Rig.py:47:19: error[not-subscriptable] Cannot subscript object of type `float` with no `__getitem__` method
+pipeline/pipe/m/scripts/Spotlight_Rig.py:48:42: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[34]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:48:46: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[34]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:48:50: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[34]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:49:44: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[90]`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:50:23: error[invalid-argument-type] Argument to function `makeIdentity` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:50:48: error[unknown-argument] Argument `t` does not match any known parameter of function `makeIdentity`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:50:53: error[unknown-argument] Argument `r` does not match any known parameter of function `makeIdentity`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:50:58: error[unknown-argument] Argument `s` does not match any known parameter of function `makeIdentity`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:54:32: error[invalid-argument-type] Argument to function `group` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:55:30: error[invalid-argument-type] Argument to function `group` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:58:31: error[invalid-argument-type] Argument to function `parent` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:59:32: error[invalid-argument-type] Argument to function `parent` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:60:17: error[invalid-argument-type] Argument to function `parent` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/scripts/Spotlight_Rig.py:61:17: error[invalid-argument-type] Argument to function `parent` is incorrect: Expected `str`, found `str | Unknown | int | float`
+pipeline/pipe/m/shotfile/anim.py:59:13: error[unresolved-attribute] Module `maya.cmds` has no member `mayaUsdDiscardEdits`
+pipeline/pipe/m/shotfile/anim.py:66:20: error[no-matching-overload] No overload of bound method `IsA` matches arguments
+pipeline/pipe/m/shotfile/anim.py:68:13: error[unresolved-attribute] Module `maya.cmds` has no member `mayaUsdEditAsMaya`
+pipeline/pipe/m/shotfile/rlo.py:18:9: error[invalid-method-override] Invalid override of method `_check_unsaved_changes`: Definition is incompatible with `MShotFileManager._check_unsaved_changes`
+pipeline/pipe/m/space_switch.py:7:17: error[unknown-argument] Argument `sl` does not match any known parameter of function `ls`
+pipeline/pipe/m/space_switch.py:24:31: error[unknown-argument] Argument `at` does not match any known parameter of function `deleteAttr`
+pipeline/pipe/m/space_switch.py:28:9: error[unknown-argument] Argument `ln` does not match any known parameter of function `addAttr`
+pipeline/pipe/m/space_switch.py:29:9: error[unknown-argument] Argument `at` does not match any known parameter of function `addAttr`
+pipeline/pipe/m/space_switch.py:30:9: error[unknown-argument] Argument `en` does not match any known parameter of function `addAttr`
+pipeline/pipe/m/space_switch.py:42:13: error[unknown-argument] Argument `em` does not match any known parameter of function `group`
+pipeline/pipe/m/space_switch.py:44:24: error[unknown-argument] Argument `em` does not match any known parameter of function `group`
+pipeline/pipe/m/space_switch.py:47:39: error[invalid-argument-type] Argument to function `parentConstraint` is incorrect: Expected `str`, found `tuple[str]`
+pipeline/pipe/m/space_switch.py:47:47: error[unknown-argument] Argument `mo` does not match any known parameter of function `parentConstraint`
+pipeline/pipe/m/space_switch.py:52:10: error[not-subscriptable] Cannot subscript object of type `int` with no `__getitem__` method
+pipeline/pipe/m/space_switch.py:52:10: error[not-subscriptable] Cannot subscript object of type `float` with no `__getitem__` method
+pipeline/pipe/m/space_switch.py:52:30: error[invalid-argument-type] Argument to function `parentConstraint` is incorrect: Expected `str`, found `list[str]`
+pipeline/pipe/m/space_switch.py:52:44: error[unknown-argument] Argument `mo` does not match any known parameter of function `parentConstraint`
+pipeline/pipe/m/space_switch.py:54:38: error[unknown-argument] Argument `wal` does not match any known parameter of function `parentConstraint`
+pipeline/pipe/m/space_switch.py:54:48: error[unknown-argument] Argument `q` does not match any known parameter of function `parentConstraint`
+pipeline/pipe/m/space_switch.py:54:56: error[unknown-argument] Argument `mo` does not match any known parameter of function `parentConstraint`
+pipeline/pipe/m/space_switch.py:56:46: error[unknown-argument] Argument `n` does not match any known parameter of function `createNode`
+pipeline/pipe/m/space_switch.py:58:47: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/space_switch.py:59:48: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[1]`
+pipeline/pipe/m/space_switch.py:60:44: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/space_switch.py:64:15: error[not-subscriptable] Cannot subscript object of type `int` with no `__getitem__` method
+pipeline/pipe/m/space_switch.py:64:15: error[not-subscriptable] Cannot subscript object of type `float` with no `__getitem__` method
+pipeline/pipe/m/space_switch.py:65:43: error[unknown-argument] Argument `n` does not match any known parameter of function `createNode`
+pipeline/pipe/m/space_switch.py:65:45: error[not-subscriptable] Cannot subscript object of type `int` with no `__getitem__` method
+pipeline/pipe/m/space_switch.py:65:45: error[not-subscriptable] Cannot subscript object of type `float` with no `__getitem__` method
+pipeline/pipe/m/space_switch.py:67:42: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `int`
+pipeline/pipe/m/space_switch.py:68:44: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[1]`
+pipeline/pipe/m/space_switch.py:69:45: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/space_switch.py:71:56: error[not-subscriptable] Cannot subscript object of type `int` with no `__getitem__` method
+pipeline/pipe/m/space_switch.py:71:56: error[not-subscriptable] Cannot subscript object of type `float` with no `__getitem__` method
+pipeline/pipe/m/studiolibrary.py:16:5: error[unresolved-attribute] Module `studiolibrary` has no member `setLibraries`
+pipeline/pipe/m/studiolibrary.py:17:5: error[unresolved-attribute] Module `studiolibrary` has no member `main`
+pipeline/pipe/m/turnaround.py:19:24: error[unknown-argument] Argument `v` does not match any known parameter of function `setKeyframe`
+pipeline/pipe/m/turnaround.py:19:44: error[unknown-argument] Argument `at` does not match any known parameter of function `setKeyframe`
+pipeline/pipe/m/turnaround.py:19:58: error[unknown-argument] Argument `t` does not match any known parameter of function `setKeyframe`
+pipeline/pipe/m/turnaround.py:20:24: error[unknown-argument] Argument `v` does not match any known parameter of function `setKeyframe`
+pipeline/pipe/m/turnaround.py:20:50: error[unknown-argument] Argument `at` does not match any known parameter of function `setKeyframe`
+pipeline/pipe/m/turnaround.py:20:64: error[unknown-argument] Argument `t` does not match any known parameter of function `setKeyframe`
+pipeline/pipe/m/turnaround.py:28:17: error[not-subscriptable] Cannot subscript object of type `int` with no `__getitem__` method
+pipeline/pipe/m/turnaround.py:28:17: error[not-subscriptable] Cannot subscript object of type `float` with no `__getitem__` method
+pipeline/pipe/m/turnaround.py:32:13: error[invalid-argument-type] Argument to function `polyCube` is incorrect: Expected `int`, found `float`
+pipeline/pipe/m/turnaround.py:33:13: error[invalid-argument-type] Argument to function `polyCube` is incorrect: Expected `int`, found `float`
+pipeline/pipe/m/turnaround.py:34:13: error[invalid-argument-type] Argument to function `polyCube` is incorrect: Expected `int`, found `float`
+pipeline/pipe/m/turnaround.py:44:19: error[invalid-argument-type] Argument to function `select` is incorrect: Expected `str`, found `str | int | float | Unknown`
+pipeline/pipe/m/turnaround.py:53:9: error[invalid-assignment] Too many values to unpack: Expected 2
+pipeline/pipe/m/turnaround.py:53:42: error[not-iterable] Object of type `int` is not iterable
+pipeline/pipe/m/turnaround.py:53:42: error[not-iterable] Object of type `float` is not iterable
+pipeline/pipe/m/turnaround.py:61:30: error[unknown-argument] Argument `r` does not match any known parameter of function `rotate`
+pipeline/pipe/m/turnaround.py:61:38: error[unknown-argument] Argument `os` does not match any known parameter of function `rotate`
+pipeline/pipe/m/turnaround.py:90:30: error[unknown-argument] Argument `r` does not match any known parameter of function `rotate`
+pipeline/pipe/m/turnaround.py:90:38: error[unknown-argument] Argument `os` does not match any known parameter of function `rotate`
+pipeline/pipe/m/turnaround.py:95:41: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[6]`
+pipeline/pipe/m/turnaround.py:96:42: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[30]`
+pipeline/pipe/m/turnaround.py:108:30: error[unknown-argument] Argument `r` does not match any known parameter of function `rotate`
+pipeline/pipe/m/turnaround.py:108:38: error[unknown-argument] Argument `os` does not match any known parameter of function `rotate`
+pipeline/pipe/m/turnaround.py:110:42: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[3]`
+pipeline/pipe/m/turnaround.py:111:43: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[30]`
+pipeline/pipe/m/turnaround.py:119:30: error[unknown-argument] Argument `r` does not match any known parameter of function `rotate`
+pipeline/pipe/m/turnaround.py:119:38: error[unknown-argument] Argument `os` does not match any known parameter of function `rotate`
+pipeline/pipe/m/turnaround.py:121:41: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[2]`
+pipeline/pipe/m/turnaround.py:122:42: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[30]`
+pipeline/pipe/m/turnaround.py:138:56: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[1]`
+pipeline/pipe/m/turnaround.py:140:55: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[1]`
+pipeline/pipe/m/turnaround.py:141:53: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[121]`
+pipeline/pipe/m/turnaround.py:144:61: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[2]`
+pipeline/pipe/m/turnaround.py:146:61: error[invalid-argument-type] Argument to function `setAttr` is incorrect: Expected `str`, found `Literal[0]`
+pipeline/pipe/m/turnaround.py:147:9: error[unresolved-attribute] Module `maya.cmds` has no member `setMayaSoftwareFrameExt`
+pipeline/pipe/sp/assetfile.py:359:16: error[invalid-return-type] Return type does not match returned value: expected `list[str]`, found `list[str & ~AlwaysFalsy] & ~AlwaysFalsy`
+pipeline/pipe/sp/ui.py:177:13: error[invalid-argument-type] Argument to bound method `_build_variant_dropdown` is incorrect: Expected `list[str]`, found `(list[str & ~AlwaysFalsy] & ~AlwaysFalsy) | list[Unknown | str]`
+pipeline/pipe/struct/db.py:195:7: error[invalid-frozen-dataclass-subclass] Frozen dataclass `AssetStub` cannot inherit from non-frozen dataclass `SGEntityStub`
+pipeline/pipe/struct/db.py:301:7: error[invalid-frozen-dataclass-subclass] Non-frozen dataclass `EnvironmentStub` cannot inherit from frozen dataclass `AssetStub`
+pipeline/pipe/struct/db.py:306:7: error[invalid-frozen-dataclass-subclass] Frozen dataclass `SequenceStub` cannot inherit from non-frozen dataclass `SGEntityStub`
+pipeline/pipe/struct/db.py:335:7: error[invalid-frozen-dataclass-subclass] Frozen dataclass `ShotStub` cannot inherit from non-frozen dataclass `SGEntityStub`
+pipeline/pipe/struct/db.py:399:7: error[invalid-frozen-dataclass-subclass] Frozen dataclass `UserStub` cannot inherit from non-frozen dataclass `SGEntityStub`
+pipeline/pipe/struct/db.py:415:7: error[invalid-frozen-dataclass-subclass] Frozen dataclass `TaskStub` cannot inherit from non-frozen dataclass `SGEntityStub`
+pipeline/pipe/struct/timeline.py:17:7: error[invalid-frozen-dataclass-subclass] Frozen dataclass `Timeline` cannot inherit from non-frozen dataclass `JsonSerializable`
+pipeline/software/maya/userSetup/userSetup.py:13:32: error[unknown-argument] Argument `q` does not match any known parameter of function `pluginInfo`
+pipeline/software/maya/userSetup/userSetup.py:15:12: error[unsupported-operator] Operator `not in` is not supported between objects of type `Unknown | str` and `Any | bool | str | ... omitted 4 union elements`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:29:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:30:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:33:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:34:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:35:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:41:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:42:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:50:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:51:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:52:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:64:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:65:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:68:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:69:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:70:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:76:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:77:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:80:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:81:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:82:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:88:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:89:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:92:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:93:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:94:5: error[unresolved-attribute] Attribute `setValue` is not defined on `None` in union `Knob | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:860:9: error[unresolved-attribute] Object of type `Node` has no attribute `begin`
+pipeline/software/nuke/tools/BobukeTools/scripts/bobo_write_node_v2.py:921:9: error[unresolved-attribute] Object of type `Node` has no attribute `end`
+pipeline/software/nuke/tools/BobukeTools/scripts/import_usd_camera.py:125:25: error[unresolved-attribute] Attribute `widget` is not defined on `None` in union `Unknown | QLayoutItem | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/import_usd_camera.py:125:25: error[unresolved-attribute] Attribute `text` is not defined on `QWidget` in union `Unknown | QWidget`
+pipeline/software/nuke/tools/BobukeTools/scripts/import_usd_camera.py:285:25: error[unresolved-attribute] Attribute `widget` is not defined on `None` in union `Unknown | QLayoutItem | None`
+pipeline/software/nuke/tools/BobukeTools/scripts/import_usd_camera.py:285:25: error[unresolved-attribute] Attribute `text` is not defined on `QWidget` in union `Unknown | QWidget`
+pipeline/software/nuke/tools/BobukeTools/scripts/import_usd_camera.py:338:30: error[no-matching-overload] No overload of function `join` matches arguments
+pipeline/software/nuke/tools/BobukeTools/scripts/import_usd_camera.py:381:12: warning[unresolved-global] Invalid global declaration of `simple_window`: `simple_window` has no declarations or bindings in the global scope
+pipeline/software/nuke/tools/BobukeTools/scripts/open_shot.py:180:12: warning[unresolved-global] Invalid global declaration of `window`: `window` has no declarations or bindings in the global scope
+pipeline/software/nuke/tools/BobukeTools/scripts/render_layer_selector.py:271:43: error[invalid-argument-type] Argument to bound method `setTextAlignment` is incorrect: Expected `int`, found `AlignmentFlag`
+pipeline/software/nuke/tools/BobukeTools/scripts/render_layer_selector.py:344:43: error[invalid-argument-type] Argument to bound method `setTextAlignment` is incorrect: Expected `int`, found `AlignmentFlag`
+pipeline/software/nuke/tools/BobukeTools/scripts/render_layer_selector.py:404:30: error[no-matching-overload] No overload of function `join` matches arguments
+pipeline/software/nuke/tools/BobukeTools/scripts/render_layer_selector.py:450:12: warning[unresolved-global] Invalid global declaration of `simple_window`: `simple_window` has no declarations or bindings in the global scope
+pipeline/software/substance_painter/plugins/startup/export.py:26:27: error[invalid-argument-type] Argument to bound method `append` is incorrect: Expected `QWidget`, found `QAction`
+pipeline/software/substance_painter/plugins/startup/export.py:27:27: error[invalid-argument-type] Argument to bound method `append` is incorrect: Expected `QWidget`, found `QAction`
+Found 376 diagnostics
