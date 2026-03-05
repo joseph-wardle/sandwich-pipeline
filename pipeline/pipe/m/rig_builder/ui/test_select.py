@@ -85,6 +85,9 @@ class TestSelectList(QListView):
         self.disable_tests_button.setMaximumHeight(16)
         self.disable_tests_button.clicked.connect(self.disable_all_tests)
         overlay_layout.addWidget(self.disable_tests_button)
+        self.verticalScrollBar().valueChanged.connect(self._reposition_overlay)
+        self.horizontalScrollBar().valueChanged.connect(self._reposition_overlay)
+
         self._button_overlay.adjustSize()
 
         # Populate tests.

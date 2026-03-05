@@ -55,6 +55,7 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
 
         # Build Options
         self.build_horizontal_layout = QHBoxLayout()
+        self.build_horizontal_layout.setContentsMargins(0, 0, 0, 0)
         self.top_layout.addLayout(self.build_horizontal_layout)
 
         self.dev_build_switch = QCheckBox()
@@ -93,6 +94,7 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
 
         # Publish Options
         self.publish_horizontal_layout = QHBoxLayout()
+        self.publish_horizontal_layout.setContentsMargins(0, 0, 0, 0)
         self.mid_layout.addLayout(self.publish_horizontal_layout)
 
         self.rig_version_spinbox = QDoubleSpinBox()
