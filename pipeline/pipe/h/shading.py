@@ -866,9 +866,7 @@ class MatlibNodeBuilder:
             return None
         net_box.setName(name, unique_name=True)
         try:
-            net_box.setUserData(
-                _AUTO_TAG_KEY, _AUTO_TAG_VALUE
-            )  # ty:ignore[unresolved-attribute]
+            cast(Any, net_box).setUserData(_AUTO_TAG_KEY, _AUTO_TAG_VALUE)
         except Exception:
             pass
         return net_box
