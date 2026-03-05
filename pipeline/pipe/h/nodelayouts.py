@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Optional, cast
+from typing import Any, Optional, cast
 
 # mypy: disable-error-code="union-attr"
 import hou
@@ -299,22 +299,19 @@ def _clear_managed_variant_boxes(parent: hou.Node, *, owner_path: str) -> None:
     if not hasattr(parent, "networkBoxes"):
         return
     for net_box in parent.networkBoxes():
+        net_box_any = cast(Any, net_box)
         box_name = ""
         try:
-            box_name = net_box.name()
+            box_name = net_box_any.name()
         except Exception:
             box_name = ""
 
         try:
             managed = (
-                net_box.userData(
-                    SKD_VARIANT_GRAPH_MANAGED_KEY
-                )  # ty:ignore[unresolved-attribute]
+                net_box_any.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
                 == SKD_VARIANT_GRAPH_MANAGED_VALUE
             )
-            owner = net_box.userData(
-                SKD_VARIANT_GRAPH_OWNER_KEY
-            )  # ty:ignore[unresolved-attribute]
+            owner = net_box_any.userData(SKD_VARIANT_GRAPH_OWNER_KEY)
         except Exception:
             managed = False
             owner = ""
@@ -324,7 +321,7 @@ def _clear_managed_variant_boxes(parent: hou.Node, *, owner_path: str) -> None:
         if managed and owner not in ("", owner_path):
             continue
         try:
-            net_box.destroy()
+            net_box_any.destroy()
         except Exception:
             continue
 
@@ -345,19 +342,18 @@ def _create_managed_variant_box(
     except Exception:
         return
 
+    net_box_any = cast(Any, net_box)
     try:
-        net_box.setUserData(  # ty:ignore[unresolved-attribute]
+        net_box_any.setUserData(
             SKD_VARIANT_GRAPH_MANAGED_KEY, SKD_VARIANT_GRAPH_MANAGED_VALUE
         )
-        net_box.setUserData(
-            SKD_VARIANT_GRAPH_OWNER_KEY, owner_path
-        )  # ty:ignore[unresolved-attribute]
+        net_box_any.setUserData(SKD_VARIANT_GRAPH_OWNER_KEY, owner_path)
     except Exception:
         pass
 
     if hasattr(net_box, "setLabel"):
         try:
-            net_box.setLabel(label)  # ty:ignore[call-non-callable]
+            net_box_any.setLabel(label)
         except Exception:
             pass
     if hasattr(net_box, "setComment"):
@@ -370,9 +366,7 @@ def _create_managed_variant_box(
                         network_item_flag, "DisplayComment", None
                     )
                     if display_comment_flag is not None:
-                        net_box.setGenericFlag(
-                            display_comment_flag, True
-                        )  # ty:ignore[call-non-callable]
+                        net_box_any.setGenericFlag(display_comment_flag, True)
                 except Exception:
                     pass
         except Exception:
@@ -398,7 +392,7 @@ def _create_managed_variant_box(
             min_y = min(point.y() for point in points) - 1.2
             max_y = max(point.y() for point in points) + 1.8
             net_box.setPosition(hou.Vector2(min_x, max_y))
-            net_box.setSize((max_x - min_x, max_y - min_y))
+            net_box_any.setSize((max_x - min_x, max_y - min_y))
         except Exception:
             pass
 
@@ -475,28 +469,20 @@ def lnd_clustersetup(kwargs: dict, parent: Optional[hou.Node] = None) -> hou.Nod
     env.setPosition(env_move + out_pos)
 
     # Configure environment fetch
-    env.parm("loppath").set(
-        f"../{ldv.name()}/OUT_ENV"
-    )  # ty:ignore[unresolved-attribute]
+    cast(Any, env.parm("loppath")).set(f"../{ldv.name()}/OUT_ENV")
 
     # Configure Component Output node
-    out.parm("mode").set(1)  # ty:ignore[unresolved-attribute]
-    out.parm("doclassinherit").set(False)  # ty:ignore[unresolved-attribute]
-    out.parm("lopoutput").set(
-        '$HIP/export/`chs("filename")`'
-    )  # ty:ignore[unresolved-attribute]
-    graft.parm("destpath").set("/")  # ty:ignore[unresolved-attribute]
-    prim.parm("primpath").set("$OS")  # ty:ignore[unresolved-attribute]
-    out.parm("rootprim").set(
-        "`lopinputprim('.', 0)`"
-    )  # ty:ignore[unresolved-attribute]
-    err.parm("errormsg1").set(
-        "Please name your primitive node"
-    )  # ty:ignore[unresolved-attribute]
-    err.parm("severity1").set("error")  # ty:ignore[unresolved-attribute]
+    cast(Any, out.parm("mode")).set(1)
+    cast(Any, out.parm("doclassinherit")).set(False)
+    cast(Any, out.parm("lopoutput")).set('$HIP/export/`chs("filename")`')
+    cast(Any, graft.parm("destpath")).set("/")
+    cast(Any, prim.parm("primpath")).set("$OS")
+    cast(Any, out.parm("rootprim")).set("`lopinputprim('.', 0)`")
+    cast(Any, err.parm("errormsg1")).set("Please name your primitive node")
+    cast(Any, err.parm("severity1")).set("error")
 
     error_expression = 'import re\nrgx = re.compile("primitive[0-9]+")\nreturn any(rgx.match(node.name()) for node in hou.pwd().inputAncestors())'
-    err.parm("enable1").setExpression(  # ty:ignore[unresolved-attribute]
+    cast(Any, err.parm("enable1")).setExpression(
         error_expression, language=hou.exprLanguage.Python
     )
 
