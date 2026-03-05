@@ -82,13 +82,6 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
         self.test_selection_layout = QHBoxLayout()
         self.mid_layout.addLayout(self.test_selection_layout)
 
-        self.enable_tests_button = QPushButton()
-        self.enable_tests_button.setText("Enable All Tests")
-        self.test_selection_layout.addWidget(self.enable_tests_button)
-        self.disable_tests_button = QPushButton()
-        self.disable_tests_button.setText("Disable All Tests")
-        self.test_selection_layout.addWidget(self.disable_tests_button)
-
         self.rig_test_button = QPushButton()
         self.rig_test_button.setText("Run Selected Tests")
         self.mid_layout.addWidget(self.rig_test_button)

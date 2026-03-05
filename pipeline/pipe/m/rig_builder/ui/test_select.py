@@ -2,7 +2,7 @@ from typing import Callable, Sequence
 
 from Qt import QtCore
 from Qt.QtGui import QBrush, QColor, QStandardItem, QStandardItemModel
-from Qt.QtWidgets import QApplication, QListView
+from Qt.QtWidgets import QApplication, QHBoxLayout, QListView, QPushButton, QWidget
 
 from ..progress import TestProgressManager
 from ..test import RIG_BUILD_TESTS, RigBuildTest, TestRunner
@@ -57,6 +57,11 @@ class TestItem(QStandardItem):
 class TestSelectList(QListView):
     def __init__(self) -> None:
         super().__init__()
+        self._progress_manager: TestProgressManager | None = None
+        self._progress_slot = None
+        self.setup_ui()
+
+    def setup_ui(self):
         self.setResizeMode(QListView.Adjust)
         self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.setMinimumSize(32, 22)
@@ -65,11 +70,39 @@ class TestSelectList(QListView):
         self.setSelectionMode(QListView.SingleSelection)
         self.setSpacing(2)
 
+        # Overlay buttons in the bottom-right corner of the viewport
+        self._button_overlay = QWidget(self.viewport())
+        overlay_layout = QHBoxLayout(self._button_overlay)
+        overlay_layout.setContentsMargins(0, 0, 4, 4)
+        overlay_layout.setSpacing(4)
+
+        self.enable_tests_button = QPushButton("All On")
+        self.enable_tests_button.setMaximumHeight(16)
+        self.enable_tests_button.clicked.connect(self.enable_all_tests)
+        overlay_layout.addWidget(self.enable_tests_button)
+
+        self.disable_tests_button = QPushButton("All Off")
+        self.disable_tests_button.setMaximumHeight(16)
+        self.disable_tests_button.clicked.connect(self.disable_all_tests)
+        overlay_layout.addWidget(self.disable_tests_button)
+        self._button_overlay.adjustSize()
+
+        # Populate tests.
         self.test_items: list[TestItem] = []
         self.populate_tests([test() for test in RIG_BUILD_TESTS])
 
-        self._progress_manager: TestProgressManager | None = None
-        self._progress_slot = None
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        self._reposition_overlay()
+
+    def _reposition_overlay(self) -> None:
+        overlay = self._button_overlay
+        viewport = self.viewport()
+        overlay.adjustSize()
+        x = viewport.width() - overlay.width()
+        y = viewport.height() - overlay.height()
+        overlay.move(x, y)
+        overlay.raise_()
 
     def populate_tests(self, tests: Sequence[RigBuildTest]) -> None:
         for test in tests:

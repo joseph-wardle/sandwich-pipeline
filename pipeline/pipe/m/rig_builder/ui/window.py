@@ -83,8 +83,6 @@ class RigBuilderWindow(RigBuilderWindowUI):
         self.build_rig_button.clicked.connect(self.rig_build_log_box.clear_log)
         self.build_rig_button.clicked.connect(self._build_rig)
 
-        self.enable_tests_button.clicked.connect(self.test_list.enable_all_tests)
-        self.disable_tests_button.clicked.connect(self.test_list.disable_all_tests)
         self.rig_test_button.clicked.connect(self.rig_build_log_box.clear_log)
         self.rig_test_button.clicked.connect(self.test_list.run_tests)
         self.test_list.connect_progress(self.rig_build_progress_bar.update_progress)
