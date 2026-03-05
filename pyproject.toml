@@ -116,7 +116,23 @@ allowed-unresolved-imports = [
     "tractor.**",
     "pipe.db.shotgun_api3.**",
 ]
-replace-imports-with-any = ["pipe.db.shotgun_api3.**"]
+replace-imports-with-any = [
+    # Existing parity setting with mypy's shotgun handling.
+    "pipe.db.shotgun_api3.**",
+    # Global DCC boundaries: treat dynamic host APIs as Any
+    "maya.cmds",
+    "maya.cmds.**",
+    "maya.mel",
+    "maya.mel.**",
+    "mayaUsd",
+    "mayaUsd.**",
+    "hou",
+    "hou.**",
+    "nuke",
+    "nuke.**",
+    "substance_painter",
+    "substance_painter.**",
+]
 
 [tool.ty.environment]
 extra-paths = [
