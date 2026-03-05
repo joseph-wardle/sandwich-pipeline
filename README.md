@@ -80,3 +80,13 @@ unformatted code here
 # fmt: on
 ...
 ```
+
+## Type Checking
+
+Type checking is enforced with `ty` in both pre-commit and CI.
+
+Run it manually from repo root with:
+
+```bash
+uv run ty check --no-progress
+```

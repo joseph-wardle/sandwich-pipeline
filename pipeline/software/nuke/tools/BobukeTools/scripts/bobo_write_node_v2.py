@@ -26,20 +26,28 @@ def make_text_nodes():
 
     # Frame Number
     frame_num_text = nuke.createNode("Text2", "font_size 30")
-    frame_num_text.knob("font_size").setValue(font_size)
-    frame_num_text.knob("box").setValue(
+    frame_num_text.knob("font_size").setValue(
+        font_size
+    )  # ty:ignore[unresolved-attribute]
+    frame_num_text.knob("box").setValue(  # ty:ignore[unresolved-attribute]
         [rl_padding, tb_padding, frame_width - rl_padding, frame_height - tb_padding]
     )
-    frame_num_text.knob("xjustify").setValue("right")
-    frame_num_text.knob("yjustify").setValue("bottom")
-    frame_num_text.knob("enable_background").setValue(1)
+    frame_num_text.knob("xjustify").setValue("right")  # ty:ignore[unresolved-attribute]
+    frame_num_text.knob("yjustify").setValue(
+        "bottom"
+    )  # ty:ignore[unresolved-attribute]
+    frame_num_text.knob("enable_background").setValue(
+        1
+    )  # ty:ignore[unresolved-attribute]
     frame_num_text.setName("Frame_Number")
     # message set below to force the font size to update
 
     # Department
     department_text = nuke.createNode("Text2")
-    department_text.knob("font_size").setValue(font_size)
-    department_text.knob("box").setValue(
+    department_text.knob("font_size").setValue(
+        font_size
+    )  # ty:ignore[unresolved-attribute]
+    department_text.knob("box").setValue(  # ty:ignore[unresolved-attribute]
         [
             rl_padding,
             tb_padding * 2 + font_size * 3,
@@ -47,9 +55,13 @@ def make_text_nodes():
             frame_height,
         ]
     )
-    department_text.knob("xjustify").setValue("left")
-    department_text.knob("yjustify").setValue("bottom")
-    department_text.knob("enable_background").setValue(1)
+    department_text.knob("xjustify").setValue("left")  # ty:ignore[unresolved-attribute]
+    department_text.knob("yjustify").setValue(
+        "bottom"
+    )  # ty:ignore[unresolved-attribute]
+    department_text.knob("enable_background").setValue(
+        1
+    )  # ty:ignore[unresolved-attribute]
     department_text.setName("department_text")
     dropdown_knob = nuke.Enumeration_Knob(
         "departmentDropdown",
@@ -61,37 +73,43 @@ def make_text_nodes():
 
     # Shot Code
     shot_code_text = nuke.createNode("Text2")
-    shot_code_text.knob("font_size").setValue(font_size)
-    shot_code_text.knob("box").setValue(
+    shot_code_text.knob("font_size").setValue(
+        font_size
+    )  # ty:ignore[unresolved-attribute]
+    shot_code_text.knob("box").setValue(  # ty:ignore[unresolved-attribute]
         [rl_padding, tb_padding + font_size * 2, frame_width - rl_padding, frame_height]
     )
-    shot_code_text.knob("xjustify").setValue("right")
-    shot_code_text.knob("yjustify").setValue("bottom")
-    shot_code_text.knob("enable_background").setValue(1)
+    shot_code_text.knob("xjustify").setValue("right")  # ty:ignore[unresolved-attribute]
+    shot_code_text.knob("yjustify").setValue(
+        "bottom"
+    )  # ty:ignore[unresolved-attribute]
+    shot_code_text.knob("enable_background").setValue(
+        1
+    )  # ty:ignore[unresolved-attribute]
     shot_code_text.setName("Shot_Code")
     # message set below to force the font size to update
 
     # date
     date_text = nuke.createNode("Text2")
-    date_text.knob("font_size").setValue(font_size)
-    date_text.knob("box").setValue(
+    date_text.knob("font_size").setValue(font_size)  # ty:ignore[unresolved-attribute]
+    date_text.knob("box").setValue(  # ty:ignore[unresolved-attribute]
         [rl_padding, tb_padding + font_size * 2, frame_width - rl_padding, frame_height]
     )
-    date_text.knob("xjustify").setValue("left")
-    date_text.knob("yjustify").setValue("bottom")
-    date_text.knob("enable_background").setValue(1)
+    date_text.knob("xjustify").setValue("left")  # ty:ignore[unresolved-attribute]
+    date_text.knob("yjustify").setValue("bottom")  # ty:ignore[unresolved-attribute]
+    date_text.knob("enable_background").setValue(1)  # ty:ignore[unresolved-attribute]
     date_text.setName("date")
     # message set below to force the font size to update
 
     # user name
     name_text = nuke.createNode("Text2")
-    name_text.knob("font_size").setValue(font_size)
-    name_text.knob("box").setValue(
+    name_text.knob("font_size").setValue(font_size)  # ty:ignore[unresolved-attribute]
+    name_text.knob("box").setValue(  # ty:ignore[unresolved-attribute]
         [rl_padding, tb_padding, frame_width - rl_padding, frame_height - tb_padding]
     )
-    name_text.knob("xjustify").setValue("left")
-    name_text.knob("yjustify").setValue("bottom")
-    name_text.knob("enable_background").setValue(1)
+    name_text.knob("xjustify").setValue("left")  # ty:ignore[unresolved-attribute]
+    name_text.knob("yjustify").setValue("bottom")  # ty:ignore[unresolved-attribute]
+    name_text.knob("enable_background").setValue(1)  # ty:ignore[unresolved-attribute]
     name_text.setName("name")
     # message set below to force the font size to update
 
@@ -857,7 +875,7 @@ def main():
         groupNode["name"].setValue(final_name)
 
         # Enter the group to build its internal node graph.input
-        groupNode.begin()
+        groupNode.begin()  # ty:ignore[unresolved-attribute]
 
         # input_node
         input_node = nuke.createNode("Input")
@@ -918,7 +936,7 @@ def main():
 
         for n in nuke.allNodes():
             n.hideControlPanel()
-        groupNode.end()
+        groupNode.end()  # ty:ignore[unresolved-attribute]
 
         groupNode.setSelected(True)
 

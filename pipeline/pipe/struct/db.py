@@ -191,8 +191,8 @@ class SGEntityStub(SGDiffable):
     id: int
 
 
-@attrs.define
-class AssetStub(SGEntityStub):
+@attrs.frozen
+class AssetStub(SGEntityStub):  # ty: ignore[invalid-frozen-dataclass-subclass]
     """Represent "stubs" that come from ShotGrid
     Stubs are JSON objects with 3 fields: id, name (display name), and type
     (which is always Asset in this case)
@@ -298,12 +298,12 @@ class Environment(SGEntity):
 
 
 @attrs.define
-class EnvironmentStub(AssetStub):
+class EnvironmentStub(AssetStub):  # ty: ignore[invalid-frozen-dataclass-subclass]
     pass
 
 
-@attrs.define
-class SequenceStub(SGEntityStub):
+@attrs.frozen
+class SequenceStub(SGEntityStub):  # ty: ignore[invalid-frozen-dataclass-subclass]
     """Represent sequence "stubs" that come from ShotGrid"""
 
     code: str = field(metadata={_SG_NAME: "name"})
@@ -331,8 +331,8 @@ class Sequence(SGEntity):
     )
 
 
-@attrs.define
-class ShotStub(SGEntityStub):
+@attrs.frozen
+class ShotStub(SGEntityStub):  # ty: ignore[invalid-frozen-dataclass-subclass]
     """Represent shot "stubs" that come from ShotGrid"""
 
     code: str = field(metadata={_SG_NAME: "name"})
@@ -395,8 +395,8 @@ class Shot(SGEntity):
         return diff
 
 
-@attrs.define
-class UserStub(SGEntityStub):
+@attrs.frozen
+class UserStub(SGEntityStub):  # ty: ignore[invalid-frozen-dataclass-subclass]
     """Represent user "stubs" that come from ShotGrid"""
 
     name: str = field(metadata={_SG_NAME: "login"})
@@ -411,8 +411,8 @@ class User(SGEntity):
     login: Optional[str] = field(metadata={_SG_NAME: "login"})
 
 
-@attrs.define
-class TaskStub(SGEntityStub):
+@attrs.frozen
+class TaskStub(SGEntityStub):  # ty: ignore[invalid-frozen-dataclass-subclass]
     """Represent shot "stubs" that come from ShotGrid"""
 
     id: int

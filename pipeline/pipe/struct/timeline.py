@@ -12,8 +12,8 @@ from .util import JsonSerializable
 PREROLL_DURATION = 55
 
 
-@attrs.define
-class Timeline(JsonSerializable):
+@attrs.define(frozen=True)
+class Timeline(JsonSerializable):  # ty: ignore[invalid-frozen-dataclass-subclass]
     start: int
     end: int
     head_duration: int = attrs.field(default=5)

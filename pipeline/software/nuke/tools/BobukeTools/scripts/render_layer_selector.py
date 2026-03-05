@@ -3,6 +3,7 @@ import random
 import re
 import time
 from functools import partial
+from typing import cast
 
 import nuke
 from env_sg import DB_Config
@@ -399,13 +400,6 @@ class CascadingComboBox(QtWidgets.QWidget):
             return
 
         base_path = r"/groups/dungeons/production/shot"
-        if self.current_render is None:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "No Render Selected",
-                "Please select a render folder before importing layers.",
-            )
-            return
         for item in selected_items:
             layer_folder = (
                 item.text()
@@ -414,7 +408,7 @@ class CascadingComboBox(QtWidgets.QWidget):
                 base_path,
                 self.default_shot,
                 "render",
-                self.current_render,
+                cast(str, self.current_render),
                 layer_folder,
                 "images_dn",
             )

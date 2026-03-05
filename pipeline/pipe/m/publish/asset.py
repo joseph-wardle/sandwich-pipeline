@@ -747,12 +747,10 @@ class AssetPublisher(Publisher):
 
                     if self._use_sg_entity:
                         try:
-                            entity = self._get_entity_from_name(self._selected_item)
-                            if entity is None:
-                                raise AssertionError(
-                                    "Selected item is not a valid SG entity"
-                                )
-                            self._entity = entity
+                            self._entity = cast(
+                                SGEntity,
+                                self._get_entity_from_name(self._selected_item),
+                            )
                         except AssertionError as exc:
                             entity_label = Asset.__name__
                             MessageDialog(
@@ -774,7 +772,9 @@ class AssetPublisher(Publisher):
 
                 self._restart_publish_telemetry_timer(publish_telemetry)
                 save_path = self._get_save_path()
-                if not save_path:
+                self._publish_path = save_path  # ty:ignore[invalid-assignment]
+                publish_path = self._publish_path
+                if not self._publish_path:
                     self._emit_publish_error(
                         publish_telemetry,
                         error_code_name="precheck",
@@ -784,8 +784,6 @@ class AssetPublisher(Publisher):
                     )
                     mc.error("No save path found!")
                     return
-                self._publish_path = save_path
-                publish_path = save_path
 
                 if not self._presave():
                     self._emit_publish_error(

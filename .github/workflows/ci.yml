@@ -32,9 +32,9 @@ jobs:
           cat "${GITHUB_WORKSPACE}/.githooks/shotgun.pyi" > "${GITHUB_WORKSPACE}/pipeline/lib/shotgun_api3/shotgun_api3/__init__.pyi"
 
       # Run type checking with ty
-      - name: Type Check (mypy)
+      - name: Type Check (ty)
         run: |
-          uv run mypy
+          uv run ty check --no-progress
 
       # Run ruff lint checks
       - name: Lint (Ruff)

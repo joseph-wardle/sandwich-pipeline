@@ -959,7 +959,7 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
             if scene_viewer is None:
                 return "Current Viewport Camera"
 
-            viewport = scene_viewer.curViewport()
+            viewport = scene_viewer.curViewport()  # ty:ignore[unresolved-attribute]
             if viewport is None:
                 return "Current Viewport Camera"
 

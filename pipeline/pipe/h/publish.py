@@ -637,7 +637,7 @@ def _export_component(
 
     try:
         if hasattr(node, "saveToDisk") and callable(node.saveToDisk):
-            if node.saveToDisk():
+            if node.saveToDisk():  # ty:ignore[call-top-callable]
                 executed = True
                 method = "saveToDisk"
         if not executed:
@@ -1011,7 +1011,9 @@ def _thumbnail_context_enabled():
         had_previous = False
 
     try:
-        hou.setContextOption(THUMBNAIL_CONTEXT_OPTION, 1)
+        hou.setContextOption(
+            THUMBNAIL_CONTEXT_OPTION, 1
+        )  # ty:ignore[invalid-argument-type]
     except Exception:
         pass
 
@@ -1020,7 +1022,9 @@ def _thumbnail_context_enabled():
     finally:
         if had_previous:
             try:
-                hou.setContextOption(THUMBNAIL_CONTEXT_OPTION, previous_value)
+                hou.setContextOption(
+                    THUMBNAIL_CONTEXT_OPTION, previous_value
+                )  # ty:ignore[invalid-argument-type]
             except Exception:
                 pass
         else:
@@ -1249,23 +1253,27 @@ def _find_gallery_matches(
 ) -> list[str]:
     matches: list[str] = []
     export_str = str(export_path)
-    item_ids = cast(Any, datasource).itemIds()
+    item_ids = datasource.itemIds()  # ty:ignore[unresolved-attribute]
     for item_id in item_ids:
         item_path = datasource.filePath(item_id)
         if item_path == export_str:
             matches.append(item_id)
             continue
         metadata_raw = datasource.metadata(item_id)
-        metadata: Mapping[str, Any]
+        metadata: Mapping[str, Any]  # ty:ignore[invalid-declaration]
         if isinstance(metadata_raw, Mapping):
             metadata = metadata_raw
         else:
             metadata = {}
-        if str(metadata.get(GALLERY_META_POLICY_KEY, "")).strip() == policy_key:
+        if (
+            str(metadata.get(GALLERY_META_POLICY_KEY, "")).strip() == policy_key
+        ):  # ty:ignore[no-matching-overload]
             matches.append(item_id)
             continue
         # Legacy fallback before policy key existed.
-        if str(metadata.get(GALLERY_META_ASSET_KEY, "")).strip() == asset_key:
+        if (
+            str(metadata.get(GALLERY_META_ASSET_KEY, "")).strip() == asset_key
+        ):  # ty:ignore[no-matching-overload]
             matches.append(item_id)
     return matches
 

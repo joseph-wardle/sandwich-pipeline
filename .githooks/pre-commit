@@ -18,8 +18,8 @@ if [[ ${#STAGED_PY_FILES[@]} -eq 0 ]]; then
     exit 0
 fi
 
-echo "Static type checking (mypy) on staged Python files..."
-mypy --follow-imports skip "${STAGED_PY_FILES[@]}"
+echo "Static type checking (ty) on staged Python files..."
+ty check --no-progress --force-exclude "${STAGED_PY_FILES[@]}"
 echo "Linting (ruff) on staged Python files..."
 ruff check "${STAGED_PY_FILES[@]}"
 echo "Formatting (ruff) on staged Python files..."
