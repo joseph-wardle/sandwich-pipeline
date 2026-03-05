@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional
 
 import maya.cmds as mc
-from pxr import Usd, UsdGeom
+from pxr import Usd
 from shared.util import get_production_path
 
 from pipe.shot.version_adapter import (
@@ -71,7 +71,7 @@ class MAnimShotFileManager(MShotFileManager):
             camera_prim = next(
                 prim
                 for prim in cls.get_stage().Traverse(Usd.PrimIsDefined)
-                if prim.IsA(UsdGeom.Camera) and prim.GetName() == CAM_NAME
+                if prim.GetTypeName() == "Camera" and prim.GetName() == CAM_NAME
             )
             mc.mayaUsdEditAsMaya(
                 cls.get_stage_shape() + "," + str(camera_prim.GetPrimPath())

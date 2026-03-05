@@ -239,10 +239,13 @@ class LayoutMaker:
             mc.error("No asset selected.")
             return
 
-        set = conn.get_entity_by_code(Environment, selected_set_name)
+        set_entity = conn.get_entity_by_code(Environment, selected_set_name)
+        if not set_entity or not set_entity.path:
+            mc.error("Selected set has no publish path.")
+            return
 
-        houdini_set_path = get_production_path() / set.path / "main.usd"
-        maya_set_path = get_production_path() / set.path / "maya_layout.usd"
+        houdini_set_path = get_production_path() / set_entity.path / "main.usd"
+        maya_set_path = get_production_path() / set_entity.path / "maya_layout.usd"
 
         # Copy file
         shutil.copyfile(houdini_set_path, maya_set_path)

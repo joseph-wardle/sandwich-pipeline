@@ -1,6 +1,7 @@
 import logging
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, cast
 
 from shared.util import get_production_path
 
@@ -13,12 +14,13 @@ CUSTOM_PICKER_TITLE = "SKD Picker"
 def custom_picker_title(custom_title: str):
     import dwpicker.main
 
-    original_title = dwpicker.main.WINDOW_TITLE
+    main_module = cast(Any, dwpicker.main)
+    original_title = main_module.WINDOW_TITLE
     try:
-        dwpicker.main.WINDOW_TITLE = custom_title
+        main_module.WINDOW_TITLE = custom_title
         yield
     finally:
-        dwpicker.main.WINDOW_TITLE = original_title
+        main_module.WINDOW_TITLE = original_title
 
 
 def run():

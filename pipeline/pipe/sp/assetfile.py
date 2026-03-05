@@ -365,7 +365,7 @@ def _resolve_default_mesh_paths(
 def _geo_variants_for_asset(asset: Asset) -> list[str]:
     variants = sorted(v for v in asset.geometry_variants if v)
     if variants:
-        return variants
+        return [str(v) for v in variants]
     return ["main"]
 
 

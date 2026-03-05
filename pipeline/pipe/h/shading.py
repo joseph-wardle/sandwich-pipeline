@@ -35,10 +35,13 @@ _MATERIAL_BUILDER_Y_STEP = 3.5
 _RENDER_MAPS = ("BaseColor", "SpecularRoughness", "Normal", "Metallic")
 _PREVIEW_MAPS = ("DiffuseColor", "ORM", "Emissive", "NormalDX")
 _SUPPORTED_MAPS = tuple(sorted({*_RENDER_MAPS, *_PREVIEW_MAPS}))
+_SORTED_SUPPORTED_MAPS = [
+    str(name) for name in sorted(_SUPPORTED_MAPS, key=len, reverse=True)
+]
 _MAP_NAME_LOOKUP = {name.lower(): name for name in _SUPPORTED_MAPS}
 _NODE_SAFE_RE = re.compile(r"[^A-Za-z0-9_]+")
 _UDIM_RE = re.compile(r"\.(?P<udim>\d{4})(?=\.[^.]+$)")
-_MAP_PATTERN = "|".join(sorted(_SUPPORTED_MAPS, key=len, reverse=True))
+_MAP_PATTERN = "|".join(_SORTED_SUPPORTED_MAPS)
 _TEX_FILE_RE = re.compile(
     rf"^(?P<tex_set>.+?)_(?P<map>{_MAP_PATTERN})(?:_[^.]+)?"
     rf"(?:\.(?P<udim>\d{{4}}))?\.(?P<ext>[A-Za-z0-9]+)$",

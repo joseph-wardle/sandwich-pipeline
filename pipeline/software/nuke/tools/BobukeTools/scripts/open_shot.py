@@ -1,7 +1,10 @@
 import os
+
 import nuke
-from Qt import QtWidgets, QtCore
+from Qt import QtCore, QtWidgets
 from Qt.QtWidgets import QComboBox
+
+window = None
 
 
 class MyWindow(QtWidgets.QWidget):
@@ -98,8 +101,8 @@ class MyWindow(QtWidgets.QWidget):
                 self.shotnum_combobox.addItem(shot)
 
     def get_shots(self):
-        from pipe.db import DB
         from env_sg import DB_Config
+        from pipe.db import DB
 
         conn = DB.Get(DB_Config)
 

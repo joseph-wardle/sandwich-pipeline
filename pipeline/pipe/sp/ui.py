@@ -172,7 +172,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             validator=QRegExpValidator(QRegExp("[a-z][a-z_\\d]*")),
         )
 
-        geo_items = sorted(v for v in asset.geometry_variants if v) or ["main"]
+        geo_items = self._variant_items(asset.geometry_variants, "main")
         geo_default = "main" if "main" in geo_items else geo_items[0]
         self._geo_var_dropdown = self._build_variant_dropdown(
             label_text="Geometry Variant:",

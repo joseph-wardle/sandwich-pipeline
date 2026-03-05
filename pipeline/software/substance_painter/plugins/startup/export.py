@@ -6,7 +6,7 @@ from pipe.glui.dialogs import MessageDialog
 from pipe.sp.ui import SubstanceExportWindow
 from Qt import QtCore, QtWidgets
 
-plugin_widgets: list[QtCore.QObject] = []
+plugin_widgets: list[QtWidgets.QWidget | QtWidgets.QAction] = []
 
 
 def start_plugin():
