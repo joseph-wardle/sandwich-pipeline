@@ -1,12 +1,12 @@
-"""Core versioning dataclasses shared across pipeline domains.
+"""Core versioning dataclasses and identifiers shared across pipeline domains.
 
 The model is intentionally small:
 1. ``VersionOwner`` identifies the root entity when metadata should be recorded.
 2. ``VersionStreamSpec`` identifies one versioned working-file stream under a root.
 3. ``VersionRecord`` and ``BackupResult`` describe persisted history entries.
 
-This phase keeps the asset manifest storage format unchanged while moving the core
-types out of ``pipe.asset`` so future shot and tool adapters can share them.
+The shared store now persists stream-keyed manifests while remaining able to read
+legacy asset manifests keyed only by DCC.
 """
 
 from __future__ import annotations
@@ -14,6 +14,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+
+
+def stream_filename(stem: str, ext: str) -> str:
+    normalized_stem = str(stem).strip()
+    normalized_ext = str(ext).strip().lstrip(".")
+    return f"{normalized_stem}.{normalized_ext}"
+
+
+def stream_key_for(dcc: str, stem: str, ext: str) -> str:
+    """Return the stable manifest key for a versioned stream."""
+    normalized_dcc = str(dcc).strip()
+    return f"{normalized_dcc}:{stream_filename(stem, ext)}"
 
 
 @dataclass(frozen=True)
@@ -69,4 +81,6 @@ __all__ = [
     "VersionOwner",
     "VersionRecord",
     "VersionStreamSpec",
+    "stream_filename",
+    "stream_key_for",
 ]

@@ -1,22 +1,29 @@
 """Low-level version manifest and backup storage helpers.
 
-Current v1 storage stays intentionally compatible with the asset manifest shape:
+Authoritative v1 manifest shape:
 
 ```
 {
   "schema_version": 1,
-  "asset": {...},  # legacy asset metadata block kept for compatibility
-  "dcc": {
-    "<dcc>": {
+  "owner": {...},
+  "asset": {...},   # legacy compatibility for existing asset tooling
+  "streams": {
+    "<stream_key>": {
+      "dcc": "maya",
+      "stem": "model",
+      "ext": "mb",
+      "label": "model.mb",
+      "working_file": "model.mb",
       "current": {...},
       "history": [...]
     }
-  }
+  },
+  "dcc": {...}      # legacy read compatibility for pre-stream manifests
 }
 ```
 
-The code in this module is domain-agnostic even though the serialized manifest still
-preserves the asset-compatible layout for the first extraction step.
+New writes target ``streams``. Reads fall back to legacy ``dcc`` entries only when a
+stream has not been written yet.
 """
 
 from __future__ import annotations
@@ -35,7 +42,13 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Iterator, Optional
 
-from .model import BackupResult, VersionOwner, VersionRecord
+from .model import (
+    BackupResult,
+    VersionOwner,
+    VersionRecord,
+    stream_filename,
+    stream_key_for,
+)
 
 _fcntl: ModuleType | None
 try:
@@ -105,6 +118,20 @@ def _safe_host() -> Optional[str]:
         return None
 
 
+def _owner_payload(owner: VersionOwner | None) -> dict[str, Any]:
+    if owner is None:
+        return {}
+    return _compact_dict(
+        {
+            "kind": _compact_text(owner.kind),
+            "code": _compact_text(owner.code),
+            "display_name": _compact_text(owner.display_name),
+            "path": _compact_text(owner.path),
+            "id": owner.id,
+        }
+    )
+
+
 def _legacy_asset_payload(owner: VersionOwner | None) -> dict[str, Any]:
     owner_kind = _compact_text(owner.kind) if owner is not None else None
     if owner is None or (owner_kind or "").lower() != "asset":
@@ -127,16 +154,42 @@ def get_manifest_path(
 def build_manifest(*, owner: VersionOwner | None = None) -> dict[str, Any]:
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
+        "owner": _owner_payload(owner),
         "asset": _legacy_asset_payload(owner),
+        "streams": {},
         "dcc": {},
     }
 
 
 def _ensure_manifest_base(manifest: dict[str, Any]) -> dict[str, Any]:
     manifest.setdefault("schema_version", MANIFEST_SCHEMA_VERSION)
+    manifest.setdefault("owner", {})
     manifest.setdefault("asset", {})
+    manifest.setdefault("streams", {})
     manifest.setdefault("dcc", {})
+    _backfill_owner_from_legacy_asset(manifest)
     return manifest
+
+
+def _backfill_owner_from_legacy_asset(manifest: dict[str, Any]) -> None:
+    owner_payload = manifest.get("owner")
+    if isinstance(owner_payload, dict) and owner_payload:
+        return
+
+    legacy_asset = manifest.get("asset")
+    if not isinstance(legacy_asset, dict) or not legacy_asset:
+        return
+
+    display_name = _compact_text(legacy_asset.get("name"))
+    manifest["owner"] = _compact_dict(
+        {
+            "kind": "asset",
+            "code": display_name or _compact_text(legacy_asset.get("path")) or "asset",
+            "display_name": display_name,
+            "path": _compact_text(legacy_asset.get("path")),
+            "id": _compact_int(legacy_asset.get("id")),
+        }
+    )
 
 
 def load_manifest(manifest_path: Path) -> dict[str, Any]:
@@ -203,6 +256,122 @@ def _normalize_backup_stem(stem: str, source_path: Path) -> str:
         version_token,
     )
     return base_stem
+
+
+def _resolve_stream_identity(
+    dcc: str,
+    *,
+    stream_key: Optional[str] = None,
+    stem: Optional[str] = None,
+    ext: Optional[str] = None,
+    source_path: Optional[Path] = None,
+    backup_path: Optional[Path] = None,
+) -> tuple[str, str, str]:
+    source_candidate = source_path or backup_path
+    resolved_stem = stem or (source_candidate.stem if source_candidate else "stream")
+    if source_candidate is not None:
+        resolved_stem = _normalize_backup_stem(resolved_stem, source_candidate)
+
+    resolved_ext = ext or (
+        source_candidate.suffix.lstrip(".") if source_candidate is not None else "dat"
+    )
+    normalized_ext = (resolved_ext or "dat").lstrip(".")
+    normalized_stream_key = _compact_text(stream_key) or stream_key_for(
+        dcc, resolved_stem, normalized_ext
+    )
+    return normalized_stream_key, resolved_stem, normalized_ext
+
+
+def _serialize_working_file(
+    manifest_path: Path,
+    working_path: Optional[Path],
+    *,
+    stem: str,
+    ext: str,
+) -> str:
+    candidate = working_path or (manifest_path.parent / stream_filename(stem, ext))
+    try:
+        relative = candidate.resolve().relative_to(manifest_path.parent.resolve())
+        return relative.as_posix()
+    except Exception:
+        return str(candidate)
+
+
+def _stream_block_for_read(
+    manifest: dict[str, Any],
+    *,
+    stream_key: str,
+    fallback_dcc: Optional[str] = None,
+) -> dict[str, Any] | None:
+    streams_payload = manifest.get("streams")
+    if isinstance(streams_payload, dict):
+        stream_block = streams_payload.get(stream_key)
+        if isinstance(stream_block, dict):
+            return stream_block
+
+    if not fallback_dcc:
+        return None
+
+    dcc_payload = manifest.get("dcc")
+    if not isinstance(dcc_payload, dict):
+        return None
+
+    dcc_block = dcc_payload.get(fallback_dcc)
+    if isinstance(dcc_block, dict):
+        return dcc_block
+    return None
+
+
+def _stream_block_for_write(
+    manifest: dict[str, Any],
+    *,
+    stream_key: str,
+    dcc: str,
+    stem: str,
+    ext: str,
+    label: Optional[str],
+    working_file: Optional[str],
+) -> dict[str, Any]:
+    streams_payload = manifest.setdefault("streams", {})
+    if not isinstance(streams_payload, dict):
+        streams_payload = {}
+        manifest["streams"] = streams_payload
+
+    stream_block = streams_payload.setdefault(stream_key, {})
+    if not isinstance(stream_block, dict):
+        stream_block = {}
+        streams_payload[stream_key] = stream_block
+
+    stream_block.update(
+        _compact_dict(
+            {
+                "dcc": dcc,
+                "stem": stem,
+                "ext": ext,
+                "label": label,
+                "working_file": working_file,
+            }
+        )
+    )
+    stream_block.setdefault("current", None)
+    history_payload = stream_block.get("history")
+    if not isinstance(history_payload, list):
+        stream_block["history"] = []
+    return stream_block
+
+
+def _entry_as_record(entry: dict[str, Any]) -> VersionRecord:
+    backup_value = _compact_text(entry.get("backup_file"))
+    return VersionRecord(
+        version=_compact_int(entry.get("version")),
+        title=_compact_text(entry.get("title")),
+        note=_compact_text(entry.get("note")),
+        context=_compact_text(entry.get("context")),
+        user=_compact_text(entry.get("user")),
+        timestamp=_compact_text(entry.get("timestamp")),
+        backup_path=Path(backup_value) if backup_value else None,
+        source_file=_compact_text(entry.get("source_file")),
+    )
 
 
 def list_versions(backup_dir: Path, stem: str, ext: str) -> list[int]:
@@ -306,8 +475,11 @@ def backup_if_changed(
     manifest_path: Path,
     *,
     dcc: str,
+    stream_key: Optional[str] = None,
     stem: Optional[str] = None,
     ext: Optional[str] = None,
+    stream_label: Optional[str] = None,
+    working_path: Optional[Path] = None,
     version: Optional[int] = None,
     padding: int = 3,
     ensure_exists: bool = True,
@@ -328,17 +500,26 @@ def backup_if_changed(
 
     signature = compute_signature(source_path, use_hash=use_hash)
     manifest = load_manifest(manifest_path)
-    dcc_block = manifest.get("dcc", {}).get(dcc, {})
-    current = dcc_block.get("current") or {}
+    resolved_stream_key, resolved_stem, resolved_ext = _resolve_stream_identity(
+        dcc,
+        stream_key=stream_key,
+        stem=stem,
+        ext=ext,
+        source_path=source_path,
+    )
+    stream_block = _stream_block_for_read(
+        manifest,
+        stream_key=resolved_stream_key,
+        fallback_dcc=dcc,
+    )
+    current = stream_block.get("current") if isinstance(stream_block, dict) else {}
+    if not isinstance(current, dict):
+        current = {}
     previous_signature = (current.get("extra") or {}).get(_SIGNATURE_KEY)
 
     changed = not _signature_matches(previous_signature, signature)
     backup_path: Optional[Path] = None
-    resolved_version: Optional[int] = current.get("version")
-
-    resolved_stem = stem or source_path.stem
-    resolved_ext = (ext or source_path.suffix.lstrip(".")) or "dat"
-    resolved_stem = _normalize_backup_stem(resolved_stem, source_path)
+    resolved_version: Optional[int] = _compact_int(current.get("version"))
 
     if changed:
         resolved_version = version or next_version(
@@ -369,6 +550,11 @@ def backup_if_changed(
     manifest = record_publish(
         manifest_path,
         dcc=dcc,
+        stream_key=resolved_stream_key,
+        stem=resolved_stem,
+        ext=resolved_ext,
+        stream_label=stream_label,
+        working_path=working_path or source_path,
         source_path=source_path,
         backup_path=backup_path,
         version=resolved_version,
@@ -393,6 +579,11 @@ def record_publish(
     manifest_path: Path,
     *,
     dcc: str,
+    stream_key: Optional[str] = None,
+    stem: Optional[str] = None,
+    ext: Optional[str] = None,
+    stream_label: Optional[str] = None,
+    working_path: Optional[Path] = None,
     source_path: Optional[Path] = None,
     backup_path: Optional[Path] = None,
     version: Optional[int] = None,
@@ -408,9 +599,28 @@ def record_publish(
     manifest = load_manifest(manifest_path)
     _ensure_manifest_base(manifest)
 
-    owner_payload = _legacy_asset_payload(owner)
+    owner_payload = _owner_payload(owner)
     if owner_payload:
-        manifest["asset"].update(owner_payload)
+        manifest["owner"].update(owner_payload)
+
+    legacy_asset_payload = _legacy_asset_payload(owner)
+    if legacy_asset_payload:
+        manifest["asset"].update(legacy_asset_payload)
+
+    resolved_stream_key, resolved_stem, resolved_ext = _resolve_stream_identity(
+        dcc,
+        stream_key=stream_key,
+        stem=stem,
+        ext=ext,
+        source_path=source_path,
+        backup_path=backup_path,
+    )
+    working_file = _serialize_working_file(
+        manifest_path,
+        working_path,
+        stem=resolved_stem,
+        ext=resolved_ext,
+    )
 
     entry = _compact_dict(
         {
@@ -428,24 +638,37 @@ def record_publish(
         }
     )
 
-    dcc_block = manifest["dcc"].setdefault(dcc, {"current": None, "history": []})
-    dcc_block["current"] = entry
-    dcc_block.setdefault("history", []).append(entry)
+    stream_block = _stream_block_for_write(
+        manifest,
+        stream_key=resolved_stream_key,
+        dcc=dcc,
+        stem=resolved_stem,
+        ext=resolved_ext,
+        label=_compact_text(stream_label) or working_file,
+        working_file=working_file,
+    )
+    stream_block["current"] = entry
+    stream_block.setdefault("history", []).append(entry)
 
     save_manifest(manifest_path, manifest)
     return manifest
 
 
-def history_as_records(manifest: dict[str, Any], dcc: str) -> list[VersionRecord]:
-    dcc_payload = manifest.get("dcc")
-    if not isinstance(dcc_payload, dict):
+def history_as_records(
+    manifest: dict[str, Any],
+    stream_key: str,
+    *,
+    fallback_dcc: Optional[str] = None,
+) -> list[VersionRecord]:
+    stream_block = _stream_block_for_read(
+        manifest,
+        stream_key=stream_key,
+        fallback_dcc=fallback_dcc,
+    )
+    if not isinstance(stream_block, dict):
         return []
 
-    dcc_block = dcc_payload.get(dcc)
-    if not isinstance(dcc_block, dict):
-        return []
-
-    history_payload = dcc_block.get("history")
+    history_payload = stream_block.get("history")
     if not isinstance(history_payload, list):
         return []
 
@@ -453,20 +676,28 @@ def history_as_records(manifest: dict[str, Any], dcc: str) -> list[VersionRecord
     for entry in reversed(history_payload):
         if not isinstance(entry, dict):
             continue
-        backup_value = _compact_text(entry.get("backup_file"))
-        records.append(
-            VersionRecord(
-                version=_compact_int(entry.get("version")),
-                title=_compact_text(entry.get("title")),
-                note=_compact_text(entry.get("note")),
-                context=_compact_text(entry.get("context")),
-                user=_compact_text(entry.get("user")),
-                timestamp=_compact_text(entry.get("timestamp")),
-                backup_path=Path(backup_value) if backup_value else None,
-                source_file=_compact_text(entry.get("source_file")),
-            )
-        )
+        records.append(_entry_as_record(entry))
     return records
+
+
+def current_record(
+    manifest: dict[str, Any],
+    stream_key: str,
+    *,
+    fallback_dcc: Optional[str] = None,
+) -> Optional[VersionRecord]:
+    stream_block = _stream_block_for_read(
+        manifest,
+        stream_key=stream_key,
+        fallback_dcc=fallback_dcc,
+    )
+    if not isinstance(stream_block, dict):
+        return None
+
+    current_payload = stream_block.get("current")
+    if not isinstance(current_payload, dict):
+        return None
+    return _entry_as_record(current_payload)
 
 
 def version_label(version: int | None) -> str:
@@ -483,6 +714,7 @@ __all__ = [
     "backup_if_changed",
     "build_manifest",
     "compute_signature",
+    "current_record",
     "get_manifest_path",
     "history_as_records",
     "list_versions",

@@ -6,6 +6,7 @@ asset-facing API stable while the wider pipeline migrates to the shared package.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
@@ -15,12 +16,14 @@ from pipe.versioning import (
     VersionRecord,
     backup_file,
     compute_signature,
+    current_record,
     get_manifest_path,
     history_as_records,
     list_versions,
     load_manifest,
     next_version,
     save_manifest,
+    stream_key_for,
     version_label,
     versioned_filename,
 )
@@ -32,6 +35,17 @@ from pipe.versioning import (
 )
 from pipe.versioning.store import backup_if_changed as _backup_if_changed
 
+from .version_adapter import asset_owner_from_metadata
+
+
+@dataclass(frozen=True)
+class _AssetStreamIdentity:
+    stream_key: str
+    stem: str
+    ext: str
+    stream_label: str
+    working_path: Optional[Path]
+
 
 def _asset_owner(
     *,
@@ -39,16 +53,10 @@ def _asset_owner(
     asset_path: Optional[str] = None,
     asset_id: Optional[int] = None,
 ) -> VersionOwner | None:
-    if asset_name is None and asset_path is None and asset_id is None:
-        return None
-    normalized_name = _compact_text(asset_name)
-    fallback_code = normalized_name or _compact_text(asset_path) or "asset"
-    return VersionOwner(
-        kind="asset",
-        code=fallback_code,
-        display_name=normalized_name,
-        path=_compact_text(asset_path),
-        id=asset_id,
+    return asset_owner_from_metadata(
+        display_name=_compact_text(asset_name),
+        asset_path=_compact_text(asset_path),
+        asset_id=asset_id,
     )
 
 
@@ -57,6 +65,29 @@ def _compact_text(value: object | None) -> Optional[str]:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _stream_identity_kwargs(
+    dcc: str,
+    *,
+    source_path: Optional[Path] = None,
+    backup_path: Optional[Path] = None,
+    stem: Optional[str] = None,
+    ext: Optional[str] = None,
+) -> _AssetStreamIdentity:
+    candidate = source_path or backup_path
+    resolved_stem = stem or (candidate.stem if candidate is not None else "stream")
+    resolved_ext = ext or (
+        candidate.suffix.lstrip(".") if candidate is not None else "dat"
+    )
+    normalized_ext = (resolved_ext or "dat").lstrip(".")
+    return _AssetStreamIdentity(
+        stream_key=stream_key_for(dcc, resolved_stem, normalized_ext),
+        stem=resolved_stem,
+        ext=normalized_ext,
+        stream_label=f"{resolved_stem}.{normalized_ext}",
+        working_path=source_path,
+    )
 
 
 def build_manifest(
@@ -97,13 +128,22 @@ def backup_if_changed(
     publish_path: Optional[Path] = None,
     extra: Optional[dict[str, Any]] = None,
 ) -> Optional[BackupResult]:
+    stream = _stream_identity_kwargs(
+        dcc,
+        source_path=source_path,
+        stem=stem,
+        ext=ext,
+    )
     return _backup_if_changed(
         source_path,
         backup_dir,
         manifest_path,
         dcc=dcc,
-        stem=stem,
-        ext=ext,
+        stream_key=stream.stream_key,
+        stem=stream.stem,
+        ext=stream.ext,
+        stream_label=stream.stream_label,
+        working_path=stream.working_path,
         version=version,
         padding=padding,
         ensure_exists=ensure_exists,
@@ -141,9 +181,19 @@ def record_publish(
     asset_path: Optional[str] = None,
     asset_id: Optional[int] = None,
 ) -> dict[str, Any]:
+    stream = _stream_identity_kwargs(
+        dcc,
+        source_path=source_path,
+        backup_path=backup_path,
+    )
     return _record_publish(
         manifest_path,
         dcc=dcc,
+        stream_key=stream.stream_key,
+        stem=stream.stem,
+        ext=stream.ext,
+        stream_label=stream.stream_label,
+        working_path=stream.working_path,
         source_path=source_path,
         backup_path=backup_path,
         version=version,
@@ -169,6 +219,7 @@ __all__ = [
     "compute_signature",
     "BackupResult",
     "VersionRecord",
+    "current_record",
     "get_manifest_path",
     "history_as_records",
     "list_versions",

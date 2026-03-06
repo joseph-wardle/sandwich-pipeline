@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Optional
 
-from .model import VersionRecord, VersionStreamSpec
+from .model import VersionRecord, VersionStreamSpec, stream_filename, stream_key_for
 from .store import (
     backup_file,
     history_as_records,
@@ -32,6 +32,7 @@ def save_version(
 ) -> VersionRecord:
     """Copy a working file into backup storage and record a manual save."""
     normalized_stream = _normalize_stream(stream)
+    assert normalized_stream.stream_key is not None
     normalized_title = _required_text(title, field_name="title")
     normalized_note = _optional_text(note)
     resolved_source = _resolve_existing_file(source_path, field_name="source_path")
@@ -55,6 +56,11 @@ def save_version(
     manifest = record_publish(
         normalized_stream.manifest_path,
         dcc=normalized_stream.dcc,
+        stream_key=normalized_stream.stream_key,
+        stem=normalized_stream.stem,
+        ext=normalized_stream.ext,
+        stream_label=normalized_stream.label,
+        working_path=normalized_stream.working_path,
         source_path=resolved_source,
         backup_path=backup_path,
         version=version,
@@ -65,7 +71,8 @@ def save_version(
     )
     return _record_from_manifest(
         manifest=manifest,
-        dcc=normalized_stream.dcc,
+        stream_key=normalized_stream.stream_key,
+        fallback_dcc=normalized_stream.dcc,
         version=version,
         backup_path=backup_path,
         fallback=VersionRecord(
@@ -90,6 +97,7 @@ def promote_version(
 ) -> VersionRecord:
     """Copy an existing backup file into a new version slot."""
     normalized_stream = _normalize_stream(stream)
+    assert normalized_stream.stream_key is not None
     normalized_title = _required_text(title, field_name="title")
     normalized_note = _optional_text(note)
 
@@ -121,6 +129,11 @@ def promote_version(
     manifest = record_publish(
         normalized_stream.manifest_path,
         dcc=normalized_stream.dcc,
+        stream_key=normalized_stream.stream_key,
+        stem=normalized_stream.stem,
+        ext=normalized_stream.ext,
+        stream_label=normalized_stream.label,
+        working_path=normalized_stream.working_path,
         source_path=source_backup,
         backup_path=backup_path,
         version=version,
@@ -131,7 +144,8 @@ def promote_version(
     )
     return _record_from_manifest(
         manifest=manifest,
-        dcc=normalized_stream.dcc,
+        stream_key=normalized_stream.stream_key,
+        fallback_dcc=normalized_stream.dcc,
         version=version,
         backup_path=backup_path,
         fallback=VersionRecord(
@@ -150,9 +164,14 @@ def promote_version(
 def list_version_records(stream: VersionStreamSpec) -> list[VersionRecord]:
     """Return version records newest-first, joined from manifest and filesystem."""
     normalized_stream = _normalize_stream(stream)
+    assert normalized_stream.stream_key is not None
 
     manifest = load_manifest(normalized_stream.manifest_path)
-    manifest_history = history_as_records(manifest, normalized_stream.dcc)
+    manifest_history = history_as_records(
+        manifest,
+        normalized_stream.stream_key,
+        fallback_dcc=normalized_stream.dcc,
+    )
     records_by_version: dict[int, VersionRecord] = {}
 
     for record in manifest_history:
@@ -193,16 +212,21 @@ def list_version_records(stream: VersionStreamSpec) -> list[VersionRecord]:
 
 
 def _normalize_stream(stream: VersionStreamSpec) -> VersionStreamSpec:
+    normalized_dcc = _required_text(stream.dcc, field_name="dcc")
+    normalized_stem = _required_text(stream.stem, field_name="stem")
+    normalized_ext = _required_ext(stream.ext)
     return VersionStreamSpec(
         root_path=Path(stream.root_path).expanduser().resolve(),
         manifest_path=Path(stream.manifest_path).expanduser().resolve(),
         backup_dir=Path(stream.backup_dir).expanduser().resolve(),
-        dcc=_required_text(stream.dcc, field_name="dcc"),
-        stem=_required_text(stream.stem, field_name="stem"),
-        ext=_required_ext(stream.ext),
+        dcc=normalized_dcc,
+        stem=normalized_stem,
+        ext=normalized_ext,
         owner=stream.owner,
-        label=_optional_text(stream.label),
-        stream_key=_optional_text(stream.stream_key),
+        label=_optional_text(stream.label)
+        or stream_filename(normalized_stem, normalized_ext),
+        stream_key=_optional_text(stream.stream_key)
+        or stream_key_for(normalized_dcc, normalized_stem, normalized_ext),
         working_path=(
             Path(stream.working_path).expanduser().resolve()
             if stream.working_path is not None
@@ -290,12 +314,17 @@ def _parse_version_from_name(*, stem: str, ext: str, filename: str) -> int | Non
 def _record_from_manifest(
     *,
     manifest: dict[str, object],
-    dcc: str,
+    stream_key: str,
+    fallback_dcc: str,
     version: int,
     backup_path: Path,
     fallback: VersionRecord,
 ) -> VersionRecord:
-    for record in history_as_records(manifest, dcc):
+    for record in history_as_records(
+        manifest,
+        stream_key,
+        fallback_dcc=fallback_dcc,
+    ):
         if record.version != version:
             continue
         if record.backup_path is None:
