@@ -13,13 +13,8 @@ from env_sg import DB_Config
 from Qt import QtCore, QtWidgets
 from shared.util import get_production_path
 
-from pipe.asset.paths import BACKUP_DIRNAME, DCC_MAYA, paths_for_asset
-from pipe.asset.version_service import (
-    list_version_records,
-    promote_version,
-    save_version,
-)
-from pipe.asset.versioning import get_manifest_path, load_manifest, version_label
+from pipe.asset.paths import BACKUP_DIRNAME, paths_for_asset
+from pipe.asset.version_adapter import asset_owner_for, maya_model_stream
 from pipe.db import DB, DBInterface
 from pipe.glui.dialogs import FilteredListDialog, MessageDialog
 from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
@@ -27,7 +22,15 @@ from pipe.glui.version_browser import VersionBrowserWidget
 from pipe.m.local import get_main_qt_window
 from pipe.struct.db import Asset, SGEntity
 from pipe.util import FileManager
-from pipe.versioning import current_record, stream_key_for
+from pipe.versioning import (
+    current_record,
+    get_manifest_path,
+    list_version_records,
+    load_manifest,
+    promote_version,
+    save_version,
+    version_label,
+)
 
 log = logging.getLogger(__name__)
 
@@ -231,10 +234,12 @@ class AssetOpenDialog(FilteredListDialog):
         paths = paths_for_asset(asset)
         manifest_path = get_manifest_path(paths.root)
         manifest = load_manifest(manifest_path)
+        model_stream = maya_model_stream(paths)
+        assert model_stream.stream_key is not None
         stream_current = current_record(
             manifest,
-            stream_key_for(DCC_MAYA, "model", "mb"),
-            fallback_dcc=DCC_MAYA,
+            model_stream.stream_key,
+            fallback_dcc=model_stream.dcc,
         )
 
         publish_summary = "No publish recorded"
@@ -427,7 +432,8 @@ class MAssetFileManager(FileManager):
             return
 
         asset_paths = paths_for_asset(asset)
-        records = list_version_records(asset_paths, DCC_MAYA, "model", "mb")
+        model_stream = maya_model_stream(asset_paths, owner=asset_owner_for(asset))
+        records = list_version_records(model_stream)
         if not records:
             MessageDialog(
                 self._main_window,
@@ -511,10 +517,7 @@ class MAssetFileManager(FileManager):
             try:
                 promoted = promote_version(
                     selected_record,
-                    asset_paths,
-                    DCC_MAYA,
-                    stem="model",
-                    ext="mb",
+                    model_stream,
                     title=promote_dialog.get_title(),
                     note=promote_dialog.get_note(),
                 )
@@ -555,14 +558,14 @@ class MAssetFileManager(FileManager):
         if not dialog.exec_():
             return
 
-        asset_paths = paths_for_asset(asset)
+        model_stream = maya_model_stream(
+            paths_for_asset(asset),
+            owner=asset_owner_for(asset),
+        )
         try:
             record = save_version(
                 scene_path,
-                asset_paths,
-                DCC_MAYA,
-                stem="model",
-                ext="mb",
+                model_stream,
                 title=dialog.get_title(),
                 note=dialog.get_note(),
             )

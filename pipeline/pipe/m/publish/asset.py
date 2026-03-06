@@ -27,8 +27,8 @@ from Qt.QtWidgets import (
 )
 from software.houdini.dcc import HoudiniDCC
 
-from pipe.asset.paths import DCC_MAYA, paths_for_asset
-from pipe.asset.versioning import BackupResult, backup_if_changed
+from pipe.asset.paths import paths_for_asset
+from pipe.asset.version_adapter import asset_owner_for, maya_model_stream
 from pipe.db import DB
 from pipe.glui.dialogs import (
     FilteredListDialog,
@@ -42,6 +42,7 @@ from pipe.m.assetfile import (
 )
 from pipe.m.util import maintain_selection
 from pipe.struct.db import Asset, SGEntity
+from pipe.versioning import BackupResult, backup_if_changed
 
 if TYPE_CHECKING:
     pass
@@ -390,19 +391,23 @@ class AssetPublisher(Publisher):
             return
 
         asset_paths = paths_for_asset(asset)
+        model_stream = maya_model_stream(asset_paths, owner=asset_owner_for(asset))
         result = backup_if_changed(
             source_path=scene_path,
-            backup_dir=asset_paths.backup_dir,
-            manifest_path=asset_paths.manifest_path,
-            dcc=DCC_MAYA,
+            backup_dir=model_stream.backup_dir,
+            manifest_path=model_stream.manifest_path,
+            dcc=model_stream.dcc,
+            stream_key=model_stream.stream_key,
+            stem=model_stream.stem,
+            ext=model_stream.ext,
+            stream_label=model_stream.label,
+            working_path=model_stream.working_path,
             title=self._version_title,
             variant=self._geo_variant,
             publish_path=self._publish_path,
             context="publish",
             note=self._version_note,
-            asset_name=asset.name,
-            asset_path=asset.asset_path,
-            asset_id=asset.id,
+            owner=model_stream.owner,
         )
 
         if result is None:

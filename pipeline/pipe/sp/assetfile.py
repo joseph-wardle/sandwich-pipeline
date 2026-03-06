@@ -18,12 +18,7 @@ from shared.util import get_documentation_path, get_production_path, resolve_map
 from substance_painter.project import NormalMapFormat, ProjectWorkflow, TangentSpace
 
 from pipe.asset.paths import DCC_SUBSTANCE, AssetPaths, paths_for_asset
-from pipe.asset.version_service import (
-    list_version_records,
-    promote_version,
-    save_version,
-)
-from pipe.asset.versioning import version_label
+from pipe.asset.version_adapter import asset_owner_for, substance_project_stream
 from pipe.db import DB
 from pipe.glui.dialogs import (
     DialogFilteredList,
@@ -35,6 +30,12 @@ from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialo
 from pipe.glui.version_browser import VersionBrowserWidget
 from pipe.sp.local import get_main_qt_window
 from pipe.struct.db import Asset, build_asset_path
+from pipe.versioning import (
+    list_version_records,
+    promote_version,
+    save_version,
+    version_label,
+)
 
 log = logging.getLogger(__name__)
 
@@ -1297,14 +1298,13 @@ def launch_version_browser_for_current_project() -> None:
         return
 
     geo_variant = _current_geo_variant()
-    stem = _texture_project_stem_for_variant(geo_variant)
     asset_paths = paths_for_asset(asset)
-    records = list_version_records(
-        asset_paths=asset_paths,
-        dcc=DCC_SUBSTANCE,
-        stem=stem,
-        ext="spp",
+    project_stream = substance_project_stream(
+        asset_paths,
+        geo_variant,
+        owner=asset_owner_for(asset),
     )
+    records = list_version_records(project_stream)
     if not records:
         MessageDialog(
             parent,
@@ -1376,10 +1376,7 @@ def launch_version_browser_for_current_project() -> None:
         try:
             promoted_record = promote_version(
                 selected_record,
-                asset_paths=asset_paths,
-                dcc=DCC_SUBSTANCE,
-                stem=stem,
-                ext="spp",
+                project_stream,
                 title=promote_dialog.get_title(),
                 note=promote_dialog.get_note(),
             )
@@ -1431,14 +1428,15 @@ def launch_save_version() -> None:
         return
 
     geo_variant = _current_geo_variant()
-    stem = _texture_project_stem_for_variant(geo_variant)
+    project_stream = substance_project_stream(
+        paths_for_asset(asset),
+        geo_variant,
+        owner=asset_owner_for(asset),
+    )
     try:
         version_record = save_version(
-            source_path=project_path,
-            asset_paths=paths_for_asset(asset),
-            dcc=DCC_SUBSTANCE,
-            stem=stem,
-            ext="spp",
+            project_path,
+            project_stream,
             title=dialog.get_title(),
             note=dialog.get_note(),
         )

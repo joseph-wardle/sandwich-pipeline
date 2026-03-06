@@ -23,11 +23,13 @@ from typing import Any, Mapping, NotRequired, TypedDict, cast
 
 import hou
 
-from pipe.asset.versioning import (
+from pipe.asset.version_adapter import asset_owner_from_metadata
+from pipe.versioning import (
     backup_file,
     get_manifest_path,
     next_version,
     record_publish,
+    stream_key_for,
 )
 
 from . import publish_hooks
@@ -567,9 +569,15 @@ def _backup_snapshot(
         return None
 
     try:
+        stream_label = f"{backup_stem}.{backup_ext}"
         record_publish(
             context.manifest_path,
             dcc=DCC_HOUDINI_NAME,
+            stream_key=stream_key_for(DCC_HOUDINI_NAME, backup_stem, backup_ext),
+            stem=backup_stem,
+            ext=backup_ext,
+            stream_label=stream_label,
+            working_path=context.hip_path,
             source_path=context.hip_path,
             backup_path=backup_path,
             version=version,
@@ -577,9 +585,11 @@ def _backup_snapshot(
             context="publish",
             note=options.note or options.publish_note,
             tool_version=options.tool_version,
-            asset_name=context.asset_name,
-            asset_path=options.asset_path,
-            asset_id=options.asset_id,
+            owner=asset_owner_from_metadata(
+                display_name=context.asset_name,
+                asset_path=options.asset_path,
+                asset_id=options.asset_id,
+            ),
             extra={
                 "variant": context.variant,
                 "publish_node": context.node.path(),

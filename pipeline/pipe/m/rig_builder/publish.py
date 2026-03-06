@@ -5,8 +5,8 @@ from env_sg import DB_Config
 from maya import cmds
 
 from pipe.asset.paths import paths_for_asset
-from pipe.asset.versioning import next_version, versioned_filename
 from pipe.db import DB
+from pipe.versioning import next_version, versioned_filename
 
 from .build import RigBuilder
 from .progress import ProgressStep, TestProgressManager
