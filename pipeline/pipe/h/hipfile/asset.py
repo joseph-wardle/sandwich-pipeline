@@ -192,8 +192,22 @@ class HAssetFileManager(HFileManager):
         if not self._check_unsaved_changes():
             return
 
-        asset = self._prompt_asset_selection()
+        hip_path = self._current_hip_path()
+        if hip_path is None:
+            MessageDialog(
+                self._main_window,
+                "No valid asset HIP is open. Use Open Asset first.",
+                "Version History",
+            ).exec_()
+            return
+
+        asset = self._resolve_asset_for_hip(hip_path)
         if not asset:
+            MessageDialog(
+                self._main_window,
+                "Could not resolve the current HIP to a valid asset. Use Open Asset first.",
+                "Version History",
+            ).exec_()
             return
 
         asset_paths = paths_for_asset(asset)

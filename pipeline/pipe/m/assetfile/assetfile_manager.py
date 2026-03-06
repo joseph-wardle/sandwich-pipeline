@@ -420,8 +420,23 @@ class MAssetFileManager(FileManager):
         if not self._check_unsaved_changes():
             return
 
-        asset = self._prompt_asset_selection()
+        scene_raw = mc.file(query=True, sceneName=True)
+        if not isinstance(scene_raw, str) or not scene_raw:
+            MessageDialog(
+                self._main_window,
+                "No valid asset scene is open. Use Open Asset first.",
+                "Version History",
+            ).exec_()
+            return
+
+        scene_path = Path(scene_raw)
+        asset = self._resolve_asset_for_scene(scene_path)
         if not asset:
+            MessageDialog(
+                self._main_window,
+                "Could not resolve the current scene to a valid asset. Use Open Asset first.",
+                "Version History",
+            ).exec_()
             return
 
         asset_paths = paths_for_asset(asset)
