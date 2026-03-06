@@ -14,27 +14,27 @@ global proc shelf_Bobo_RLO () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Open RLO File" 
+        -annotation "Open RLO File"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "OpenRLO" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "OpenRLO"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -imageOverlayLabel "Open RLO" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "openLoadGeneric.png" 
-        -image1 "openLoadGeneric.png" 
-        -style "iconOnly" 
+        -imageOverlayLabel "Open RLO"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "openLoadGeneric.png"
+        -image1 "openLoadGeneric.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.shotfile import MRLOShotFileManager; fm = MRLOShotFileManager(); fm.open_file()" 
-        -sourceType "python" 
+        -command "from pipe.m.shotfile import MRLOShotFileManager; fm = MRLOShotFileManager(); fm.open_file()"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -48,27 +48,95 @@ global proc shelf_Bobo_RLO () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Tool for shifting around timelines" 
+        -annotation "Create a manual version of the current RLO scene"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "PinShift" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Save Version"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -imageOverlayLabel "Pin Shift" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "pin.png" 
-        -image1 "pin.png" 
-        -style "iconOnly" 
+        -imageOverlayLabel "Save Version"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "save.png"
+        -image1 "save.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import pin_shift; pin_shift.run();" 
-        -sourceType "python" 
+        -command "from pipe.m.shotfile import MRLOShotFileManager; MRLOShotFileManager().save_version_for_current_scene()"
+        -sourceType "python"
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "Open version history for the current RLO scene"
+        -enableBackground 0
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Version History"
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "Versions"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "default.svg"
+        -image1 "default.svg"
+        -style "iconOnly"
+        -marginWidth 0
+        -marginHeight 1
+        -command "from pipe.m.shotfile import MRLOShotFileManager; MRLOShotFileManager().open_version_browser()"
+        -sourceType "python"
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "Tool for shifting around timelines"
+        -enableBackground 0
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "PinShift"
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "Pin Shift"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "pin.png"
+        -image1 "pin.png"
+        -style "iconOnly"
+        -marginWidth 0
+        -marginHeight 1
+        -command "import pin_shift; pin_shift.run();"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -82,27 +150,27 @@ global proc shelf_Bobo_RLO () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Tool for L&D camera publishing" 
+        -annotation "Tool for L&D camera publishing"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Publish" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Publish"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -imageOverlayLabel "Publish Camera" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "camera.closed.svg" 
-        -image1 "camera.closed.svg" 
-        -style "iconOnly" 
+        -imageOverlayLabel "Publish Camera"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "camera.closed.svg"
+        -image1 "camera.closed.svg"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.publish import CameraPublisher; CameraPublisher().publish();" 
-        -sourceType "python" 
+        -command "from pipe.m.publish import CameraPublisher; CameraPublisher().publish();"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -116,27 +184,27 @@ global proc shelf_Bobo_RLO () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Previs Playblasting" 
+        -annotation "Previs Playblasting"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Publish" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Publish"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -imageOverlayLabel "Previs Playblast" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "playblast.png" 
-        -image1 "playblast.png" 
-        -style "iconOnly" 
+        -imageOverlayLabel "Previs Playblast"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "playblast.png"
+        -image1 "playblast.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.playblast import PrevisPlayblastDialog; from pipe.m.local import get_main_qt_window; PrevisPlayblastDialog(get_main_qt_window()).show();" 
-        -sourceType "python" 
+        -command "from pipe.m.playblast import PrevisPlayblastDialog; from pipe.m.local import get_main_qt_window; PrevisPlayblastDialog(get_main_qt_window()).show();"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -150,27 +218,27 @@ global proc shelf_Bobo_RLO () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Assign FX Material" 
+        -annotation "Assign FX Material"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Assign FX Material" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Assign FX Material"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -imageOverlayLabel "Assign FX Material" 
-        -overlayLabelColor 0.8 0.8 0.8 
-        -overlayLabelBackColor 0 0 0 0.5 
-        -image "a_standard_surface.png" 
-        -image1 "a_standard_surface.png" 
-        -style "iconOnly" 
+        -imageOverlayLabel "Assign FX Material"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "a_standard_surface.png"
+        -image1 "a_standard_surface.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.scripts.Assign_FX_Material import assign_texture_with_dropdown; assign_texture_with_dropdown();\n" 
-        -sourceType "python" 
+        -command "from pipe.m.scripts.Assign_FX_Material import assign_texture_with_dropdown; assign_texture_with_dropdown();\n"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -184,27 +252,27 @@ global proc shelf_Bobo_RLO () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "ALT Camera" 
+        -annotation "ALT Camera"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "ALT Camera" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "ALT Camera"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -imageOverlayLabel "ALT Camera" 
-        -overlayLabelColor 0.8 0.8 0.8 
-        -overlayLabelBackColor 0 0 0 0.5 
-        -image "camera.closed.svg" 
-        -image1 "camera.closed.svg" 
-        -style "iconOnly" 
+        -imageOverlayLabel "ALT Camera"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "camera.closed.svg"
+        -image1 "camera.closed.svg"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.scripts.ALT_Camera import ReferenceAndMatchRig; ReferenceAndMatchRig().launch();\n" 
-        -sourceType "python" 
+        -command "from pipe.m.scripts.ALT_Camera import ReferenceAndMatchRig; ReferenceAndMatchRig().launch();\n"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -218,27 +286,27 @@ global proc shelf_Bobo_RLO () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Camera" 
+        -annotation "Camera"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Camera" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Camera"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -imageOverlayLabel "Camera" 
-        -overlayLabelColor 0.8 0.8 0.8 
-        -overlayLabelBackColor 0 0 0 0.5 
-        -image "camera.open.svg" 
-        -image1 "camera.open.svg" 
-        -style "iconOnly" 
+        -imageOverlayLabel "Camera"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "camera.open.svg"
+        -image1 "camera.open.svg"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.scripts.Camera import show_camera_reference_ui; show_camera_reference_ui();\n" 
-        -sourceType "python" 
+        -command "from pipe.m.scripts.Camera import show_camera_reference_ui; show_camera_reference_ui();\n"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -252,27 +320,27 @@ global proc shelf_Bobo_RLO () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "FX Card Rig" 
+        -annotation "FX Card Rig"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "FX Card Rig" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "FX Card Rig"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -imageOverlayLabel "FX Card Rig" 
-        -overlayLabelColor 0.8 0.8 0.8 
-        -overlayLabelBackColor 0 0 0 0.5 
-        -image "radialField.svg" 
-        -image1 "radialField.svg" 
-        -style "iconOnly" 
+        -imageOverlayLabel "FX Card Rig"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "radialField.svg"
+        -image1 "radialField.svg"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.scripts.FX_Card_Rig import open_reference_ui; open_reference_ui();\n" 
-        -sourceType "python" 
+        -command "from pipe.m.scripts.FX_Card_Rig import open_reference_ui; open_reference_ui();\n"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -286,27 +354,27 @@ global proc shelf_Bobo_RLO () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "FX Card" 
+        -annotation "FX Card"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "FX Card" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "FX Card"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -imageOverlayLabel "FX Card" 
-        -overlayLabelColor 0.8 0.8 0.8 
-        -overlayLabelBackColor 0 0 0 0.5 
-        -image "colorPresetSpectrum.png" 
-        -image1 "colorPresetSpectrum.png" 
-        -style "iconOnly" 
+        -imageOverlayLabel "FX Card"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "colorPresetSpectrum.png"
+        -image1 "colorPresetSpectrum.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.scripts.FX_Card import FXCard; FXCard();\n" 
-        -sourceType "python" 
+        -command "from pipe.m.scripts.FX_Card import FXCard; FXCard();\n"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -320,27 +388,27 @@ global proc shelf_Bobo_RLO () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Pointlight Rig" 
+        -annotation "Pointlight Rig"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Pointlight Rig" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Pointlight Rig"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -imageOverlayLabel "Pointlight Rig" 
-        -overlayLabelColor 0.8 0.8 0.8 
-        -overlayLabelBackColor 0 0 0 0.5 
-        -image "light.png" 
-        -image1 "light.png" 
-        -style "iconOnly" 
+        -imageOverlayLabel "Pointlight Rig"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "light.png"
+        -image1 "light.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.scripts.Pointlight_Rig import create_point_light_control; create_point_light_control();\n" 
-        -sourceType "python" 
+        -command "from pipe.m.scripts.Pointlight_Rig import create_point_light_control; create_point_light_control();\n"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -354,27 +422,27 @@ global proc shelf_Bobo_RLO () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Setup" 
+        -annotation "Setup"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Setup" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Setup"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -imageOverlayLabel "Setup" 
-        -overlayLabelColor 0.8 0.8 0.8 
-        -overlayLabelBackColor 0 0 0 0.5 
-        -image "uvlatticeLarge.png" 
-        -image1 "uvlatticeLarge.png" 
-        -style "iconOnly" 
+        -imageOverlayLabel "Setup"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "uvlatticeLarge.png"
+        -image1 "uvlatticeLarge.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.scripts.Set_Up import setup; setup();" 
-        -sourceType "python" 
+        -command "from pipe.m.scripts.Set_Up import setup; setup();"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -388,29 +456,29 @@ global proc shelf_Bobo_RLO () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Spotlight Rig" 
+        -annotation "Spotlight Rig"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Spotlight Rig" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Spotlight Rig"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -imageOverlayLabel "Spotlight Rig" 
-        -overlayLabelColor 0.8 0.8 0.8 
-        -overlayLabelBackColor 0 0 0 0.5 
-        -image "spotLight.closed.svg" 
-        -image1 "spotLight.closed.svg" 
-        -style "iconOnly" 
+        -imageOverlayLabel "Spotlight Rig"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "spotLight.closed.svg"
+        -image1 "spotLight.closed.svg"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.scripts.Spotlight_Rig import create_spotlight_rig_auto_index; create_spotlight_rig_auto_index();" 
-        -sourceType "python" 
+        -command "from pipe.m.scripts.Spotlight_Rig import create_spotlight_rig_auto_index; create_spotlight_rig_auto_index();"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
 
-} 
+}

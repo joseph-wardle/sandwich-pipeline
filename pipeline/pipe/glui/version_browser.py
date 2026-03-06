@@ -242,7 +242,18 @@ def _dim_item(item: QtWidgets.QTableWidgetItem) -> None:
 
 def _has_backup_file(record: VersionRecord) -> bool:
     backup_path = record.backup_path
-    return bool(backup_path and backup_path.exists() and backup_path.is_file())
+    if not (backup_path and backup_path.exists() and backup_path.is_file()):
+        return False
+
+    backup_root = record.backup_root
+    if backup_root is None or not record.backup_members:
+        return True
+
+    resolved_backup_root = Path(backup_root)
+    return all(
+        (resolved_backup_root / member_path).exists()
+        for member_path in record.backup_members
+    )
 
 
 def _format_timestamp(timestamp: str | None) -> str:

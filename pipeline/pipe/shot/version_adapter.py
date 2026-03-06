@@ -16,6 +16,7 @@ from shared.util import get_production_path
 from pipe.struct.db import Shot
 from pipe.versioning import (
     VersionOwner,
+    VersionSnapshotMember,
     VersionStreamSpec,
     get_manifest_path,
     stream_key_for,
@@ -25,6 +26,7 @@ DCC_HOUDINI = "houdini"
 DCC_MAYA = "maya"
 SHOT_VERSION_MANIFEST_FILENAME = "version_manifest.json"
 _STREAM_DIRNAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+_BUNDLE_DIRNAME_RE = re.compile(r"^v\d+$")
 
 
 def _normalized_text(value: object | None) -> Optional[str]:
@@ -63,6 +65,7 @@ def shot_stream(
     ext: str,
     owner: VersionOwner | None = None,
     label: str | None = None,
+    snapshot_members: tuple[VersionSnapshotMember, ...] = (),
 ) -> VersionStreamSpec:
     resolved_dcc = _normalized_text(dcc) or "unknown"
     resolved_stream_name = _normalized_text(stream_name) or stem
@@ -86,6 +89,7 @@ def shot_stream(
         label=_normalized_text(label) or working_path.name,
         stream_key=stream_key,
         working_path=working_path,
+        snapshot_members=snapshot_members,
     )
 
 
@@ -103,6 +107,39 @@ def maya_anim_stream(
         ext="mb",
         owner=owner,
         label="Animation Scene",
+    )
+
+
+def maya_rlo_stream(
+    shot: Shot,
+    *,
+    owner: VersionOwner | None = None,
+) -> VersionStreamSpec:
+    scene_relative_path = Path("rlo") / f"{shot.code}.mb"
+    return shot_stream(
+        shot,
+        DCC_MAYA,
+        stream_name="rlo",
+        subpath="rlo",
+        stem=shot.code,
+        ext="mb",
+        owner=owner,
+        label="RLO Scene",
+        snapshot_members=(
+            VersionSnapshotMember(
+                relative_path=scene_relative_path,
+                label="RLO Scene",
+                primary=True,
+            ),
+            VersionSnapshotMember(
+                relative_path=Path("maya_root.usd"),
+                label="Shot Root Layer",
+            ),
+            VersionSnapshotMember(
+                relative_path=Path("set") / "maya_override.usd",
+                label="Shot Override Layer",
+            ),
+        ),
     )
 
 
@@ -128,6 +165,10 @@ def houdini_department_stream(
 def path_matches_stream(path: Path, stream: VersionStreamSpec) -> bool:
     resolved_path = Path(path).expanduser().resolve()
 
+    for member in stream.snapshot_members:
+        if resolved_path == (Path(stream.root_path) / member.relative_path).resolve():
+            return True
+
     working_path = stream.working_path
     if working_path is not None:
         resolved_working_path = Path(working_path).expanduser().resolve()
@@ -135,9 +176,26 @@ def path_matches_stream(path: Path, stream: VersionStreamSpec) -> bool:
             return True
 
     resolved_backup_dir = Path(stream.backup_dir).expanduser().resolve()
-    if resolved_path.parent != resolved_backup_dir:
+    try:
+        relative_to_backup = resolved_path.relative_to(resolved_backup_dir)
+    except Exception:
         return False
-    return resolved_path.suffix.lower() == f".{stream.ext.lower()}"
+
+    if stream.snapshot_members:
+        if len(relative_to_backup.parts) < 2:
+            return False
+        bundle_name = relative_to_backup.parts[0]
+        if not _BUNDLE_DIRNAME_RE.match(bundle_name):
+            return False
+        member_path = Path(*relative_to_backup.parts[1:])
+        return member_path in {
+            snapshot_member.relative_path for snapshot_member in stream.snapshot_members
+        }
+
+    return (
+        resolved_path.parent == resolved_backup_dir
+        and resolved_path.suffix.lower() == f".{stream.ext.lower()}"
+    )
 
 
 __all__ = [
@@ -146,6 +204,7 @@ __all__ = [
     "SHOT_VERSION_MANIFEST_FILENAME",
     "houdini_department_stream",
     "maya_anim_stream",
+    "maya_rlo_stream",
     "path_matches_stream",
     "shot_owner_for",
     "shot_root_path",
