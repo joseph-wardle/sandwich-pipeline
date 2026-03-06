@@ -27,6 +27,7 @@ from pipe.glui.version_browser import VersionBrowserWidget
 from pipe.m.local import get_main_qt_window
 from pipe.struct.db import Asset, SGEntity
 from pipe.util import FileManager
+from pipe.versioning import current_record, stream_key_for
 
 log = logging.getLogger(__name__)
 
@@ -230,28 +231,23 @@ class AssetOpenDialog(FilteredListDialog):
         paths = paths_for_asset(asset)
         manifest_path = get_manifest_path(paths.root)
         manifest = load_manifest(manifest_path)
-
-        dcc_block = manifest.get("dcc", {}).get(DCC_MAYA, {})
-        current = dcc_block.get("current") or {}
-
-        version = current.get("version")
-        title = _normalize_value(current.get("title"))
-        context = _normalize_value(current.get("context"))
-        user = current.get("user")
-        timestamp = current.get("timestamp")
+        stream_current = current_record(
+            manifest,
+            stream_key_for(DCC_MAYA, "model", "mb"),
+            fallback_dcc=DCC_MAYA,
+        )
 
         publish_summary = "No publish recorded"
-        if version is not None:
-            version_label = f"v{int(version):03d}"
-            parts = [version_label]
-            if title:
-                parts.append(f'"{title}"')
-            if context:
-                parts.append(f"[{context}]")
-            if user:
-                parts.append(f"by {user}")
-            if timestamp:
-                parts.append(f"at {timestamp}")
+        if stream_current and stream_current.version is not None:
+            parts = [version_label(stream_current.version)]
+            if stream_current.title:
+                parts.append(f'"{stream_current.title}"')
+            if stream_current.context:
+                parts.append(f"[{stream_current.context}]")
+            if stream_current.user:
+                parts.append(f"by {stream_current.user}")
+            if stream_current.timestamp:
+                parts.append(f"at {stream_current.timestamp}")
             publish_summary = " ".join(parts)
 
         info_lines = [

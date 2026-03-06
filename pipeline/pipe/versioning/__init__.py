@@ -1,6 +1,13 @@
 """Shared versioning core for working-file history workflows."""
 
-from .model import BackupResult, VersionOwner, VersionRecord, VersionStreamSpec
+from .model import (
+    BackupResult,
+    VersionOwner,
+    VersionRecord,
+    VersionStreamSpec,
+    stream_filename,
+    stream_key_for,
+)
 from .service import list_version_records, promote_version, save_version
 from .store import (
     DEFAULT_MANIFEST_FILENAME,
@@ -9,6 +16,7 @@ from .store import (
     backup_if_changed,
     build_manifest,
     compute_signature,
+    current_record,
     get_manifest_path,
     history_as_records,
     list_versions,
@@ -31,6 +39,7 @@ __all__ = [
     "backup_if_changed",
     "build_manifest",
     "compute_signature",
+    "current_record",
     "get_manifest_path",
     "history_as_records",
     "list_version_records",
@@ -41,6 +50,8 @@ __all__ = [
     "record_publish",
     "save_version",
     "save_manifest",
+    "stream_filename",
+    "stream_key_for",
     "version_label",
     "versioned_filename",
 ]
