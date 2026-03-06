@@ -22,6 +22,18 @@ fm = HAssetFileManager()
 fm.open_file()]]></script>
   </tool>
 
+  <tool name="save_asset_version" label="Save Version" icon="BUTTONS_save">
+    <script scriptType="python"><![CDATA[from pipe.h.hipfile import HAssetFileManager
+fm = HAssetFileManager()
+fm.save_version()]]></script>
+  </tool>
+
+  <tool name="asset_version_history" label="Version History" icon="BUTTONS_chooser_history">
+    <script scriptType="python"><![CDATA[from pipe.h.hipfile import HAssetFileManager
+fm = HAssetFileManager()
+fm.open_version_browser()]]></script>
+  </tool>
+
   <tool name="open_set" label="Open Set" icon="LOP_layout">
     <script scriptType="python"><![CDATA[from pipe.h.hipfile import HEnvFileManager
 fm = HEnvFileManager()

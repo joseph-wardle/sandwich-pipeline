@@ -7,6 +7,8 @@
 
   <toolshelf name="bobo_assets" label="Bobo Assets">
     <memberTool name="open_asset"/>
+    <memberTool name="save_asset_version"/>
+    <memberTool name="asset_version_history"/>
     <memberTool name="open_set"/>
     <memberTool name="open_shot"/>
     <memberTool name="bobo_playblast"/>
