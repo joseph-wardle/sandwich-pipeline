@@ -28,7 +28,7 @@ fm = HAssetFileManager()
 fm.save_version()]]></script>
   </tool>
 
-  <tool name="asset_version_history" label="Version History" icon="BUTTONS_chooser_history">
+  <tool name="asset_version_history" label="Version History" icon="BUTTONS_history">
     <script scriptType="python"><![CDATA[from pipe.h.hipfile import HAssetFileManager
 fm = HAssetFileManager()
 fm.open_version_browser()]]></script>
@@ -45,7 +45,7 @@ fm.open_file()]]></script>
 HShotFileManager().open_file()]]></script>
   </tool>
 
-  <tool name="bobo_playblast" label="Playblast" icon="NETWORKS_scene">
+  <tool name="bobo_playblast" label="Playblast" icon="TOOLS_view">
     <script scriptType="python"><![CDATA[from pipe.h.playblast.tool import launch_playblast
 launch_playblast()]]></script>
   </tool>
