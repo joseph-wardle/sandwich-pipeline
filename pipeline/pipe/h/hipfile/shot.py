@@ -9,8 +9,22 @@ from typing import cast
 import hou
 
 import pipe.h
-from pipe.glui.dialogs import FilteredListDialog
-from pipe.struct.db import SGEntity, Shot
+from pipe.glui.dialogs import FilteredListDialog, MessageDialog
+from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
+from pipe.glui.version_browser import VersionBrowserWidget
+from pipe.shot.version_adapter import (
+    houdini_department_stream,
+    path_matches_stream,
+    shot_owner_for,
+)
+from pipe.struct.db import SGEntity, Shot, validate_shot_code_token
+from pipe.versioning import (
+    VersionStreamSpec,
+    list_version_records,
+    promote_version,
+    save_version,
+    version_label,
+)
 
 from .filemanager import HFileManager
 
@@ -18,7 +32,7 @@ log = logging.getLogger(__name__)
 
 
 class HShotFileManager(HFileManager):
-    _department: DEPARTMENT
+    _department: str | None
 
     class DEPARTMENT(str, Enum):
         CFX = "cfx"
@@ -28,33 +42,69 @@ class HShotFileManager(HFileManager):
         FLO = "flo"
         RENDER = "render"
 
-    def __init__(self):
+    @classmethod
+    def _department_options(cls) -> list[str]:
+        return [
+            cls.DEPARTMENT.CFX.value,
+            cls.DEPARTMENT.FX.value,
+            cls.DEPARTMENT.ENVFX.value,
+            cls.DEPARTMENT.FLO.value,
+            cls.DEPARTMENT.LIGHTING.value,
+            cls.DEPARTMENT.RENDER.value,
+        ]
+
+    @classmethod
+    def _normalize_department(cls, department: object | None) -> str | None:
+        if isinstance(department, Enum):
+            raw_value = department.value
+        else:
+            raw_value = department
+        normalized = str(raw_value).strip().lower() if raw_value is not None else ""
+        if normalized in cls._department_options():
+            return normalized
+        return None
+
+    @classmethod
+    def _prompt_department(cls) -> str | None:
         department_dialog = FilteredListDialog(
             pipe.h.local.get_main_qt_window(),
-            [
-                self.DEPARTMENT.CFX,
-                self.DEPARTMENT.FX,
-                self.DEPARTMENT.ENVFX,
-                self.DEPARTMENT.FLO,
-                self.DEPARTMENT.LIGHTING,
-                self.DEPARTMENT.RENDER,
-            ],
+            cls._department_options(),
             "Department Select",
             include_filter_field=False,
             accept_button_name="Select",
         )
         department_dialog.exec_()
+        return cls._normalize_department(department_dialog.get_selected_item())
 
-        self._department = department_dialog.get_selected_item()
-        if not self._department:
-            return
+    def __init__(
+        self,
+        department: DEPARTMENT | str | None = None,
+        *,
+        prompt_for_department: bool = True,
+    ):
+        self._department = self._normalize_department(department)
+        if self._department is None and prompt_for_department:
+            self._department = self._prompt_department()
         super().__init__(Shot, versioning=True, version_glob="{}_v*.{}")
 
+    def open_file(self) -> None:
+        if self._department is None:
+            self._department = self._prompt_department()
+        if self._department is None:
+            return
+        super().open_file()
+
     def _generate_filename_ext(self, entity) -> tuple[str, str]:
-        return self._department, "hipnc"
+        department = self._department_value()
+        if department == "unknown":
+            raise RuntimeError("Shot department has not been selected.")
+        return department, "hipnc"
 
     def _get_subpath(self) -> str:
-        return self._department
+        department = self._department_value()
+        if department == "unknown":
+            raise RuntimeError("Shot department has not been selected.")
+        return department
 
     def _post_open_file(self, entity: SGEntity) -> None:
         shot = cast(Shot, entity)
@@ -62,13 +112,281 @@ class HShotFileManager(HFileManager):
         self._set_environment_paths(shot)
 
     def _department_value(self) -> str:
-        department = (
-            self._department.value
-            if isinstance(self._department, Enum)
-            else self._department
-        )
-        normalized = str(department).strip()
+        normalized = str(self._department or "").strip()
         return normalized or "unknown"
+
+    @staticmethod
+    def _current_hip_path() -> Path | None:
+        hip_raw = (hou.hipFile.path() or "").strip()
+        if not hip_raw:
+            return None
+
+        hip_path = Path(hou.expandString(hip_raw)).expanduser()
+        if not hip_path.is_absolute():
+            hip_path = (Path(hou.hscriptStringExpression("$HIP")) / hip_path).resolve()
+        else:
+            hip_path = hip_path.resolve()
+        return hip_path
+
+    @classmethod
+    def _department_from_path(cls, hip_path: Path) -> str | None:
+        parent_name = hip_path.parent.name.strip().lower()
+        if parent_name in cls._department_options():
+            return parent_name
+
+        if hip_path.suffix.lower() != ".hipnc":
+            return None
+
+        stem = hip_path.stem.strip().lower()
+        if ".v" in stem:
+            stem = stem.rsplit(".v", 1)[0]
+        if stem in cls._department_options():
+            return stem
+        return None
+
+    def _resolve_shot_for_hip(self, hip_path: Path) -> Shot | None:
+        try:
+            shot_context = str(hou.contextOption("SHOT")).strip()
+        except Exception:
+            shot_context = ""
+
+        shot_code = ""
+        if shot_context:
+            try:
+                shot_code = validate_shot_code_token(Path(shot_context).name)
+            except ValueError:
+                shot_code = ""
+
+        if not shot_code:
+            try:
+                shot_index = hip_path.parts.index("shot")
+                if shot_index + 1 < len(hip_path.parts):
+                    shot_code = validate_shot_code_token(hip_path.parts[shot_index + 1])
+            except (ValueError, IndexError):
+                shot_code = ""
+
+        if not shot_code:
+            return None
+        return self._conn.get_shot_by_code(shot_code)
+
+    def _resolve_current_shot_stream(
+        self,
+        hip_path: Path,
+    ) -> tuple[Shot, str, VersionStreamSpec] | None:
+        shot = self._resolve_shot_for_hip(hip_path)
+        if shot is None:
+            return None
+
+        department = self._department_from_path(hip_path)
+        if department is None:
+            return None
+
+        self._department = department
+        stream = houdini_department_stream(
+            shot,
+            department,
+            owner=shot_owner_for(shot),
+        )
+        if not path_matches_stream(hip_path, stream):
+            return None
+        return shot, department, stream
+
+    def _ensure_hip_saved(self) -> Path | None:
+        hip_path = self._current_hip_path()
+        if hip_path is None:
+            MessageDialog(
+                self._main_window,
+                "Current HIP has no file path. Save the project before creating a version.",
+                "Save Required",
+            ).exec_()
+            return None
+
+        if hou.hipFile.hasUnsavedChanges():
+            response = hou.ui.displayMessage(
+                "The current HIP has unsaved changes. Save before creating a version?",
+                buttons=("Save", "Cancel"),
+                severity=hou.severityType.ImportantMessage,
+                default_choice=0,
+                close_choice=1,
+            )
+            if response != 0:
+                return None
+            try:
+                hou.hipFile.save()
+            except Exception:
+                log.exception("Failed to save HIP before creating version.")
+                MessageDialog(
+                    self._main_window,
+                    "Failed to save the current HIP. Resolve file issues and try again.",
+                    "Save Failed",
+                ).exec_()
+                return None
+            hip_path = self._current_hip_path()
+            if hip_path is None:
+                MessageDialog(
+                    self._main_window,
+                    "Could not resolve HIP path after save.",
+                    "Save Failed",
+                ).exec_()
+                return None
+
+        return hip_path
+
+    def open_version_browser(self) -> None:
+        hip_path = self._current_hip_path()
+        if hip_path is None:
+            MessageDialog(
+                self._main_window,
+                "No valid shot HIP is open. Use Open Shot first.",
+                "Version History",
+            ).exec_()
+            return
+
+        resolved = self._resolve_current_shot_stream(hip_path)
+        if resolved is None:
+            MessageDialog(
+                self._main_window,
+                "Could not resolve the current HIP to a valid shot department file. Use Open Shot first.",
+                "Version History",
+            ).exec_()
+            return
+
+        shot, department, shot_stream = resolved
+        records = list_version_records(shot_stream)
+        if not records:
+            MessageDialog(
+                self._main_window,
+                "No version history was found for this shot department.",
+                "No Versions",
+            ).exec_()
+            return
+
+        browser = VersionBrowserWidget(
+            self._main_window,
+            records,
+            owner_label=f"{shot.code} ({department})",
+        )
+        if not browser.exec_():
+            return
+
+        selected_record = browser.get_selected_record()
+        selected_action = browser.get_selected_action()
+        if selected_record is None:
+            return
+
+        if selected_action == VersionBrowserWidget.ACTION_OPEN:
+            backup_path = selected_record.backup_path
+            if backup_path is None:
+                MessageDialog(
+                    self._main_window,
+                    "The selected version has no backup file path.",
+                    "Open Version Failed",
+                ).exec_()
+                return
+            if not backup_path.exists() or not backup_path.is_file():
+                MessageDialog(
+                    self._main_window,
+                    f"Backup file is missing on disk:\n{backup_path}",
+                    "Open Version Failed",
+                ).exec_()
+                return
+            if not self._check_unsaved_changes():
+                return
+
+            try:
+                hou.hipFile.load(str(backup_path), suppress_save_prompt=True)
+                self._post_open_file(shot)
+            except Exception as exc:
+                log.exception("Failed to open Houdini shot version: %s", backup_path)
+                MessageDialog(
+                    self._main_window,
+                    f"Failed to open selected version:\n{exc}",
+                    "Open Version Failed",
+                ).exec_()
+            return
+
+        if selected_action == VersionBrowserWidget.ACTION_PROMOTE:
+            source_backup = selected_record.backup_path
+            if source_backup is None or not source_backup.exists():
+                MessageDialog(
+                    self._main_window,
+                    "Cannot create a new version from this entry because the backup file is missing.",
+                    "Create Version Failed",
+                ).exec_()
+                return
+
+            promote_dialog = PromoteVersionDialog(self._main_window, selected_record)
+            if not promote_dialog.exec_():
+                return
+            try:
+                promoted_record = promote_version(
+                    selected_record,
+                    shot_stream,
+                    title=promote_dialog.get_title(),
+                    note=promote_dialog.get_note(),
+                )
+            except Exception as exc:
+                log.exception("Failed to create a new Houdini shot version.")
+                MessageDialog(
+                    self._main_window,
+                    f"Failed to create new version:\n{exc}",
+                    "Create Version Failed",
+                ).exec_()
+                return
+
+            MessageDialog(
+                self._main_window,
+                (
+                    f'Created new version {version_label(promoted_record.version)} '
+                    f'"{promoted_record.title or "(untitled)"}" from the selected backup.\n'
+                    "Open it from Version History to continue working from it."
+                ),
+                "Version Created",
+            ).exec_()
+
+    def save_version(self) -> None:
+        hip_path = self._ensure_hip_saved()
+        if hip_path is None:
+            return
+
+        resolved = self._resolve_current_shot_stream(hip_path)
+        if resolved is None:
+            MessageDialog(
+                self._main_window,
+                "Could not resolve the current HIP to a valid shot department file.",
+                "Shot Not Resolved",
+            ).exec_()
+            return
+
+        _shot, _department, shot_stream = resolved
+        dialog = SaveVersionDialog(self._main_window)
+        if not dialog.exec_():
+            return
+
+        try:
+            version_record = save_version(
+                hip_path,
+                shot_stream,
+                title=dialog.get_title(),
+                note=dialog.get_note(),
+            )
+        except Exception as exc:
+            log.exception("Failed to save Houdini shot version.")
+            MessageDialog(
+                self._main_window,
+                f"Failed to save version:\n{exc}",
+                "Save Version Failed",
+            ).exec_()
+            return
+
+        MessageDialog(
+            self._main_window,
+            (
+                f'Saved {version_label(version_record.version)} '
+                f'"{version_record.title or "(untitled)"}".'
+            ),
+            "Version Saved",
+        ).exec_()
 
     def _shot_setup_payload(self, *, shot: Shot, path: Path) -> dict[str, object]:
         return {
@@ -159,11 +477,12 @@ class HShotFileManager(HFileManager):
             layer_break = stage.createNode("layerbreak")
             layer_break.setInput(0, input_node)
 
+            department_name = self._department_value().upper()
             begin_dep = stage.createNode("null")
-            begin_dep.setName(f"BEGIN_{self._department.upper()}")
+            begin_dep.setName(f"BEGIN_{department_name}")
 
             end_dep = stage.createNode("null")
-            end_dep.setName(f"END_{self._department.upper()}")
+            end_dep.setName(f"END_{department_name}")
 
             publish = stage.createNode("usd_rop")
             publish.setName("PUBLISH")
@@ -424,17 +743,18 @@ class HShotFileManager(HFileManager):
                 hou.putenv("SET_PATH", layout.path)
 
     def _get_muted_departments(self) -> list[str]:
-        if self._department == self.DEPARTMENT.CFX:
+        department = self._department_value()
+        if department == self.DEPARTMENT.CFX.value:
             return ["cfx", "fx", "envfx", "layout", "lighting", "render"]
-        if self._department == self.DEPARTMENT.FX:
+        if department == self.DEPARTMENT.FX.value:
             return ["fx"]
-        if self._department == self.DEPARTMENT.FLO:
+        if department == self.DEPARTMENT.FLO.value:
             return ["cfx", "fx", "envfx", "lighting", "flo", "render"]
-        if self._department == self.DEPARTMENT.ENVFX:
+        if department == self.DEPARTMENT.ENVFX.value:
             return ["envfx"]
-        if self._department == self.DEPARTMENT.LIGHTING:
+        if department == self.DEPARTMENT.LIGHTING.value:
             return ["lighting"]
-        if self._department == self.DEPARTMENT.RENDER:
+        if department == self.DEPARTMENT.RENDER.value:
             return []
         return []
 

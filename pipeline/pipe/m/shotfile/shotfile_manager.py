@@ -14,6 +14,7 @@ from shared.util import get_production_path
 from timeline_marker.ui import TimelineMarker  # type: ignore[import-not-found]
 
 from pipe.db import DB
+from pipe.glui.dialogs import MessageDialog
 from pipe.m.local import get_main_qt_window
 from pipe.struct.db import SGEntity, Shot, build_shot_path, validate_shot_code_token
 from pipe.util import FileManager, log_errors
@@ -49,6 +50,24 @@ class MShotFileManager(FileManager):
     @classmethod
     def _normalize_usd_path(cls, path: str) -> str:
         return path.replace("\\", "/")
+
+    @classmethod
+    def _shot_code_from_file_info(cls) -> Optional[str]:
+        info = mc.fileInfo("code", query=True)
+        if isinstance(info, (list, tuple)):
+            if not info:
+                return None
+            raw_value = info[0]
+        elif isinstance(info, str):
+            raw_value = info
+        else:
+            return None
+
+        try:
+            return validate_shot_code_token(raw_value)
+        except ValueError:
+            log.warning("Invalid shot code in scene metadata: %s", raw_value)
+            return None
 
     @classmethod
     def _shot_code_from_scene_path(cls, scene_path: Optional[str]) -> Optional[str]:
@@ -280,13 +299,7 @@ class MShotFileManager(FileManager):
 
         # set session USD target layer to the override layer
         try:
-            shot_code: Optional[str] = None
-            info = mc.fileInfo("code", query=True)
-            if isinstance(info, (list, tuple)):
-                if info:
-                    shot_code = info[0]
-            elif isinstance(info, str):
-                shot_code = info
+            shot_code = cls._shot_code_from_file_info()
             if not shot_code:
                 scene_path = mc.file(query=True, sceneName=True)
                 scene_path_str = scene_path if isinstance(scene_path, str) else ""
@@ -332,6 +345,66 @@ class MShotFileManager(FileManager):
             if warning_response == "Cancel":
                 return False
         return True
+
+    def _current_scene_path(self) -> Path | None:
+        scene_raw = mc.file(query=True, sceneName=True)
+        if not isinstance(scene_raw, str) or not scene_raw:
+            return None
+        return Path(scene_raw).expanduser().resolve()
+
+    def _ensure_scene_saved(self) -> Path | None:
+        scene_path = self._current_scene_path()
+        if scene_path is None:
+            MessageDialog(
+                self._main_window,
+                "Scene must be saved before creating a version.",
+                "Save Required",
+            ).exec_()
+            return None
+
+        if mc.file(query=True, modified=True):
+            response = mc.confirmDialog(
+                title="Save Changes",
+                message="This scene has unsaved changes. Save before creating a version?",
+                button=["Save", "Cancel"],
+                defaultButton="Save",
+                cancelButton="Cancel",
+                dismissString="Cancel",
+            )
+            if response != "Save":
+                return None
+            try:
+                mc.file(save=True, force=True)
+            except Exception:
+                MessageDialog(
+                    self._main_window,
+                    "Failed to save the current scene. Resolve any file issues and try again.",
+                    "Save Failed",
+                ).exec_()
+                log.exception("Failed to save Maya shot scene before creating version.")
+                return None
+            scene_path = self._current_scene_path()
+            if scene_path is None:
+                MessageDialog(
+                    self._main_window,
+                    "Could not resolve the current scene path after save.",
+                    "Save Failed",
+                ).exec_()
+                return None
+
+        return scene_path
+
+    def _resolve_shot_for_scene(self, scene_path: Path) -> Shot | None:
+        shot_code = self._shot_code_from_file_info() or self._shot_code_from_scene_path(
+            str(scene_path)
+        )
+        if not shot_code:
+            return None
+
+        shot = self._conn.get_shot_by_code(shot_code)
+        if shot:
+            mc.fileInfo("code", shot.code)
+        return shot
 
     def _generate_filename_ext(self, entity) -> tuple[str, str]:
         shot = cast(Shot, entity)
