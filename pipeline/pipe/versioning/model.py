@@ -3,7 +3,9 @@
 The model is intentionally small:
 1. ``VersionOwner`` identifies the root entity when metadata should be recorded.
 2. ``VersionStreamSpec`` identifies one versioned working-file stream under a root.
-3. ``VersionRecord`` and ``BackupResult`` describe persisted history entries.
+3. ``VersionSnapshotMember`` optionally describes extra files captured with a
+   compound snapshot.
+4. ``VersionRecord`` and ``BackupResult`` describe persisted history entries.
 
 The shared store now persists stream-keyed manifests while remaining able to read
 legacy asset manifests keyed only by DCC.
@@ -38,6 +40,16 @@ class BackupResult:
 
 
 @dataclass(frozen=True)
+class VersionSnapshotMember:
+    """Describe one file included in a compound version snapshot."""
+
+    relative_path: Path
+    label: Optional[str] = None
+    primary: bool = False
+    required: bool = True
+
+
+@dataclass(frozen=True)
 class VersionRecord:
     version: Optional[int]
     title: Optional[str]
@@ -47,6 +59,8 @@ class VersionRecord:
     timestamp: Optional[str]
     backup_path: Optional[Path]
     source_file: Optional[str]
+    backup_root: Optional[Path] = None
+    backup_members: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -62,7 +76,12 @@ class VersionOwner:
 
 @dataclass(frozen=True)
 class VersionStreamSpec:
-    """Describe one versioned working-file stream under a root path."""
+    """Describe one versioned working-file stream under a root path.
+
+    ``snapshot_members`` is empty for single-file streams. When populated, the
+    stream is treated as a compound snapshot whose version storage preserves the
+    listed root-relative files together.
+    """
 
     root_path: Path
     manifest_path: Path
@@ -74,12 +93,14 @@ class VersionStreamSpec:
     label: Optional[str] = None
     stream_key: Optional[str] = None
     working_path: Optional[Path] = None
+    snapshot_members: tuple[VersionSnapshotMember, ...] = ()
 
 
 __all__ = [
     "BackupResult",
     "VersionOwner",
     "VersionRecord",
+    "VersionSnapshotMember",
     "VersionStreamSpec",
     "stream_filename",
     "stream_key_for",

@@ -24,6 +24,20 @@ Authoritative v1 manifest shape:
 
 New writes target ``streams``. Reads fall back to legacy ``dcc`` entries only when a
 stream has not been written yet.
+
+History entries may also include optional compound snapshot metadata:
+
+```
+{
+  "backup_file": "/abs/path/to/primary/file",
+  "backup_root": "/abs/path/to/version/bundle",
+  "backup_members": [
+    "rlo/A_010.mb",
+    "maya_root.usd",
+    "set/maya_override.usd"
+  ]
+}
+```
 """
 
 from __future__ import annotations
@@ -63,6 +77,7 @@ DEFAULT_MANIFEST_FILENAME = "asset_manifest.json"
 
 _VERSION_RE_TEMPLATE = r"^{stem}\.v(?P<ver>\d+)\.{ext}$"
 _VERSIONED_STEM_RE = re.compile(r"^(?P<base>.+)\.v(?P<ver>\d+)$")
+_BUNDLE_VERSION_RE = re.compile(r"^v(?P<ver>\d+)$")
 _SIGNATURE_KEY = "signature"
 _SIGNATURE_HASH_KEY = "hash"
 _SIGNATURE_HASH_ALGO_KEY = "hash_algo"
@@ -362,6 +377,17 @@ def _stream_block_for_write(
 
 def _entry_as_record(entry: dict[str, Any]) -> VersionRecord:
     backup_value = _compact_text(entry.get("backup_file"))
+    backup_root = _compact_text(entry.get("backup_root"))
+    backup_members_payload = entry.get("backup_members")
+    backup_members: tuple[str, ...] = ()
+    if isinstance(backup_members_payload, list):
+        backup_members = tuple(
+            member_text
+            for member_text in (
+                _compact_text(member) for member in backup_members_payload
+            )
+            if member_text is not None
+        )
     return VersionRecord(
         version=_compact_int(entry.get("version")),
         title=_compact_text(entry.get("title")),
@@ -371,6 +397,8 @@ def _entry_as_record(entry: dict[str, Any]) -> VersionRecord:
         timestamp=_compact_text(entry.get("timestamp")),
         backup_path=Path(backup_value) if backup_value else None,
         source_file=_compact_text(entry.get("source_file")),
+        backup_root=Path(backup_root) if backup_root else None,
+        backup_members=backup_members,
     )
 
 
@@ -396,6 +424,33 @@ def next_version(backup_dir: Path, stem: str, ext: str) -> int:
 def versioned_filename(stem: str, ext: str, version: int, padding: int = 3) -> str:
     ext = ext.lstrip(".")
     return f"{stem}.v{version:0{padding}d}.{ext}"
+
+
+def bundle_dirname(version: int, padding: int = 3) -> str:
+    return f"v{version:0{padding}d}"
+
+
+def list_bundle_versions(backup_dir: Path) -> list[int]:
+    if not backup_dir.exists():
+        return []
+
+    versions: list[int] = []
+    for item in backup_dir.iterdir():
+        if not item.is_dir():
+            continue
+        match = _BUNDLE_VERSION_RE.match(item.name)
+        if not match:
+            continue
+        try:
+            versions.append(int(match.group("ver")))
+        except Exception:
+            continue
+    return sorted(versions)
+
+
+def next_bundle_version(backup_dir: Path) -> int:
+    versions = list_bundle_versions(backup_dir)
+    return (max(versions) + 1) if versions else 1
 
 
 def compute_signature(
@@ -586,6 +641,8 @@ def record_publish(
     working_path: Optional[Path] = None,
     source_path: Optional[Path] = None,
     backup_path: Optional[Path] = None,
+    backup_root: Optional[Path] = None,
+    backup_members: Optional[list[str]] = None,
     version: Optional[int] = None,
     user: Optional[str] = None,
     host: Optional[str] = None,
@@ -629,6 +686,8 @@ def record_publish(
             "host": host or _safe_host(),
             "source_file": str(source_path) if source_path else None,
             "backup_file": str(backup_path) if backup_path else None,
+            "backup_root": str(backup_root) if backup_root else None,
+            "backup_members": backup_members,
             "version": version,
             "title": title,
             "context": context,
@@ -712,13 +771,16 @@ __all__ = [
     "MANIFEST_SCHEMA_VERSION",
     "backup_file",
     "backup_if_changed",
+    "bundle_dirname",
     "build_manifest",
     "compute_signature",
     "current_record",
     "get_manifest_path",
     "history_as_records",
+    "list_bundle_versions",
     "list_versions",
     "load_manifest",
+    "next_bundle_version",
     "next_version",
     "record_publish",
     "save_manifest",
