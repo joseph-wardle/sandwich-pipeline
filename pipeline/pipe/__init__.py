@@ -19,6 +19,7 @@ _BASE_SUBMODULES = [
     "telemetry",
     "texconverter",
     "util",
+    "versioning",
 ]
 _DCC_SUBMODULES = {
     "houdini": "h",

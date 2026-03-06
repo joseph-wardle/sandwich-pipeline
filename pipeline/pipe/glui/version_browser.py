@@ -6,7 +6,7 @@ from pathlib import Path
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.asset.versioning import VersionRecord, version_label
+from pipe.versioning import VersionRecord, version_label
 
 _VERSIONED_FILENAME_RE = re.compile(r"^(?P<stem>.+)\.v(?P<ver>\d+)\.(?P<ext>[^.]+)$")
 _UNTITLED_LABEL = "(untitled)"

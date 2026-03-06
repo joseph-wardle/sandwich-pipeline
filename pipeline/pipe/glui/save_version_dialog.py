@@ -4,7 +4,7 @@ from typing import Optional
 
 from Qt import QtCore, QtWidgets
 
-from pipe.asset.versioning import VersionRecord, version_label
+from pipe.versioning import VersionRecord, version_label
 
 _UNTITLED_LABEL = "(untitled)"
 
