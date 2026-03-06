@@ -14,7 +14,16 @@ import maya.cmds as mc
 from env import Executables
 from Qt.QtCore import QRegExp
 from Qt.QtGui import QRegExpValidator, QTextCursor
-from Qt.QtWidgets import QComboBox, QDialogButtonBox, QHBoxLayout, QLabel, QWidget
+from Qt.QtWidgets import (
+    QComboBox,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 from software.houdini.dcc import HoudiniDCC
 
 from pipe.asset.paths import DCC_MAYA, paths_for_asset
@@ -110,7 +119,61 @@ class _PublishAssetVariantControls:
         )
 
 
-class PublishAssetOptionsDialog(FilteredListDialog, _PublishAssetVariantControls):
+class VersionTitleWidget:
+    _version_title_field: QLineEdit
+    _version_note_field: QPlainTextEdit
+
+    def _init_version_title_controls(self) -> None:
+        title_widget = QWidget(cast(QWidget, self))
+        title_layout = QHBoxLayout(title_widget)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(6)
+        title_label = QLabel("Version Title:")
+        title_label.setToolTip(
+            "Required. Give this publish version a meaningful title."
+        )
+        title_layout.addWidget(title_label, 30)
+
+        self._version_title_field = QLineEdit()
+        self._version_title_field.setPlaceholderText("e.g. Post-rig cleanup")
+        self._version_title_field.setToolTip(
+            "Required. Artists will see this in version history."
+        )
+        title_layout.addWidget(self._version_title_field, 70)
+        insert_at = max(self._layout.count() - 1, 0)  # type: ignore[attr-defined]
+        self._layout.insertWidget(insert_at, title_widget)  # type: ignore[attr-defined]
+
+        note_widget = QWidget(cast(QWidget, self))
+        note_layout = QVBoxLayout(note_widget)
+        note_layout.setContentsMargins(0, 0, 0, 0)
+        note_layout.setSpacing(4)
+        note_label = QLabel("Version Note (optional):")
+        note_label.setToolTip("Optional extra context about this publish.")
+        note_layout.addWidget(note_label)
+
+        self._version_note_field = QPlainTextEdit()
+        self._version_note_field.setPlaceholderText(
+            "Optional details for this version."
+        )
+        self._version_note_field.setFixedHeight(72)
+        self._version_note_field.setToolTip(
+            "Optional note that appears in version history details."
+        )
+        note_layout.addWidget(self._version_note_field)
+        insert_at = max(self._layout.count() - 1, 0)  # type: ignore[attr-defined]
+        self._layout.insertWidget(insert_at, note_widget)  # type: ignore[attr-defined]
+
+    def get_version_title(self) -> str:
+        return self._version_title_field.text().strip()
+
+    def get_version_note(self) -> str | None:
+        note = self._version_note_field.toPlainText().strip()
+        return note or None
+
+
+class PublishAssetOptionsDialog(
+    FilteredListDialog, _PublishAssetVariantControls, VersionTitleWidget
+):
     """Publish dialog for the current scene asset (read-only asset name)."""
 
     _selected_asset_name: Optional[str]
@@ -144,6 +207,8 @@ class PublishAssetOptionsDialog(FilteredListDialog, _PublishAssetVariantControls
         self._layout.insertWidget(0, asset_label)
 
         self._init_variant_controls()
+        self._init_version_title_controls()
+        self._version_title_field.textChanged.connect(self._update_accept_state)
 
         insert_at = max(self._layout.count() - 1, 0)
         self._layout.insertStretch(insert_at, 1)
@@ -158,6 +223,7 @@ class PublishAssetOptionsDialog(FilteredListDialog, _PublishAssetVariantControls
         cancel_btn = self.buttons.button(QDialogButtonBox.Cancel)
         if cancel_btn:
             cancel_btn.setToolTip("Cancel publishing and close this window.")
+        self._update_accept_state()
 
     def get_selected_item(self) -> str | None:
         return self._selected_asset_name
@@ -165,8 +231,15 @@ class PublishAssetOptionsDialog(FilteredListDialog, _PublishAssetVariantControls
     def _on_item_selected(self) -> None:
         return
 
+    def _update_accept_state(self) -> None:
+        ok_btn = self.buttons.button(QDialogButtonBox.Ok)
+        if ok_btn:
+            ok_btn.setEnabled(bool(self.get_version_title()))
 
-class PublishAssetPickerDialog(FilteredListDialog, _PublishAssetVariantControls):
+
+class PublishAssetPickerDialog(
+    FilteredListDialog, _PublishAssetVariantControls, VersionTitleWidget
+):
     """Fallback dialog that lets users choose the asset to publish."""
 
     def __init__(
@@ -185,6 +258,8 @@ class PublishAssetPickerDialog(FilteredListDialog, _PublishAssetVariantControls)
             self._filter_field.setToolTip("Type to filter the asset list.")
         self._list_widget.setToolTip("Select the asset to publish.")
         self._init_variant_controls()
+        self._init_version_title_controls()
+        self._version_title_field.textChanged.connect(self._update_accept_state)
         self._populate_geo_var(None)
         insert_at = max(self._layout.count() - 1, 0)
         self._layout.insertStretch(insert_at, 1)
@@ -195,14 +270,24 @@ class PublishAssetPickerDialog(FilteredListDialog, _PublishAssetVariantControls)
         cancel_btn = self.buttons.button(QDialogButtonBox.Cancel)
         if cancel_btn:
             cancel_btn.setToolTip("Cancel publishing and close this window.")
+        self._update_accept_state()
 
     def _on_item_selected(self) -> None:
         selected = self.get_selected_item()
         if self._conn and selected:
             asset = self._conn.get_asset_by_display_name(selected)
         else:
+            self._update_accept_state()
             return
         self._populate_geo_var(asset)
+        self._update_accept_state()
+
+    def _update_accept_state(self) -> None:
+        ok_btn = self.buttons.button(QDialogButtonBox.Ok)
+        if ok_btn:
+            ok_btn.setEnabled(
+                bool(self.get_version_title()) and bool(self.get_selected_item())
+            )
 
 
 class AssetPublisher(Publisher):
@@ -225,6 +310,8 @@ class AssetPublisher(Publisher):
         self._scene_asset: Asset | None = None
         self._backup_result: BackupResult | None = None
         self._backup_status: str | None = None
+        self._version_title: str | None = None
+        self._version_note: str | None = None
 
     def _resolve_scene_asset(self) -> Asset | None:
         metadata = read_asset_metadata(self._conn)
@@ -299,8 +386,11 @@ class AssetPublisher(Publisher):
             backup_dir=asset_paths.backup_dir,
             manifest_path=asset_paths.manifest_path,
             dcc=DCC_MAYA,
+            title=self._version_title,
             variant=self._geo_variant,
             publish_path=self._publish_path,
+            context="publish",
+            note=self._version_note,
             asset_name=asset.name,
             asset_path=asset.asset_path,
             asset_id=asset.id,
@@ -314,7 +404,17 @@ class AssetPublisher(Publisher):
         self._backup_result = result
         if result.changed:
             if result.backup_path:
-                self._backup_status = f"Backup created: {result.backup_path.name}"
+                version_label = (
+                    f"v{int(result.version):03d}"
+                    if result.version is not None
+                    else result.backup_path.name
+                )
+                if self._version_title:
+                    self._backup_status = (
+                        f'Backup created: {version_label} "{self._version_title}"'
+                    )
+                else:
+                    self._backup_status = f"Backup created: {version_label}"
                 log.info("Backup created at %s", result.backup_path)
             else:
                 self._backup_status = "Backup created."
@@ -399,6 +499,23 @@ class AssetPublisher(Publisher):
         dialog = cast(PublishAssetOptionsDialog, self._dialog)
         return dialog.get_selected_variant()
 
+    def _get_version_title(self) -> str | None:
+        dialog = cast(Any, self._dialog)
+        if hasattr(dialog, "get_version_title"):
+            title = str(dialog.get_version_title()).strip()
+            return title or None
+        return None
+
+    def _get_version_note(self) -> str | None:
+        dialog = cast(Any, self._dialog)
+        if hasattr(dialog, "get_version_note"):
+            note = dialog.get_version_note()
+            if note is None:
+                return None
+            note_text = str(note).strip()
+            return note_text or None
+        return None
+
     def _get_save_path(self) -> Path | None:
         asset = self._get_asset()
         if not asset:
@@ -426,6 +543,17 @@ class AssetPublisher(Publisher):
             ).exec_()
             return None
 
+        version_title = self._get_version_title()
+        if not version_title:
+            MessageDialog(
+                self._window,
+                "Error: Version title is required for publishing.",
+                "Error",
+            ).exec_()
+            return None
+
+        self._version_title = version_title
+        self._version_note = self._get_version_note()
         write_asset_metadata(asset)
 
         self._geo_variant = variant_name
@@ -546,6 +674,8 @@ class AssetPublisher(Publisher):
             with maintain_selection():
                 self._backup_result = None
                 self._backup_status = None
+                self._version_title = None
+                self._version_note = None
                 if not self._ensure_scene_saved():
                     self._emit_publish_error(
                         publish_telemetry,

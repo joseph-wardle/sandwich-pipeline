@@ -13,15 +13,17 @@ from env_sg import DB_Config
 from Qt import QtCore, QtWidgets
 from shared.util import get_production_path
 
-from pipe.asset.paths import BACKUP_DIRNAME, DCC_MAYA, AssetPaths, paths_for_asset
-from pipe.asset.versioning import (
-    get_manifest_path,
-    list_versions,
-    load_manifest,
-    versioned_filename,
+from pipe.asset.paths import BACKUP_DIRNAME, DCC_MAYA, paths_for_asset
+from pipe.asset.version_service import (
+    list_version_records,
+    promote_version,
+    save_version,
 )
+from pipe.asset.versioning import get_manifest_path, load_manifest
 from pipe.db import DB, DBInterface
 from pipe.glui.dialogs import FilteredListDialog, MessageDialog
+from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
+from pipe.glui.version_browser import VersionBrowserWidget
 from pipe.m.local import get_main_qt_window
 from pipe.struct.db import Asset, SGEntity
 from pipe.util import FileManager
@@ -82,6 +84,15 @@ def _set_dialog_button_tooltips(
     cancel_btn = buttons.button(QtWidgets.QDialogButtonBox.Cancel)
     if cancel_btn:
         cancel_btn.setToolTip(cancel_text)
+
+
+def _version_label(value: object | None) -> str:
+    if value is None:
+        return "unknown version"
+    try:
+        return f"v{int(str(value)):03d}"
+    except Exception:
+        return str(value)
 
 
 def write_asset_metadata(asset: Asset) -> None:
@@ -179,7 +190,6 @@ class AssetOpenDialog(FilteredListDialog):
     """Dialog for selecting an asset and previewing manifest metadata."""
 
     _conn: DBInterface
-    _open_backup_cb: QtWidgets.QCheckBox
     _info_label: QtWidgets.QLabel
 
     def __init__(
@@ -199,18 +209,10 @@ class AssetOpenDialog(FilteredListDialog):
         info_layout.setContentsMargins(0, 0, 0, 0)
         info_layout.setSpacing(6)
 
-        self._open_backup_cb = QtWidgets.QCheckBox("Open backup version")
-        self._open_backup_cb.setToolTip(
-            "Open a versioned backup instead of the live asset model file."
-        )
-        info_layout.addWidget(self._open_backup_cb)
-
         self._info_label = QtWidgets.QLabel("Select an asset to see details.")
         self._info_label.setWordWrap(True)
         self._info_label.setTextFormat(QtCore.Qt.PlainText)
-        self._info_label.setToolTip(
-            "Shows recent publish info and available backups for the selected asset."
-        )
+        self._info_label.setToolTip("Shows recent publish info for the selected asset.")
         info_layout.addWidget(self._info_label)
 
         self._layout.insertWidget(1, info_widget)
@@ -222,10 +224,6 @@ class AssetOpenDialog(FilteredListDialog):
             ok_text="Open the selected asset model file.",
             cancel_text="Close without opening a file.",
         )
-
-    @property
-    def open_backup(self) -> bool:
-        return self._open_backup_cb.isChecked()
 
     def _on_item_selected(self) -> None:
         selected = self.get_selected_item()
@@ -246,6 +244,8 @@ class AssetOpenDialog(FilteredListDialog):
         current = dcc_block.get("current") or {}
 
         version = current.get("version")
+        title = _normalize_value(current.get("title"))
+        context = _normalize_value(current.get("context"))
         user = current.get("user")
         timestamp = current.get("timestamp")
 
@@ -253,6 +253,10 @@ class AssetOpenDialog(FilteredListDialog):
         if version is not None:
             version_label = f"v{int(version):03d}"
             parts = [version_label]
+            if title:
+                parts.append(f'"{title}"')
+            if context:
+                parts.append(f"[{context}]")
             if user:
                 parts.append(f"by {user}")
             if timestamp:
@@ -332,46 +336,7 @@ class MAssetFileManager(FileManager):
         else:
             log.debug("Unable to infer asset metadata from scene path: %s", scene_path)
 
-    def _prompt_backup_version(self, paths: AssetPaths) -> Optional[Path]:
-        versions = list_versions(paths.backup_dir, "model", "mb")
-        if not versions:
-            MessageDialog(
-                self._main_window,
-                "No backup versions were found for this asset.",
-                "No Backups",
-            ).exec_()
-            return None
-
-        version_files = [
-            versioned_filename("model", "mb", version)
-            for version in sorted(versions, reverse=True)
-        ]
-        dialog = FilteredListDialog(
-            self._main_window,
-            version_files,
-            "Open Backup Version",
-            "Select the backup version to open.",
-            accept_button_name="Open",
-        )
-        if hasattr(dialog, "_filter_field"):
-            dialog._filter_field.setToolTip("Type to filter backup versions.")
-        dialog._list_widget.setToolTip("Select a backup version to open.")
-        _set_dialog_button_tooltips(
-            dialog,
-            ok_text="Open the selected backup version.",
-            cancel_text="Close without opening a backup.",
-        )
-        if not dialog.exec_():
-            return None
-        selected = dialog.get_selected_item()
-        if not selected:
-            return None
-        return paths.backup_dir / selected
-
-    def open_file(self) -> None:
-        if not self._check_unsaved_changes():
-            return
-
+    def _prompt_asset_selection(self) -> Asset | None:
         asset_names = self._conn.get_entity_code_list(
             Asset,
             sorted=True,
@@ -379,53 +344,232 @@ class MAssetFileManager(FileManager):
         )
         dialog = AssetOpenDialog(self._main_window, asset_names, self._conn)
         if not dialog.exec_():
-            return
+            return None
 
         selection = dialog.get_selected_item()
         if not selection:
-            return
+            return None
 
         asset = self._conn.get_asset_by_name(selection)
+        if asset:
+            return asset
+
+        MessageDialog(
+            self._main_window,
+            "The selected asset could not be resolved from ShotGrid.",
+            "Missing Asset",
+        ).exec_()
+        return None
+
+    def _ensure_scene_saved(self) -> Path | None:
+        scene_raw = mc.file(query=True, sceneName=True)
+        if not isinstance(scene_raw, str) or not scene_raw:
+            MessageDialog(
+                self._main_window,
+                "Scene must be saved before creating a version.",
+                "Save Required",
+            ).exec_()
+            return None
+
+        if mc.file(query=True, modified=True):
+            response = mc.confirmDialog(
+                title="Save Changes",
+                message="This scene has unsaved changes. Save before creating a version?",
+                button=["Save", "Cancel"],
+                defaultButton="Save",
+                cancelButton="Cancel",
+                dismissString="Cancel",
+            )
+            if response != "Save":
+                return None
+            try:
+                mc.file(save=True, force=True)
+            except Exception:
+                MessageDialog(
+                    self._main_window,
+                    "Failed to save the current scene. Resolve any file issues and try again.",
+                    "Save Failed",
+                ).exec_()
+                log.exception("Failed to save scene before creating version.")
+                return None
+
+        scene_raw = mc.file(query=True, sceneName=True)
+        if not isinstance(scene_raw, str) or not scene_raw:
+            MessageDialog(
+                self._main_window,
+                "Could not resolve the current scene path after save.",
+                "Save Failed",
+            ).exec_()
+            return None
+
+        return Path(scene_raw)
+
+    def _resolve_asset_for_scene(self, scene_path: Path) -> Asset | None:
+        meta = read_asset_metadata(self._conn)
+        if meta.asset:
+            self._ensure_scene_asset_metadata(scene_path)
+            return meta.asset
+
+        asset = resolve_asset_from_scene_path(self._conn, scene_path)
+        if asset:
+            write_asset_metadata(asset)
+            return asset
+        return None
+
+    def open_version_browser(self) -> None:
+        if not self._check_unsaved_changes():
+            return
+
+        asset = self._prompt_asset_selection()
+        if not asset:
+            return
+
+        asset_paths = paths_for_asset(asset)
+        records = list_version_records(asset_paths, DCC_MAYA, "model", "mb")
+        if not records:
+            MessageDialog(
+                self._main_window,
+                "No version history was found for this asset.",
+                "No Versions",
+            ).exec_()
+            return
+
+        browser = VersionBrowserWidget(
+            self._main_window,
+            records,
+            asset_label=asset.display_name or asset.name or "Asset",
+        )
+        if not browser.exec_():
+            return
+
+        selected_record = browser.get_selected_record()
+        selected_action = browser.get_selected_action()
+        if selected_record is None:
+            return
+
+        if selected_action == VersionBrowserWidget.ACTION_OPEN:
+            backup_path = selected_record.backup_path
+            if backup_path is None:
+                MessageDialog(
+                    self._main_window,
+                    "The selected version has no backup file path.",
+                    "Open Version",
+                ).exec_()
+                return
+
+            file_open_event, _ = self._telemetry_file_events()
+            action_id = self._new_file_action_id()
+            try:
+                self._open_file(backup_path)
+                self._ensure_scene_asset_metadata()
+            except Exception as exc:
+                if file_open_event:
+                    self._emit_file_event(
+                        event_type=file_open_event,
+                        status="error",
+                        entity=asset,
+                        path=backup_path,
+                        action_id=action_id,
+                        opened_backup=True,
+                        error_message=str(exc),
+                        exception_type=type(exc).__name__,
+                    )
+                raise
+            if file_open_event:
+                self._emit_file_event(
+                    event_type=file_open_event,
+                    status="success",
+                    entity=asset,
+                    path=backup_path,
+                    action_id=action_id,
+                    opened_backup=True,
+                )
+            return
+
+        if selected_action == VersionBrowserWidget.ACTION_PROMOTE:
+            promote_dialog = PromoteVersionDialog(self._main_window, selected_record)
+            if not promote_dialog.exec_():
+                return
+            try:
+                promoted = promote_version(
+                    selected_record,
+                    asset_paths,
+                    DCC_MAYA,
+                    stem="model",
+                    ext="mb",
+                    title=promote_dialog.get_title(),
+                    note=promote_dialog.get_note(),
+                )
+            except Exception as exc:
+                log.exception("Failed to promote Maya model version.")
+                MessageDialog(
+                    self._main_window,
+                    f"Failed to promote version:\n{exc}",
+                    "Promote Version Failed",
+                ).exec_()
+                return
+
+            MessageDialog(
+                self._main_window,
+                f'Promoted version to {_version_label(promoted.version)} "{promoted.title or "(untitled)"}".',
+                "Version Promoted",
+            ).exec_()
+
+    def save_version_for_current_scene(self) -> None:
+        scene_path = self._ensure_scene_saved()
+        if scene_path is None:
+            return
+
+        asset = self._resolve_asset_for_scene(scene_path)
         if not asset:
             MessageDialog(
                 self._main_window,
-                "The selected asset could not be resolved from ShotGrid.",
-                "Missing Asset",
+                "Could not resolve asset metadata from the current scene.",
+                "Asset Not Resolved",
             ).exec_()
+            return
+
+        dialog = SaveVersionDialog(self._main_window)
+        if not dialog.exec_():
+            return
+
+        asset_paths = paths_for_asset(asset)
+        try:
+            record = save_version(
+                scene_path,
+                asset_paths,
+                DCC_MAYA,
+                stem="model",
+                ext="mb",
+                title=dialog.get_title(),
+                note=dialog.get_note(),
+            )
+        except Exception as exc:
+            log.exception("Failed to save manual Maya model version.")
+            MessageDialog(
+                self._main_window,
+                f"Failed to save version:\n{exc}",
+                "Save Version Failed",
+            ).exec_()
+            return
+
+        MessageDialog(
+            self._main_window,
+            f'Saved {_version_label(record.version)} "{record.title or "(untitled)"}".',
+            "Version Saved",
+        ).exec_()
+
+    def open_file(self) -> None:
+        if not self._check_unsaved_changes():
+            return
+
+        asset = self._prompt_asset_selection()
+        if not asset:
             return
 
         file_open_event, file_create_event = self._telemetry_file_events()
         action_id = self._new_file_action_id()
         paths = paths_for_asset(asset)
-        if dialog.open_backup:
-            backup_path = self._prompt_backup_version(paths)
-            if backup_path:
-                try:
-                    self._open_file(backup_path)
-                    self._ensure_scene_asset_metadata(backup_path)
-                except Exception as exc:
-                    if file_open_event:
-                        self._emit_file_event(
-                            event_type=file_open_event,
-                            status="error",
-                            entity=asset,
-                            path=backup_path,
-                            action_id=action_id,
-                            opened_backup=True,
-                            error_message=str(exc),
-                            exception_type=type(exc).__name__,
-                        )
-                    raise
-                if file_open_event:
-                    self._emit_file_event(
-                        event_type=file_open_event,
-                        status="success",
-                        entity=asset,
-                        path=backup_path,
-                        action_id=action_id,
-                        opened_backup=True,
-                    )
-            return
 
         if not self._prompt_create_if_not_exist(paths.root):
             return
