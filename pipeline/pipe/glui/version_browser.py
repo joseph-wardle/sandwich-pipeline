@@ -18,7 +18,7 @@ class VersionBrowserWidget(QtWidgets.QDialog):
 
     _records: list[VersionRecord]
     _selected_action: str | None
-    _asset_label: str
+    _owner_label: str
     _stream_label: str
     _current_version: int | None
     _table: QtWidgets.QTableWidget
@@ -31,12 +31,12 @@ class VersionBrowserWidget(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None,
         records: list[VersionRecord],
         *,
-        asset_label: str,
+        owner_label: str,
     ) -> None:
         super().__init__(parent)
         self._records = list(records)
         self._selected_action = None
-        self._asset_label = (asset_label or "").strip() or "Asset"
+        self._owner_label = (owner_label or "").strip() or "Item"
         self._stream_label = _detect_stream_label(self._records)
         self._current_version = _current_version(self._records)
 
@@ -72,9 +72,9 @@ class VersionBrowserWidget(QtWidgets.QDialog):
         header.setFont(header_font)
         layout.addWidget(header)
 
-        asset_info = QtWidgets.QLabel(f"Asset: {self._asset_label}")
-        asset_info.setTextFormat(QtCore.Qt.PlainText)
-        layout.addWidget(asset_info)
+        owner_info = QtWidgets.QLabel(f"Item: {self._owner_label}")
+        owner_info.setTextFormat(QtCore.Qt.PlainText)
+        layout.addWidget(owner_info)
 
         self._table = QtWidgets.QTableWidget(self)
         self._table.setColumnCount(5)

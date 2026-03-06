@@ -221,7 +221,7 @@ class HAssetFileManager(HFileManager):
         browser = VersionBrowserWidget(
             self._main_window,
             records,
-            asset_label=asset.display_name or asset.name or "Asset",
+            owner_label=asset.display_name or asset.name or "Asset",
         )
         if not browser.exec_():
             return

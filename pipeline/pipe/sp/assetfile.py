@@ -1316,7 +1316,7 @@ def launch_version_browser_for_current_project() -> None:
     browser = VersionBrowserWidget(
         parent,
         records,
-        asset_label=asset.display_name or asset.name or "Asset",
+        owner_label=asset.display_name or asset.name or "Asset",
     )
     if not browser.exec_():
         return
