@@ -7,18 +7,22 @@ from typing import cast
 import hou
 from shared.util import get_production_path
 
-from pipe.asset.paths import BACKUP_DIRNAME, DCC_HOUDINI, paths_for_asset
-from pipe.asset.version_service import (
-    list_version_records,
-    promote_version,
-    save_version as save_version_record,
+from pipe.asset.paths import BACKUP_DIRNAME, paths_for_asset
+from pipe.asset.version_adapter import (
+    asset_owner_for,
+    houdini_asset_builder_stream,
 )
-from pipe.asset.versioning import version_label
 from pipe.db import DBInterface
 from pipe.glui.dialogs import FilteredListDialog, MessageDialog
 from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
 from pipe.glui.version_browser import VersionBrowserWidget
 from pipe.struct.db import Asset, SGEntity
+from pipe.versioning import (
+    list_version_records,
+    promote_version,
+    save_version,
+    version_label,
+)
 
 from .. import nodelayouts
 from .filemanager import HFileManager
@@ -201,12 +205,11 @@ class HAssetFileManager(HFileManager):
             return
 
         asset_paths = paths_for_asset(asset)
-        records = list_version_records(
-            asset_paths=asset_paths,
-            dcc=DCC_HOUDINI,
-            stem="asset_builder",
-            ext="hipnc",
+        asset_stream = houdini_asset_builder_stream(
+            asset_paths,
+            owner=asset_owner_for(asset),
         )
+        records = list_version_records(asset_stream)
         if not records:
             MessageDialog(
                 self._main_window,
@@ -275,10 +278,7 @@ class HAssetFileManager(HFileManager):
             try:
                 promoted_record = promote_version(
                     selected_record,
-                    asset_paths=asset_paths,
-                    dcc=DCC_HOUDINI,
-                    stem="asset_builder",
-                    ext="hipnc",
+                    asset_stream,
                     title=promote_dialog.get_title(),
                     note=promote_dialog.get_note(),
                 )
@@ -316,13 +316,14 @@ class HAssetFileManager(HFileManager):
         if not dialog.exec_():
             return
 
+        asset_stream = houdini_asset_builder_stream(
+            paths_for_asset(asset),
+            owner=asset_owner_for(asset),
+        )
         try:
-            version_record = save_version_record(
-                source_path=hip_path,
-                asset_paths=paths_for_asset(asset),
-                dcc=DCC_HOUDINI,
-                stem="asset_builder",
-                ext="hipnc",
+            version_record = save_version(
+                hip_path,
+                asset_stream,
                 title=dialog.get_title(),
                 note=dialog.get_note(),
             )

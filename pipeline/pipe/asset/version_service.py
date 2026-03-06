@@ -7,6 +7,7 @@ from typing import Optional
 
 from pipe.versioning import (
     VersionRecord,
+    VersionStreamSpec,
 )
 from pipe.versioning import (
     list_version_records as _list_version_records,
@@ -28,7 +29,7 @@ def _asset_stream(
     *,
     stem: str,
     ext: str,
-):
+) -> VersionStreamSpec:
     return asset_stream(asset_paths, dcc, stem=stem, ext=ext)
 
 

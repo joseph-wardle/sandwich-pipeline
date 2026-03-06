@@ -28,8 +28,8 @@ from env_sg import DB_Config
 from shared.util import get_documentation_path
 from software.houdini.dcc import HoudiniDCC
 
-from pipe.asset.paths import DCC_SUBSTANCE, paths_for_asset
-from pipe.asset.versioning import backup_if_changed
+from pipe.asset.paths import paths_for_asset
+from pipe.asset.version_adapter import asset_owner_for, substance_project_stream
 from pipe.db import DB
 from pipe.glui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButtons
 from pipe.sp.assetfile import PIPE_SP_DOCS_PAGE, get_active_asset_from_project
@@ -38,6 +38,7 @@ from pipe.sp.local import get_main_qt_window
 from pipe.struct.db import Asset
 from pipe.struct.material import DisplacementSource, NormalSource, NormalType
 from pipe.util import checkbox_callback_helper, dict_index
+from pipe.versioning import backup_if_changed
 
 log = logging.getLogger(__name__)
 _HOUDINI_RESULT_START = "--BUILD-RESULT--"
@@ -407,11 +408,21 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 publish_path = asset_paths.publish_textures_layer_dir(
                     geo_var, mat_var, material_layer
                 )
+                project_stream = substance_project_stream(
+                    asset_paths,
+                    geo_var,
+                    owner=asset_owner_for(self._curr_asset),
+                )
                 result = backup_if_changed(
                     source_path=Path(project_path),
-                    backup_dir=asset_paths.backup_dir,
-                    manifest_path=asset_paths.manifest_path,
-                    dcc=DCC_SUBSTANCE,
+                    backup_dir=project_stream.backup_dir,
+                    manifest_path=project_stream.manifest_path,
+                    dcc=project_stream.dcc,
+                    stream_key=project_stream.stream_key,
+                    stem=project_stream.stem,
+                    ext=project_stream.ext,
+                    stream_label=project_stream.label,
+                    working_path=project_stream.working_path,
                     title=version_title,
                     publish_path=publish_path,
                     context="publish",
@@ -421,9 +432,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                         "material": mat_var,
                         "material_layer": material_layer,
                     },
-                    asset_name=self._curr_asset.display_name or self._curr_asset.name,
-                    asset_path=self._curr_asset.asset_path,
-                    asset_id=self._curr_asset.id,
+                    owner=project_stream.owner,
                 )
 
                 if result is None:
