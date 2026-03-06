@@ -72,6 +72,8 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     _mat_var_dropdown: QComboBox
     _geo_var_dropdown: QComboBox
     _material_layer_dropdown: QComboBox
+    _version_title_field: QtWidgets.QLineEdit
+    _version_note_field: QtWidgets.QTextEdit
 
     # _mat_var_enabled: QtWidgets.QCheckBox
     # _metadataManager: pipe.sp.metadata.MetadataUpdater
@@ -191,17 +193,19 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             editable=True,
             validator=QRegExpValidator(QRegExp("[a-z][a-z_\\d]*")),
         )
+        self._build_version_metadata_fields()
 
         self._init_buttons(has_cancel_button=True, ok_name="Export")
         self.buttons.rejected.connect(self.close)
         self.buttons.accepted.connect(self.do_export)
-        self.buttons.button(QtWidgets.QDialogButtonBox.Ok).setToolTip(
-            "Export textures and convert them to TEX/preview files."
-        )
-        self.buttons.button(QtWidgets.QDialogButtonBox.Cancel).setToolTip(
-            "Close without exporting."
-        )
+        ok_btn = self.buttons.button(QtWidgets.QDialogButtonBox.Ok)
+        if ok_btn:
+            ok_btn.setToolTip("Export textures and convert them to TEX/preview files.")
+        cancel_btn = self.buttons.button(QtWidgets.QDialogButtonBox.Cancel)
+        if cancel_btn:
+            cancel_btn.setToolTip("Close without exporting.")
         self._main_layout.addWidget(self.buttons)
+        self._update_export_button_state()
 
         footer = QLabel(
             "Tip: Make sure your project was opened via Open Asset so the asset "
@@ -245,6 +249,44 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         self._main_layout.addWidget(widget)
         return dropdown
 
+    def _build_version_metadata_fields(self) -> None:
+        title_widget = QtWidgets.QWidget()
+        title_layout = QtWidgets.QHBoxLayout(title_widget)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(6)
+
+        title_label = QLabel("Version Title:")
+        title_label.setToolTip("Required. This appears in version history.")
+        title_layout.addWidget(title_label, 30)
+
+        self._version_title_field = QtWidgets.QLineEdit()
+        self._version_title_field.setPlaceholderText("e.g. Dirt pass refinement")
+        self._version_title_field.setToolTip(
+            "Required. Artists see this title in version history."
+        )
+        self._version_title_field.textChanged.connect(self._update_export_button_state)
+        title_layout.addWidget(self._version_title_field, 70)
+        self._main_layout.addWidget(title_widget)
+
+        note_label = QLabel("Version Note (optional):")
+        note_label.setToolTip("Optional context shown in version history details.")
+        self._main_layout.addWidget(note_label)
+
+        self._version_note_field = QtWidgets.QTextEdit()
+        self._version_note_field.setPlaceholderText(
+            "Optional details for this texture publish."
+        )
+        self._version_note_field.setFixedHeight(72)
+        self._version_note_field.setToolTip(
+            "Optional note shown in version history details."
+        )
+        self._main_layout.addWidget(self._version_note_field)
+
+    def _update_export_button_state(self) -> None:
+        ok_btn = self.buttons.button(QtWidgets.QDialogButtonBox.Ok)
+        if ok_btn:
+            ok_btn.setEnabled(bool(self.version_title))
+
     @staticmethod
     def _variant_items(options: typing.Iterable[str], default_value: str) -> list[str]:
         items = sorted({option for option in options if option})
@@ -272,12 +314,30 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     def material_layer(self) -> str:
         return self._material_layer_dropdown.currentText()
 
+    @property
+    def version_title(self) -> str:
+        return self._version_title_field.text().strip()
+
+    @property
+    def version_note(self) -> str | None:
+        note = self._version_note_field.toPlainText().strip()
+        return note or None
+
     def do_export(self, isBatch: bool = False) -> None:
         if not self._curr_asset:
             return
         if not self._preflight():
             return
         if not self._ensure_project_saved():
+            return
+
+        version_title = self.version_title
+        if not version_title:
+            MessageDialog(
+                get_main_qt_window(),
+                "Version title is required before exporting textures.",
+                "Publish Textures",
+            ).exec_()
             return
 
         mat_var = self.mat_var.strip() or "default"
@@ -352,7 +412,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                     backup_dir=asset_paths.backup_dir,
                     manifest_path=asset_paths.manifest_path,
                     dcc=DCC_SUBSTANCE,
+                    title=version_title,
                     publish_path=publish_path,
+                    context="publish",
+                    note=self.version_note,
                     extra={
                         "geo": geo_var,
                         "material": mat_var,
@@ -368,7 +431,14 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                     log.warning("Backup skipped: source file missing.")
                 elif result.changed:
                     if result.backup_path:
-                        backup_status = f"Backup created: {result.backup_path.name}"
+                        version_label = (
+                            f"v{int(result.version):03d}"
+                            if result.version is not None
+                            else result.backup_path.name
+                        )
+                        backup_status = (
+                            f'Backup created: {version_label} "{version_title}"'
+                        )
                         log.info("Backup created at %s", result.backup_path)
                     else:
                         backup_status = "Backup created."

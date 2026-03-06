@@ -18,6 +18,11 @@ from shared.util import get_documentation_path, get_production_path, resolve_map
 from substance_painter.project import NormalMapFormat, ProjectWorkflow, TangentSpace
 
 from pipe.asset.paths import DCC_SUBSTANCE, AssetPaths, paths_for_asset
+from pipe.asset.version_service import (
+    list_version_records,
+    promote_version,
+    save_version,
+)
 from pipe.db import DB
 from pipe.glui.dialogs import (
     DialogFilteredList,
@@ -25,6 +30,8 @@ from pipe.glui.dialogs import (
     MessageDialog,
     MessageDialogCustomButtons,
 )
+from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
+from pipe.glui.version_browser import VersionBrowserWidget
 from pipe.sp.local import get_main_qt_window
 from pipe.struct.db import Asset, build_asset_path
 
@@ -884,6 +891,117 @@ def _current_project_path() -> Path | None:
     return Path(current_path)
 
 
+def _current_geo_variant() -> str:
+    metadata = get_asset_selection_metadata()
+    variant = metadata.get("geo_variant")
+    if variant is None:
+        return "main"
+    text = str(variant).strip()
+    return text or "main"
+
+
+def _texture_project_stem_for_variant(geo_variant: str) -> str:
+    variant = str(geo_variant).strip() or "main"
+    return f"textures.{variant}"
+
+
+def _version_label(version: int | None) -> str:
+    if version is None:
+        return "unknown version"
+    return f"v{version:03d}"
+
+
+def _ensure_project_ready_for_version_action(
+    parent: QtWidgets.QWidget | None, *, action_name: str
+) -> bool:
+    if not sp.project.is_open():
+        MessageDialog(
+            parent,
+            "No Substance Painter project is open. Open an asset project first.",
+            action_name,
+        ).exec_()
+        return False
+
+    if sp.project.is_busy():
+        MessageDialog(
+            parent,
+            "Substance Painter is busy. Wait for the current operation to finish.",
+            action_name,
+        ).exec_()
+        return False
+
+    try:
+        if not sp.project.is_in_edition_state():
+            MessageDialog(
+                parent,
+                "The project is still loading. Wait for it to finish before continuing.",
+                action_name,
+            ).exec_()
+            return False
+    except Exception:
+        log.exception("Failed to query project edition state for %s.", action_name)
+        return False
+
+    return True
+
+
+def _ensure_project_saved_for_version_action(
+    parent: QtWidgets.QWidget | None, *, action_name: str
+) -> Path | None:
+    if not _ensure_project_ready_for_version_action(parent, action_name=action_name):
+        return None
+
+    project_path = _current_project_path()
+    if project_path is None:
+        MessageDialog(
+            parent,
+            "This project has no file path yet. Use Save As first.",
+            "Save Required",
+        ).exec_()
+        return None
+
+    if sp.project.needs_saving():
+        dialog = MessageDialogCustomButtons(
+            parent,
+            f"The project has unsaved changes. Save before {action_name.lower()}?",
+            "Save Required",
+            has_cancel_button=True,
+            ok_name="Save",
+            cancel_name="Cancel",
+        )
+        if not dialog.exec_():
+            return None
+        try:
+            sp.project.save()
+        except Exception:
+            log.exception("Failed to save project before %s.", action_name)
+            MessageDialog(
+                parent,
+                "Failed to save the current project. Resolve file issues and try again.",
+                "Save Failed",
+            ).exec_()
+            return None
+
+        if sp.project.needs_saving():
+            MessageDialog(
+                parent,
+                "The project still appears unsaved. Save manually and try again.",
+                "Save Required",
+            ).exec_()
+            return None
+
+        project_path = _current_project_path()
+        if project_path is None:
+            MessageDialog(
+                parent,
+                "Could not resolve the project path after saving.",
+                "Save Failed",
+            ).exec_()
+            return None
+
+    return project_path
+
+
 def _store_asset_metadata_when_ready(
     asset: Asset, *, geo_variant: Optional[str] = None
 ) -> None:
@@ -1161,6 +1279,176 @@ def launch_open_asset_textures() -> None:
         )
 
 
+def launch_version_browser_for_current_project() -> None:
+    """Show version history for the currently open asset project."""
+    if sp.project.is_busy():
+        sp.project.execute_when_not_busy(launch_version_browser_for_current_project)
+        return
+
+    parent = get_main_qt_window()
+    if not _ensure_project_ready_for_version_action(
+        parent, action_name="Version History"
+    ):
+        return
+
+    conn = DB.Get(DB_Config)
+    asset = get_active_asset_from_project(conn)
+    if not asset:
+        MessageDialog(
+            parent,
+            "Could not resolve the current asset from project metadata.",
+            "Version History",
+        ).exec_()
+        return
+
+    geo_variant = _current_geo_variant()
+    stem = _texture_project_stem_for_variant(geo_variant)
+    asset_paths = paths_for_asset(asset)
+    records = list_version_records(
+        asset_paths=asset_paths,
+        dcc=DCC_SUBSTANCE,
+        stem=stem,
+        ext="spp",
+    )
+    if not records:
+        MessageDialog(
+            parent,
+            "No version history was found for the current asset project.",
+            "Version History",
+        ).exec_()
+        return
+
+    browser = VersionBrowserWidget(
+        parent,
+        records,
+        asset_label=asset.display_name or asset.name or "Asset",
+    )
+    if not browser.exec_():
+        return
+
+    selected_record = browser.get_selected_record()
+    selected_action = browser.get_selected_action()
+    if selected_record is None:
+        return
+
+    if selected_action == VersionBrowserWidget.ACTION_OPEN:
+        backup_path = selected_record.backup_path
+        if backup_path is None:
+            MessageDialog(
+                parent,
+                "The selected version has no backup file path.",
+                "Open Version Failed",
+            ).exec_()
+            return
+
+        if sp.project.needs_saving() and not _confirm_discard_unsaved(parent):
+            return
+        if not _close_current_project(
+            parent, action_context="opening a versioned project"
+        ):
+            return
+        if not _open_existing_project(backup_path, parent):
+            return
+        _store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
+        log.info(
+            "Opened backup version %s for asset %s (variant=%s)",
+            backup_path,
+            asset.display_name or asset.name,
+            geo_variant,
+        )
+        return
+
+    if selected_action == VersionBrowserWidget.ACTION_PROMOTE:
+        promote_dialog = PromoteVersionDialog(parent, selected_record)
+        if not promote_dialog.exec_():
+            return
+        try:
+            promoted_record = promote_version(
+                selected_record,
+                asset_paths=asset_paths,
+                dcc=DCC_SUBSTANCE,
+                stem=stem,
+                ext="spp",
+                title=promote_dialog.get_title(),
+                note=promote_dialog.get_note(),
+            )
+        except Exception as exc:
+            log.exception("Failed to promote Substance Painter version.")
+            MessageDialog(
+                parent,
+                f"Failed to promote version:\n{exc}",
+                "Promote Version Failed",
+            ).exec_()
+            return
+
+        MessageDialog(
+            parent,
+            (
+                f'Promoted version to {_version_label(promoted_record.version)} '
+                f'"{promoted_record.title or "(untitled)"}".'
+            ),
+            "Version Promoted",
+        ).exec_()
+
+
+def launch_save_version() -> None:
+    """Create a manual version for the currently open asset project."""
+    if sp.project.is_busy():
+        sp.project.execute_when_not_busy(launch_save_version)
+        return
+
+    parent = get_main_qt_window()
+    project_path = _ensure_project_saved_for_version_action(
+        parent, action_name="Save Version"
+    )
+    if project_path is None:
+        return
+
+    conn = DB.Get(DB_Config)
+    asset = get_active_asset_from_project(conn)
+    if not asset:
+        MessageDialog(
+            parent,
+            "Could not resolve the current asset from project metadata.",
+            "Save Version",
+        ).exec_()
+        return
+
+    dialog = SaveVersionDialog(parent)
+    if not dialog.exec_():
+        return
+
+    geo_variant = _current_geo_variant()
+    stem = _texture_project_stem_for_variant(geo_variant)
+    try:
+        version_record = save_version(
+            source_path=project_path,
+            asset_paths=paths_for_asset(asset),
+            dcc=DCC_SUBSTANCE,
+            stem=stem,
+            ext="spp",
+            title=dialog.get_title(),
+            note=dialog.get_note(),
+        )
+    except Exception as exc:
+        log.exception("Failed to save Substance Painter version.")
+        MessageDialog(
+            parent,
+            f"Failed to save version:\n{exc}",
+            "Save Version Failed",
+        ).exec_()
+        return
+
+    MessageDialog(
+        parent,
+        (
+            f'Saved {_version_label(version_record.version)} '
+            f'"{version_record.title or "(untitled)"}".'
+        ),
+        "Version Saved",
+    ).exec_()
+
+
 __all__ = [
     "PIPE_SP_METADATA_CONTEXT",
     "PIPE_SP_METADATA_KEY",
@@ -1170,4 +1458,6 @@ __all__ = [
     "store_asset_metadata_for_project",
     "store_asset_selection_metadata",
     "launch_open_asset_textures",
+    "launch_save_version",
+    "launch_version_browser_for_current_project",
 ]
