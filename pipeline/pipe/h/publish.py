@@ -139,6 +139,9 @@ class PublishOptions:
     manifest_path: Path | None = None
     backup_stem: str | None = None
     backup_ext: str | None = None
+    title: str | None = None
+    note: str | None = None
+    # Backward-compatible alias used by existing HDA parameters.
     publish_note: str | None = None
     tool_version: str | None = None
 
@@ -570,7 +573,9 @@ def _backup_snapshot(
             source_path=context.hip_path,
             backup_path=backup_path,
             version=version,
-            note=options.publish_note,
+            title=options.title,
+            context="publish",
+            note=options.note or options.publish_note,
             tool_version=options.tool_version,
             asset_name=context.asset_name,
             asset_path=options.asset_path,

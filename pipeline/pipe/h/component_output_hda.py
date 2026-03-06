@@ -177,6 +177,7 @@ def publish(node: hou.Node) -> Mapping[str, Any]:
 def _collect_publish_options(node: hou.Node) -> PublishOptions:
     asset_id = _eval_int(node, "asset_id_override")
     variant = _empty_to_none(_eval_string(node, "variant_override"))
+    publish_note = _empty_to_none(_eval_string(node, "publish_note"))
     return PublishOptions(
         asset_root=_eval_path(node, "asset_root_override"),
         asset_name=_empty_to_none(_eval_string(node, "asset_name_override")),
@@ -187,7 +188,9 @@ def _collect_publish_options(node: hou.Node) -> PublishOptions:
         save_hip_before_publish=_eval_bool(node, "save_hip_before_publish", True),
         backup_dir=_eval_path(node, "backup_dir_override"),
         manifest_path=_eval_path(node, "manifest_path_override"),
-        publish_note=_empty_to_none(_eval_string(node, "publish_note")),
+        title=_empty_to_none(_eval_string(node, "publish_title")),
+        note=publish_note,
+        publish_note=publish_note,
         tool_version=_empty_to_none(_eval_string(node, "tool_version")),
         export_component=_eval_bool(node, "export_component", True),
         collect_thumbnail=_eval_bool(node, "collect_thumbnail", True),
