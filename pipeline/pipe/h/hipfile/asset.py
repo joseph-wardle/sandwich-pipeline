@@ -11,10 +11,9 @@ from pipe.asset.paths import BACKUP_DIRNAME, DCC_HOUDINI, paths_for_asset
 from pipe.asset.version_service import (
     list_version_records,
     promote_version,
-)
-from pipe.asset.version_service import (
     save_version as save_version_record,
 )
+from pipe.asset.versioning import version_label
 from pipe.db import DBInterface
 from pipe.glui.dialogs import FilteredListDialog, MessageDialog
 from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
@@ -25,12 +24,6 @@ from .. import nodelayouts
 from .filemanager import HFileManager
 
 log = logging.getLogger(__name__)
-
-
-def _version_label(version: int | None) -> str:
-    if version is None:
-        return "unknown version"
-    return f"v{version:03d}"
 
 
 class HAssetFileManager(HFileManager):
@@ -189,9 +182,6 @@ class HAssetFileManager(HFileManager):
         return hip_path
 
     def open_version_browser(self) -> None:
-        if not self._check_unsaved_changes():
-            return
-
         hip_path = self._current_hip_path()
         if hip_path is None:
             MessageDialog(
@@ -247,6 +237,15 @@ class HAssetFileManager(HFileManager):
                     "Open Version Failed",
                 ).exec_()
                 return
+            if not backup_path.exists() or not backup_path.is_file():
+                MessageDialog(
+                    self._main_window,
+                    f"Backup file is missing on disk:\n{backup_path}",
+                    "Open Version Failed",
+                ).exec_()
+                return
+            if not self._check_unsaved_changes():
+                return
 
             try:
                 hou.hipFile.load(str(backup_path), suppress_save_prompt=True)
@@ -261,6 +260,15 @@ class HAssetFileManager(HFileManager):
             return
 
         if selected_action == VersionBrowserWidget.ACTION_PROMOTE:
+            source_backup = selected_record.backup_path
+            if source_backup is None or not source_backup.exists():
+                MessageDialog(
+                    self._main_window,
+                    "Cannot create a new version from this entry because the backup file is missing.",
+                    "Create Version Failed",
+                ).exec_()
+                return
+
             promote_dialog = PromoteVersionDialog(self._main_window, selected_record)
             if not promote_dialog.exec_():
                 return
@@ -278,18 +286,19 @@ class HAssetFileManager(HFileManager):
                 log.exception("Failed to promote Houdini version.")
                 MessageDialog(
                     self._main_window,
-                    f"Failed to promote version:\n{exc}",
-                    "Promote Version Failed",
+                    f"Failed to create new version:\n{exc}",
+                    "Create Version Failed",
                 ).exec_()
                 return
 
             MessageDialog(
                 self._main_window,
                 (
-                    f'Promoted version to {_version_label(promoted_record.version)} '
-                    f'"{promoted_record.title or "(untitled)"}".'
+                    f'Created new version {version_label(promoted_record.version)} '
+                    f'"{promoted_record.title or "(untitled)"}" from the selected backup.\n'
+                    "Open it from Version History to continue working from it."
                 ),
-                "Version Promoted",
+                "Version Created",
             ).exec_()
 
     def save_version(self) -> None:
@@ -329,7 +338,7 @@ class HAssetFileManager(HFileManager):
         MessageDialog(
             self._main_window,
             (
-                f'Saved {_version_label(version_record.version)} '
+                f'Saved {version_label(version_record.version)} '
                 f'"{version_record.title or "(untitled)"}".'
             ),
             "Version Saved",

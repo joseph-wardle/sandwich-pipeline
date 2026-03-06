@@ -15,6 +15,7 @@ from env import Executables
 from Qt.QtCore import QRegExp
 from Qt.QtGui import QRegExpValidator, QTextCursor
 from Qt.QtWidgets import (
+    QBoxLayout,
     QComboBox,
     QDialogButtonBox,
     QHBoxLayout,
@@ -120,10 +121,18 @@ class _PublishAssetVariantControls:
 
 
 class VersionTitleWidget:
+    """Mixin for dialogs that add required version title + optional note fields.
+
+    Contract: classes using this mixin must provide ``self._layout`` as the
+    root ``QVBoxLayout`` (the same layout shape provided by FilteredListDialog).
+    """
+
+    _layout: QBoxLayout
     _version_title_field: QLineEdit
     _version_note_field: QPlainTextEdit
 
     def _init_version_title_controls(self) -> None:
+        layout = self._layout
         title_widget = QWidget(cast(QWidget, self))
         title_layout = QHBoxLayout(title_widget)
         title_layout.setContentsMargins(0, 0, 0, 0)
@@ -140,8 +149,8 @@ class VersionTitleWidget:
             "Required. Artists will see this in version history."
         )
         title_layout.addWidget(self._version_title_field, 70)
-        insert_at = max(self._layout.count() - 1, 0)  # type: ignore[attr-defined]
-        self._layout.insertWidget(insert_at, title_widget)  # type: ignore[attr-defined]
+        insert_at = max(layout.count() - 1, 0)
+        layout.insertWidget(insert_at, title_widget)
 
         note_widget = QWidget(cast(QWidget, self))
         note_layout = QVBoxLayout(note_widget)
@@ -160,8 +169,8 @@ class VersionTitleWidget:
             "Optional note that appears in version history details."
         )
         note_layout.addWidget(self._version_note_field)
-        insert_at = max(self._layout.count() - 1, 0)  # type: ignore[attr-defined]
-        self._layout.insertWidget(insert_at, note_widget)  # type: ignore[attr-defined]
+        insert_at = max(layout.count() - 1, 0)
+        layout.insertWidget(insert_at, note_widget)
 
     def get_version_title(self) -> str:
         return self._version_title_field.text().strip()

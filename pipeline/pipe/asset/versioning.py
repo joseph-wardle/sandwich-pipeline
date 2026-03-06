@@ -479,6 +479,13 @@ def history_as_records(manifest: dict[str, Any], dcc: str) -> list[VersionRecord
     return records
 
 
+def version_label(version: int | None) -> str:
+    """Format a version number as a zero-padded label (e.g. 'v003'), or '-' if unknown."""
+    if version is None:
+        return "-"
+    return f"v{version:03d}"
+
+
 __all__ = [
     "backup_file",
     "backup_if_changed",
@@ -493,5 +500,6 @@ __all__ = [
     "next_version",
     "record_publish",
     "save_manifest",
+    "version_label",
     "versioned_filename",
 ]

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.asset.versioning import VersionRecord
+from pipe.asset.versioning import VersionRecord, version_label
 
 _VERSIONED_FILENAME_RE = re.compile(r"^(?P<stem>.+)\.v(?P<ver>\d+)\.(?P<ext>[^.]+)$")
 _UNTITLED_LABEL = "(untitled)"
@@ -88,6 +88,7 @@ class VersionBrowserWidget(QtWidgets.QDialog):
         self._table.verticalHeader().setVisible(False)
         self._table.setWordWrap(False)
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
+        self._table.itemDoubleClicked.connect(self._on_row_double_clicked)
 
         header_view = self._table.horizontalHeader()
         header_view.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
@@ -105,7 +106,7 @@ class VersionBrowserWidget(QtWidgets.QDialog):
 
         button_row = QtWidgets.QHBoxLayout()
         self._open_btn = QtWidgets.QPushButton("Open Version")
-        self._promote_btn = QtWidgets.QPushButton("Promote as New Current")
+        self._promote_btn = QtWidgets.QPushButton("Save as New Version")
         cancel_btn = QtWidgets.QPushButton("Cancel")
         self._open_btn.clicked.connect(self._accept_open)
         self._promote_btn.clicked.connect(self._accept_promote)
@@ -119,7 +120,7 @@ class VersionBrowserWidget(QtWidgets.QDialog):
     def _populate_table(self) -> None:
         self._table.setRowCount(len(self._records))
         for row, record in enumerate(self._records):
-            version_text = _version_label(record.version)
+            version_text = version_label(record.version)
             title_text = (record.title or "").strip() or _UNTITLED_LABEL
             user_text = (record.user or "").strip() or "-"
             date_text = _format_timestamp(record.timestamp)
@@ -140,12 +141,23 @@ class VersionBrowserWidget(QtWidgets.QDialog):
             if not (record.title or "").strip():
                 _dim_item(title_item)
 
-            if _is_current_row(row, record, self._records, self._current_version):
-                _set_row_bold(self._table, row, True)
+            backup_missing = record.backup_path is not None and not _has_backup_file(
+                record
+            )
+            if backup_missing:
                 for col in range(self._table.columnCount()):
                     item = self._table.item(row, col)
                     if item is not None:
-                        item.setToolTip("Current version")
+                        _dim_item(item)
+                        item.setToolTip("Backup file not found on disk")
+
+            if _is_current_row(row, record, self._records, self._current_version):
+                _set_row_bold(self._table, row, True)
+                if not backup_missing:
+                    for col in range(self._table.columnCount()):
+                        item = self._table.item(row, col)
+                        if item is not None:
+                            item.setToolTip("Current version")
 
         if self._records:
             self._table.selectRow(0)
@@ -166,17 +178,30 @@ class VersionBrowserWidget(QtWidgets.QDialog):
             return
 
         note_text = (record.note or "").strip() or "(none)"
-        self._detail_label.setText(f"Note: {note_text}")
+        has_backup_path = _has_backup_file(record)
+        if record.backup_path is None:
+            self._detail_label.setText(
+                f"Note: {note_text}\nBackup file: (not recorded)"
+            )
+        elif not has_backup_path:
+            self._detail_label.setText(
+                f"Note: {note_text}\nBackup file not found on disk."
+            )
+        else:
+            self._detail_label.setText(f"Note: {note_text}")
 
-        has_backup_path = record.backup_path is not None
         self._open_btn.setEnabled(has_backup_path)
         self._promote_btn.setEnabled(
             has_backup_path
             and not _is_current_row(row, record, self._records, self._current_version)
         )
 
+    def _on_row_double_clicked(self, _item: QtWidgets.QTableWidgetItem) -> None:
+        if self._open_btn.isEnabled():
+            self._accept_open()
+
     def _accept_open(self) -> None:
-        if self.get_selected_record() is None:
+        if self.get_selected_record() is None or not self._open_btn.isEnabled():
             return
         self._selected_action = self.ACTION_OPEN
         self.accept()
@@ -186,7 +211,10 @@ class VersionBrowserWidget(QtWidgets.QDialog):
         row = self._selected_row()
         if record is None or row is None:
             return
-        if _is_current_row(row, record, self._records, self._current_version):
+        if (
+            _is_current_row(row, record, self._records, self._current_version)
+            or not self._promote_btn.isEnabled()
+        ):
             return
         self._selected_action = self.ACTION_PROMOTE
         self.accept()
@@ -212,10 +240,9 @@ def _dim_item(item: QtWidgets.QTableWidgetItem) -> None:
     item.setForeground(QtGui.QBrush(QtGui.QColor(130, 130, 130)))
 
 
-def _version_label(version: int | None) -> str:
-    if version is None:
-        return "-"
-    return f"v{version:03d}"
+def _has_backup_file(record: VersionRecord) -> bool:
+    backup_path = record.backup_path
+    return bool(backup_path and backup_path.exists() and backup_path.is_file())
 
 
 def _format_timestamp(timestamp: str | None) -> str:

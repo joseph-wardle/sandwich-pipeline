@@ -19,7 +19,7 @@ from pipe.asset.version_service import (
     promote_version,
     save_version,
 )
-from pipe.asset.versioning import get_manifest_path, load_manifest
+from pipe.asset.versioning import get_manifest_path, load_manifest, version_label
 from pipe.db import DB, DBInterface
 from pipe.glui.dialogs import FilteredListDialog, MessageDialog
 from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
@@ -84,15 +84,6 @@ def _set_dialog_button_tooltips(
     cancel_btn = buttons.button(QtWidgets.QDialogButtonBox.Cancel)
     if cancel_btn:
         cancel_btn.setToolTip(cancel_text)
-
-
-def _version_label(value: object | None) -> str:
-    if value is None:
-        return "unknown version"
-    try:
-        return f"v{int(str(value)):03d}"
-    except Exception:
-        return str(value)
 
 
 def write_asset_metadata(asset: Asset) -> None:
@@ -471,6 +462,13 @@ class MAssetFileManager(FileManager):
                     "Open Version",
                 ).exec_()
                 return
+            if not backup_path.exists() or not backup_path.is_file():
+                MessageDialog(
+                    self._main_window,
+                    f"Backup file is missing on disk:\n{backup_path}",
+                    "Open Version",
+                ).exec_()
+                return
 
             file_open_event, _ = self._telemetry_file_events()
             action_id = self._new_file_action_id()
@@ -502,6 +500,15 @@ class MAssetFileManager(FileManager):
             return
 
         if selected_action == VersionBrowserWidget.ACTION_PROMOTE:
+            source_backup = selected_record.backup_path
+            if source_backup is None or not source_backup.exists():
+                MessageDialog(
+                    self._main_window,
+                    "Cannot create a new version from this entry because the backup file is missing.",
+                    "Create Version Failed",
+                ).exec_()
+                return
+
             promote_dialog = PromoteVersionDialog(self._main_window, selected_record)
             if not promote_dialog.exec_():
                 return
@@ -519,15 +526,19 @@ class MAssetFileManager(FileManager):
                 log.exception("Failed to promote Maya model version.")
                 MessageDialog(
                     self._main_window,
-                    f"Failed to promote version:\n{exc}",
-                    "Promote Version Failed",
+                    f"Failed to create new version:\n{exc}",
+                    "Create Version Failed",
                 ).exec_()
                 return
 
             MessageDialog(
                 self._main_window,
-                f'Promoted version to {_version_label(promoted.version)} "{promoted.title or "(untitled)"}".',
-                "Version Promoted",
+                (
+                    f'Created new version {version_label(promoted.version)} '
+                    f'"{promoted.title or "(untitled)"}" from the selected backup.\n'
+                    "Open it from Version History to continue working from it."
+                ),
+                "Version Created",
             ).exec_()
 
     def save_version_for_current_scene(self) -> None:
@@ -570,7 +581,7 @@ class MAssetFileManager(FileManager):
 
         MessageDialog(
             self._main_window,
-            f'Saved {_version_label(record.version)} "{record.title or "(untitled)"}".',
+            f'Saved {version_label(record.version)} "{record.title or "(untitled)"}".',
             "Version Saved",
         ).exec_()
 

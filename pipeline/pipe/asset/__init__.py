@@ -8,6 +8,7 @@ from .versioning import (
     load_manifest,
     record_publish,
     save_manifest,
+    version_label,
 )
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "load_manifest",
     "record_publish",
     "save_manifest",
+    "version_label",
 ]

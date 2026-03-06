@@ -4,7 +4,7 @@ from typing import Optional
 
 from Qt import QtCore, QtWidgets
 
-from pipe.asset.versioning import VersionRecord
+from pipe.asset.versioning import VersionRecord, version_label
 
 _UNTITLED_LABEL = "(untitled)"
 
@@ -89,25 +89,17 @@ class PromoteVersionDialog(SaveVersionDialog):
         parent: QtWidgets.QWidget | None,
         record: VersionRecord,
     ) -> None:
-        version_text = _version_label(record.version)
+        version_text = version_label(record.version)
         title_text = (record.title or "").strip() or _UNTITLED_LABEL
         super().__init__(
             parent,
-            title="Promote Version",
-            prompt=f"Promoting from: {version_text} - {title_text}",
+            title="Save as New Version",
+            prompt=f"Create a new version from: {version_text} - {title_text}",
         )
         ok_btn = self._buttons.button(QtWidgets.QDialogButtonBox.Ok)
         if ok_btn:
-            ok_btn.setText("Promote")
-        self._title_field.setPlaceholderText(
-            "Enter title for the new promoted version..."
-        )
-
-
-def _version_label(version: int | None) -> str:
-    if version is None:
-        return "unknown version"
-    return f"v{version:03d}"
+            ok_btn.setText("Create Version")
+        self._title_field.setPlaceholderText("Enter title for the new version...")
 
 
 __all__ = ["PromoteVersionDialog", "SaveVersionDialog"]

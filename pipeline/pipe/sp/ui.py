@@ -328,8 +328,6 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             return
         if not self._preflight():
             return
-        if not self._ensure_project_saved():
-            return
 
         version_title = self.version_title
         if not version_title:
@@ -338,6 +336,8 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 "Version title is required before exporting textures.",
                 "Publish Textures",
             ).exec_()
+            return
+        if not self._ensure_project_saved():
             return
 
         mat_var = self.mat_var.strip() or "default"

@@ -23,6 +23,7 @@ from pipe.asset.version_service import (
     promote_version,
     save_version,
 )
+from pipe.asset.versioning import version_label
 from pipe.db import DB
 from pipe.glui.dialogs import (
     DialogFilteredList,
@@ -905,12 +906,6 @@ def _texture_project_stem_for_variant(geo_variant: str) -> str:
     return f"textures.{variant}"
 
 
-def _version_label(version: int | None) -> str:
-    if version is None:
-        return "unknown version"
-    return f"v{version:03d}"
-
-
 def _ensure_project_ready_for_version_action(
     parent: QtWidgets.QWidget | None, *, action_name: str
 ) -> bool:
@@ -1340,6 +1335,13 @@ def launch_version_browser_for_current_project() -> None:
                 "Open Version Failed",
             ).exec_()
             return
+        if not backup_path.exists() or not backup_path.is_file():
+            MessageDialog(
+                parent,
+                f"Backup file is missing on disk:\n{backup_path}",
+                "Open Version Failed",
+            ).exec_()
+            return
 
         if sp.project.needs_saving() and not _confirm_discard_unsaved(parent):
             return
@@ -1359,6 +1361,15 @@ def launch_version_browser_for_current_project() -> None:
         return
 
     if selected_action == VersionBrowserWidget.ACTION_PROMOTE:
+        source_backup = selected_record.backup_path
+        if source_backup is None or not source_backup.exists():
+            MessageDialog(
+                parent,
+                "Cannot create a new version from this entry because the backup file is missing.",
+                "Create Version Failed",
+            ).exec_()
+            return
+
         promote_dialog = PromoteVersionDialog(parent, selected_record)
         if not promote_dialog.exec_():
             return
@@ -1376,18 +1387,19 @@ def launch_version_browser_for_current_project() -> None:
             log.exception("Failed to promote Substance Painter version.")
             MessageDialog(
                 parent,
-                f"Failed to promote version:\n{exc}",
-                "Promote Version Failed",
+                f"Failed to create new version:\n{exc}",
+                "Create Version Failed",
             ).exec_()
             return
 
         MessageDialog(
             parent,
             (
-                f'Promoted version to {_version_label(promoted_record.version)} '
-                f'"{promoted_record.title or "(untitled)"}".'
+                f'Created new version {version_label(promoted_record.version)} '
+                f'"{promoted_record.title or "(untitled)"}" from the selected backup.\n'
+                "Open it from Version History to continue working from it."
             ),
-            "Version Promoted",
+            "Version Created",
         ).exec_()
 
 
@@ -1442,7 +1454,7 @@ def launch_save_version() -> None:
     MessageDialog(
         parent,
         (
-            f'Saved {_version_label(version_record.version)} '
+            f'Saved {version_label(version_record.version)} '
             f'"{version_record.title or "(untitled)"}".'
         ),
         "Version Saved",
