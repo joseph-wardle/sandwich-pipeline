@@ -17,7 +17,7 @@ from pipe.shot.version_adapter import (
     path_matches_stream,
     shot_owner_for,
 )
-from pipe.struct.db import SGEntity, Shot, validate_shot_code_token
+from pipe.struct.db import EnvironmentStub, SGEntity, Shot, validate_shot_code_token
 from pipe.versioning import (
     VersionStreamSpec,
     list_version_records,
@@ -293,16 +293,44 @@ class HShotFileManager(HFileManager):
             if not self._check_unsaved_changes():
                 return
 
+            load_warning: str | None = None
             try:
-                hou.hipFile.load(str(backup_path), suppress_save_prompt=True)
-                self._post_open_file(shot)
+                load_warning = self._load_hip_file(backup_path)
             except Exception as exc:
-                log.exception("Failed to open Houdini shot version: %s", backup_path)
+                log.exception("Failed to load Houdini shot version: %s", backup_path)
                 MessageDialog(
                     self._main_window,
-                    f"Failed to open selected version:\n{exc}",
+                    (
+                        "Failed to open selected version:\n"
+                        f"{self._describe_exception(exc, fallback='Could not load the HIP file')}"
+                    ),
                     "Open Version Failed",
                 ).exec_()
+                return
+
+            try:
+                self._post_open_file(shot)
+            except Exception as exc:
+                log.exception(
+                    "Loaded Houdini shot version but post-open setup failed: %s",
+                    backup_path,
+                )
+                MessageDialog(
+                    self._main_window,
+                    (
+                        "The selected version loaded, but shot setup could not finish:\n"
+                        f"{self._describe_exception(exc, fallback='Shot post-open setup failed')}"
+                    ),
+                    "Open Version Failed",
+                ).exec_()
+                return
+
+            if load_warning:
+                self._show_hip_load_warning(
+                    path=backup_path,
+                    warning=load_warning,
+                    title="Version Opened With Warnings",
+                )
             return
 
         if selected_action == VersionBrowserWidget.ACTION_PROMOTE:
@@ -725,22 +753,64 @@ class HShotFileManager(HFileManager):
         hou.playbar.setFrameRange(start, end)
         hou.playbar.setPlaybackRange(start, end)
 
+    def _resolve_environment_path(
+        self,
+        *,
+        shot: Shot,
+        environment_stub: EnvironmentStub | None,
+    ) -> str | None:
+        if environment_stub is None:
+            return None
+        try:
+            layout = self._conn.get_env_by_stub(environment_stub)
+        except StopIteration:
+            log.warning(
+                "Skipping missing environment while opening shot %s: %s",
+                shot.code,
+                environment_stub,
+            )
+            return None
+        return layout.path if layout and layout.path else None
+
+    def _resolve_sequence_environment_stub(
+        self,
+        shot: Shot,
+    ) -> EnvironmentStub | None:
+        if shot.sequence is None:
+            return None
+        try:
+            sequence = self._conn.get_sequence_by_stub(shot.sequence)
+        except StopIteration:
+            log.warning(
+                "Skipping missing sequence while opening shot %s: %s",
+                shot.code,
+                shot.sequence,
+            )
+            return None
+        return sequence.set
+
     def _set_environment_paths(self, shot: Shot) -> None:
         sets = shot.sets
         if sets:
             for idx, environment_stub in enumerate(sets):
-                layout = self._conn.get_env_by_stub(environment_stub)
-                if layout and layout.path:
-                    hou.putenv(f"SET{idx+1}_PATH", layout.path)
+                environment_path = self._resolve_environment_path(
+                    shot=shot,
+                    environment_stub=environment_stub,
+                )
+                if environment_path:
+                    hou.putenv(f"SET{idx+1}_PATH", environment_path)
             return
 
-        # Fallback to depreciated single set logic if no sets are assigned
-        if environment_stub := (
-            shot.set or self._conn.get_sequence_by_stub(shot.sequence).set  # type: ignore[assignment, arg-type]
-        ):
-            layout = self._conn.get_env_by_stub(environment_stub)
-            if layout and layout.path:
-                hou.putenv("SET_PATH", layout.path)
+        # Fallback to deprecated single-set logic if no sets are assigned.
+        fallback_environment_stub = shot.set or self._resolve_sequence_environment_stub(
+            shot
+        )
+        environment_path = self._resolve_environment_path(
+            shot=shot,
+            environment_stub=fallback_environment_stub,
+        )
+        if environment_path:
+            hou.putenv("SET_PATH", environment_path)
 
     def _get_muted_departments(self) -> list[str]:
         department = self._department_value()
