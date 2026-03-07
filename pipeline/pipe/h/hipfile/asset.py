@@ -250,16 +250,44 @@ class HAssetFileManager(HFileManager):
             if not self._check_unsaved_changes():
                 return
 
+            load_warning: str | None = None
             try:
-                hou.hipFile.load(str(backup_path), suppress_save_prompt=True)
-                self._post_open_file(asset)
+                load_warning = self._load_hip_file(backup_path)
             except Exception as exc:
-                log.exception("Failed to open Houdini backup version: %s", backup_path)
+                log.exception("Failed to load Houdini backup version: %s", backup_path)
                 MessageDialog(
                     self._main_window,
-                    f"Failed to open selected version:\n{exc}",
+                    (
+                        "Failed to open selected version:\n"
+                        f"{self._describe_exception(exc, fallback='Could not load the HIP file')}"
+                    ),
                     "Open Version Failed",
                 ).exec_()
+                return
+
+            try:
+                self._post_open_file(asset)
+            except Exception as exc:
+                log.exception(
+                    "Loaded Houdini asset version but post-open setup failed: %s",
+                    backup_path,
+                )
+                MessageDialog(
+                    self._main_window,
+                    (
+                        "The selected version loaded, but asset setup could not finish:\n"
+                        f"{self._describe_exception(exc, fallback='Asset post-open setup failed')}"
+                    ),
+                    "Open Version Failed",
+                ).exec_()
+                return
+
+            if load_warning:
+                self._show_hip_load_warning(
+                    path=backup_path,
+                    warning=load_warning,
+                    title="Version Opened With Warnings",
+                )
             return
 
         if selected_action == VersionBrowserWidget.ACTION_PROMOTE:
