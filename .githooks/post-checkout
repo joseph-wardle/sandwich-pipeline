@@ -8,7 +8,7 @@ BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 AXIOM_LINK="${LOCAL_DIR}/pipeline/lib/axiom"
 # Create symlink if Axiom isn't present in local directory
-if [[ ! -e "$AXIOM_LINK"]]; then
+if [[ ! -e "$AXIOM_LINK" ]]; then
     ln -s "${PROD_DIR}/pipeline/lib/axiom" "$AXIOM_LINK"
 fi
 
