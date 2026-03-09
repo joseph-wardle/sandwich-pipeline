@@ -19,9 +19,3 @@ fi
 
 # Update the venv and set it up if it doesn't exist
 source "${LOCAL_DIR}/.githooks/update-venv"
-
-# copy the pin shift tool over
-if [[ "${PROD_DIR}" != "${LOCAL_DIR}" ]]; then
-    cp "${PROD_DIR}/pipeline/software/maya/scripts/pin_shift.py" \
-      "${LOCAL_DIR}/pipeline/software/maya/scripts/pin_shift.py"
-fi
