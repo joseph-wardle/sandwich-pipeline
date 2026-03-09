@@ -6,9 +6,10 @@ PROD_DIR=/groups/sandwich/.pipeline
 LOCAL_DIR=$(git rev-parse --show-toplevel)
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-# Create symlink if Axiom folder does not exist
-if [[ ! -d "${LOCAL_DIR}/pipeline/lib/axiom" ]]; then
-    ln -s "${PROD_DIR}/pipeline/lib/axiom" "${LOCAL_DIR}/pipeline/lib/axiom"
+AXIOM_LINK="${LOCAL_DIR}/pipeline/lib/axiom"
+# Create symlink if Axiom isn't present in local directory
+if [[ ! -e "$AXIOM_LINK" && ! -L "$AXIOM_LINK" ]]; then
+    ln -s "${PROD_DIR}/pipeline/lib/axiom" "$AXIOM_LINK"
 fi
 
 # Update the env file
