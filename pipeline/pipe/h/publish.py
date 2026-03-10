@@ -24,12 +24,12 @@ from typing import Any, Mapping, NotRequired, TypedDict, cast
 import hou
 
 from pipe.asset.version_adapter import asset_owner_from_metadata
-from pipe.versioning import (
+from pipe.versioning import stream_key_for
+from pipe.versioning.store import (
     backup_file,
     get_manifest_path,
     next_version,
     record_publish,
-    stream_key_for,
 )
 
 from . import publish_hooks

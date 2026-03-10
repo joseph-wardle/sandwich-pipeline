@@ -42,7 +42,8 @@ from pipe.m.assetfile import (
 )
 from pipe.m.util import maintain_selection
 from pipe.struct.db import Asset, SGEntity
-from pipe.versioning import BackupResult, backup_if_changed
+from pipe.versioning import BackupResult
+from pipe.versioning.store import backup_if_changed
 
 if TYPE_CHECKING:
     pass

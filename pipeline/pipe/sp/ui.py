@@ -38,7 +38,7 @@ from pipe.sp.local import get_main_qt_window
 from pipe.struct.db import Asset
 from pipe.struct.material import DisplacementSource, NormalSource, NormalType
 from pipe.util import checkbox_callback_helper, dict_index
-from pipe.versioning import backup_if_changed
+from pipe.versioning.store import backup_if_changed
 
 log = logging.getLogger(__name__)
 _HOUDINI_RESULT_START = "--BUILD-RESULT--"
