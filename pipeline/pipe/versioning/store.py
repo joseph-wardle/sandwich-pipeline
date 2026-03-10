@@ -25,6 +25,22 @@ Authoritative v1 manifest shape:
 New writes target ``streams``. Reads fall back to legacy ``dcc`` entries only when a
 stream has not been written yet.
 
+Manifest filename divergence
+----------------------------
+The manifest filename is chosen by each domain adapter, not by this module:
+
+- Assets use ``"asset_manifest.json"`` (set in ``pipe.asset.paths.MANIFEST_FILENAME``).
+  This predates the unified versioning system and must not be renamed without a
+  one-time migration of every existing asset directory on disk.
+- Shots and environments use ``"version_manifest.json"`` (defined as
+  ``SHOT_VERSION_MANIFEST_FILENAME`` / ``ENVIRONMENT_VERSION_MANIFEST_FILENAME`` in
+  their respective adapters).  These were introduced together with the unified system
+  and share the same name by convention.
+
+A future normalisation pass could migrate asset manifests to ``version_manifest.json``
+and drop the per-adapter constants, but that is out of scope until all asset roots have
+been converted.
+
 History entries may also include optional compound snapshot metadata:
 
 ```
