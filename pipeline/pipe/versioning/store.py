@@ -25,19 +25,6 @@ Authoritative v1 manifest shape:
 New writes target ``streams``. Reads fall back to legacy ``dcc`` entries only when a
 stream has not been written yet.
 
-Manifest filename divergence
-----------------------------
-The manifest filename is chosen by each domain adapter, not by this module:
-
-- Assets use ``ASSET_MANIFEST_FILENAME`` (``"asset_manifest.json"``).  This name
-  predates the unified versioning system and must not be changed without migrating
-  every existing asset directory on disk.
-- Shots and environments both use ``VERSION_MANIFEST_FILENAME``
-  (``"version_manifest.json"``), introduced alongside the unified system.
-
-A future normalisation pass could migrate asset manifests to ``VERSION_MANIFEST_FILENAME``
-and unify the two, but that is out of scope until all asset roots have been converted.
-
 History entries may also include optional compound snapshot metadata:
 
 ```
@@ -86,13 +73,6 @@ except Exception:  # pragma: no cover - platform dependent
 log = logging.getLogger(__name__)
 
 MANIFEST_SCHEMA_VERSION = 1
-
-# Asset directories use "asset_manifest.json" — a legacy name predating the
-# unified versioning system that must not be renamed without a disk migration.
-ASSET_MANIFEST_FILENAME = "asset_manifest.json"
-
-# Shot and environment directories use "version_manifest.json" — introduced
-# together with the unified system and shared by both domain adapters.
 VERSION_MANIFEST_FILENAME = "version_manifest.json"
 
 _VERSION_RE_TEMPLATE = r"^{stem}\.v(?P<ver>\d+)\.{ext}$"
@@ -181,7 +161,7 @@ def _legacy_asset_payload(owner: VersionOwner | None) -> dict[str, Any]:
 
 
 def get_manifest_path(
-    root_path: Path, *, filename: str = ASSET_MANIFEST_FILENAME
+    root_path: Path, *, filename: str = VERSION_MANIFEST_FILENAME
 ) -> Path:
     return root_path / filename
 
@@ -793,7 +773,6 @@ def version_label(version: int | None) -> str:
 
 
 __all__ = [
-    "ASSET_MANIFEST_FILENAME",
     "MANIFEST_SCHEMA_VERSION",
     "VERSION_MANIFEST_FILENAME",
     "backup_file",
