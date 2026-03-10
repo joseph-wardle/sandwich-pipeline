@@ -9,11 +9,11 @@ from pipe.struct.db import Environment
 from pipe.versioning import (
     VersionOwner,
     VersionStreamSpec,
-    get_manifest_path,
     path_matches_stream,
     stream_dirname,
     stream_key_for,
 )
+from pipe.versioning.store import get_manifest_path
 from shared.util import get_production_path
 
 DCC_HOUDINI = "houdini"
