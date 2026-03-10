@@ -15,9 +15,18 @@ from timeline_marker.ui import TimelineMarker  # type: ignore[import-not-found]
 
 from pipe.db import DB
 from pipe.glui.dialogs import MessageDialog
+from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
+from pipe.glui.version_browser import VersionBrowserWidget
 from pipe.m.local import get_main_qt_window
 from pipe.struct.db import SGEntity, Shot, build_shot_path, validate_shot_code_token
 from pipe.util import FileManager, log_errors
+from pipe.versioning import (
+    VersionStreamSpec,
+    list_version_records,
+    promote_version as _promote_version,
+    save_version as _save_version,
+    version_label,
+)
 
 from .timeline import shot_timeline_generator
 
@@ -572,3 +581,197 @@ class MShotFileManager(FileManager):
         # Save shot code to file
         mc.fileInfo("code", self.shot.code)
         mc.file(save=True, force=True)
+
+    # ------------------------------------------------------------------
+    # Subclass contract
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    def _resolve_current_stream(
+        self, scene_path: Path
+    ) -> tuple[VersionStreamSpec, str, Shot] | None:
+        """Return (stream, owner_label, shot) for the current scene, or None.
+
+        Subclasses must override this to resolve the versioning stream that
+        corresponds to the open scene file.  ``owner_label`` is displayed in
+        the version browser header.  ``shot`` is passed to ``_post_open_file``
+        after opening a backup version.
+        """
+        ...
+
+    def _entity_label(self) -> str:
+        """Human-readable noun for the entity kind managed by this class.
+
+        Used in dialog messages, e.g. ``\"animation\"``, ``\"RLO\"``.
+        """
+        return "shot"
+
+    # ------------------------------------------------------------------
+    # Shared version browser and save
+    # ------------------------------------------------------------------
+
+    def open_version_browser(self) -> None:
+        kind = self._entity_label()
+        scene_path = self._current_scene_path()
+        if scene_path is None:
+            MessageDialog(
+                self._main_window,
+                f"No valid {kind} shot file is open. Use Open {kind} first.",
+                "Version History",
+            ).exec_()
+            return
+
+        resolved = self._resolve_current_stream(scene_path)
+        if resolved is None:
+            MessageDialog(
+                self._main_window,
+                f"Could not resolve the current scene to a valid {kind} shot file. "
+                f"Use Open {kind} first.",
+                "Version History",
+            ).exec_()
+            return
+
+        stream, owner_label, shot = resolved
+        records = list_version_records(stream)
+        if not records:
+            MessageDialog(
+                self._main_window,
+                f"No version history was found for this {kind}.",
+                "No Versions",
+            ).exec_()
+            return
+
+        browser = VersionBrowserWidget(
+            self._main_window,
+            records,
+            owner_label=owner_label,
+            stream_label=stream.label,
+        )
+        if not browser.exec_():
+            return
+
+        selected_record = browser.get_selected_record()
+        selected_action = browser.get_selected_action()
+        if selected_record is None:
+            return
+
+        if selected_action == VersionBrowserWidget.ACTION_OPEN:
+            backup_path = selected_record.backup_path
+            if backup_path is None:
+                MessageDialog(
+                    self._main_window,
+                    "The selected version has no backup file path.",
+                    "Open Version Failed",
+                ).exec_()
+                return
+            if not backup_path.exists() or not backup_path.is_file():
+                MessageDialog(
+                    self._main_window,
+                    f"Backup file is missing on disk:\n{backup_path}",
+                    "Open Version Failed",
+                ).exec_()
+                return
+            if not self._check_unsaved_changes():
+                return
+
+            try:
+                self._open_file(backup_path)
+                self._post_open_file(shot)
+            except Exception as exc:
+                log.exception("Failed to open %s backup version: %s", kind, backup_path)
+                MessageDialog(
+                    self._main_window,
+                    f"Failed to open selected version:\n{exc}",
+                    "Open Version Failed",
+                ).exec_()
+            return
+
+        if selected_action == VersionBrowserWidget.ACTION_PROMOTE:
+            source_backup = selected_record.backup_path
+            if source_backup is None or not source_backup.exists():
+                MessageDialog(
+                    self._main_window,
+                    "Cannot create a new version from this entry because the backup file is missing.",
+                    "Create Version Failed",
+                ).exec_()
+                return
+
+            promote_dialog = PromoteVersionDialog(self._main_window, selected_record)
+            if not promote_dialog.exec_():
+                return
+
+            try:
+                promoted_record = _promote_version(
+                    selected_record,
+                    stream,
+                    title=promote_dialog.get_title(),
+                    note=promote_dialog.get_note(),
+                )
+            except Exception as exc:
+                log.exception("Failed to create a new %s version.", kind)
+                MessageDialog(
+                    self._main_window,
+                    f"Failed to create new version:\n{exc}",
+                    "Create Version Failed",
+                ).exec_()
+                return
+
+            MessageDialog(
+                self._main_window,
+                (
+                    f"Created new version {version_label(promoted_record.version)} "
+                    f'"{promoted_record.title or "(untitled)"}" from the selected backup.\n'
+                    "Open it from Version History to continue working from it."
+                ),
+                "Version Created",
+            ).exec_()
+
+    def _do_save_version_for_scene(
+        self, scene_path: Path, stream: VersionStreamSpec
+    ) -> None:
+        """Prompt for a version title and write a backup of *scene_path*."""
+        dialog = SaveVersionDialog(self._main_window)
+        if not dialog.exec_():
+            return
+
+        try:
+            version_record = _save_version(
+                scene_path,
+                stream,
+                title=dialog.get_title(),
+                note=dialog.get_note(),
+            )
+        except Exception as exc:
+            log.exception("Failed to save %s version.", self._entity_label())
+            MessageDialog(
+                self._main_window,
+                f"Failed to save version:\n{exc}",
+                "Save Version Failed",
+            ).exec_()
+            return
+
+        MessageDialog(
+            self._main_window,
+            (
+                f"Saved {version_label(version_record.version)} "
+                f'"{version_record.title or "(untitled)"}".'
+            ),
+            "Version Saved",
+        ).exec_()
+
+    def save_version_for_current_scene(self) -> None:
+        scene_path = self._ensure_scene_saved()
+        if scene_path is None:
+            return
+
+        resolved = self._resolve_current_stream(scene_path)
+        if resolved is None:
+            MessageDialog(
+                self._main_window,
+                f"Could not resolve the current scene to a valid {self._entity_label()} shot file.",
+                "Shot Not Resolved",
+            ).exec_()
+            return
+
+        stream, _, _ = resolved
+        self._do_save_version_for_scene(scene_path, stream)
