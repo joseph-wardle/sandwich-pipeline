@@ -14,15 +14,8 @@ from pipe.asset.version_adapter import (
 )
 from pipe.db import DBInterface
 from pipe.glui.dialogs import FilteredListDialog, MessageDialog
-from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
-from pipe.glui.version_browser import VersionBrowserWidget
 from pipe.struct.db import Asset, SGEntity
-from pipe.versioning import (
-    list_version_records,
-    promote_version,
-    save_version,
-    version_label,
-)
+from pipe.versioning import VersionStreamSpec
 
 from .. import nodelayouts
 from .filemanager import HFileManager
@@ -33,6 +26,9 @@ log = logging.getLogger(__name__)
 class HAssetFileManager(HFileManager):
     def __init__(self) -> None:
         super().__init__(Asset)
+
+    def _entity_label(self) -> str:
+        return "asset"
 
     def _generate_filename_ext(self, entity) -> tuple[str, str]:
         return "asset_builder", "hipnc"
@@ -124,191 +120,32 @@ class HAssetFileManager(HFileManager):
         except Exception:
             return None
 
-    def open_version_browser(self) -> None:
-        hip_path = self._current_hip_path()
-        if hip_path is None:
-            MessageDialog(
-                self._main_window,
-                "No valid asset HIP is open. Use Open Asset first.",
-                "Version History",
-            ).exec_()
-            return
-
+    def _resolve_current_stream(
+        self, hip_path: Path
+    ) -> tuple[VersionStreamSpec, str, SGEntity] | None:
         asset = self._resolve_asset_for_hip(hip_path)
-        if not asset:
-            MessageDialog(
-                self._main_window,
-                "Could not resolve the current HIP to a valid asset. Use Open Asset first.",
-                "Version History",
-            ).exec_()
-            return
-
-        asset_paths = paths_for_asset(asset)
-        asset_stream = houdini_asset_builder_stream(
-            asset_paths,
-            owner=asset_owner_for(asset),
+        if asset is None:
+            return None
+        stream = houdini_asset_builder_stream(
+            paths_for_asset(asset), owner=asset_owner_for(asset)
         )
-        records = list_version_records(asset_stream)
-        if not records:
-            MessageDialog(
-                self._main_window,
-                "No version history was found for this asset.",
-                "No Versions",
-            ).exec_()
-            return
-
-        browser = VersionBrowserWidget(
-            self._main_window,
-            records,
-            owner_label=asset.display_name or asset.name or "Asset",
-            stream_label=asset_stream.label,
-        )
-        if not browser.exec_():
-            return
-
-        selected_record = browser.get_selected_record()
-        selected_action = browser.get_selected_action()
-        if selected_record is None:
-            return
-
-        if selected_action == VersionBrowserWidget.ACTION_OPEN:
-            backup_path = selected_record.backup_path
-            if backup_path is None:
-                MessageDialog(
-                    self._main_window,
-                    "The selected version has no backup file path.",
-                    "Open Version Failed",
-                ).exec_()
-                return
-            if not backup_path.exists() or not backup_path.is_file():
-                MessageDialog(
-                    self._main_window,
-                    f"Backup file is missing on disk:\n{backup_path}",
-                    "Open Version Failed",
-                ).exec_()
-                return
-            if not self._check_unsaved_changes():
-                return
-
-            load_warning: str | None = None
-            try:
-                load_warning = self._load_hip_file(backup_path)
-            except Exception as exc:
-                log.exception("Failed to load Houdini backup version: %s", backup_path)
-                MessageDialog(
-                    self._main_window,
-                    (
-                        "Failed to open selected version:\n"
-                        f"{self._describe_exception(exc, fallback='Could not load the HIP file')}"
-                    ),
-                    "Open Version Failed",
-                ).exec_()
-                return
-
-            try:
-                self._post_open_file(asset)
-            except Exception as exc:
-                log.exception(
-                    "Loaded Houdini asset version but post-open setup failed: %s",
-                    backup_path,
-                )
-                MessageDialog(
-                    self._main_window,
-                    (
-                        "The selected version loaded, but asset setup could not finish:\n"
-                        f"{self._describe_exception(exc, fallback='Asset post-open setup failed')}"
-                    ),
-                    "Open Version Failed",
-                ).exec_()
-                return
-
-            if load_warning:
-                self._show_hip_load_warning(
-                    path=backup_path,
-                    warning=load_warning,
-                    title="Version Opened With Warnings",
-                )
-            return
-
-        if selected_action == VersionBrowserWidget.ACTION_PROMOTE:
-            source_backup = selected_record.backup_path
-            if source_backup is None or not source_backup.exists():
-                MessageDialog(
-                    self._main_window,
-                    "Cannot create a new version from this entry because the backup file is missing.",
-                    "Create Version Failed",
-                ).exec_()
-                return
-
-            promote_dialog = PromoteVersionDialog(self._main_window, selected_record)
-            if not promote_dialog.exec_():
-                return
-            try:
-                promoted_record = promote_version(
-                    selected_record,
-                    asset_stream,
-                    title=promote_dialog.get_title(),
-                    note=promote_dialog.get_note(),
-                )
-            except Exception as exc:
-                log.exception("Failed to promote Houdini version.")
-                MessageDialog(
-                    self._main_window,
-                    f"Failed to create new version:\n{exc}",
-                    "Create Version Failed",
-                ).exec_()
-                return
-
-            MessageDialog(
-                self._main_window,
-                (
-                    f'Created new version {version_label(promoted_record.version)} '
-                    f'"{promoted_record.title or "(untitled)"}" from the selected backup.\n'
-                    "Open it from Version History to continue working from it."
-                ),
-                "Version Created",
-            ).exec_()
+        return stream, asset.display_name or asset.name or "Asset", asset
 
     def save_version(self) -> None:
         hip_path = self._ensure_hip_saved()
         if hip_path is None:
             return
 
-        asset = self._resolve_asset_for_hip(hip_path)
-        if asset is None:
+        resolved = self._resolve_current_stream(hip_path)
+        if resolved is None:
+            # The HIP isn't linked to a known asset context; let the artist pick.
             asset = self._prompt_asset_selection()
-        if not asset:
-            return
-
-        dialog = SaveVersionDialog(self._main_window)
-        if not dialog.exec_():
-            return
-
-        asset_stream = houdini_asset_builder_stream(
-            paths_for_asset(asset),
-            owner=asset_owner_for(asset),
-        )
-        try:
-            version_record = save_version(
-                hip_path,
-                asset_stream,
-                title=dialog.get_title(),
-                note=dialog.get_note(),
+            if not asset:
+                return
+            stream: VersionStreamSpec = houdini_asset_builder_stream(
+                paths_for_asset(asset), owner=asset_owner_for(asset)
             )
-        except Exception as exc:
-            log.exception("Failed to save Houdini version.")
-            MessageDialog(
-                self._main_window,
-                f"Failed to save version:\n{exc}",
-                "Save Version Failed",
-            ).exec_()
-            return
+        else:
+            stream, _, _ = resolved
 
-        MessageDialog(
-            self._main_window,
-            (
-                f'Saved {version_label(version_record.version)} '
-                f'"{version_record.title or "(untitled)"}".'
-            ),
-            "Version Saved",
-        ).exec_()
+        self._do_save_version(hip_path, stream)
