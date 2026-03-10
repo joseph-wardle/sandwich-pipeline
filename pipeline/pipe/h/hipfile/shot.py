@@ -115,19 +115,6 @@ class HShotFileManager(HFileManager):
         normalized = str(self._department or "").strip()
         return normalized or "unknown"
 
-    @staticmethod
-    def _current_hip_path() -> Path | None:
-        hip_raw = (hou.hipFile.path() or "").strip()
-        if not hip_raw:
-            return None
-
-        hip_path = Path(hou.expandString(hip_raw)).expanduser()
-        if not hip_path.is_absolute():
-            hip_path = (Path(hou.hscriptStringExpression("$HIP")) / hip_path).resolve()
-        else:
-            hip_path = hip_path.resolve()
-        return hip_path
-
     @classmethod
     def _department_from_path(cls, hip_path: Path) -> str | None:
         parent_name = hip_path.parent.name.strip().lower()
@@ -190,47 +177,6 @@ class HShotFileManager(HFileManager):
         if not path_matches_stream(hip_path, stream):
             return None
         return shot, department, stream
-
-    def _ensure_hip_saved(self) -> Path | None:
-        hip_path = self._current_hip_path()
-        if hip_path is None:
-            MessageDialog(
-                self._main_window,
-                "Current HIP has no file path. Save the project before creating a version.",
-                "Save Required",
-            ).exec_()
-            return None
-
-        if hou.hipFile.hasUnsavedChanges():
-            response = hou.ui.displayMessage(
-                "The current HIP has unsaved changes. Save before creating a version?",
-                buttons=("Save", "Cancel"),
-                severity=hou.severityType.ImportantMessage,
-                default_choice=0,
-                close_choice=1,
-            )
-            if response != 0:
-                return None
-            try:
-                hou.hipFile.save()
-            except Exception:
-                log.exception("Failed to save HIP before creating version.")
-                MessageDialog(
-                    self._main_window,
-                    "Failed to save the current HIP. Resolve file issues and try again.",
-                    "Save Failed",
-                ).exec_()
-                return None
-            hip_path = self._current_hip_path()
-            if hip_path is None:
-                MessageDialog(
-                    self._main_window,
-                    "Could not resolve HIP path after save.",
-                    "Save Failed",
-                ).exec_()
-                return None
-
-        return hip_path
 
     def open_version_browser(self) -> None:
         hip_path = self._current_hip_path()
