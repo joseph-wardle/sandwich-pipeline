@@ -7,7 +7,6 @@ translation in one place so DCC integrations stay thin.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Optional
 
@@ -19,14 +18,14 @@ from pipe.versioning import (
     VersionSnapshotMember,
     VersionStreamSpec,
     get_manifest_path,
+    path_matches_stream,
+    stream_dirname,
     stream_key_for,
 )
 
 DCC_HOUDINI = "houdini"
 DCC_MAYA = "maya"
 SHOT_VERSION_MANIFEST_FILENAME = "version_manifest.json"
-_STREAM_DIRNAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
-_BUNDLE_DIRNAME_RE = re.compile(r"^v\d+$")
 
 
 def _normalized_text(value: object | None) -> Optional[str]:
@@ -34,11 +33,6 @@ def _normalized_text(value: object | None) -> Optional[str]:
         return None
     text = str(value).strip()
     return text or None
-
-
-def _stream_dirname(stream_key: str) -> str:
-    normalized = _STREAM_DIRNAME_RE.sub("_", stream_key).strip("._")
-    return normalized or "stream"
 
 
 def shot_root_path(shot: Shot) -> Path:
@@ -81,7 +75,7 @@ def shot_stream(
             root_path,
             filename=SHOT_VERSION_MANIFEST_FILENAME,
         ),
-        backup_dir=root_path / ".backup" / _stream_dirname(stream_key),
+        backup_dir=root_path / ".backup" / stream_dirname(stream_key),
         dcc=resolved_dcc,
         stem=resolved_stem,
         ext=resolved_ext,
@@ -159,42 +153,6 @@ def houdini_department_stream(
         ext="hipnc",
         owner=owner,
         label=f"{resolved_department.upper()} Scene",
-    )
-
-
-def path_matches_stream(path: Path, stream: VersionStreamSpec) -> bool:
-    resolved_path = Path(path).expanduser().resolve()
-
-    for member in stream.snapshot_members:
-        if resolved_path == (Path(stream.root_path) / member.relative_path).resolve():
-            return True
-
-    working_path = stream.working_path
-    if working_path is not None:
-        resolved_working_path = Path(working_path).expanduser().resolve()
-        if resolved_path == resolved_working_path:
-            return True
-
-    resolved_backup_dir = Path(stream.backup_dir).expanduser().resolve()
-    try:
-        relative_to_backup = resolved_path.relative_to(resolved_backup_dir)
-    except Exception:
-        return False
-
-    if stream.snapshot_members:
-        if len(relative_to_backup.parts) < 2:
-            return False
-        bundle_name = relative_to_backup.parts[0]
-        if not _BUNDLE_DIRNAME_RE.match(bundle_name):
-            return False
-        member_path = Path(*relative_to_backup.parts[1:])
-        return member_path in {
-            snapshot_member.relative_path for snapshot_member in stream.snapshot_members
-        }
-
-    return (
-        resolved_path.parent == resolved_backup_dir
-        and resolved_path.suffix.lower() == f".{stream.ext.lower()}"
     )
 
 

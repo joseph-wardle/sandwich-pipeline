@@ -31,6 +31,7 @@ from .store import (
     version_label,
     versioned_filename,
 )
+from .stream_paths import path_matches_stream, stream_dirname
 
 __all__ = [
     "BackupResult",
@@ -53,12 +54,14 @@ __all__ = [
     "list_versions",
     "load_manifest",
     "next_bundle_version",
+    "path_matches_stream",
     "next_version",
     "promote_version",
     "record_publish",
     "save_version",
     "save_manifest",
     "stream_filename",
+    "stream_dirname",
     "stream_key_for",
     "version_label",
     "versioned_filename",
