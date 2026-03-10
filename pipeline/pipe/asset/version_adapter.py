@@ -7,7 +7,6 @@ into :mod:`pipe.versioning` owners and stream specs.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from pipe.struct.db import Asset
 from pipe.versioning import (
@@ -15,21 +14,15 @@ from pipe.versioning import (
     VersionStreamSpec,
     stream_key_for,
 )
+from pipe.versioning.model import DCC_HOUDINI, DCC_MAYA, DCC_SUBSTANCE, _normalize_text
 
-from .paths import DCC_HOUDINI, DCC_MAYA, DCC_SUBSTANCE, AssetPaths
-
-
-def _normalized_text(value: object | None) -> Optional[str]:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
+from .paths import AssetPaths
 
 
 def asset_owner_for(asset: Asset) -> VersionOwner:
-    display_name = _normalized_text(asset.display_name)
-    asset_name = _normalized_text(asset.name)
-    asset_path = _normalized_text(asset.asset_path)
+    display_name = _normalize_text(asset.display_name)
+    asset_name = _normalize_text(asset.name)
+    asset_path = _normalize_text(asset.asset_path)
     return VersionOwner(
         kind="asset",
         code=display_name or asset_name or asset_path or "asset",
@@ -45,8 +38,8 @@ def asset_owner_from_metadata(
     asset_path: str | None = None,
     asset_id: int | None = None,
 ) -> VersionOwner | None:
-    normalized_display_name = _normalized_text(display_name)
-    normalized_asset_path = _normalized_text(asset_path)
+    normalized_display_name = _normalize_text(display_name)
+    normalized_asset_path = _normalize_text(asset_path)
     if (
         normalized_display_name is None
         and normalized_asset_path is None
@@ -110,7 +103,7 @@ def substance_project_stream(
     *,
     owner: VersionOwner | None = None,
 ) -> VersionStreamSpec:
-    normalized_variant = _normalized_text(variant) or "main"
+    normalized_variant = _normalize_text(variant) or "main"
     return asset_stream(
         asset_paths,
         DCC_SUBSTANCE,

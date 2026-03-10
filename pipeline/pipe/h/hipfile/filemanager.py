@@ -193,7 +193,7 @@ class HFileManager(FileManager):
         if hip_path is None:
             MessageDialog(
                 self._main_window,
-                f"No valid {kind} HIP is open. Use Open {kind.title()} first.",
+                f"No valid {kind} HIP is open. Use Open {kind[0].upper() + kind[1:]} first.",
                 "Version History",
             ).exec_()
             return
@@ -203,7 +203,7 @@ class HFileManager(FileManager):
             MessageDialog(
                 self._main_window,
                 f"Could not resolve the current HIP to a valid {kind}. "
-                f"Use Open {kind.title()} first.",
+                f"Use Open {kind[0].upper() + kind[1:]} first.",
                 "Version History",
             ).exec_()
             return
@@ -276,7 +276,7 @@ class HFileManager(FileManager):
                     self._main_window,
                     (
                         f"The selected version loaded, but {kind} setup could not finish:\n"
-                        f"{self._describe_exception(exc, fallback=f'{kind.title()} post-open setup failed')}"
+                        f"{self._describe_exception(exc, fallback=f'{kind[0].upper() + kind[1:]} post-open setup failed')}"
                     ),
                     "Open Version Failed",
                 ).exec_()

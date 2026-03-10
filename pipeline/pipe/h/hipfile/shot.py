@@ -12,9 +12,9 @@ import pipe.h
 from pipe.glui.dialogs import FilteredListDialog, MessageDialog
 from pipe.shot.version_adapter import (
     houdini_department_stream,
-    path_matches_stream,
     shot_owner_for,
 )
+from pipe.versioning import path_matches_stream
 from pipe.struct.db import EnvironmentStub, SGEntity, Shot, validate_shot_code_token
 from pipe.versioning import VersionStreamSpec
 
@@ -273,7 +273,7 @@ class HShotFileManager(HFileManager):
         shot = cast(Shot, entity)
         action_id = self._new_shot_setup_action_id()
         try:
-            super(HShotFileManager, HShotFileManager)._setup_file(self, path, entity)
+            super()._setup_file(path, entity)
             self._set_shot_context(shot)
             stage = self._get_stage()
             muted_departments = self._get_muted_departments()

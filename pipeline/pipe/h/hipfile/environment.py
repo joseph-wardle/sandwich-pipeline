@@ -10,8 +10,8 @@ from shared.util import get_production_path
 from pipe.environment.version_adapter import (
     environment_owner_for,
     houdini_set_stream,
-    path_matches_stream,
 )
+from pipe.versioning import path_matches_stream
 from pipe.glui.dialogs import MessageDialog
 from pipe.struct.db import Environment, SGEntity, normalize_display_name
 from pipe.versioning import VersionStreamSpec
@@ -43,7 +43,7 @@ class HEnvFileManager(HFileManager):
             hou.setContextOption("ENVIRON", context_value)
 
     def _setup_file(self, path: Path, entity: SGEntity) -> None:
-        super(HEnvFileManager, HEnvFileManager)._setup_file(self, path, entity)
+        super()._setup_file(path, entity)
 
     def _resolve_environment_from_context(
         self, context_value: str

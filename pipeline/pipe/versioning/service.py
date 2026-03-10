@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 from dataclasses import replace
 from pathlib import Path
@@ -17,6 +16,8 @@ from .model import (
     stream_key_for,
 )
 from .store import (
+    _BUNDLE_VERSION_RE,
+    _parse_version_from_name,
     backup_file,
     bundle_dirname,
     history_as_records,
@@ -28,11 +29,6 @@ from .store import (
     record_publish,
     versioned_filename,
 )
-
-_VERSION_RE_TEMPLATE = r"^{stem}\.v(?P<ver>\d+)\.{ext}$"
-_BUNDLE_DIR_RE = re.compile(r"^v(?P<ver>\d+)$")
-# Matches bare version-bundle directory names (e.g. "v001")
-_BUNDLE_DIRNAME_RE = re.compile(r"^v\d+$")
 _MANUAL_SAVE_CONTEXT = "manual_save"
 _PROMOTED_CONTEXT = "promoted"
 
@@ -650,7 +646,7 @@ def _single_file_record_for_stream(
     parsed_version = _parse_version_from_name(
         stem=stream.stem,
         ext=stream.ext,
-        filename=normalized_backup_path.name,
+        name=normalized_backup_path.name,
     )
     if parsed_version is None:
         return None
@@ -745,19 +741,8 @@ def _resolve_compound_record_backup_path(
     return (backup_root / _primary_snapshot_member(stream).relative_path).resolve()
 
 
-def _parse_version_from_name(*, stem: str, ext: str, filename: str) -> int | None:
-    pattern = _VERSION_RE_TEMPLATE.format(stem=re.escape(stem), ext=re.escape(ext))
-    match = re.match(pattern, filename)
-    if not match:
-        return None
-    try:
-        return int(match.group("ver"))
-    except Exception:
-        return None
-
-
 def _parse_bundle_version(dirname: str) -> int | None:
-    match = _BUNDLE_DIR_RE.match(dirname)
+    match = _BUNDLE_VERSION_RE.match(dirname)
     if not match:
         return None
     try:
@@ -851,7 +836,7 @@ def path_matches_stream(path: Path, stream: VersionStreamSpec) -> bool:
         if len(relative_to_backup.parts) < 2:
             return False
         bundle_name = relative_to_backup.parts[0]
-        if not _BUNDLE_DIRNAME_RE.match(bundle_name):
+        if not _BUNDLE_VERSION_RE.match(bundle_name):
             return False
         member_path = Path(*relative_to_backup.parts[1:])
         return member_path in {

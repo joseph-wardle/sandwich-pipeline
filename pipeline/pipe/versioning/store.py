@@ -29,17 +29,14 @@ Manifest filename divergence
 ----------------------------
 The manifest filename is chosen by each domain adapter, not by this module:
 
-- Assets use ``"asset_manifest.json"`` (set in ``pipe.asset.paths.MANIFEST_FILENAME``).
-  This predates the unified versioning system and must not be renamed without a
-  one-time migration of every existing asset directory on disk.
-- Shots and environments use ``"version_manifest.json"`` (defined as
-  ``SHOT_VERSION_MANIFEST_FILENAME`` / ``ENVIRONMENT_VERSION_MANIFEST_FILENAME`` in
-  their respective adapters).  These were introduced together with the unified system
-  and share the same name by convention.
+- Assets use ``ASSET_MANIFEST_FILENAME`` (``"asset_manifest.json"``).  This name
+  predates the unified versioning system and must not be changed without migrating
+  every existing asset directory on disk.
+- Shots and environments both use ``VERSION_MANIFEST_FILENAME``
+  (``"version_manifest.json"``), introduced alongside the unified system.
 
-A future normalisation pass could migrate asset manifests to ``version_manifest.json``
-and drop the per-adapter constants, but that is out of scope until all asset roots have
-been converted.
+A future normalisation pass could migrate asset manifests to ``VERSION_MANIFEST_FILENAME``
+and unify the two, but that is out of scope until all asset roots have been converted.
 
 History entries may also include optional compound snapshot metadata:
 
@@ -89,7 +86,14 @@ except Exception:  # pragma: no cover - platform dependent
 log = logging.getLogger(__name__)
 
 MANIFEST_SCHEMA_VERSION = 1
-DEFAULT_MANIFEST_FILENAME = "asset_manifest.json"
+
+# Asset directories use "asset_manifest.json" — a legacy name predating the
+# unified versioning system that must not be renamed without a disk migration.
+ASSET_MANIFEST_FILENAME = "asset_manifest.json"
+
+# Shot and environment directories use "version_manifest.json" — introduced
+# together with the unified system and shared by both domain adapters.
+VERSION_MANIFEST_FILENAME = "version_manifest.json"
 
 _VERSION_RE_TEMPLATE = r"^{stem}\.v(?P<ver>\d+)\.{ext}$"
 _VERSIONED_STEM_RE = re.compile(r"^(?P<base>.+)\.v(?P<ver>\d+)$")
@@ -177,7 +181,7 @@ def _legacy_asset_payload(owner: VersionOwner | None) -> dict[str, Any]:
 
 
 def get_manifest_path(
-    root_path: Path, *, filename: str = DEFAULT_MANIFEST_FILENAME
+    root_path: Path, *, filename: str = ASSET_MANIFEST_FILENAME
 ) -> Path:
     return root_path / filename
 
@@ -260,7 +264,13 @@ def _manifest_write_lock(manifest_path: Path) -> Iterator[None]:
             _fcntl.flock(lock_handle.fileno(), _fcntl.LOCK_UN)
 
 
-def _parse_version_from_name(stem: str, ext: str, name: str) -> Optional[int]:
+def _parse_version_from_name(*, stem: str, ext: str, name: str) -> Optional[int]:
+    """Return the version number embedded in a versioned filename, or ``None``.
+
+    Matches filenames of the form ``<stem>.v<N>.<ext>`` where N is one or more
+    digits.  Used by both this module and ``service.py`` — the authoritative
+    definition lives here so there is only one regex template.
+    """
     pattern = _VERSION_RE_TEMPLATE.format(stem=re.escape(stem), ext=re.escape(ext))
     match = re.match(pattern, name)
     if not match:
@@ -426,7 +436,7 @@ def list_versions(backup_dir: Path, stem: str, ext: str) -> list[int]:
     for item in backup_dir.iterdir():
         if not item.is_file():
             continue
-        version = _parse_version_from_name(stem, ext, item.name)
+        version = _parse_version_from_name(stem=stem, ext=ext, name=item.name)
         if version is not None:
             versions.append(version)
     return sorted(versions)
@@ -783,8 +793,9 @@ def version_label(version: int | None) -> str:
 
 
 __all__ = [
-    "DEFAULT_MANIFEST_FILENAME",
+    "ASSET_MANIFEST_FILENAME",
     "MANIFEST_SCHEMA_VERSION",
+    "VERSION_MANIFEST_FILENAME",
     "backup_file",
     "backup_if_changed",
     "bundle_dirname",

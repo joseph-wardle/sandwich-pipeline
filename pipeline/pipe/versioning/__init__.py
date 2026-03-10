@@ -2,6 +2,9 @@
 
 from .model import (
     BackupResult,
+    DCC_HOUDINI,
+    DCC_MAYA,
+    DCC_SUBSTANCE,
     VersionOwner,
     VersionRecord,
     VersionSnapshotMember,
@@ -20,6 +23,9 @@ from .store import version_label
 
 __all__ = [
     "BackupResult",
+    "DCC_HOUDINI",
+    "DCC_MAYA",
+    "DCC_SUBSTANCE",
     "VersionOwner",
     "VersionRecord",
     "VersionSnapshotMember",

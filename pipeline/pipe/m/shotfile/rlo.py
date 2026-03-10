@@ -4,9 +4,9 @@ from pathlib import Path
 from pipe.glui.dialogs import MessageDialogCustomButtons
 from pipe.shot.version_adapter import (
     maya_rlo_stream,
-    path_matches_stream,
     shot_owner_for,
 )
+from pipe.versioning import path_matches_stream
 from pipe.struct.db import SGEntity, Shot
 from pipe.versioning import VersionStreamSpec
 
