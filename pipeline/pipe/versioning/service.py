@@ -31,6 +31,8 @@ from .store import (
 
 _VERSION_RE_TEMPLATE = r"^{stem}\.v(?P<ver>\d+)\.{ext}$"
 _BUNDLE_DIR_RE = re.compile(r"^v(?P<ver>\d+)$")
+# Matches bare version-bundle directory names (e.g. "v001")
+_BUNDLE_DIRNAME_RE = re.compile(r"^v\d+$")
 _MANUAL_SAVE_CONTEXT = "manual_save"
 _PROMOTED_CONTEXT = "promoted"
 
@@ -817,8 +819,55 @@ def _resolve_existing_file(path: Path, *, field_name: str) -> Path:
     return resolved
 
 
+def path_matches_stream(path: Path, stream: VersionStreamSpec) -> bool:
+    """Return ``True`` when a file path belongs to a stream's working or backup set.
+
+    Checks three locations in order:
+    1. Any snapshot member's working location under the stream root.
+    2. The stream's own working path.
+    3. The stream's backup directory (single-file or compound bundle).
+    """
+    resolved_path = Path(path).expanduser().resolve()
+
+    # Check snapshot member working locations
+    for member in stream.snapshot_members:
+        if resolved_path == (Path(stream.root_path) / member.relative_path).resolve():
+            return True
+
+    # Check the primary working path
+    if stream.working_path is not None:
+        if resolved_path == Path(stream.working_path).expanduser().resolve():
+            return True
+
+    # Check inside the backup directory
+    resolved_backup_dir = Path(stream.backup_dir).expanduser().resolve()
+    try:
+        relative_to_backup = resolved_path.relative_to(resolved_backup_dir)
+    except Exception:
+        return False
+
+    if stream.snapshot_members:
+        # Compound stream: path must be <backup_dir>/v###/<member_relative_path>
+        if len(relative_to_backup.parts) < 2:
+            return False
+        bundle_name = relative_to_backup.parts[0]
+        if not _BUNDLE_DIRNAME_RE.match(bundle_name):
+            return False
+        member_path = Path(*relative_to_backup.parts[1:])
+        return member_path in {
+            member.relative_path for member in stream.snapshot_members
+        }
+
+    # Single-file stream: path must be a versioned file directly in the backup dir
+    return (
+        resolved_path.parent == resolved_backup_dir
+        and resolved_path.suffix.lower() == f".{stream.ext.lower()}"
+    )
+
+
 __all__ = [
     "list_version_records",
+    "path_matches_stream",
     "promote_version",
     "save_version",
 ]
