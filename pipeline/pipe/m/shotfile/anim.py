@@ -8,9 +8,9 @@ from shared.util import get_production_path
 
 from pipe.shot.version_adapter import (
     maya_anim_stream,
-    path_matches_stream,
     shot_owner_for,
 )
+from pipe.versioning import path_matches_stream
 from pipe.struct.db import Shot
 from pipe.versioning import VersionStreamSpec
 

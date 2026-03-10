@@ -25,6 +25,7 @@ import hou
 
 from pipe.asset.version_adapter import asset_owner_from_metadata
 from pipe.versioning import stream_key_for
+from pipe.versioning.model import DCC_HOUDINI
 from pipe.versioning.store import (
     backup_file,
     get_manifest_path,
@@ -37,7 +38,6 @@ from . import publish_hooks
 log = logging.getLogger(__name__)
 
 COMPONENT_OUTPUT_TYPE_NAME = "componentoutput"
-DCC_HOUDINI_NAME = "houdini"
 MANIFEST_FILENAME = "asset_manifest.json"
 DEFAULT_VARIANT = "main"
 THUMBNAIL_CONTEXT_OPTION = "RENDER_THUMBNAIL"
@@ -572,8 +572,8 @@ def _backup_snapshot(
         stream_label = f"{backup_stem}.{backup_ext}"
         record_publish(
             context.manifest_path,
-            dcc=DCC_HOUDINI_NAME,
-            stream_key=stream_key_for(DCC_HOUDINI_NAME, backup_stem, backup_ext),
+            dcc=DCC_HOUDINI,
+            stream_key=stream_key_for(DCC_HOUDINI, backup_stem, backup_ext),
             stem=backup_stem,
             ext=backup_ext,
             stream_label=stream_label,

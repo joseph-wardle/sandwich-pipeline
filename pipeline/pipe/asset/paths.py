@@ -15,13 +15,9 @@ from typing import Optional
 from shared.util import get_production_path
 
 from pipe.struct.db import Asset
+from pipe.versioning.model import DCC_HOUDINI, DCC_MAYA, DCC_SUBSTANCE
 
 log = logging.getLogger(__name__)
-
-# DCC identifiers
-DCC_MAYA = "maya"
-DCC_HOUDINI = "houdini"
-DCC_SUBSTANCE = "substance_painter"
 
 # Asset root-level filenames
 MODEL_FILENAME = "model.mb"

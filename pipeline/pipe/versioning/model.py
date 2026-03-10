@@ -10,6 +10,13 @@ The model is intentionally small:
 Naming helpers (``stream_filename``, ``stream_key_for``, ``stream_dirname``) live
 here because they operate on plain strings and carry no dependencies beyond the
 standard library.
+
+DCC identifiers
+---------------
+``DCC_MAYA``, ``DCC_HOUDINI``, and ``DCC_SUBSTANCE`` are the canonical string
+values used in ``VersionStreamSpec.dcc``.  They live here so every domain adapter
+can import a single authoritative definition instead of each spelling its own
+string literal.
 """
 
 from __future__ import annotations
@@ -19,7 +26,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+# Canonical DCC identifier strings used in VersionStreamSpec.dcc.
+DCC_MAYA = "maya"
+DCC_HOUDINI = "houdini"
+DCC_SUBSTANCE = "substance_painter"
+
 _STREAM_DIRNAME_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def _normalize_text(value: object | None) -> Optional[str]:
+    """Strip *value* to a non-empty string, or return ``None``.
+
+    Shared by all domain adapters when normalising ``VersionOwner`` fields from
+    DCC metadata that may be ``None``, empty, or whitespace-only.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def stream_filename(stem: str, ext: str) -> str:
@@ -117,6 +141,9 @@ class VersionStreamSpec:
 
 __all__ = [
     "BackupResult",
+    "DCC_HOUDINI",
+    "DCC_MAYA",
+    "DCC_SUBSTANCE",
     "VersionOwner",
     "VersionRecord",
     "VersionSnapshotMember",
