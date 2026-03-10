@@ -64,8 +64,7 @@ class HFileManager(FileManager):
     # Shared HIP helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _check_unsaved_changes() -> bool:
+    def _check_unsaved_changes(self) -> bool:
         if hou.hipFile.hasUnsavedChanges():
             warning_response = hou.ui.displayMessage(
                 "The current file has not been saved. Continue anyways?",
