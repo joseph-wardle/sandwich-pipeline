@@ -16,6 +16,7 @@ from shared.util import get_production_path
 
 from pipe.struct.db import Asset
 from pipe.versioning.model import DCC_HOUDINI, DCC_MAYA, DCC_SUBSTANCE
+from pipe.versioning.store import VERSION_MANIFEST_FILENAME
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ MODEL_FILENAME = "model.mb"
 TEXTURES_FILENAME = "textures.spp"
 TEXTURES_VARIANT_TEMPLATE = "textures.{variant}.spp"
 ASSET_BUILDER_FILENAME = "asset_builder.hipnc"
-MANIFEST_FILENAME = "asset_manifest.json"
+MANIFEST_FILENAME = VERSION_MANIFEST_FILENAME
 
 # Directory names
 BACKUP_DIRNAME = ".backup"

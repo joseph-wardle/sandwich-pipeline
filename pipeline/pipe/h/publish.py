@@ -27,6 +27,7 @@ from pipe.asset.version_adapter import asset_owner_from_metadata
 from pipe.versioning import stream_key_for
 from pipe.versioning.model import DCC_HOUDINI
 from pipe.versioning.store import (
+    VERSION_MANIFEST_FILENAME,
     backup_file,
     get_manifest_path,
     next_version,
@@ -38,7 +39,7 @@ from . import publish_hooks
 log = logging.getLogger(__name__)
 
 COMPONENT_OUTPUT_TYPE_NAME = "componentoutput"
-MANIFEST_FILENAME = "asset_manifest.json"
+MANIFEST_FILENAME = VERSION_MANIFEST_FILENAME
 DEFAULT_VARIANT = "main"
 THUMBNAIL_CONTEXT_OPTION = "RENDER_THUMBNAIL"
 THUMBNAIL_FALLBACK_MODE = 3
