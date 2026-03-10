@@ -1317,6 +1317,7 @@ def launch_version_browser_for_current_project() -> None:
         parent,
         records,
         owner_label=asset.display_name or asset.name or "Asset",
+        stream_label=project_stream.label,
     )
     if not browser.exec_():
         return

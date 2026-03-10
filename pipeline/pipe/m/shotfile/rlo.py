@@ -97,6 +97,7 @@ class MRLOShotFileManager(MShotFileManager):
             self._main_window,
             records,
             owner_label=shot.code,
+            stream_label=rlo_stream.label,
         )
         if not browser.exec_():
             return

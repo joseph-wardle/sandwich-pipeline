@@ -32,12 +32,15 @@ class VersionBrowserWidget(QtWidgets.QDialog):
         records: list[VersionRecord],
         *,
         owner_label: str,
+        stream_label: str | None = None,
     ) -> None:
         super().__init__(parent)
         self._records = list(records)
         self._selected_action = None
         self._owner_label = (owner_label or "").strip() or "Item"
-        self._stream_label = _detect_stream_label(self._records)
+        self._stream_label = (stream_label or "").strip() or _detect_stream_label(
+            self._records
+        )
         self._current_version = _current_version(self._records)
 
         self.setParent(parent)

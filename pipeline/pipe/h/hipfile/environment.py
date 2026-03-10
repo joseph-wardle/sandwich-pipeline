@@ -265,6 +265,7 @@ class HEnvFileManager(HFileManager):
             self._main_window,
             records,
             owner_label=environment.display_name or environment.name or "Set",
+            stream_label=set_stream.label,
         )
         if not browser.exec_():
             return

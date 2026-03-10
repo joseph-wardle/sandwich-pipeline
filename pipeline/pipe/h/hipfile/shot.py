@@ -265,6 +265,7 @@ class HShotFileManager(HFileManager):
             self._main_window,
             records,
             owner_label=f"{shot.code} ({department})",
+            stream_label=shot_stream.label,
         )
         if not browser.exec_():
             return

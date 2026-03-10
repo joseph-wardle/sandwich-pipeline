@@ -175,6 +175,7 @@ class MAnimShotFileManager(MShotFileManager):
             self._main_window,
             records,
             owner_label=shot.code,
+            stream_label=anim_stream.label,
         )
         if not browser.exec_():
             return
