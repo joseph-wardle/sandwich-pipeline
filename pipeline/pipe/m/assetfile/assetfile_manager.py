@@ -23,14 +23,12 @@ from pipe.m.local import get_main_qt_window
 from pipe.struct.db import Asset, SGEntity
 from pipe.util import FileManager
 from pipe.versioning import (
-    current_record,
-    get_manifest_path,
     list_version_records,
-    load_manifest,
     promote_version,
     save_version,
     version_label,
 )
+from pipe.versioning.store import current_record, get_manifest_path, load_manifest
 
 log = logging.getLogger(__name__)
 

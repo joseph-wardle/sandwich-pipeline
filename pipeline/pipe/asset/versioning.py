@@ -14,7 +14,13 @@ from pipe.versioning import (
     BackupResult,
     VersionOwner,
     VersionRecord,
+    stream_key_for,
+    version_label,
+)
+from pipe.versioning.store import (
     backup_file,
+    backup_if_changed as _backup_if_changed,
+    build_manifest as _build_manifest,
     compute_signature,
     current_record,
     get_manifest_path,
@@ -22,18 +28,10 @@ from pipe.versioning import (
     list_versions,
     load_manifest,
     next_version,
+    record_publish as _record_publish,
     save_manifest,
-    stream_key_for,
-    version_label,
     versioned_filename,
 )
-from pipe.versioning import (
-    build_manifest as _build_manifest,
-)
-from pipe.versioning import (
-    record_publish as _record_publish,
-)
-from pipe.versioning.store import backup_if_changed as _backup_if_changed
 
 from .version_adapter import asset_owner_from_metadata
 
