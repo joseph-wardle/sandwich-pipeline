@@ -187,12 +187,16 @@ loptoolutils.referenceTestAsset(node, asset_name)]]></script>
   </tool>
 
   <shelfSet name="solaris_lnd0" label="Solaris Geometry">
-    <memberToolshelf name="bobo_assets"/>
+    <memberToolshelf name="skd_assets"/>
+    <memberToolshelf name="skd_sets"/>
+    <memberToolshelf name="skd_shots"/>
     <memberToolshelf name="test_geometry"/>
   </shelfSet>
 
   <shelfSet name="solaris_lnd" label="Solaris Geometry">
-    <memberToolshelf name="bobo_assets"/>
+    <memberToolshelf name="skd_assets"/>
+    <memberToolshelf name="skd_sets"/>
+    <memberToolshelf name="skd_shots"/>
     <memberToolshelf name="test_geometry"/>
     <memberToolshelf name="shelf_1"/>
     <memberToolshelf name="shelf_1"/>
