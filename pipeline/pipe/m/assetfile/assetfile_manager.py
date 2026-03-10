@@ -444,6 +444,7 @@ class MAssetFileManager(FileManager):
             self._main_window,
             records,
             owner_label=asset.display_name or asset.name or "Asset",
+            stream_label=model_stream.label,
         )
         if not browser.exec_():
             return
