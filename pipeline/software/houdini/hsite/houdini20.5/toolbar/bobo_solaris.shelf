@@ -5,18 +5,25 @@
  Note, that two definitions of the same element are not allowed in
  a single file. -->
 
-  <toolshelf name="bobo_assets" label="Bobo Assets">
+  <toolshelf name="skd_assets" label="SKD Assets">
     <memberTool name="open_asset"/>
     <memberTool name="save_asset_version"/>
     <memberTool name="asset_version_history"/>
+    <memberTool name="bobo_playblast"/>
+  </toolshelf>
+
+  <toolshelf name="skd_sets" label="SKD Sets">
     <memberTool name="open_set"/>
     <memberTool name="save_set_version"/>
     <memberTool name="set_version_history"/>
+    <memberTool name="bobo_playblast"/>
+  </toolshelf>
+
+  <toolshelf name="skd_shots" label="SKD Shots">
     <memberTool name="open_shot"/>
     <memberTool name="save_shot_version"/>
     <memberTool name="shot_version_history"/>
     <memberTool name="bobo_playblast"/>
-    <memberTool name="reload_pipe_houdini"/>
   </toolshelf>
 
   <tool name="reload_pipe_houdini" label="Reload Pipe" icon="BUTTONS_reload">
