@@ -14,6 +14,7 @@ from types import ModuleType as _ModuleType
 
 _BASE_SUBMODULES = [
     "db",
+    "environment",
     "glui",
     "shot",
     "struct",

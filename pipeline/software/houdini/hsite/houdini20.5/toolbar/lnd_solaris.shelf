@@ -40,6 +40,18 @@ fm = HEnvFileManager()
 fm.open_file()]]></script>
   </tool>
 
+  <tool name="save_set_version" label="Save Set Version" icon="BUTTONS_save">
+    <script scriptType="python"><![CDATA[from pipe.h.hipfile import HEnvFileManager
+fm = HEnvFileManager()
+fm.save_version()]]></script>
+  </tool>
+
+  <tool name="set_version_history" label="Set Version History" icon="BUTTONS_history">
+    <script scriptType="python"><![CDATA[from pipe.h.hipfile import HEnvFileManager
+fm = HEnvFileManager()
+fm.open_version_browser()]]></script>
+  </tool>
+
   <tool name="open_shot" label="Open Shot" icon="NETWORKS_scene">
     <script scriptType="python"><![CDATA[from pipe.h.hipfile import HShotFileManager
 HShotFileManager().open_file()]]></script>

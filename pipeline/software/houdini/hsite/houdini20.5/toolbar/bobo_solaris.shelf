@@ -10,6 +10,8 @@
     <memberTool name="save_asset_version"/>
     <memberTool name="asset_version_history"/>
     <memberTool name="open_set"/>
+    <memberTool name="save_set_version"/>
+    <memberTool name="set_version_history"/>
     <memberTool name="open_shot"/>
     <memberTool name="save_shot_version"/>
     <memberTool name="shot_version_history"/>
