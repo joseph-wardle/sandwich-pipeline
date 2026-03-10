@@ -4,7 +4,7 @@ import pipe.sp
 import substance_painter as sp
 from pipe.glui.dialogs import MessageDialog
 from pipe.sp.ui import SubstanceExportWindow
-from Qt import QtCore, QtWidgets
+from Qt import QtWidgets
 
 plugin_widgets: list[QtWidgets.QWidget | QtWidgets.QAction] = []
 
