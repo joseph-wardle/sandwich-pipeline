@@ -7,27 +7,46 @@ The model is intentionally small:
    compound snapshot.
 4. ``VersionRecord`` and ``BackupResult`` describe persisted history entries.
 
-The shared store now persists stream-keyed manifests while remaining able to read
-legacy asset manifests keyed only by DCC.
+Naming helpers (``stream_filename``, ``stream_key_for``, ``stream_dirname``) live
+here because they operate on plain strings and carry no dependencies beyond the
+standard library.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+_STREAM_DIRNAME_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
+
 
 def stream_filename(stem: str, ext: str) -> str:
+    """Return the canonical filename for a stream (e.g. ``"model.mb"``)."""
     normalized_stem = str(stem).strip()
     normalized_ext = str(ext).strip().lstrip(".")
     return f"{normalized_stem}.{normalized_ext}"
 
 
 def stream_key_for(dcc: str, stem: str, ext: str) -> str:
-    """Return the stable manifest key for a versioned stream."""
+    """Return the stable manifest key for a versioned stream.
+
+    Keys are scoped by DCC so the same filename used in two different DCCs
+    produces distinct history buckets (e.g. ``"maya:model.mb"``).
+    """
     normalized_dcc = str(dcc).strip()
     return f"{normalized_dcc}:{stream_filename(stem, ext)}"
+
+
+def stream_dirname(stream_key: str) -> str:
+    """Return a filesystem-safe directory name derived from a stream key.
+
+    Used to scope backup directories per stream so multiple streams under
+    the same root never collide (e.g. ``"maya_model.mb"``).
+    """
+    normalized = _STREAM_DIRNAME_UNSAFE.sub("_", str(stream_key).strip()).strip("._")
+    return normalized or "stream"
 
 
 @dataclass(frozen=True)
@@ -102,6 +121,7 @@ __all__ = [
     "VersionRecord",
     "VersionSnapshotMember",
     "VersionStreamSpec",
+    "stream_dirname",
     "stream_filename",
     "stream_key_for",
 ]

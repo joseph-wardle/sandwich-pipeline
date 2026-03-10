@@ -6,10 +6,16 @@ from .model import (
     VersionRecord,
     VersionSnapshotMember,
     VersionStreamSpec,
+    stream_dirname,
     stream_filename,
     stream_key_for,
 )
-from .service import list_version_records, promote_version, save_version
+from .service import (
+    list_version_records,
+    path_matches_stream,
+    promote_version,
+    save_version,
+)
 from .store import (
     DEFAULT_MANIFEST_FILENAME,
     MANIFEST_SCHEMA_VERSION,
@@ -31,7 +37,6 @@ from .store import (
     version_label,
     versioned_filename,
 )
-from .stream_paths import path_matches_stream, stream_dirname
 
 __all__ = [
     "BackupResult",
@@ -43,8 +48,8 @@ __all__ = [
     "VersionStreamSpec",
     "backup_file",
     "backup_if_changed",
-    "bundle_dirname",
     "build_manifest",
+    "bundle_dirname",
     "compute_signature",
     "current_record",
     "get_manifest_path",
@@ -54,14 +59,14 @@ __all__ = [
     "list_versions",
     "load_manifest",
     "next_bundle_version",
-    "path_matches_stream",
     "next_version",
+    "path_matches_stream",
     "promote_version",
     "record_publish",
-    "save_version",
     "save_manifest",
-    "stream_filename",
+    "save_version",
     "stream_dirname",
+    "stream_filename",
     "stream_key_for",
     "version_label",
     "versioned_filename",
