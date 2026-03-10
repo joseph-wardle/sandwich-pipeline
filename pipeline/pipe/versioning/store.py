@@ -66,7 +66,9 @@ from .model import (
 
 _fcntl: ModuleType | None
 try:
-    import fcntl as _fcntl
+    import fcntl as _fcntl_mod
+
+    _fcntl = _fcntl_mod
 except Exception:  # pragma: no cover - platform dependent
     _fcntl = None
 
