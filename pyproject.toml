@@ -5,7 +5,10 @@ description = "Pipeline for BYU Animation's Class of 2027 capstone film"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
-authors = [{ name = "Scott Milner", email = "scottdmilner@gmail.com" }]
+authors = [
+    { name = "Scott Milner", email = "scottdmilner@gmail.com" },
+    { name = "Michael Harmon", email = "michaelharmonart@gmail.com" }
+]
 dependencies = [
     "attrs>=24.2.0,<25",
     "cattrs>=23.2.3,<24",
