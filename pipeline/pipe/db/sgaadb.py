@@ -577,6 +577,42 @@ class SGaaDB(DBInterface):
             )
         ]
 
+    def get_assets_by_tag(
+        self, tags: Iterable[str] | str, require_all_tags: bool = False
+    ) -> list[Asset]:
+        """
+        Gets all assets that have the specified tags.
+
+        Args:
+                tags: Set of tags used for filtering.
+                require_all_tags: Determines matching behavior.
+                    - True: An asset must contain all provided tags.
+                    - False: An asset must contain at least one of the provided tags.
+
+        Returns:
+            A list of Asset objects that satisfy the tag query.
+        """
+        tags_set: set[str]
+        if isinstance(tags, str):
+            tags_set = {tags}
+        else:
+            tags_set = set(tags)
+        matches: list[dict]
+        if require_all_tags:
+            matches = [
+                asset
+                for asset in self._sg_entity_lists[Asset.__name__]
+                if tags_set <= set(tag["name"] for tag in asset["tags"])
+            ]
+        else:
+            matches = [
+                asset
+                for asset in self._sg_entity_lists[Asset.__name__]
+                if tags_set & set(tag["name"] for tag in asset["tags"])
+            ]
+
+        return [Asset.from_sg(dict) for dict in matches]
+
     def update_asset(self, asset: Asset) -> bool:
         try:
             assert asset.id

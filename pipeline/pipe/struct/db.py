@@ -204,6 +204,13 @@ class AssetStub(SGEntityStub):  # ty: ignore[invalid-frozen-dataclass-subclass]
 @attrs.define
 class Asset(SGEntity):
     type: str = field(metadata={_SG_NAME: "sg_asset_type"})
+    tags: set[str] = field(
+        metadata={
+            _SG_NAME: "tags",
+            _STRUCT_HOOK: lambda tags, _: set(tag["name"] for tag in tags),
+        },
+        on_setattr=attrs.setters.frozen,
+    )
     subdirectory: Optional[str] = field(
         default=None,
         kw_only=True,
@@ -279,6 +286,7 @@ class Asset(SGEntity):
         """
         self.path = self.asset_path
         diff = super().sg_diff()
+        diff.pop("tags", None)
         diff.pop("path", None)
         diff.pop("sg_path", None)
         return diff
