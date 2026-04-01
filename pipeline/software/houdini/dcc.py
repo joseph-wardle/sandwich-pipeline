@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import filecmp
+import getpass
 import logging
 import os
 import shutil
@@ -88,8 +89,20 @@ class HoudiniDCC(DCC):
                     "&",
                 ]
             ),
-            # Splash file
-            "HOUDINI_SPLASH_FILE": str(pipe_path / "lib/splash/panini_splash.png"),
+            # Splash file — per-user override if present, else default
+            "HOUDINI_SPLASH_FILE": str(
+                next(
+                    (
+                        p
+                        for p in [
+                            pipe_path / f"lib/splash/users/{getpass.getuser()}.png",
+                            pipe_path / "lib/splash/panini_splash.png",
+                        ]
+                        if p.exists()
+                    ),
+                    pipe_path / "lib/splash/panini_splash.png",
+                )
+            ),
             # Project-specific preference overrides
             "HSITE": str(resolve_mapped_path(this_path.parent / "hsite")),
             # Job directory
