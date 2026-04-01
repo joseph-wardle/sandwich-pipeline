@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import getpass
 import logging
 import os
 import platform
@@ -175,7 +176,10 @@ class MayaDCC(DCC):
         splash_dir = Path(self.splash_path)
         splash_dir.mkdir(parents=True, exist_ok=True)
 
-        src = Path(__file__).resolve().parents[2] / "lib/splash/mayo_splash.png"
+        lib_splash = Path(__file__).resolve().parents[2] / "lib/splash"
+        user_splash = lib_splash / f"users/{getpass.getuser()}.png"
+        default_splash = lib_splash / "mayo_splash.png"
+        src = user_splash if user_splash.exists() else default_splash
         if not src.exists():
             log.warning("Missing Maya splash image at %s", src)
             return
