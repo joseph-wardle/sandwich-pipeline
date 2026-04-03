@@ -1,4 +1,5 @@
 from ctypes import c_float
+from dataclasses import dataclass
 from typing import Iterable
 
 import numpy as np
@@ -8,9 +9,9 @@ from maya.api import OpenMaya as om2
 from numpy.typing import NDArray
 
 from .. import RigBuildTest
-from ..common import get_all_visible_meshes, get_dag_path, is_control
+from ..common import format_max_items, get_all_visible_meshes, get_dag_path, is_control
 
-EPSILON: float = 0.01
+MAX_ERROR_PERCENTAGE: float = 0.1
 
 
 def _get_root_control() -> str | None:
@@ -74,12 +75,42 @@ def _transform_mesh_points(
     return points @ np_matrix
 
 
+@dataclass
+class ErrorMetrics:
+    max_error: float
+    mean_error: float
+    failed_count: int
+    failed_indices: NDArray[np.signedinteger]
+
+    def __str__(self):
+        string = (
+            f"Max Error = {self.max_error}, Mean Error = {self.mean_error}, Failed Count = {self.failed_count}, "
+            f"Failed Indices = {format_max_items(self.failed_indices)}"
+        )
+        return string
+
+
 def _compare_points(
     current_points: NDArray[np.float64],
     expected_points: NDArray[np.float64],
-    epsilon: float = EPSILON,
-) -> bool:
-    return np.allclose(current_points, expected_points, atol=EPSILON)
+    max_error_percentage: float = MAX_ERROR_PERCENTAGE,
+) -> ErrorMetrics:
+    diff = np.abs(current_points - expected_points)
+    diff_xyz = diff[:, :3]
+
+    # Compute mesh scale (bounding box diagonal)
+    mins = np.min(expected_points[:, :3], axis=0)
+    maxs = np.max(expected_points[:, :3], axis=0)
+    bbox_diag = np.linalg.norm(maxs - mins)
+
+    max_error = np.max(diff_xyz)
+    mean_error = np.mean(diff_xyz)
+
+    max_error_scaled = (max_error_percentage / 100) * bbox_diag
+    failed_mask = np.any(diff_xyz > max_error_scaled, axis=1)
+    failed_indices = np.where(failed_mask)[0]
+
+    return ErrorMetrics(max_error, mean_error, int(len(failed_indices)), failed_indices)
 
 
 def _compare_before_after_transform(
@@ -88,7 +119,7 @@ def _compare_before_after_transform(
     translation: tuple[float, float, float] | None = None,
     rotation: tuple[float, float, float] | None = None,
     scale: tuple[float, float, float] | None = None,
-) -> bool:
+) -> tuple[bool, dict[str, ErrorMetrics]]:
     mesh_points_mapping = {mesh: _get_mesh_points(mesh) for mesh in meshes}
 
     control_dag = get_dag_path(control)
@@ -110,13 +141,15 @@ def _compare_before_after_transform(
     new_world_matrix: om2.MMatrix = control_dag.inclusiveMatrix()
     offset_matrix = original_world_matrix.inverse() * new_world_matrix
     all_match = True
+    mesh_error_metrics: dict[str, ErrorMetrics] = {}
     for mesh, original_points in mesh_points_mapping.items():
         # Transform the original points by the offset
         transformed_points = _transform_mesh_points(original_points, offset_matrix)
         new_points = _get_mesh_points(mesh)
-        if not _compare_points(transformed_points, new_points):
+        error_metrics = _compare_points(transformed_points, new_points)
+        if error_metrics.failed_count > 0:
             all_match = False
-            break
+            mesh_error_metrics[mesh] = error_metrics
 
     # Reset transform
     if translation is not None:
@@ -126,7 +159,11 @@ def _compare_before_after_transform(
     if scale is not None:
         transform_mfn.setScale(original_scale)
 
-    return all_match
+    return all_match, mesh_error_metrics
+
+
+def _error_metrics_string(error_metrics: dict[str, ErrorMetrics]):
+    return ", \n".join(f"{item}: {value}" for item, value in error_metrics.items())
 
 
 class TestRootTranslation(RigBuildTest):
@@ -144,14 +181,15 @@ class TestRootTranslation(RigBuildTest):
             return False
         visible_mesh_shapes = _get_visible_mesh_shapes()
         translation_value = (1, 1, 1)
-        passed = _compare_before_after_transform(
+        passed, error_metrics = _compare_before_after_transform(
             control=root_control,
             meshes=visible_mesh_shapes,
             translation=translation_value,
         )
         if not passed:
             self.log_warn(
-                f"Rig did not behave properly when {root_control} was translated by {translation_value}"
+                f"Rig did not behave properly when {root_control} was translated by {translation_value} "
+                f"Problem meshes: \n{_error_metrics_string(error_metrics)}"
             )
             return False
         else:
@@ -174,14 +212,15 @@ class TestRootRotate(RigBuildTest):
             return False
         visible_mesh_shapes = _get_visible_mesh_shapes()
         rotation_value = (0, 90, 0)
-        passed = _compare_before_after_transform(
+        passed, error_metrics = _compare_before_after_transform(
             control=root_control,
             meshes=visible_mesh_shapes,
             rotation=rotation_value,
         )
         if not passed:
             self.log_warn(
-                f"Rig did not behave properly when {root_control} was rotated by {rotation_value}"
+                f"Rig did not behave properly when {root_control} was rotated by {rotation_value} "
+                f"Problem meshes: \n{_error_metrics_string(error_metrics)}"
             )
             return False
         else:
@@ -204,12 +243,13 @@ class TestRootScale(RigBuildTest):
             return False
         visible_mesh_shapes = _get_visible_mesh_shapes()
         scale_value = (5, 5, 5)
-        passed = _compare_before_after_transform(
+        passed, error_metrics = _compare_before_after_transform(
             control=root_control, meshes=visible_mesh_shapes, scale=scale_value
         )
         if not passed:
             self.log_warn(
-                f"Rig did not behave properly when {root_control} was scaled by {scale_value}"
+                f"Rig did not behave properly when {root_control} was scaled by {scale_value} "
+                f"Problem meshes: \n{_error_metrics_string(error_metrics)}"
             )
             return False
         else:
