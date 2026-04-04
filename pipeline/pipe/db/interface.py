@@ -234,6 +234,21 @@ class DBInterface(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
+    def create_version_for_asset(
+        self,
+        asset: Asset | AssetStub | dict[str, typing.Any] | int,
+        code: str,
+        user: User | dict[str, typing.Any] | int | None = None,
+        task: Task | dict[str, typing.Any] | int | None = None,
+        video_path: str | None = None,
+        description: str | None = None,
+        playlist_id: int | None = None,
+        extra_fields: dict[str, typing.Any] | None = None,
+    ) -> dict[str, typing.Any]:
+        """Create a ShotGrid Version for an asset with optional links."""
+        raise NotImplementedError
+
+    @abstractmethod
     def get_recent_review_playlists(
         self, limit: int = 10
     ) -> list[dict[str, typing.Any]]:

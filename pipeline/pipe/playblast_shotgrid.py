@@ -35,6 +35,23 @@ class PlayblastVersionUploadRequest:
 
 
 @dataclass(frozen=True)
+class AssetPlayblastVersionUploadRequest:
+    """Normalized input for creating and uploading an Asset ShotGrid Version."""
+
+    asset_display_name: str
+    movie_path: Path | str
+    version_name: str
+    description: str | None = None
+    path_to_frames: str | None = None
+    artist_display_name: str | None = None
+    task_id: int | None = None
+    upload_target: str = UPLOAD_TARGET_VERSION_ONLY
+    review_playlist_id: int | None = None
+    upload_field: str = "sg_uploaded_movie"
+    extra_version_fields: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class PlayblastReviewPlaylistOption:
     """Normalized review playlist option for UI selection lists."""
 
@@ -70,8 +87,41 @@ class PlayblastVersionUploadResult:
 
 
 @dataclass(frozen=True)
+class AssetPlayblastVersionUploadResult:
+    """Outcome for an asset playblast ShotGrid upload attempt."""
+
+    status: str
+    message: str
+    asset_display_name: str
+    version_name: str
+    movie_path: Path | None = None
+    version_id: int | None = None
+    attachment_id: int | None = None
+    warnings: tuple[str, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return self.status == UPLOAD_STATUS_SUCCESS
+
+
+@dataclass(frozen=True)
 class _NormalizedUploadRequest:
     shot_code: str
+    movie_path: Path
+    version_name: str
+    description: str | None
+    path_to_frames: str | None
+    artist_display_name: str | None
+    task_id: int | None
+    upload_target: str
+    review_playlist_id: int | None
+    upload_field: str
+    extra_version_fields: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _NormalizedAssetUploadRequest:
+    asset_display_name: str
     movie_path: Path
     version_name: str
     description: str | None
@@ -274,6 +324,140 @@ def upload_playblast_version(
     )
 
 
+def upload_asset_playblast_version(
+    request: AssetPlayblastVersionUploadRequest,
+    *,
+    conn: Any | None = None,
+) -> AssetPlayblastVersionUploadResult:
+    """Create a ShotGrid Version for an asset and upload the playblast movie."""
+
+    normalized_or_error = _normalize_asset_request(request)
+    if isinstance(normalized_or_error, AssetPlayblastVersionUploadResult):
+        return normalized_or_error
+    normalized = normalized_or_error
+
+    try:
+        connection = conn or _default_db_connection()
+    except Exception as exc:
+        log.exception("Could not resolve ShotGrid connection")
+        return _failed_asset_result(
+            normalized,
+            "Could not connect to ShotGrid: " f"{_format_exception_details(exc)}",
+        )
+
+    try:
+        asset = connection.get_asset_by_display_name(normalized.asset_display_name)
+    except Exception as exc:
+        log.exception(
+            "Could not resolve asset '%s' in ShotGrid", normalized.asset_display_name
+        )
+        return _failed_asset_result(
+            normalized,
+            "Could not resolve asset "
+            f"'{normalized.asset_display_name}' in ShotGrid: "
+            f"{_format_exception_details(exc)}",
+        )
+
+    asset_id = _extract_entity_id(asset)
+    if asset_id is None:
+        return _failed_asset_result(
+            normalized,
+            (
+                f"Asset '{normalized.asset_display_name}' is missing a valid "
+                "ShotGrid id."
+            ),
+        )
+
+    warnings: list[str] = []
+    user_id = _resolve_user_id(connection, normalized.artist_display_name, warnings)
+
+    try:
+        created_version = connection.create_version_for_asset(
+            asset=asset,
+            code=normalized.version_name,
+            user=user_id,
+            task=normalized.task_id,
+            video_path=normalized.path_to_frames,
+            description=normalized.description,
+            playlist_id=None,
+            extra_fields=normalized.extra_version_fields,
+        )
+    except Exception as exc:
+        log.exception(
+            "ShotGrid Version creation failed for asset '%s'",
+            normalized.asset_display_name,
+        )
+        return _failed_asset_result(
+            normalized,
+            "ShotGrid Version creation failed: " f"{_format_exception_details(exc)}",
+            warnings=warnings,
+        )
+
+    version_id = _extract_entity_id(created_version)
+    if version_id is None:
+        return _failed_asset_result(
+            normalized,
+            "ShotGrid did not return a valid Version id after creation.",
+            warnings=warnings,
+        )
+
+    try:
+        attachment_id = connection.upload_version_movie(
+            version_id,
+            str(normalized.movie_path),
+            field=normalized.upload_field,
+        )
+    except Exception as exc:
+        log.exception("ShotGrid movie upload failed for Version %s", version_id)
+        return _failed_asset_result(
+            normalized,
+            "ShotGrid movie upload failed: " f"{_format_exception_details(exc)}",
+            version_id=version_id,
+            warnings=warnings,
+        )
+
+    review_linked = False
+    if (
+        normalized.upload_target == UPLOAD_TARGET_REVIEW
+        and normalized.review_playlist_id is not None
+    ):
+        try:
+            connection.link_version_to_playlist(
+                version_id=version_id,
+                playlist_id=normalized.review_playlist_id,
+            )
+            review_linked = True
+        except Exception as exc:
+            failure_reason = _format_exception_details(exc)
+            log.exception(
+                "ShotGrid review link failed "
+                "(asset_display_name=%s, version_id=%s, playlist_id=%s, reason=%s)",
+                normalized.asset_display_name,
+                version_id,
+                normalized.review_playlist_id,
+                failure_reason,
+            )
+            warnings.append(
+                "Version upload succeeded, but linking to review playlist "
+                f"{normalized.review_playlist_id} failed: "
+                f"{failure_reason}"
+            )
+
+    return AssetPlayblastVersionUploadResult(
+        status=UPLOAD_STATUS_SUCCESS,
+        message=_success_message_for_upload_outcome(
+            normalized.upload_target,
+            review_linked=review_linked,
+        ),
+        asset_display_name=normalized.asset_display_name,
+        version_name=normalized.version_name,
+        movie_path=normalized.movie_path,
+        version_id=version_id,
+        attachment_id=_extract_entity_id(attachment_id),
+        warnings=tuple(warnings),
+    )
+
+
 def _normalize_request(
     request: PlayblastVersionUploadRequest,
 ) -> _NormalizedUploadRequest | PlayblastVersionUploadResult:
@@ -368,6 +552,113 @@ def _normalize_request(
 
     return _NormalizedUploadRequest(
         shot_code=shot_code,
+        movie_path=movie_path,
+        version_name=version_name,
+        description=description,
+        path_to_frames=path_to_frames,
+        artist_display_name=artist_display_name,
+        task_id=task_id,
+        upload_target=upload_target,
+        review_playlist_id=review_playlist_id,
+        upload_field=upload_field,
+        extra_version_fields=normalized_extra_fields,
+    )
+
+
+def _normalize_asset_request(
+    request: AssetPlayblastVersionUploadRequest,
+) -> _NormalizedAssetUploadRequest | AssetPlayblastVersionUploadResult:
+    asset_display_name = str(request.asset_display_name).strip()
+    if not asset_display_name:
+        return AssetPlayblastVersionUploadResult(
+            status=UPLOAD_STATUS_FAILED,
+            message="Asset display name is required for ShotGrid upload.",
+            asset_display_name="",
+            version_name=str(request.version_name).strip(),
+            movie_path=None,
+        )
+
+    version_name = str(request.version_name).strip()
+    if not version_name:
+        return AssetPlayblastVersionUploadResult(
+            status=UPLOAD_STATUS_FAILED,
+            message="Version name is required for ShotGrid upload.",
+            asset_display_name=asset_display_name,
+            version_name="",
+            movie_path=None,
+        )
+
+    movie_path = Path(str(request.movie_path)).expanduser().resolve()
+    if not movie_path.exists() or not movie_path.is_file():
+        return AssetPlayblastVersionUploadResult(
+            status=UPLOAD_STATUS_FAILED,
+            message=f"Playblast movie file was not found: {movie_path}",
+            asset_display_name=asset_display_name,
+            version_name=version_name,
+            movie_path=movie_path,
+        )
+
+    if movie_path.stat().st_size < 1:
+        return AssetPlayblastVersionUploadResult(
+            status=UPLOAD_STATUS_FAILED,
+            message=f"Playblast movie file is empty: {movie_path}",
+            asset_display_name=asset_display_name,
+            version_name=version_name,
+            movie_path=movie_path,
+        )
+
+    upload_field = str(request.upload_field).strip()
+    if not upload_field:
+        return AssetPlayblastVersionUploadResult(
+            status=UPLOAD_STATUS_FAILED,
+            message="Upload field cannot be empty.",
+            asset_display_name=asset_display_name,
+            version_name=version_name,
+            movie_path=movie_path,
+        )
+
+    upload_target = _normalize_upload_target(request.upload_target)
+    if upload_target is None:
+        return AssetPlayblastVersionUploadResult(
+            status=UPLOAD_STATUS_FAILED,
+            message=(
+                "Upload target must be 'version_only' or 'review' for ShotGrid upload."
+            ),
+            asset_display_name=asset_display_name,
+            version_name=version_name,
+            movie_path=movie_path,
+        )
+
+    review_playlist_id = _optional_positive_int(request.review_playlist_id)
+    if upload_target == UPLOAD_TARGET_REVIEW and review_playlist_id is None:
+        return AssetPlayblastVersionUploadResult(
+            status=UPLOAD_STATUS_FAILED,
+            message=(
+                "A valid review playlist id is required when upload target is 'review'."
+            ),
+            asset_display_name=asset_display_name,
+            version_name=version_name,
+            movie_path=movie_path,
+        )
+    if upload_target == UPLOAD_TARGET_VERSION_ONLY:
+        review_playlist_id = None
+
+    description = _optional_text(request.description)
+    path_to_frames = _optional_text(request.path_to_frames) or str(movie_path)
+    artist_display_name = _optional_text(request.artist_display_name)
+    task_id = _optional_positive_int(request.task_id)
+
+    normalized_extra_fields: dict[str, Any] = {}
+    for field_name, value in request.extra_version_fields.items():
+        normalized_name = str(field_name).strip()
+        if not normalized_name:
+            continue
+        if value is None:
+            continue
+        normalized_extra_fields[normalized_name] = value
+
+    return _NormalizedAssetUploadRequest(
+        asset_display_name=asset_display_name,
         movie_path=movie_path,
         version_name=version_name,
         description=description,
@@ -555,7 +846,27 @@ def _failed_result(
     )
 
 
+def _failed_asset_result(
+    request: _NormalizedAssetUploadRequest,
+    message: str,
+    *,
+    version_id: int | None = None,
+    warnings: list[str] | None = None,
+) -> AssetPlayblastVersionUploadResult:
+    return AssetPlayblastVersionUploadResult(
+        status=UPLOAD_STATUS_FAILED,
+        message=message,
+        asset_display_name=request.asset_display_name,
+        version_name=request.version_name,
+        movie_path=request.movie_path,
+        version_id=version_id,
+        warnings=tuple(warnings or []),
+    )
+
+
 __all__ = [
+    "AssetPlayblastVersionUploadRequest",
+    "AssetPlayblastVersionUploadResult",
     "PlayblastReviewPlaylistOption",
     "PlayblastVersionUploadRequest",
     "PlayblastVersionUploadResult",
@@ -566,5 +877,6 @@ __all__ = [
     "default_version_name_from_movie_path",
     "list_recent_review_playlists",
     "resolve_preferred_upload_movie_path",
+    "upload_asset_playblast_version",
     "upload_playblast_version",
 ]

@@ -13,6 +13,7 @@ from typing import Sequence as SequenceT
 
 from pipe.struct.db import (
     Asset,
+    AssetStub,
     Environment,
     Sequence,
     SGEntity,
@@ -650,9 +651,69 @@ class SGaaDB(DBInterface):
         if shot_ref is None:
             raise ValueError("A valid shot (with id) is required.")
 
+        return self._create_version_for_entity(
+            entity_ref=shot_ref,
+            code=version_code,
+            user=user,
+            task=task,
+            video_path=video_path,
+            description=description,
+            playlist_id=playlist_id,
+            extra_fields=extra_fields,
+        )
+
+    def create_version_for_asset(
+        self,
+        asset: Asset | AssetStub | dict[str, Any] | int,
+        code: str,
+        user: User | dict[str, Any] | int | None = None,
+        task: Task | dict[str, Any] | int | None = None,
+        video_path: Optional[str] = None,
+        description: Optional[str] = None,
+        playlist_id: Optional[int] = None,
+        extra_fields: Optional[dict[str, Any]] = None,
+    ) -> dict[Any, Any]:
+        """Create a ShotGrid Version linked to an asset.
+
+        `code` and `asset` are required. `user`, `task`, and `playlist_id`
+        are optional and only included when valid ids are provided.
+        `extra_fields` can provide additional ShotGrid Version fields.
+        """
+
+        version_code = str(code).strip()
+        if not version_code:
+            raise ValueError("Version code is required.")
+
+        asset_ref = self._entity_ref("Asset", asset)
+        if asset_ref is None:
+            raise ValueError("A valid asset (with id) is required.")
+
+        return self._create_version_for_entity(
+            entity_ref=asset_ref,
+            code=version_code,
+            user=user,
+            task=task,
+            video_path=video_path,
+            description=description,
+            playlist_id=playlist_id,
+            extra_fields=extra_fields,
+        )
+
+    def _create_version_for_entity(
+        self,
+        *,
+        entity_ref: dict[str, str | int],
+        code: str,
+        user: User | dict[str, Any] | int | None = None,
+        task: Task | dict[str, Any] | int | None = None,
+        video_path: Optional[str] = None,
+        description: Optional[str] = None,
+        playlist_id: Optional[int] = None,
+        extra_fields: Optional[dict[str, Any]] = None,
+    ) -> dict[Any, Any]:
         version_payload: dict[str, Any] = {
-            "code": version_code,
-            "entity": shot_ref,
+            "code": code,
+            "entity": entity_ref,
             "project": {"type": "Project", "id": self._id},
         }
 
