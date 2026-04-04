@@ -24,10 +24,12 @@ def group_top_level_nodes(
     if not top_level_nodes:
         raise RuntimeError("No transforms found in imported model!")
 
-    # Case 1: exactly one root transform
+    # Case 1: exactly one root transform (a group)
     if len(top_level_nodes) == 1:
         top_level_node = top_level_nodes[0]
-        if cmds.nodeType(top_level_node) == "transform":
+        if cmds.nodeType(top_level_node) == "transform" and not cmds.listRelatives(
+            top_level_node, shapes=True
+        ):
             geo_grp = top_level_node
         else:
             geo_grp = cmds.group(top_level_node, name=group_name, world=True)
