@@ -53,7 +53,7 @@ class TestControlsZeroed(RigBuildTest):
         if problem_controls:
             self.log_warn(
                 "Scene has controls with non zeroed transforms: "
-                "{format_max_items(problem_controls, 'controls')}"
+                f"{format_max_items(problem_controls, 'controls')}"
             )
             return False
         else:
@@ -78,7 +78,7 @@ class TestControlsTagged(RigBuildTest):
         if problem_controls:
             self.log_warn(
                 "Scene has controls that aren't tagged as controllers: "
-                "{format_max_items(problem_controls, 'controls')}"
+                f"{format_max_items(problem_controls, 'controls')}"
             )
             return False
         else:
