@@ -55,11 +55,11 @@ def _scene_path() -> Path | None:
     return Path(raw_path)
 
 
-def _current_scene_directory() -> str | Path:
+def _scene_render_directory() -> str | Path:
     scene_path = _scene_path()
     if scene_path is None:
         return ""
-    return scene_path.parent
+    return scene_path.parent / "render"
 
 
 class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
@@ -69,8 +69,8 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
 
     class SAVE_LOCS:
         CURRENT = SaveLocation(
-            "Current Folder",
-            _current_scene_directory,
+            "Render Folder",
+            _scene_render_directory,
             Playblaster.PRESET.WEB,
         )
         CUSTOM = SaveLocation("Custom Folder", "", Playblaster.PRESET.WEB)
@@ -591,7 +591,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
             self._destination_checkboxes[self.SAVE_LOCS.CURRENT.name].isChecked()
             and _scene_path() is None
         ):
-            return "Save the scene before exporting to Current Folder."
+            return "Save the scene before exporting to Render Folder."
 
         if (
             self._is_shotgrid_upload_requested()
