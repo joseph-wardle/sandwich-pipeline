@@ -18,6 +18,7 @@ from env_sg import DB_Config
 from pipe.asset.paths import paths_for_asset
 from pipe.db import DB
 from pipe.glui.dialogs import ButtonPair, MessageDialog
+from pipe.m.command import maya_command
 from pipe.m.local import get_main_qt_window
 from pipe.m.optionvar import StringOptionVar
 
@@ -30,6 +31,12 @@ _MAYA_SCALE = 100.0
 _dialog: ScaleReferenceDialog | None = None
 
 
+@maya_command(
+    name="scale_reference",
+    label="Scale Reference",
+    category="modeling",
+    icon="yoon.svg",
+)
 def show_scale_reference_dialog() -> ScaleReferenceDialog:
     """Open the scale reference dialog, closing any existing instance first."""
     global _dialog
