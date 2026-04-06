@@ -31,7 +31,13 @@ roles:
   texture_paint: sRGB - Texture
 
 file_rules:
-  - !<Rule> {name: Default, colorspace: ACES2065-1}
+  - !<Rule> {name: exr, colorspace: ACEScg, pattern: "*", extension: exr}
+  - !<Rule> {name: png, colorspace: sRGB - Texture, pattern: "*", extension: png}
+  - !<Rule> {name: jpg, colorspace: sRGB - Texture, pattern: "*", extension: jpg}
+  - !<Rule> {name: jpeg, colorspace: sRGB - Texture, pattern: "*", extension: jpeg}
+  - !<Rule> {name: tif, colorspace: sRGB - Texture, pattern: "*", extension: tif}
+  - !<Rule> {name: tiff, colorspace: sRGB - Texture, pattern: "*", extension: tiff}
+  - !<Rule> {name: Default, colorspace: ACEScg}
 
 shared_views:
   - !<View> {name: ACES 1.0 - SDR Video, view_transform: ACES 1.0 - SDR Video, display_colorspace: <USE_DISPLAY_NAME>}
