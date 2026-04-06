@@ -852,6 +852,7 @@ class MatlibNodeBuilder:
 
         self._set_parm_if_exists(node, "file", texture_path)
         self._set_parm_if_exists(node, "filename", texture_path)
+        # USD Preview Material spec tokens (not OCIO names): "sRGB", "raw", or "auto"
         self._set_parm_if_exists(node, "sourceColorSpace", "sRGB" if color else "raw")
         self._set_parm_if_exists(node, "sourcecolorspace", "sRGB" if color else "raw")
         return node
@@ -863,6 +864,7 @@ class MatlibNodeBuilder:
             return
         self._set_parm_if_exists(node, "filename", path)
         if is_color:
+            # OCIO alias from sandwich-v01 config (resolves to "sRGB - Texture")
             self._set_parm_if_exists(node, "filename_colorspace", "srgb_texture")
 
     @staticmethod
