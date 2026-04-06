@@ -1,4 +1,6 @@
 import logging
+import os
+from pathlib import Path
 from typing import Callable, Iterable
 
 from env_sg import DB_Config
@@ -110,7 +112,10 @@ class RigPublisher:
                 f"PUBLISH: The file at {rig_publish_filepath} already exists and is not a symlink! To avoid data loss symlink creation/updating was cancelled."
             )
             return False
-        rig_publish_filepath.symlink_to(rig_version_filepath)
+        symlink_relative_path = Path(
+            os.path.relpath(rig_version_filepath, rig_publish_filepath.parent)
+        )
+        rig_publish_filepath.symlink_to(symlink_relative_path)
         log.info(f"PUBLISH: {rig_name} rig symlink updated to {rig_version_filepath}")
         self.publish_progress.finish_step()
         return True
