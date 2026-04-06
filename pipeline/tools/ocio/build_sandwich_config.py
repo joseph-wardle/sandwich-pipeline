@@ -111,6 +111,19 @@ def build_config(ocio, source_uri: str):
     config.setRole("substance_3d_painter_bitmap_export_16bit", srgb_texture)
     config.setRole("substance_3d_painter_bitmap_export_floating", linear_srgb)
 
+    # File rules — interpret untagged files by extension.
+    # Renders (EXR) are ACEScg; 8-bit images (PNG/JPG/TIF) are sRGB.
+    # The Default fallback is ACEScg since all scene-linear data in this
+    # pipeline originates from RenderMan renders in ACEScg.
+    file_rules = config.getFileRules()
+    file_rules.insertRule(0, "exr", acescg, "*", "exr")
+    file_rules.insertRule(1, "png", srgb_texture, "*", "png")
+    file_rules.insertRule(2, "jpg", srgb_texture, "*", "jpg")
+    file_rules.insertRule(3, "jpeg", srgb_texture, "*", "jpeg")
+    file_rules.insertRule(4, "tif", srgb_texture, "*", "tif")
+    file_rules.insertRule(5, "tiff", srgb_texture, "*", "tiff")
+    file_rules.setDefaultRuleColorSpace(acescg)
+
     config.validate()
     return config
 

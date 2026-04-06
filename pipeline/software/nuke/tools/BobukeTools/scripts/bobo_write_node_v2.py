@@ -337,8 +337,7 @@ def make_MOV_node():
     write_node["create_directories"].setValue(1)
 
     # Other write node settings.
-    write_node["colorspace"].setValue(6)  # Data (linear-rawr)
-
+    write_node["colorspace"].setValue("Raw")
     write_node["transformType"].setValue(1)  # Display transform
 
     fmt = write_node.format()
@@ -410,7 +409,7 @@ def make_demoReel_mov_node():
     reel_write_node["create_directories"].setValue(1)
 
     # Other write node settings.
-    reel_write_node["colorspace"].setValue(6)  # Data (linear-rawr)
+    reel_write_node["colorspace"].setValue("Raw")
     reel_write_node["transformType"].setValue(1)  # Display transform tried: 2,
     reel_write_node["mov64_codec"].setValue(
         "appr"
@@ -433,7 +432,7 @@ def make_EXR_node():
 
     # TODO set exr settings and stuff
     write_node["write_ACES_compliant_EXR"].setValue(1)
-    write_node["colorspace"].setValue(10)  # should be scene_linear (ACEScg)
+    write_node["colorspace"].setValue("ACEScg")
     write_node["transformType"].setValue(0)  # transform type- colorspace
     return write_node
 
