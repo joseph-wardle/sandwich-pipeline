@@ -714,7 +714,11 @@ __all__ = [
 
 
 @maya_command(
-    name="open_asset", label="Open Asset", icon="fileOpen.png", hotkey="ctrl+alt+a"
+    name="open_asset",
+    label="Open Asset",
+    icon="fileOpen.png",
+    hotkey="ctrl+alt+a",
+    category="asset",
 )
 def open_asset():
     """
