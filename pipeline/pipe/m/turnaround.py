@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from pipe.m.command import maya_command
 from pipe.m.local import get_main_qt_window
 from pipe.m.playblast.turnaround import AssetTurnaroundDialog
 
 _dialog: AssetTurnaroundDialog | None = None
 
 
+@maya_command(
+    name="turnaround",
+    label="Turnaround",
+    category="modeling",
+    icon="turnaround.svg",
+)
 def show_turnaround_dialog() -> AssetTurnaroundDialog:
     """Open the Maya asset turnaround dialog and keep a module-level reference."""
 
