@@ -717,7 +717,7 @@ class Exporter:
                         "destChannel": "R",
                         "srcChannel": "R",
                         "srcMapType": "documentMap",
-                        "srcMapName": "opacity",
+                        "srcMapName": "ambientOcclusion",
                     },
                     {
                         "destChannel": "G",
