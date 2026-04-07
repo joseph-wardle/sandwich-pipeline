@@ -29,7 +29,7 @@ class AnimPublisher(Publisher):
     _shot: Shot
     _init_success: bool
 
-    def __init__(self):
+    def __init__(self, spline_publish: bool = False):
         super().__init__(use_sg_entity=False)
         try:
             shot_code = mc.fileInfo("code", query=True)[0]
@@ -44,6 +44,7 @@ class AnimPublisher(Publisher):
             self._init_success = False
 
         self._shot = self._conn.get_shot_by_code(shot_code)
+        self.spline_publish = spline_publish
 
     def _prepublish(self) -> bool:
         if not self._init_success:
@@ -63,28 +64,36 @@ class AnimPublisher(Publisher):
         return True
 
     def _get_save_path(self) -> Path | None:
-        return get_production_path() / self._shot.shot_path / "anim/usd/main.usd"
+        publish_path = get_production_path() / self._shot.shot_path / "anim/usd"
+        filename = "main.usd" if not self.spline_publish else "spline.usd"
+        return publish_path / filename
 
     def _presave(self) -> bool:
         return True
 
     def _get_mayausd_kwargs(self) -> dict[str, Any]:
         timeline = Timeline.from_shot(self._shot, preroll_duration=55)
+        chaser_mode = (
+            ExportChaserMode.ANIM
+            if not self.spline_publish
+            else ExportChaserMode.SPLINE_ANIM
+        )
         return {
             "chaser": [ExportChaser.ID],
             "chaserArgs": [
-                (ExportChaser.ID, "mode", ExportChaserMode.ANIM),
+                (ExportChaser.ID, "mode", chaser_mode),
                 (ExportChaser.ID, "timeline", timeline.to_json()),
             ],
             "exportColorSets": False,
             "exportComponentTags": False,
             "exportUVs": False,
+            "shadingMode": "none",
+            "exportMaterials": False,
             "frameRange": (
                 timeline.preroll,
                 timeline.end,
             ),
             "frameStride": 1.0,
-            "shadingMode": "none",
             "stripNamespaces": False,
         }
 

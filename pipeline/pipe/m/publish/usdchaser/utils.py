@@ -382,16 +382,6 @@ def split_preroll(
     stiched_layer.TransferContent(anim_layer)
 
     timesample_files = [preroll_layer.realPath, anim_layer.realPath]
-    topology_layer = create_or_clear_layer(
-        UsdUtils.GenerateClipTopologyName(stiched_layer.resolvedPath)
-    )
-    manifest_layer = create_or_clear_layer(
-        UsdUtils.GenerateClipManifestName(stiched_layer.realPath)
-    )
-    UsdUtils.StitchClipsTopology(topology_layer, timesample_files)
-    UsdUtils.StitchClipsManifest(
-        manifest_layer, topology_layer, timesample_files, prim_path
-    )
     UsdUtils.StitchClips(
         stiched_layer, timesample_files, prim_path, tl.preroll, tl.end, False
     )
