@@ -43,6 +43,7 @@ class ExportChaserMode(IntEnum):
     ANIM = 1
     CAM = 2
     RIG = 3
+    SPLINE_ANIM = 4
 
 
 @attrs.define
@@ -74,26 +75,28 @@ class ExportChaser(mayaUsdLib.ExportChaser):
     def PostExport(self) -> bool:
         if self._chaser_args.mode == ExportChaserMode.ANIM:
             self._post_export_anim()
-
+        elif self._chaser_args.mode == ExportChaserMode.SPLINE_ANIM:
+            self._post_export_anim(suffix="spline")
         elif self._chaser_args.mode == ExportChaserMode.RIG:
             self._post_export_rig()
-
         elif self._chaser_args.mode == ExportChaserMode.CAM:
             self._post_export_cam()
         else:
             raise ValueError(
                 f"{self._chaser_args.mode} is not a valid LnD chaser mode."
             )
-
         return True
 
-    def _post_export_anim(self):
+    def _post_export_anim(self, suffix: str | None = None):
         assert self._chaser_args.timeline is not None
         path_dag_mapping = path_to_maya_dag_map(self._dag_to_usd)
 
         scale_down_geo(self._stage)
         make_topo_attrs_default(self._stage)
-        layers = split_by_namespace(self._stage, "anim", path_dag_mapping)
+        namespace_layer_suffix = "anim" if not suffix else f"{suffix}.anim"
+        layers = split_by_namespace(
+            self._stage, namespace_layer_suffix, path_dag_mapping
+        )
         root_layer = self._stage.GetRootLayer()
 
         conn = DB.Get(DB_Config)
@@ -109,8 +112,9 @@ class ExportChaser(mayaUsdLib.ExportChaser):
 
             # The path to the root of the animated geometry.
             rig_geo_prim_path = Sdf.Path("/rig/geo")
+            preroll_name = name if not suffix else f"{name}.{suffix}"
             stitched_layer = split_preroll(
-                layer, name, rig_geo_prim_path, self._chaser_args.timeline
+                layer, preroll_name, rig_geo_prim_path, self._chaser_args.timeline
             )
 
             # Create prim that will hold the animation and be inherited by the rig in shots.
