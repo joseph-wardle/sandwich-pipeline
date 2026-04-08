@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [
-    { name = "Scott Milner", email = "scottdmilner@gmail.com" },
+    { name = "Scott Milner",   email = "scottdmilner@gmail.com" },
+    { name = "Dallin Clark",   email = "dallinbretclark@gmail.com" },
+    { name = "Joseph Wardle",  email = "joseph.m.wardle@gmail.com" },
     { name = "Michael Harmon", email = "michaelharmonart@gmail.com" }
 ]
 dependencies = [
