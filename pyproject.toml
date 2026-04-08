@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [
-    { name = "Scott Milner", email = "scottdmilner@gmail.com" },
+    { name = "Scott Milner",   email = "scottdmilner@gmail.com" },
+    { name = "Dallin Clark",   email = "dallinbretclark@gmail.com" },
+    { name = "Joseph Wardle",  email = "joseph.m.wardle@gmail.com" },
     { name = "Michael Harmon", email = "michaelharmonart@gmail.com" }
 ]
 dependencies = [
@@ -18,6 +20,7 @@ dependencies = [
     "six>=1.17.0,<2",
     "gitpython>=3.1.45,<4",
     "nxt-core>=0.18.1",
+    "shotgun-api3>=3.8.4,<4",
 ]
 
 [dependency-groups]
@@ -53,7 +56,6 @@ exclude = [
     'pin_shift.py',
     "rjg",
     'y-rig',
-    "shotgun_api3",
     "studiolibrary",
     "timeline_marker",
     "pipeline/software/maya/scripts/**"
@@ -69,11 +71,10 @@ allowed-unresolved-imports = [
     "substance_painter_plugins.**",
     "yrig.**",
     "tractor.**",
-    "pipe.db.shotgun_api3.**",
 ]
 replace-imports-with-any = [
-    # Keep known dynamic legacy boundaries as `Any`.
-    "pipe.db.shotgun_api3.**",
+    # shotgun_api3 is untyped; treat as Any to avoid churn.
+    "shotgun_api3.**",
     # Keep Maya command modules dynamic to avoid high-volume legacy churn.
     "maya.cmds",
     "maya.cmds.**",
@@ -112,7 +113,6 @@ exclude = [
     "pipeline/**/pin_shift.py",
     "pipeline/**/rjg/**",
     "pipeline/lib/y-rig/**",
-    "pipeline/lib/shotgun_api3/**",
     "pipeline/**/studiolibrary/**",
     "pipeline/**/timeline_marker/**",
     "pipeline/**/houdini/scripts/**",
