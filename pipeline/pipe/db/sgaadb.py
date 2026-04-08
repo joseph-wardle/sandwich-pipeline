@@ -27,7 +27,7 @@ from pipe.struct.db import (
     normalize_display_name,
 )
 
-from . import shotgun_api3
+import shotgun_api3
 from .interface import DBInterface
 from .typing import (
     AttrMappingKwargs,
@@ -138,7 +138,7 @@ class SGaaDB(DBInterface):
         if not cls._is_houdini_runtime():
             return
 
-        from .shotgun_api3 import shotgun as shotgun_module
+        from shotgun_api3 import shotgun as shotgun_module
 
         if getattr(shotgun_module, "_PIPELINE_HOUDINI_UPLOAD_PATCHED", False):
             return

@@ -177,6 +177,7 @@ dependencies = [
     { name = "gitpython" },
     { name = "nxt-core" },
     { name = "qt-py" },
+    { name = "shotgun-api3" },
     { name = "six" },
 ]
 
@@ -205,6 +206,7 @@ requires-dist = [
     { name = "gitpython", specifier = ">=3.1.45,<4" },
     { name = "nxt-core", specifier = ">=0.18.1" },
     { name = "qt-py", specifier = ">=1.4.1,<2" },
+    { name = "shotgun-api3", specifier = ">=3.8.4,<4" },
     { name = "six", specifier = ">=1.17.0,<2" },
 ]
 
@@ -222,6 +224,15 @@ dev = [
     { name = "types-pyside2", specifier = ">=5.15.2.1.7,<6" },
     { name = "types-substance-painter", specifier = ">=2023.8.3.0.0,<2024" },
     { name = "types-usd", specifier = ">=24.5.1,<25" },
+]
+
+[[package]]
+name = "shotgun-api3"
+version = "3.10.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/d3/f8eecd9f18a0ec127b77acb461c427f38afde1c149b203485465f37f6cb0/shotgun_api3-3.10.0.tar.gz", hash = "sha256:7adb508b7d4e67943fef49b0c2149a21dcf4da0532d4912179e40915d98644f6", size = 417844, upload-time = "2026-02-06T01:11:10.226Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3d/14/cd3d243b3344857e15290b70d0dc956f03ba9482a9c080f4de16d69ed260/shotgun_api3-3.10.0-py2.py3-none-any.whl", hash = "sha256:26f8c1fa3cda08aa6895ae1997079b1c010aeb3a68ec085b4bd0d4ea2c9ad982", size = 385793, upload-time = "2026-02-06T01:11:08.749Z" },
 ]
 
 [[package]]
