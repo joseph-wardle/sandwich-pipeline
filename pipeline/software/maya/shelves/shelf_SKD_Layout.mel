@@ -1,4 +1,4 @@
-global proc shelf_Bobo_Layout () {
+global proc shelf_SKD_Layout () {
     global string $gBuffStr;
     global string $gBuffStr0;
     global string $gBuffStr1;
