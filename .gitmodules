@@ -36,3 +36,6 @@
 [submodule "pipeline/lib/y-rig"]
 	path = pipeline/lib/y-rig
 	url = git@github.com:michaelharmonart/y-rig.git
+[submodule "pipeline/lib/ae_SVG"]
+	path = pipeline/lib/ae_SVG
+	url = https://github.com/Aeoll/ae_SVG.git
