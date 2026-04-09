@@ -404,8 +404,8 @@ class Publisher:
                     return
 
                 self._publish_path.parent.mkdir(parents=True, exist_ok=True)
-                temp_publish_path = (
-                    os.getenv("TEMP", "") + os.pathsep + self._publish_path.name
+                temp_publish_path = str(
+                    Path(os.getenv("TEMP", "")) / self._publish_path.name
                 )
 
                 kwargs = {
@@ -437,7 +437,6 @@ class Publisher:
                     return
 
                 # if on Windows, work around this bug: https://github.com/PixarAnimationStudios/OpenUSD/issues/849
-                # TODO: check if this is still needed in Maya 2026
                 if self._IS_WINDOWS:
                     try:
                         shutil.move(temp_publish_path, self._publish_path)
