@@ -62,7 +62,7 @@ def set_frameRange_and_aspectRatio():
 
 ################################### Nungeon buttons (Sidebar) ###################################
 toolbar = nuke.menu("Nodes")
-m = toolbar.addMenu("Bobuke", icon="BobukeIcon.png")
+m = toolbar.addMenu("SKD", icon="BobukeIcon.png")
 
 
 m.addCommand(
@@ -113,12 +113,12 @@ m.addCommand("Lens", "nuke.createNode('Lens')", icon="BobukeIcon.png")
 print(
     f"nuke.nodePaste({str(get_pipe_path() / 'software/nuke/tools/BobukeTools/toolsets/shotTemplate.nk')})"
 )
-m.addCommand("Bobo Write Node", "make_bobo_write_node()", icon="BobukeIcon.png")
-m.addCommand("Bobo Open Shot Node", "choose_shot()", icon="BobukeIcon.png")
-m.addCommand("Bobo Read Node", "make_bobo_read_node()", icon="BobukeIcon.png")
+m.addCommand("SKD Write Node", "make_bobo_write_node()", icon="BobukeIcon.png")
+m.addCommand("SKD Open Shot", "choose_shot()", icon="BobukeIcon.png")
+m.addCommand("SKD Read Node", "make_bobo_read_node()", icon="BobukeIcon.png")
 
-m.addCommand("Bobo FX Read", "make_bobo_fx_read_node()", icon="BobukeIcon.png")
-m.addCommand("Bobo CFX Read", "make_bobo_cfx_read_node()", icon="BobukeIcon.png")
+m.addCommand("SKD FX Read", "make_bobo_fx_read_node()", icon="BobukeIcon.png")
+m.addCommand("SKD CFX Read", "make_bobo_cfx_read_node()", icon="BobukeIcon.png")
 
 ################################### Nungeon Shelf Tool Buttons ###################################
 menu = nuke.menu("Nuke")
