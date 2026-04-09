@@ -62,63 +62,63 @@ def set_frameRange_and_aspectRatio():
 
 ################################### Nungeon buttons (Sidebar) ###################################
 toolbar = nuke.menu("Nodes")
-m = toolbar.addMenu("SKD", icon="BobukeIcon.png")
+m = toolbar.addMenu("SKD", icon="MicrowaveIcon.png")
 
 
 m.addCommand(
     "Template",
-    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/BobukeTools/toolsets/shotTemplate.nk")}")',
-    icon="BobukeIcon.png",
+    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/SKD_Tools/toolsets/shotTemplate.nk")}")',
+    icon="MicrowaveIcon.png",
 )
 m.addCommand(
     "Depth Fog",
-    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/BobukeTools/toolsets/depth_fog.nk")}")',
-    icon="BobukeIcon.png",
+    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/SKD_Tools/toolsets/depth_fog.nk")}")',
+    icon="MicrowaveIcon.png",
 )
 m.addCommand(
     "Deep Fog",
-    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/BobukeTools/toolsets/deep_fog.nk")}")',
-    icon="BobukeIcon.png",
+    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/SKD_Tools/toolsets/deep_fog.nk")}")',
+    icon="MicrowaveIcon.png",
 )
 
 m.addCommand(
     "Lightwrap (upper matrix)",
-    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/BobukeTools/toolsets/bobo_lightwrap.nk")}")',
-    icon="BobukeIcon.png",
+    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/SKD_Tools/toolsets/bobo_lightwrap.nk")}")',
+    icon="MicrowaveIcon.png",
 )
 m.addCommand(
     "Relight",
-    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/BobukeTools/toolsets/relight_template.nk")}")',
-    icon="BobukeIcon.png",
+    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/SKD_Tools/toolsets/relight_template.nk")}")',
+    icon="MicrowaveIcon.png",
 )
 
 m.addCommand(
     "Eye Light",
-    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/BobukeTools/toolsets/eyelights.nk")}")',
-    icon="BobukeIcon.png",
+    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/SKD_Tools/toolsets/eyelights.nk")}")',
+    icon="MicrowaveIcon.png",
 )
 m.addCommand(
     "Sky Dome (Basic)",
-    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/BobukeTools/toolsets/bobo_skydome_basic.nk")}")',
-    icon="BobukeIcon.png",
+    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/SKD_Tools/toolsets/bobo_skydome_basic.nk")}")',
+    icon="MicrowaveIcon.png",
 )
 
 
 # m.addCommand("FrameBurn", "nuke.createNode('FrameBurn')", icon="nungeonIcon.png")
-m.addCommand("Grade_AOV", "nuke.createNode('grade_AOV')", icon="BobukeIcon.png")
-m.addCommand("luma Distort", "nuke.createNode('lumaDistort')", icon="BobukeIcon.png")
-# m.addCommand("Roughen Edges", "nuke.createNode('roughenEdges')", icon="BobukeIcon.png") #broken but worked on previous films
+m.addCommand("Grade_AOV", "nuke.createNode('grade_AOV')", icon="MicrowaveIcon.png")
+m.addCommand("luma Distort", "nuke.createNode('lumaDistort')", icon="MicrowaveIcon.png")
+# m.addCommand("Roughen Edges", "nuke.createNode('roughenEdges')", icon="MicrowaveIcon.png") #broken but worked on previous films
 # lens node
-m.addCommand("Lens", "nuke.createNode('Lens')", icon="BobukeIcon.png")
+m.addCommand("Lens", "nuke.createNode('Lens')", icon="MicrowaveIcon.png")
 print(
-    f"nuke.nodePaste({str(get_pipe_path() / 'software/nuke/tools/BobukeTools/toolsets/shotTemplate.nk')})"
+    f"nuke.nodePaste({str(get_pipe_path() / 'software/nuke/tools/SKD_Tools/toolsets/shotTemplate.nk')})"
 )
-m.addCommand("SKD Write Node", "make_bobo_write_node()", icon="BobukeIcon.png")
-m.addCommand("SKD Open Shot", "choose_shot()", icon="BobukeIcon.png")
-m.addCommand("SKD Read Node", "make_bobo_read_node()", icon="BobukeIcon.png")
+m.addCommand("SKD Write Node", "make_bobo_write_node()", icon="MicrowaveIcon.png")
+m.addCommand("SKD Open Shot", "choose_shot()", icon="MicrowaveIcon.png")
+m.addCommand("SKD Read Node", "make_bobo_read_node()", icon="MicrowaveIcon.png")
 
-m.addCommand("SKD FX Read", "make_bobo_fx_read_node()", icon="BobukeIcon.png")
-m.addCommand("SKD CFX Read", "make_bobo_cfx_read_node()", icon="BobukeIcon.png")
+m.addCommand("SKD FX Read", "make_bobo_fx_read_node()", icon="MicrowaveIcon.png")
+m.addCommand("SKD CFX Read", "make_bobo_cfx_read_node()", icon="MicrowaveIcon.png")
 
 ################################### Nungeon Shelf Tool Buttons ###################################
 menu = nuke.menu("Nuke")

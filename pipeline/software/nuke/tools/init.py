@@ -1,7 +1,7 @@
 import nuke
 
 nuke.pluginAddPath("./NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit")
-nuke.pluginAddPath("./BobukeTools")
+nuke.pluginAddPath("./SKD_Tools")
 
 # aspect ratio
 nuke.addFormat("1920 1080 Bobo_aspect_ratio")
