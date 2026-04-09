@@ -155,7 +155,8 @@ class MayaDCC(DCC):
             ]
         else:
             launch_command = str(Executables.maya)
-            launch_args.extend(("-name", "Mayo"))
+            if system == "Linux":
+                launch_args.extend(("-name", "Mayo"))
             if extra_args:
                 launch_args.extend(extra_args)
 
