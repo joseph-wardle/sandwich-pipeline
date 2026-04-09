@@ -1,6 +1,7 @@
 import os
 
 import nuke
+from shared.util import get_production_path
 from Qt import QtCore, QtWidgets
 from Qt.QtWidgets import QComboBox
 
@@ -148,29 +149,24 @@ class MyWindow(QtWidgets.QWidget):
         self.z_shots.sort()
 
     def check_file_exists(self, shot_num):
-        file_path_os = (
-            "/groups/bobo/production/shot/" + shot_num + "/comp/" + shot_num + ".nk"
-        )
+        shot_root = get_production_path() / "shot" / shot_num
+        file_path_os = str(shot_root / "comp" / f"{shot_num}.nk")
         if os.path.exists(file_path_os):
             print(f"File '{file_path_os}' exists.")
             return
         else:
             print(f"File '{file_path_os}' does not exist. Creating now.")
 
-            shot_folder = "/groups/bobo/production/shot/" + shot_num
-            comp_folder = "/groups/bobo/production/shot/" + shot_num + "/comp/"
-
-            if not os.path.exists(shot_folder):
-                os.mkdir(shot_folder)  # create the shot folder
-            if not os.path.exists(comp_folder):
-                os.mkdir(comp_folder)  # create the comp folder
+            comp_folder = shot_root / "comp"
+            shot_root.mkdir(exist_ok=True)
+            comp_folder.mkdir(exist_ok=True)
             nuke.scriptSaveAs(file_path_os)  # create the .nk file
             return
 
     def open_nk_shot(self, shot_num):
         self.check_file_exists(shot_num)
-        nk_file_path = (
-            "/groups/bobo/production/shot/" + shot_num + "/comp/" + shot_num + ".nk"
+        nk_file_path = str(
+            get_production_path() / "shot" / shot_num / "comp" / f"{shot_num}.nk"
         )
         try:
             nuke.scriptOpen(nk_file_path)
