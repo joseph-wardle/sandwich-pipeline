@@ -20,6 +20,11 @@ from shared.util import resolve_mapped_path
 
 from pipe.asset.paths import paths_for_asset
 from pipe.db import DB
+from pipe.sp.progress import (
+    PublishProgressCallback,
+    PublishProgressUpdate,
+    PublishStage,
+)
 from pipe.struct.db import Asset
 from pipe.struct.material import (
     DisplacementSource,
@@ -448,6 +453,7 @@ class Exporter:
         mat_var: str,
         geo_var: str,
         material_layer: str,
+        progress_callback: PublishProgressCallback | None = None,
     ) -> bool:
         """Export all the textures of the given Texture Sets"""
         self._last_error_message = None
@@ -497,6 +503,14 @@ class Exporter:
         config = Exporter._generate_config(self._src_path, resolved_targets)
         log.debug(config)
 
+        if progress_callback is not None:
+            progress_callback(
+                PublishProgressUpdate(
+                    stage=PublishStage.PLANNING_EXPORT,
+                    message="Collecting the source textures Painter plans to write.",
+                )
+            )
+
         try:
             planned_exports = sp.export.list_project_textures(config)
         except Exception as exc:
@@ -532,6 +546,17 @@ class Exporter:
                 exception_type="NoExportsPlanned",
             )
             return False
+
+        if progress_callback is not None:
+            progress_callback(
+                PublishProgressUpdate(
+                    stage=PublishStage.EXPORTING_SOURCE,
+                    message=(
+                        "Exporting "
+                        f"{planned_export_count} source texture(s) from Substance Painter."
+                    ),
+                )
+            )
 
         export_result: sp.export.TextureExportResult
         export_started_at_unix = time.time()
@@ -648,6 +673,13 @@ class Exporter:
             )
 
         try:
+            if progress_callback is not None:
+                progress_callback(
+                    PublishProgressUpdate(
+                        stage=PublishStage.WRITING_METADATA,
+                        message="Writing material metadata for the published textures.",
+                    )
+                )
             self.write_mat_info([target.settings for target in resolved_targets])
         except Exception as exc:
             log.exception("Failed to write material info metadata.")
@@ -681,6 +713,7 @@ class Exporter:
             geo_variant=geo_var,
             material_variant=mat_var,
             renderman_variant=material_layer,
+            progress_callback=progress_callback,
         )
 
         try:

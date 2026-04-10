@@ -14,9 +14,11 @@ from Qt.QtCore import QRegExp
 from Qt.QtGui import QIcon, QPixmap, QRegExpValidator
 from Qt.QtWidgets import (
     QComboBox,
+    QDialog,
     QLabel,
     QLayout,
     QMainWindow,
+    QProgressBar,
 )
 
 if TYPE_CHECKING:
@@ -35,6 +37,11 @@ from pipe.glui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButt
 from pipe.sp.assetfile import PIPE_SP_DOCS_PAGE, get_active_asset_from_project
 from pipe.sp.export import Exporter, TexSetExportSettings
 from pipe.sp.local import get_main_qt_window
+from pipe.sp.progress import (
+    DEFAULT_PUBLISH_STAGE_SEQUENCE,
+    PublishProgressUpdate,
+    PublishStage,
+)
 from pipe.struct.db import Asset
 from pipe.struct.material import DisplacementSource, NormalSource, NormalType
 from pipe.util import checkbox_callback_helper, dict_index
@@ -63,6 +70,100 @@ def _texture_set_name(tex_set: sp.textureset.TextureSet) -> str:
     if isinstance(name_attr, str):
         return name_attr
     return str(tex_set)
+
+
+class _PublishProgressDialog(QDialog):
+    _allow_close: bool
+    _detail_label: QLabel
+    _progress_bar: QProgressBar
+    _stage_label: QLabel
+    _stage_sequence: tuple[PublishStage, ...]
+    _step_label: QLabel
+
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget | None,
+        *,
+        stage_sequence: typing.Sequence[PublishStage],
+    ) -> None:
+        super().__init__(parent)
+        self._allow_close = False
+        self._stage_sequence = tuple(stage_sequence)
+
+        self.setWindowTitle("Publishing Textures")
+        self.setModal(True)
+        self.setMinimumWidth(420)
+        self.setWindowFlags(
+            (self.windowFlags() & ~QtCore.Qt.WindowContextHelpButtonHint)
+            | QtCore.Qt.WindowStaysOnTopHint
+        )
+        self.setWindowModality(QtCore.Qt.WindowModal)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(8)
+
+        self._step_label = QLabel("")
+        self._step_label.setStyleSheet("font-size: 11px; color: #8a8a8a;")
+        layout.addWidget(self._step_label)
+
+        self._stage_label = QLabel("Preparing publish")
+        self._stage_label.setStyleSheet("font-size: 13px; font-weight: bold;")
+        layout.addWidget(self._stage_label)
+
+        self._detail_label = QLabel("")
+        self._detail_label.setWordWrap(True)
+        layout.addWidget(self._detail_label)
+
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setTextVisible(True)
+        self._progress_bar.setRange(0, 0)
+        layout.addWidget(self._progress_bar)
+
+    def event(self, event: QtCore.QEvent) -> bool:
+        if not self._allow_close and event.type() == QtCore.QEvent.Close:
+            event.ignore()
+            return True
+        return super().event(event)
+
+    def reject(self) -> None:
+        if self._allow_close:
+            super().reject()
+
+    def finish(self) -> None:
+        if self._allow_close:
+            return
+        self._allow_close = True
+        self.close()
+
+    def update_progress(self, update: PublishProgressUpdate) -> None:
+        step_index = self._step_index(update.stage)
+        self._step_label.setText(f"Step {step_index} of {len(self._stage_sequence)}")
+        self._stage_label.setText(update.stage.label)
+        self._detail_label.setText(update.message)
+
+        if update.is_determinate:
+            total = max(1, int(update.total or 0))
+            current = max(0, min(int(update.current or 0), total))
+            self._progress_bar.setRange(0, total)
+            self._progress_bar.setValue(current)
+            self._progress_bar.setFormat("%v / %m")
+        else:
+            self._progress_bar.setRange(0, 0)
+            self._progress_bar.setFormat("")
+
+        if not self.isVisible():
+            self.show()
+        self.raise_()
+        self.activateWindow()
+
+        QtWidgets.QApplication.processEvents()
+
+    def _step_index(self, stage: PublishStage) -> int:
+        try:
+            return self._stage_sequence.index(stage) + 1
+        except ValueError:
+            return len(self._stage_sequence)
 
 
 class SubstanceExportWindow(QMainWindow, ButtonPair):
@@ -340,7 +441,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 "Publish Textures",
             ).exec_()
             return
-        if not self._ensure_project_saved():
+        if not self._ensure_project_ready():
+            return
+        save_required = sp.project.needs_saving()
+        if save_required and not self._confirm_save_before_publish():
             return
 
         mat_var = self.mat_var.strip() or "default"
@@ -394,18 +498,87 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             return
         log.info("Exporting %d texture sets", len(export_settings))
 
-        if exporter.export(
-            export_settings,
-            mat_var,
-            geo_var,
-            material_layer,
-        ):
+        stage_sequence = tuple(
+            stage
+            for stage in DEFAULT_PUBLISH_STAGE_SEQUENCE
+            if save_required or stage is not PublishStage.SAVING_PROJECT
+        )
+        progress_dialog = _PublishProgressDialog(
+            self,
+            stage_sequence=stage_sequence,
+        )
+
+        try:
+            if save_required:
+                progress_dialog.update_progress(
+                    PublishProgressUpdate(
+                        stage=PublishStage.SAVING_PROJECT,
+                        message="Saving the Substance Painter project before publish.",
+                    )
+                )
+                try:
+                    sp.project.save()
+                except Exception:
+                    progress_dialog.finish()
+                    MessageDialog(
+                        get_main_qt_window(),
+                        "Failed to save the project. Resolve any file issues and try again.",
+                        "Save Failed",
+                    ).exec_()
+                    log.exception(
+                        "Failed to save Substance Painter project before publish."
+                    )
+                    return
+
+                if sp.project.needs_saving():
+                    progress_dialog.finish()
+                    MessageDialog(
+                        get_main_qt_window(),
+                        "The project still appears unsaved. Please save manually before publishing.",
+                        "Save Required",
+                    ).exec_()
+                    return
+
+            progress_dialog.update_progress(
+                PublishProgressUpdate(
+                    stage=PublishStage.PREPARING_PUBLISH,
+                    message="Preparing the publish configuration and enabled texture sets.",
+                )
+            )
+
+            export_success = exporter.export(
+                export_settings,
+                mat_var,
+                geo_var,
+                material_layer,
+                progress_callback=progress_dialog.update_progress,
+            )
+            if not export_success:
+                log.error("Texture export failed for %s", asset_label)
+                error_message = exporter.last_error_message or (
+                    "An error occurred while exporting textures. Please check the "
+                    "console for more information."
+                )
+                progress_dialog.finish()
+                MessageDialog(
+                    get_main_qt_window(),
+                    error_message,
+                    "Texture Export Failed",
+                ).exec_()
+                return
+
             backup_status = None
             project_path = sp.project.file_path() or ""
             if not project_path:
                 backup_status = "Backup skipped: project has no file path."
                 log.warning("Backup skipped: project has no file path.")
             else:
+                progress_dialog.update_progress(
+                    PublishProgressUpdate(
+                        stage=PublishStage.BACKING_UP_PROJECT,
+                        message="Saving a versioned backup of the Substance Painter project.",
+                    )
+                )
                 asset_paths = paths_for_asset(self._curr_asset)
                 publish_path = asset_paths.publish_textures_layer_dir(
                     geo_var, mat_var, material_layer
@@ -460,6 +633,12 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
             houdini_status: str | None = None
             try:
+                progress_dialog.update_progress(
+                    PublishProgressUpdate(
+                        stage=PublishStage.RUNNING_HOUDINI,
+                        message="Running the Houdini asset publish step.",
+                    )
+                )
                 houdini_result = self._run_houdini_asset_builder(geo_variant=geo_var)
                 houdini_status = self._summarize_houdini_result(houdini_result)
             except HoudiniPublishError as exc:
@@ -471,21 +650,13 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 message = f"{message}\n{backup_status}"
             if houdini_status:
                 message = f"{message}\n{houdini_status}"
+            progress_dialog.finish()
             MessageDialog(
                 get_main_qt_window(),
                 message,
             ).exec_()
-        else:
-            log.error("Texture export failed for %s", asset_label)
-            error_message = exporter.last_error_message or (
-                "An error occurred while exporting textures. Please check the "
-                "console for more information."
-            )
-            MessageDialog(
-                get_main_qt_window(),
-                error_message,
-                "Texture Export Failed",
-            ).exec_()
+        finally:
+            progress_dialog.finish()
 
     def _run_houdini_asset_builder(self, *, geo_variant: str) -> dict[str, Any]:
         asset = self._curr_asset
@@ -640,7 +811,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
         return ", ".join(parts)
 
-    def _ensure_project_saved(self) -> bool:
+    def _ensure_project_ready(self) -> bool:
         if not sp.project.is_open():
             MessageDialog(
                 get_main_qt_window(),
@@ -680,39 +851,18 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             ).exec_()
             return False
 
-        if sp.project.needs_saving():
-            dialog = MessageDialogCustomButtons(
-                get_main_qt_window(),
-                "The project has unsaved changes. Save before publishing?",
-                "Save Required",
-                has_cancel_button=True,
-                ok_name="Save",
-                cancel_name="Cancel",
-            )
-            if not dialog.exec_():
-                return False
-            try:
-                sp.project.save()
-            except Exception:
-                MessageDialog(
-                    get_main_qt_window(),
-                    "Failed to save the project. Resolve any file issues and try again.",
-                    "Save Failed",
-                ).exec_()
-                log.exception(
-                    "Failed to save Substance Painter project before publish."
-                )
-                return False
-
-            if sp.project.needs_saving():
-                MessageDialog(
-                    get_main_qt_window(),
-                    "The project still appears unsaved. Please save manually before publishing.",
-                    "Save Required",
-                ).exec_()
-                return False
-
         return True
+
+    def _confirm_save_before_publish(self) -> bool:
+        dialog = MessageDialogCustomButtons(
+            get_main_qt_window(),
+            "The project has unsaved changes. Save before publishing?",
+            "Save Required",
+            has_cancel_button=True,
+            ok_name="Save",
+            cancel_name="Cancel",
+        )
+        return bool(dialog.exec_())
 
 
 class TexSetWidget(QtWidgets.QWidget):

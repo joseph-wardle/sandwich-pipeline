@@ -16,6 +16,11 @@ if TYPE_CHECKING:
 
 from env import Executables
 
+from pipe.sp.progress import (
+    PublishProgressCallback,
+    PublishProgressUpdate,
+    PublishStage,
+)
 from pipe.util import silent_startupinfo
 
 log = logging.getLogger(__name__)
@@ -52,6 +57,7 @@ class TexConverter:
         material_variant: str | None = None,
         renderman_variant: str | None = None,
         batch_size: int = 18,
+        progress_callback: PublishProgressCallback | None = None,
     ) -> None:
         self.tex_path = tex_path
         self.preview_path = preview_path
@@ -62,6 +68,7 @@ class TexConverter:
         self.material_variant = material_variant
         self.renderman_variant = renderman_variant
         self.batch_size = max(1, int(batch_size))
+        self.progress_callback = progress_callback
         self._last_converted_tex_count = 0
         self._last_converted_preview_count = 0
 
@@ -249,7 +256,30 @@ class TexConverter:
         self._wait_and_check_cmds(
             pre_cmdlines, batch_size=self.batch_size, skip_check=True
         )
-        finished_imgs = self._wait_and_check_cmds(cmdlines, batch_size=self.batch_size)
+        total_tex = len(cmdlines)
+        if total_tex <= 0:
+            self._report_progress(
+                PublishStage.CONVERTING_TEX,
+                "No TEX conversions were required for this publish.",
+                current=1,
+                total=1,
+            )
+            self._last_converted_tex_count = 0
+            return []
+
+        self._report_progress(
+            PublishStage.CONVERTING_TEX,
+            f"Converting source textures to TEX ({total_tex} file(s)).",
+            current=0,
+            total=total_tex,
+        )
+
+        finished_imgs = self._wait_and_check_cmds(
+            cmdlines,
+            batch_size=self.batch_size,
+            stage=PublishStage.CONVERTING_TEX,
+            message="Converting source textures to TEX.",
+        )
         self._last_converted_tex_count = len(finished_imgs)
 
         if len(finished_imgs) != len(cmdlines):
@@ -309,7 +339,30 @@ class TexConverter:
             jpeg_cmd(Path(root), sorted(imgs)) for root, imgs in img_list.items()
         ]
 
-        finished_imgs = self._wait_and_check_cmds(cmdlines, batch_size=self.batch_size)
+        total_preview = len(cmdlines)
+        if total_preview <= 0:
+            self._report_progress(
+                PublishStage.CONVERTING_PREVIEW,
+                "No preview textures were required for this publish.",
+                current=1,
+                total=1,
+            )
+            self._last_converted_preview_count = 0
+            return []
+
+        self._report_progress(
+            PublishStage.CONVERTING_PREVIEW,
+            f"Building preview textures ({total_preview} output file(s)).",
+            current=0,
+            total=total_preview,
+        )
+
+        finished_imgs = self._wait_and_check_cmds(
+            cmdlines,
+            batch_size=self.batch_size,
+            stage=PublishStage.CONVERTING_PREVIEW,
+            message="Building preview textures.",
+        )
         self._last_converted_preview_count = len(finished_imgs)
 
         if len(finished_imgs) != len(cmdlines):
@@ -333,9 +386,32 @@ class TexConverter:
         matches = img_dims.group(1, 2)
         return (int(matches[0]), int(matches[1]))
 
-    @staticmethod
+    def _report_progress(
+        self,
+        stage: PublishStage,
+        message: str,
+        *,
+        current: int | None = None,
+        total: int | None = None,
+    ) -> None:
+        if self.progress_callback is None:
+            return
+        self.progress_callback(
+            PublishProgressUpdate(
+                stage=stage,
+                message=message,
+                current=current,
+                total=total,
+            )
+        )
+
     def _wait_and_check_cmds(
-        cmds: typing.Sequence[list[str]], batch_size: int = 18, skip_check: bool = False
+        self,
+        cmds: typing.Sequence[list[str]],
+        batch_size: int = 18,
+        skip_check: bool = False,
+        stage: PublishStage | None = None,
+        message: str | None = None,
     ) -> list[Path]:
         """Wait for list of processes to finish and print them to the debug log"""
 
@@ -344,6 +420,7 @@ class TexConverter:
         )
 
         finished_imgs: list[Path] = []
+        total_cmds = len(cmds)
 
         while batch := next(batched_cmds, None):
             start_time = time.time()
@@ -376,6 +453,13 @@ class TexConverter:
                 if start_time < img.stat().st_mtime:
                     log.debug(f"Successfully converted {img}")
                     finished_imgs.append(img)
+                    if stage is not None and message is not None:
+                        self._report_progress(
+                            stage,
+                            message,
+                            current=len(finished_imgs),
+                            total=total_cmds,
+                        )
 
         return finished_imgs
 
