@@ -64,6 +64,17 @@ class _ExportEventSnapshot:
     ended_textures: dict[tuple[str, str], list[str]] | None = None
 
 
+@dataclass(frozen=True)
+class _TargetExportOutcome:
+    target: _ResolvedExportTarget
+    planned_exports: dict[tuple[str, str], list[str]]
+    exported_textures: dict[tuple[str, str], list[str]]
+    returned_texture_count: int
+    event_texture_count: int
+    event_planned_texture_count: int
+    used_event_fallback: bool
+
+
 def _texture_set_name(tex_set: sp.textureset.TextureSet) -> str:
     """Return texture set name across API versions."""
     name_attr = getattr(tex_set, "name", None)
@@ -447,6 +458,167 @@ class Exporter:
         detail = "\n".join(details)
         raise RuntimeError(detail)
 
+    def _export_target(
+        self,
+        target: _ResolvedExportTarget,
+        *,
+        target_index: int,
+        target_count: int,
+        progress_callback: PublishProgressCallback | None = None,
+    ) -> _TargetExportOutcome:
+        config = Exporter._generate_config(self._src_path, [target])
+        log.debug(config)
+
+        planned_message = (
+            "Collecting the source textures Painter plans to write "
+            f"for texture set {target_index}/{target_count}: "
+            f"{target.texture_set_name}."
+        )
+        if progress_callback is not None:
+            progress_callback(
+                PublishProgressUpdate(
+                    stage=PublishStage.PLANNING_EXPORT,
+                    message=planned_message,
+                    current=target_index - 1,
+                    total=target_count,
+                )
+            )
+
+        try:
+            planned_exports = sp.export.list_project_textures(config)
+        except Exception as exc:
+            raise ValueError(
+                "Export configuration is invalid for texture set "
+                f'"{target.texture_set_name}".\n'
+                "Check enabled texture sets and channel settings, then try again.\n"
+                f"Details: {exc}"
+            ) from exc
+
+        planned_export_count = self._planned_export_count(planned_exports)
+        if not any(planned_exports.values()):
+            raise ValueError(
+                "No textures match the current export configuration for "
+                f'texture set "{target.texture_set_name}".'
+            )
+
+        if progress_callback is not None:
+            progress_callback(
+                PublishProgressUpdate(
+                    stage=PublishStage.EXPORTING_SOURCE,
+                    message=(
+                        "Exporting source textures from Substance Painter "
+                        f"for texture set {target_index}/{target_count}: "
+                        f"{target.texture_set_name} "
+                        f"({planned_export_count} file(s))."
+                    ),
+                    current=target_index - 1,
+                    total=target_count,
+                )
+            )
+
+        export_started_at_unix = time.time()
+        event_snapshot, disconnect_export_events = self._capture_export_events()
+        try:
+            export_result = sp.export.export_project_textures(config)
+        except Exception as exc:
+            disconnect_export_events()
+            self._cleanup_export_lock(
+                context=f'after export exception for "{target.texture_set_name}"'
+            )
+            raise RuntimeError(
+                "Substance Painter failed while exporting texture set "
+                f'"{target.texture_set_name}".\n'
+                f"Details: {exc}"
+            ) from exc
+        disconnect_export_events()
+        self._cleanup_export_lock(
+            context=f'after export for "{target.texture_set_name}"'
+        )
+
+        if export_result.status == sp.export.ExportStatus.Cancelled:
+            raise RuntimeError(
+                "Texture export was cancelled while exporting texture set "
+                f'"{target.texture_set_name}".'
+            )
+
+        if export_result.status == sp.export.ExportStatus.Warning:
+            log.warning(
+                'Texture export completed with warnings for "%s": %s',
+                target.texture_set_name,
+                export_result.message,
+            )
+        elif export_result.status != sp.export.ExportStatus.Success:
+            result_message = str(getattr(export_result, "message", "") or "").strip()
+            raise RuntimeError(
+                "Texture export failed for texture set "
+                f'"{target.texture_set_name}" with status {export_result.status}.'
+                + (f"\nSubstance message: {result_message}" if result_message else "")
+            )
+
+        try:
+            exported_textures = self._resolve_exported_files(
+                export_result,
+                planned_exports,
+                event_snapshot,
+                started_at_unix=export_started_at_unix,
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(
+                "Texture export produced no usable file list for texture set "
+                f'"{target.texture_set_name}".\n{exc}'
+            ) from exc
+
+        returned_texture_count = self._planned_export_count(
+            self._normalize_texture_export_map(export_result.textures)
+        )
+        event_texture_count = self._planned_export_count(
+            event_snapshot.ended_textures or {}
+        )
+        event_planned_texture_count = self._planned_export_count(
+            event_snapshot.about_to_start_textures or {}
+        )
+        used_event_fallback = not any(export_result.textures.values()) and bool(
+            event_snapshot.ended_textures
+        )
+
+        if planned_export_count != event_planned_texture_count:
+            log.warning(
+                'Substance planned export count mismatch for "%s": list_project_textures=%s, ExportTexturesAboutToStart=%s',
+                target.texture_set_name,
+                planned_export_count,
+                event_planned_texture_count,
+            )
+        if returned_texture_count != event_texture_count:
+            log.warning(
+                'Substance export count mismatch for "%s": return=%s, ExportTexturesEnded=%s',
+                target.texture_set_name,
+                returned_texture_count,
+                event_texture_count,
+            )
+
+        if progress_callback is not None:
+            progress_callback(
+                PublishProgressUpdate(
+                    stage=PublishStage.EXPORTING_SOURCE,
+                    message=(
+                        "Finished source export for texture set "
+                        f"{target_index}/{target_count}: {target.texture_set_name}."
+                    ),
+                    current=target_index,
+                    total=target_count,
+                )
+            )
+
+        return _TargetExportOutcome(
+            target=target,
+            planned_exports=planned_exports,
+            exported_textures=exported_textures,
+            returned_texture_count=returned_texture_count,
+            event_texture_count=event_texture_count,
+            event_planned_texture_count=event_planned_texture_count,
+            used_event_fallback=used_event_fallback,
+        )
+
     def export(
         self,
         exp_setting_arr: typing.Sequence[TexSetExportSettings],
@@ -499,40 +671,66 @@ class Exporter:
                 [target.settings for target in resolved_targets]
             ),
         )
+        all_exported_textures: dict[tuple[str, str], list[str]] = {}
+        planned_texture_count = 0
+        returned_texture_count = 0
+        event_texture_count = 0
+        event_planned_texture_count = 0
+        used_event_fallback = False
 
-        config = Exporter._generate_config(self._src_path, resolved_targets)
-        log.debug(config)
-
-        if progress_callback is not None:
-            progress_callback(
-                PublishProgressUpdate(
-                    stage=PublishStage.PLANNING_EXPORT,
-                    message="Collecting the source textures Painter plans to write.",
+        for target_index, target in enumerate(resolved_targets, start=1):
+            self._cleanup_export_lock(
+                context=f'before export for "{target.texture_set_name}"'
+            )
+            try:
+                outcome = self._export_target(
+                    target,
+                    target_index=target_index,
+                    target_count=len(resolved_targets),
+                    progress_callback=progress_callback,
                 )
-            )
+            except ValueError as exc:
+                log.exception(
+                    'Export configuration is invalid for texture set "%s".',
+                    target.texture_set_name,
+                )
+                self._set_error_message(str(exc))
+                export_payload["planned_texture_count"] = planned_texture_count
+                self._emit_texture_export_event(
+                    status="error",
+                    action_id=export_action_id,
+                    payload=export_payload,
+                    duration_ms=_duration_ms(),
+                    error_message=self._last_error_message,
+                    exception_type=type(exc).__name__,
+                )
+                return False
+            except RuntimeError as exc:
+                log.error(
+                    'Texture export failed while processing texture set "%s".',
+                    target.texture_set_name,
+                )
+                self._set_error_message(str(exc))
+                export_payload["planned_texture_count"] = planned_texture_count
+                self._emit_texture_export_event(
+                    status="error",
+                    action_id=export_action_id,
+                    payload=export_payload,
+                    duration_ms=_duration_ms(),
+                    error_message=self._last_error_message,
+                    exception_type=type(exc).__name__,
+                )
+                return False
 
-        try:
-            planned_exports = sp.export.list_project_textures(config)
-        except Exception as exc:
-            log.exception("Export configuration is invalid for this project.")
-            self._set_error_message(
-                "Export configuration is invalid for the current project. "
-                "Check enabled texture sets and channel settings, then try again.\n"
-                f"Details: {exc}"
-            )
-            self._emit_texture_export_event(
-                status="error",
-                action_id=export_action_id,
-                payload=export_payload,
-                duration_ms=_duration_ms(),
-                error_message=self._last_error_message,
-                exception_type=type(exc).__name__,
-            )
-            return False
+            planned_texture_count += self._planned_export_count(outcome.planned_exports)
+            returned_texture_count += outcome.returned_texture_count
+            event_texture_count += outcome.event_texture_count
+            event_planned_texture_count += outcome.event_planned_texture_count
+            used_event_fallback = used_event_fallback or outcome.used_event_fallback
+            all_exported_textures.update(outcome.exported_textures)
 
-        planned_export_count = self._planned_export_count(planned_exports)
-        export_payload["planned_texture_count"] = planned_export_count
-        if not any(planned_exports.values()):
+        export_payload["planned_texture_count"] = planned_texture_count
+        if planned_texture_count <= 0:
             self._set_error_message(
                 "No textures match the current export configuration."
             )
@@ -547,130 +745,14 @@ class Exporter:
             )
             return False
 
-        if progress_callback is not None:
-            progress_callback(
-                PublishProgressUpdate(
-                    stage=PublishStage.EXPORTING_SOURCE,
-                    message=(
-                        "Exporting "
-                        f"{planned_export_count} source texture(s) from Substance Painter."
-                    ),
-                )
-            )
-
-        export_result: sp.export.TextureExportResult
-        export_started_at_unix = time.time()
-        event_snapshot, disconnect_export_events = self._capture_export_events()
-        try:
-            export_result = sp.export.export_project_textures(config)
-        except Exception as exc:
-            disconnect_export_events()
-            log.exception("Texture export failed in Substance Painter.")
-            self._cleanup_export_lock(context="after export exception")
-            self._set_error_message(
-                "Substance Painter failed while exporting textures.\n" f"Details: {exc}"
-            )
-            self._emit_texture_export_event(
-                status="error",
-                action_id=export_action_id,
-                payload=export_payload,
-                duration_ms=_duration_ms(),
-                error_message=self._last_error_message,
-                exception_type=type(exc).__name__,
-            )
-            return False
-        disconnect_export_events()
-        self._cleanup_export_lock(context="after export")
-
-        if export_result.status == sp.export.ExportStatus.Cancelled:
-            log.warning("Texture export was cancelled: %s", export_result.message)
-            self._set_error_message("Texture export was cancelled.")
-            self._emit_texture_export_event(
-                status="error",
-                action_id=export_action_id,
-                payload=export_payload,
-                duration_ms=_duration_ms(),
-                error_message=self._last_error_message,
-                exception_type="ExportCancelled",
-            )
-            return False
-
-        if export_result.status == sp.export.ExportStatus.Warning:
-            log.warning(
-                "Texture export completed with warnings: %s", export_result.message
-            )
-        elif export_result.status != sp.export.ExportStatus.Success:
-            log.error("Texture export failed with status %s", export_result.status)
-            result_message = str(getattr(export_result, "message", "") or "").strip()
-            self._set_error_message(
-                f"Texture export failed with status {export_result.status}."
-                + (f"\nSubstance message: {result_message}" if result_message else "")
-            )
-            self._emit_texture_export_event(
-                status="error",
-                action_id=export_action_id,
-                payload=export_payload,
-                duration_ms=_duration_ms(),
-                error_message=self._last_error_message,
-                exception_type="ExportStatusError",
-            )
-            return False
-
-        try:
-            exported_textures = self._resolve_exported_files(
-                export_result,
-                planned_exports,
-                event_snapshot,
-                started_at_unix=export_started_at_unix,
-            )
-        except RuntimeError as exc:
-            log.error("Texture export produced no usable file list.")
-            self._set_error_message(str(exc))
-            self._emit_texture_export_event(
-                status="error",
-                action_id=export_action_id,
-                payload=export_payload,
-                duration_ms=_duration_ms(),
-                error_message=self._last_error_message,
-                exception_type="EmptyExportResult",
-            )
-            return False
-
         export_payload["exported_texture_count"] = self._planned_export_count(
-            exported_textures
+            all_exported_textures
         )
         export_payload["preexisting_source_file_count"] = preexisting_src_count
-        export_payload["returned_texture_count"] = self._planned_export_count(
-            self._normalize_texture_export_map(export_result.textures)
-        )
-        export_payload["event_texture_count"] = self._planned_export_count(
-            event_snapshot.ended_textures or {}
-        )
-        export_payload["event_planned_texture_count"] = self._planned_export_count(
-            event_snapshot.about_to_start_textures or {}
-        )
-        export_payload["used_event_fallback"] = not any(
-            export_result.textures.values()
-        ) and bool(event_snapshot.ended_textures)
-
-        if (
-            export_payload["planned_texture_count"]
-            != export_payload["event_planned_texture_count"]
-        ):
-            log.warning(
-                "Substance planned export count mismatch: list_project_textures=%s, ExportTexturesAboutToStart=%s",
-                export_payload["planned_texture_count"],
-                export_payload["event_planned_texture_count"],
-            )
-        if (
-            export_payload["returned_texture_count"]
-            != export_payload["event_texture_count"]
-        ):
-            log.warning(
-                "Substance export count mismatch: return=%s, ExportTexturesEnded=%s",
-                export_payload["returned_texture_count"],
-                export_payload["event_texture_count"],
-            )
+        export_payload["returned_texture_count"] = returned_texture_count
+        export_payload["event_texture_count"] = event_texture_count
+        export_payload["event_planned_texture_count"] = event_planned_texture_count
+        export_payload["used_event_fallback"] = used_event_fallback
 
         try:
             if progress_callback is not None:
@@ -707,7 +789,7 @@ class Exporter:
         tex_converter = TexConverter(
             self._tex_path,
             self._preview_path,
-            list(exported_textures.values()),
+            list(all_exported_textures.values()),
             action_id=export_action_id,
             asset_name=self._texture_export_asset_name(),
             geo_variant=geo_var,
