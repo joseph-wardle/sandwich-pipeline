@@ -77,16 +77,22 @@ def add_model_suffix(name: str, suffix: str = "geo"):
 def _merge_group(group: str) -> str | None:
     group_parents = cmds.listRelatives(group, parent=True)
     group_parent: str | None
-    if group_parents is not None:
-        group_parent = group_parents[0]
-    else:
-        group_parent = None
+    group_parent = group_parents[0] if group_parents else None
+
+    # capture original position index
+    sibling_index = None
+    if group_parent:
+        siblings = (
+            cmds.listRelatives(group_parent, children=True, type="transform") or []
+        )
+        if group in siblings:
+            sibling_index = siblings.index(group)
 
     child_transforms = (
         cmds.listRelatives(group, children=True, shapes=False, type="transform") or []
     )
 
-    # Nothing inside
+    # Delete empty groups
     if not child_transforms:
         if cmds.listRelatives(group, children=True, shapes=True):
             return group
@@ -110,6 +116,11 @@ def _merge_group(group: str) -> str | None:
         cmds.parent(merged, world=True)
     cmds.delete(merged, constructionHistory=True)
     final_name = cmds.rename(merged, group)
+
+    if sibling_index is not None:
+        cmds.reorder(final_name, front=True)
+        cmds.reorder(final_name, relative=sibling_index)
+
     return final_name
 
 
