@@ -477,12 +477,14 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             ).exec_()
         else:
             log.error("Texture export failed for %s", asset_label)
+            error_message = exporter.last_error_message or (
+                "An error occurred while exporting textures. Please check the "
+                "console for more information."
+            )
             MessageDialog(
                 get_main_qt_window(),
-                (
-                    "An error occured while exporting textures. Please check the "
-                    "console for more information"
-                ),
+                error_message,
+                "Texture Export Failed",
             ).exec_()
 
     def _run_houdini_asset_builder(self, *, geo_variant: str) -> dict[str, Any]:
