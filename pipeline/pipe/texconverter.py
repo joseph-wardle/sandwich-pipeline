@@ -277,8 +277,8 @@ class TexConverter:
             total_pixels = native_x * native_y * count
             mosaic_side = _nearest_pow2(int(sqrt(total_pixels) / DOWNSCALE_RATIO))
             mosaic_side = min(mosaic_side, MAX_OUTPUT_SIZE)
-            cell_size = _nearest_pow2(mosaic_side // grid_base)
-            cell_size = max(cell_size, 128)
+            target_tile_size = mosaic_side / max(grid_base, grid_height)
+            cell_size = _nearest_pow2(int(target_tile_size))
 
             # fmt: off
             return [
