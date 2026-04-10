@@ -21,6 +21,10 @@ from pipe.util import silent_startupinfo
 log = logging.getLogger(__name__)
 
 
+def _nearest_pow2(n: int) -> int:
+    return 1 << (n - 1).bit_length()
+
+
 class TexConversionError(ChildProcessError):
     pass
 
@@ -211,7 +215,7 @@ class TexConverter:
             Substance because that doesn't include normal painting or
             stickers. Thus, the remaining option is to convert the Normal map
             from Substance back into a height map."""
-            img_dims = [str(int(log2(int(d)))) for d in self._img_dims(img)]
+            img_dims = [str(int(log2(d))) for d in self._img_dims(img)]
             # fmt: off
             return [
                 str(Executables.sbsrender),
@@ -255,13 +259,12 @@ class TexConverter:
 
     def convert_previewsurface(self) -> list[Path]:
         """Compile all .jpeg textures in the most recent export to UDIM-less tiles"""
-
+        MAX_OUTPUT_SIZE = 4096
+        DOWNSCALE_RATIO = 2
         assert self.preview_path is not None
 
         @self._debug_out
         def jpeg_cmd(root: Path, imgs: typing.Sequence[str]) -> list[str]:
-            dimx, dimy = self._img_dims(imgs[0])
-
             img_name = re.search(r"^(.*_)(.+)$", root.name)
             assert img_name is not None
             name_base, _color_space = img_name.group(1, 2)
@@ -270,12 +273,19 @@ class TexConverter:
             grid_height = int(floor(sqrt(count)))
             grid_base = int(grid_height + ceil(count / grid_height - grid_height))
 
+            native_x, native_y = self._img_dims(imgs[0])
+            total_pixels = native_x * native_y * count
+            mosaic_side = _nearest_pow2(int(sqrt(total_pixels) / DOWNSCALE_RATIO))
+            mosaic_side = min(mosaic_side, MAX_OUTPUT_SIZE)
+            cell_size = _nearest_pow2(mosaic_side // grid_base)
+            cell_size = max(cell_size, 128)
+
             # fmt: off
             return [
                 str(Executables.oiiotool),
                 *imgs,
-                "--mosaic", f"{grid_base}x{grid_height}",
-                "--resize", f"{dimx}x{dimy}",
+                f"--mosaic:fit{cell_size}x{cell_size}", f"{grid_base}x{grid_height}",
+                "--resize", f"{mosaic_side}x{mosaic_side}",
                 "-o", f"{str(self.preview_path / name_base)}sRGB.jpeg",
             ]
             # fmt: on
@@ -308,7 +318,7 @@ class TexConverter:
         return finished_imgs
 
     @staticmethod
-    def _img_dims(img: str) -> tuple[str, str]:
+    def _img_dims(img: str) -> tuple[int, int]:
         img_info = subprocess.check_output(
             [
                 str(Executables.oiiotool),
@@ -321,7 +331,7 @@ class TexConverter:
 
         assert img_dims is not None
         matches = img_dims.group(1, 2)
-        return (matches[0], matches[1])
+        return (int(matches[0]), int(matches[1]))
 
     @staticmethod
     def _wait_and_check_cmds(
