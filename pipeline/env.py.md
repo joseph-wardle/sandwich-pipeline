@@ -1,8 +1,8 @@
 # `env.py` Contents
 
-In this folder the pipeline expects a file named `env.py` with the following 
-defined variables to properly function. Note that they will need to be defined 
-conditionally based off of operating system for functionality on multiple 
+In this folder the pipeline expects a file named `env.py` with the following
+defined variables to properly function. Note that they will need to be defined
+conditionally based off of operating system for functionality on multiple
 operating systems.
 
 ```python
@@ -21,6 +21,7 @@ class Executables:
     mayabin: Path             # absolute path to the Maya bin folder (ie /usr/autodesk/maya2024/bin)
     maya: Path                # absolute path to the Maya executable
     mayapy: Path              # absolute path to the mayapy executable
+    blender: Path             # absolute path to the Blender executable
     nukedir: Path             # absolute path to the Nuke installation dir (ie /opt/Nuke14.0v5)
     nuke: Path                # absolute path to the Nuke executable
     nuke_python: Path         # absolute path to the Nuke python executable
