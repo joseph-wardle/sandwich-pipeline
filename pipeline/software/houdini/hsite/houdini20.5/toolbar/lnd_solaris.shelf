@@ -194,9 +194,9 @@ loptoolutils.referenceTestAsset(node, asset_name)]]></script>
   </shelfSet>
 
   <shelfSet name="solaris_lnd" label="Solaris Geometry">
+    <memberToolshelf name="skd_shots"/>
     <memberToolshelf name="skd_assets"/>
     <memberToolshelf name="skd_sets"/>
-    <memberToolshelf name="skd_shots"/>
     <memberToolshelf name="test_geometry"/>
     <memberToolshelf name="shelf_1"/>
     <memberToolshelf name="shelf_1"/>
