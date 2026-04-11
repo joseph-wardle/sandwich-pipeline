@@ -283,6 +283,13 @@ class Exporter:
     def _normalize_texture_export_map(
         textures: object,
     ) -> dict[tuple[str, str], list[str]]:
+        """Coerce an SP texture map into a consistently typed dict.
+
+        The SP API returns ``dict[(str, str), list[str]]`` keyed by
+        (texture_set_name, stack_name), but the runtime types aren't always
+        exact.  This ensures every key is a proper ``(str, str)`` tuple and
+        every value is a ``list[str]``.
+        """
         if not isinstance(textures, dict):
             return {}
 
@@ -309,6 +316,12 @@ class Exporter:
         *,
         started_at_unix: float,
     ) -> dict[tuple[str, str], list[str]]:
+        """Scan disk for files that were written recently at planned paths.
+
+        Used as a last-resort recovery when the SP export API returns an
+        empty file list despite files being written to disk.  Only files
+        modified within 5 seconds of *started_at_unix* are included.
+        """
         recovered: dict[tuple[str, str], list[str]] = {}
         for stack_key, export_paths in planned_exports.items():
             written_paths: list[str] = []
@@ -342,6 +355,18 @@ class Exporter:
         _ExportEventSnapshot,
         typing.Callable[[], None],
     ]:
+        """Connect SP export event listeners and return a snapshot + disconnect callback.
+
+        Substance Painter fires ``ExportTexturesAboutToStart`` and
+        ``ExportTexturesEnded`` events during export.  This method connects
+        listeners that capture those events into a mutable snapshot, and
+        returns a disconnect callable.  The snapshot is used by
+        ``_resolve_exported_files`` as a fallback when the export return
+        value is empty.
+
+        Returns ``(snapshot, disconnect)`` — call *disconnect* after the
+        export to stop listening.
+        """
         snapshot = _ExportEventSnapshot()
 
         def _on_about_to_start(event: sp.event.ExportTexturesAboutToStart) -> None:
@@ -384,6 +409,17 @@ class Exporter:
         *,
         started_at_unix: float,
     ) -> dict[tuple[str, str], list[str]]:
+        """Determine which texture files were actually written to disk.
+
+        Tries three sources in order, falling back to the next if the
+        previous yields an empty result:
+
+        1. ``export_result.textures`` — the SP export return value
+        2. ``event_snapshot.ended_textures`` — from the ExportTexturesEnded event
+        3. ``_find_recent_written_exports`` — disk scan of planned paths
+
+        Raises ``RuntimeError`` with diagnostics if all three are empty.
+        """
         returned_textures = {
             stack_key: list(export_paths)
             for stack_key, export_paths in self._normalize_texture_export_map(
@@ -510,6 +546,16 @@ class Exporter:
         target_count: int,
         progress_callback: PublishProgressCallback | None = None,
     ) -> _TargetExportOutcome:
+        """Export a single texture set target and resolve the output files.
+
+        Calls ``export_project_textures`` for this target, then resolves
+        the exported file list via ``_resolve_exported_files`` (which may
+        fall back to event data or disk scanning if the return value is empty).
+
+        *planned_exports* should come from ``_preflight_exports``.
+
+        Raises ``RuntimeError`` on export failure or empty output.
+        """
         config = Exporter._generate_config(self._src_path, [target])
 
         planned_export_count = self._planned_export_count(planned_exports)

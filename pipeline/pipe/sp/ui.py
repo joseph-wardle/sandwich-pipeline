@@ -435,6 +435,12 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         return note or None
 
     def do_export(self, isBatch: bool = False) -> None:
+        """Validate inputs and start the texture publish pipeline.
+
+        Runs pre-flight checks, gathers export settings from the UI, then
+        hands off to ``_begin_publish`` which manages the async progress
+        dialog and scheduling.
+        """
         if self._active_publish_context is not None:
             return
         if not self._curr_asset:
@@ -509,6 +515,13 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         self._begin_publish(request)
 
     def _begin_publish(self, request: _PendingPublishRequest) -> None:
+        """Set up the progress dialog and kick off the publish.
+
+        Creates the non-closable progress dialog, disables the publish UI,
+        then defers to ``_schedule_publish_when_idle`` via a zero-delay
+        QTimer so Qt can paint the dialog before Substance Painter begins
+        synchronous work.
+        """
         progress_dialog = _PublishProgressDialog(
             self,
             stage_sequence=request.stage_sequence,
@@ -543,6 +556,12 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         )
 
     def _schedule_publish_when_idle(self, context: _ActivePublishContext) -> None:
+        """Wait for Substance Painter to finish any background work, then publish.
+
+        Uses ``sp.project.execute_when_not_busy`` to defer
+        ``_run_publish_request`` until Painter is idle.  This is necessary
+        because export API calls will fail while Painter is processing.
+        """
         if not self._is_active_publish_context(context):
             return
 
@@ -574,6 +593,13 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             )
 
     def _run_publish_request(self, context: _ActivePublishContext) -> None:
+        """Execute the full publish pipeline: save, export, backup, Houdini build.
+
+        Called by ``_schedule_publish_when_idle`` once Painter is idle.
+        Runs synchronously — the progress dialog was already shown by
+        ``_begin_publish``.  On completion (success or failure), dismisses
+        the progress dialog and re-enables the publish UI.
+        """
         if not self._is_active_publish_context(context):
             return
         if not self._curr_asset:
@@ -792,6 +818,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         ).exec_()
 
     def _ensure_project_ready(self) -> bool:
+        """Check that the project is open, idle, loaded, and saved to disk.
+
+        Shows a message dialog and returns False if any precondition fails.
+        """
         if not sp.project.is_open():
             MessageDialog(
                 get_main_qt_window(),
