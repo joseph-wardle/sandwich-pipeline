@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 import substance_painter as sp
 from env_sg import DB_Config
+from substance_painter.exception import ProjectError, ServiceNotFoundError
 
 from pipe.asset.paths import paths_for_asset
 from pipe.asset.version_adapter import asset_owner_for, substance_project_stream
@@ -564,7 +565,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
         try:
             sp.project.execute_when_not_busy(lambda: self._run_publish_request(context))
-        except Exception:
+        except (ProjectError, ServiceNotFoundError):
             log.exception("Failed to schedule publish when Substance Painter is idle.")
             self._show_publish_message(
                 context,
@@ -613,7 +614,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 )
                 try:
                     sp.project.save()
-                except Exception:
+                except ProjectError:
                     log.exception(
                         "Failed to save Substance Painter project before publish."
                     )
@@ -815,7 +816,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                     "Project Loading",
                 ).exec_()
                 return False
-        except Exception:
+        except ServiceNotFoundError:
             log.exception("Failed to query project edition state before publish.")
             return False
 

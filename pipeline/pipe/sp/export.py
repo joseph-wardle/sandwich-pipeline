@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 from env_sg import DB_Config
 from shared.util import resolve_mapped_path
+from substance_painter.exception import ProjectError, ServiceNotFoundError
 
 from pipe.asset.paths import paths_for_asset
 from pipe.db import DB
@@ -164,7 +165,7 @@ class Exporter:
             try:
                 if export_settings.tex_set.has_uv_tiles():
                     count += 1
-            except Exception:
+            except (ProjectError, ServiceNotFoundError):
                 continue
         return count
 
@@ -180,7 +181,7 @@ class Exporter:
     def _texture_export_scope(self) -> dict[str, str] | None:
         try:
             from pipe.telemetry import extract_scope
-        except Exception:
+        except ImportError:
             return None
         scope = extract_scope(self._asset)
         return scope or None
@@ -189,7 +190,7 @@ class Exporter:
     def _new_texture_action_id() -> str | None:
         try:
             from pipe.telemetry import new_action_id
-        except Exception:
+        except ImportError:
             return None
         return new_action_id()
 
@@ -224,7 +225,7 @@ class Exporter:
         try:
             from pipe.telemetry import STATUS_ERROR, STATUS_SUCCESS, emit, events
             from pipe.telemetry.registry import ERROR_TEXTURE_EXPORT_FAILED
-        except Exception:
+        except ImportError:
             return
 
         status_value = STATUS_SUCCESS if status == "success" else STATUS_ERROR
@@ -477,7 +478,7 @@ class Exporter:
 
         try:
             planned_exports = sp.export.list_project_textures(config)
-        except Exception as exc:
+        except (ProjectError, ValueError) as exc:
             raise ValueError(
                 "Export configuration is invalid for texture set "
                 f'"{target.texture_set_name}".\n'
@@ -511,7 +512,7 @@ class Exporter:
         event_snapshot, disconnect_export_events = self._capture_export_events()
         try:
             export_result = sp.export.export_project_textures(config)
-        except Exception as exc:
+        except (ProjectError, ValueError) as exc:
             disconnect_export_events()
             self._cleanup_export_lock(
                 context=f'after export exception for "{target.texture_set_name}"'
@@ -754,7 +755,7 @@ class Exporter:
                     )
                 )
             self.write_mat_info([target.settings for target in resolved_targets])
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             log.exception("Failed to write material info metadata.")
             self._set_error_message(
                 "Textures exported, but failed to write material metadata.\n"

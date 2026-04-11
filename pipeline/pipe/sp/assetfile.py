@@ -18,6 +18,7 @@ from pathlib import Path
 
 import substance_painter as sp
 from env_sg import DB_Config
+from substance_painter.exception import ProjectError, ServiceNotFoundError
 from Qt import QtWidgets
 from shared.util import resolve_mapped_path
 
@@ -130,7 +131,7 @@ def _ensure_project_ready_for_version_action(
                 action_name,
             ).exec_()
             return False
-    except Exception:
+    except ServiceNotFoundError:
         log.exception("Failed to query project edition state for %s.", action_name)
         return False
 
@@ -169,7 +170,7 @@ def _ensure_project_saved_for_version_action(
             return None
         try:
             sp.project.save()
-        except Exception:
+        except ProjectError:
             log.exception("Failed to save project before %s.", action_name)
             MessageDialog(
                 parent,
@@ -208,7 +209,7 @@ def _open_existing_project(path: Path, parent: QtWidgets.QWidget | None) -> bool
     resolved_path = resolve_mapped_path(path)
     try:
         sp.project.open(str(resolved_path))
-    except Exception:
+    except ProjectError:
         log.exception("Failed to open Substance Painter project: %s", resolved_path)
         MessageDialog(
             parent,
@@ -224,7 +225,7 @@ def _save_current_project_as(path: Path, parent: QtWidgets.QWidget | None) -> bo
     resolved_path = resolve_mapped_path(path)
     try:
         sp.project.save_as(str(resolved_path))
-    except Exception:
+    except ProjectError:
         log.exception("Failed to save Substance Painter project as: %s", resolved_path)
         MessageDialog(
             parent,
@@ -241,7 +242,7 @@ def _close_current_project(
     """Close the current project. Returns True on success."""
     try:
         sp.project.close()
-    except Exception:
+    except ProjectError:
         log.exception(
             "Failed to close Substance Painter project before %s.", action_context
         )
@@ -402,7 +403,7 @@ def _create_default_project_for_asset(
             mesh_file_path=str(resolved_mesh),
             template_file_path=str(resolved_template),
         )
-    except Exception:
+    except ProjectError:
         log.exception("Failed to create Painter project from template.")
         MessageDialog(
             parent,

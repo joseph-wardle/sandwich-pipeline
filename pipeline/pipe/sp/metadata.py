@@ -33,6 +33,7 @@ from typing import Any, Callable, Optional
 
 import substance_painter as sp
 from shared.util import get_production_path
+from substance_painter.exception import ProjectError, ServiceNotFoundError
 
 from pipe.asset.paths import DCC_SUBSTANCE
 from pipe.db import DB
@@ -66,7 +67,7 @@ def current_project_path() -> Path | None:
     """Return the file path of the currently open project, or None."""
     try:
         path_str = sp.project.file_path()
-    except Exception:
+    except (ProjectError, ServiceNotFoundError):
         return None
     if not path_str:
         return None
@@ -92,7 +93,8 @@ def run_once_on_project_edition_entered(callback: Callable[[], None]) -> None:
     def _on_edition_entered(_event: sp.event.Event) -> None:
         try:
             sp.event.DISPATCHER.disconnect(_on_edition_entered)
-        except Exception:
+        except RuntimeError:
+            # Already disconnected or never connected — safe to ignore.
             pass
         callback()
 
@@ -121,7 +123,7 @@ def run_when_project_editable(callback: Callable[[], None]) -> None:
                 lambda: run_when_project_editable(callback)
             )
             return
-    except Exception:
+    except ServiceNotFoundError:
         return
 
     callback()
@@ -143,7 +145,7 @@ def _safe_get_metadata() -> dict[str, Any]:
         return {}
     try:
         payload = _metadata_handle().get(PIPE_SP_METADATA_KEY)
-    except Exception:
+    except (ProjectError, ServiceNotFoundError):
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -241,7 +243,7 @@ def store_asset_selection_metadata(
                 )
             )
             return
-    except Exception:
+    except ServiceNotFoundError:
         return
 
     resolved_last_asset = last_asset
@@ -343,7 +345,7 @@ def _asset_from_project_path(conn: DB) -> Asset | None:
             return None
         asset_root = project_path.parent
         rel_asset_path = asset_root.relative_to(prod_root)
-    except Exception:
+    except (ValueError, OSError):
         return None
 
     rel_path_str = rel_asset_path.as_posix()
