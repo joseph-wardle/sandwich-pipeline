@@ -23,6 +23,8 @@ class BlenderDCC(DCC):
         env_vars = {
             "PYTHONPATH": os.pathsep.join([str(pipe_path)]),
             "BLENDER_CUSTOM_SPLASH": str(pipe_path / "lib/splash/toaster_splash.png"),
+            "BLENDER_SYSTEM_EXTENSIONS": str(this_path.parent / "extensions"),
+            "BLENDER_SYSTEM_SCRIPTS": str(this_path.parent / "scripts"),
             # "OCIO": str(pipe_path / "lib/ocio/sandwich-v01/config.ocio"),
         }
 
