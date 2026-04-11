@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
-import subprocess
 from dataclasses import dataclass
 from math import log2
 from pathlib import Path
 from re import findall
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from Qt import QtCore, QtWidgets
 from Qt.QtCore import QRegExp
@@ -26,19 +24,17 @@ if TYPE_CHECKING:
     import typing
 
 import substance_painter as sp
-from env import Executables
 from env_sg import DB_Config
-from shared.util import get_documentation_path
-from software.houdini.dcc import HoudiniDCC
 
 from pipe.asset.paths import paths_for_asset
 from pipe.asset.version_adapter import asset_owner_for, substance_project_stream
 from pipe.db import DB
 from pipe.glui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButtons
-from pipe.sp.dialogs import PIPE_SP_DOCS_PAGE
-from pipe.sp.metadata import get_active_asset_from_project
 from pipe.sp.export import Exporter, TexSetExportSettings
+from pipe.sp.houdini import HoudiniPublishError, run_asset_builder, summarize_result
 from pipe.sp.local import get_main_qt_window
+from pipe.sp.metadata import get_active_asset_from_project
+from pipe.sp.util import docs_link_html, texture_set_name
 from pipe.sp.progress import (
     DEFAULT_PUBLISH_STAGE_SEQUENCE,
     PublishProgressUpdate,
@@ -50,28 +46,6 @@ from pipe.util import checkbox_callback_helper, dict_index
 from pipe.versioning.store import backup_if_changed
 
 log = logging.getLogger(__name__)
-_HOUDINI_RESULT_START = "--BUILD-RESULT--"
-_HOUDINI_RESULT_END = "--END-BUILD-RESULT--"
-
-
-class HoudiniPublishError(RuntimeError):
-    """Raised when headless Houdini publish fails from Substance."""
-
-
-def _docs_link_html() -> str:
-    url = get_documentation_path(PIPE_SP_DOCS_PAGE)
-    if "://" not in url:
-        url = QtCore.QUrl.fromLocalFile(url).toString()
-    return f'<a href="{url}">the documentation</a>'
-
-
-def _texture_set_name(tex_set: sp.textureset.TextureSet) -> str:
-    name_attr = getattr(tex_set, "name", None)
-    if callable(name_attr):
-        return name_attr()
-    if isinstance(name_attr, str):
-        return name_attr
-    return str(tex_set)
 
 
 @dataclass(frozen=True)
@@ -346,7 +320,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         footer = QLabel(
             "Tip: Make sure your project was opened via Open Asset so the asset "
             "metadata is stored in the project. For more information, see "
-            f"{_docs_link_html()}."
+            f"{docs_link_html()}."
         )
         footer.setWordWrap(True)
         footer.setTextFormat(QtCore.Qt.RichText)
@@ -759,10 +733,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                         message="Running the Houdini asset publish step.",
                     )
                 )
-                houdini_result = self._run_houdini_asset_builder(
-                    geo_variant=request.geo_var
+                houdini_result = run_asset_builder(
+                    self._curr_asset, geo_variant=request.geo_var
                 )
-                houdini_status = self._summarize_houdini_result(houdini_result)
+                houdini_status = summarize_result(houdini_result)
             except HoudiniPublishError as exc:
                 houdini_status = f"Houdini publish failed: {exc}"
                 log.error("Headless Houdini publish failed from Substance: %s", exc)
@@ -813,159 +787,6 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             message,
             title or "Publish Textures",
         ).exec_()
-
-    def _run_houdini_asset_builder(self, *, geo_variant: str) -> dict[str, Any]:
-        asset = self._curr_asset
-        assert asset is not None
-
-        if not Executables.hython.exists():
-            raise HoudiniPublishError(
-                f"Houdini executable not found at {Executables.hython}"
-            )
-
-        asset_paths = paths_for_asset(asset)
-        asset_name = asset.name or asset.display_name or asset_paths.root.name
-        command = [
-            str(Executables.hython),
-            "-m",
-            "pipe.h.assetbuilder",
-            "--asset-root",
-            str(asset_paths.root),
-            "--asset-name",
-            asset_name,
-            "--variant",
-            geo_variant,
-            "--ensure-builder",
-            "--publish",
-            "--respect-existing",
-        ]
-
-        if asset.asset_path:
-            command.extend(["--asset-path", asset.asset_path])
-        if asset.id is not None:
-            command.extend(["--asset-id", str(asset.id)])
-
-        dcc = HoudiniDCC(is_python_shell=True)
-        env = dcc._get_env_vars()
-        env["PIPE_LOG_LEVEL"] = str(log.getEffectiveLevel())
-
-        log.info(
-            "Running headless Houdini publish from Substance for %s (geo=%s)",
-            asset_name,
-            geo_variant,
-        )
-        try:
-            completed = subprocess.run(
-                command,
-                check=True,
-                capture_output=True,
-                text=True,
-                env=env,
-            )
-        except FileNotFoundError as exc:
-            raise HoudiniPublishError(
-                "Failed to execute hython; verify Houdini is installed."
-            ) from exc
-        except subprocess.CalledProcessError as exc:
-            stdout = exc.stdout or ""
-            payload = self._parse_houdini_result(stdout)
-            if payload is not None:
-                summary = self._summarize_houdini_errors(payload)
-                raise HoudiniPublishError(summary) from exc
-            if stdout:
-                log.error("Houdini asset builder stdout:\n%s", stdout)
-            if exc.stderr:
-                log.error("Houdini asset builder stderr:\n%s", exc.stderr)
-            raise HoudiniPublishError(
-                f"Houdini publish failed with exit code {exc.returncode}"
-            ) from exc
-
-        payload = self._parse_houdini_result(completed.stdout or "")
-        if payload is None:
-            log.error("Houdini asset builder stdout:\n%s", completed.stdout or "")
-            log.error("Houdini asset builder stderr:\n%s", completed.stderr or "")
-            raise HoudiniPublishError(
-                "Failed to parse structured output from Houdini publish."
-            )
-
-        if payload.get("status") != "success":
-            raise HoudiniPublishError(self._summarize_houdini_errors(payload))
-        return payload
-
-    @staticmethod
-    def _parse_houdini_result(stdout: str) -> dict[str, Any] | None:
-        start = stdout.find(_HOUDINI_RESULT_START)
-        end = stdout.find(_HOUDINI_RESULT_END)
-        if start == -1 or end == -1:
-            return None
-        json_text = stdout[start + len(_HOUDINI_RESULT_START) : end]
-        try:
-            payload = json.loads(json_text)
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(payload, dict):
-            return None
-        return payload
-
-    @staticmethod
-    def _summarize_houdini_errors(payload: dict[str, Any]) -> str:
-        errors = payload.get("errors", [])
-        if isinstance(errors, list):
-            messages = [
-                str(entry.get("message", ""))
-                for entry in errors
-                if isinstance(entry, dict) and entry.get("message")
-            ]
-            if messages:
-                return "; ".join(messages)
-        publish_payload = payload.get("publish")
-        if isinstance(publish_payload, dict):
-            publish_errors = publish_payload.get("errors", [])
-            if isinstance(publish_errors, list):
-                messages = [
-                    str(entry.get("message", ""))
-                    for entry in publish_errors
-                    if isinstance(entry, dict) and entry.get("message")
-                ]
-                if messages:
-                    return "; ".join(messages)
-        return "Unknown Houdini publish error."
-
-    @staticmethod
-    def _summarize_houdini_result(payload: dict[str, Any]) -> str:
-        status = str(payload.get("status", "unknown")).capitalize()
-        parts = [f"Houdini publish: {status}"]
-
-        summary = payload.get("summary")
-        if isinstance(summary, dict):
-            if summary.get("builder_created"):
-                parts.append("builder created")
-            else:
-                parts.append("builder reused")
-
-        publish_payload = payload.get("publish")
-        if isinstance(publish_payload, dict):
-            export = publish_payload.get("export")
-            if isinstance(export, dict):
-                export_path = str(export.get("export_path", "")).strip()
-                if export_path:
-                    parts.append(f"exported {Path(export_path).name}")
-
-            gallery = publish_payload.get("gallery")
-            if isinstance(gallery, dict):
-                gallery_status = str(gallery.get("status", "")).strip()
-                if gallery_status:
-                    parts.append(f"gallery {gallery_status}")
-
-            warnings = publish_payload.get("warnings", [])
-            if isinstance(warnings, list) and warnings:
-                parts.append(f"{len(warnings)} publish warning(s)")
-
-        warnings = payload.get("warnings", [])
-        if isinstance(warnings, list) and warnings:
-            parts.append(f"{len(warnings)} warning(s)")
-
-        return ", ".join(parts)
 
     def _ensure_project_ready(self) -> bool:
         if not sp.project.is_open():
@@ -1085,7 +906,7 @@ class TexSetWidget(QtWidgets.QWidget):
             MessageDialog(
                 get_main_qt_window(),
                 (
-                    f'Texture Set "{_texture_set_name(self._tex_set)}" uses material '
+                    f'Texture Set "{texture_set_name(self._tex_set)}" uses material '
                     "layering. This publish tool currently supports non-layered "
                     "texture sets only."
                 ),
@@ -1114,7 +935,7 @@ class TexSetWidget(QtWidgets.QWidget):
         layout.addWidget(self._enabled_checkbox, 10, QtCore.Qt.AlignTop)
 
         message = QLabel(
-            f"{_texture_set_name(self._tex_set)} "
+            f"{texture_set_name(self._tex_set)} "
             "(material layering not supported by this exporter)"
         )
         message.setWordWrap(True)
@@ -1144,7 +965,7 @@ class TexSetWidget(QtWidgets.QWidget):
         layout.addWidget(settings_container, 90)
 
         # Texture set title
-        self.label = QLabel(_texture_set_name(self._tex_set))
+        self.label = QLabel(texture_set_name(self._tex_set))
         self.label.setStyleSheet("font-size: 11px; font-weight: bold;")
         settings_layout.addWidget(self.label, 0, 0, 1, 3)
 

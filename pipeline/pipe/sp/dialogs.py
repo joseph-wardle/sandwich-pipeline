@@ -20,20 +20,18 @@ from pathlib import Path
 
 import substance_painter as sp
 from Qt import QtCore, QtWidgets
-from shared.util import get_documentation_path, get_production_path, resolve_mapped_path
+from shared.util import get_production_path, resolve_mapped_path
 from substance_painter.project import NormalMapFormat, ProjectWorkflow, TangentSpace
 
 from pipe.asset.paths import AssetPaths, paths_for_asset
 from pipe.db import DB
 from pipe.glui.dialogs import DialogFilteredList, FilteredListDialog
+from pipe.sp.util import docs_link_html
 from pipe.struct.db import Asset
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-PIPE_SP_DOCS_PAGE = "Asset-Pipeline#substance-painter"
-"""Wiki page slug appended to the documentation base URL."""
 
 PIPE_SP_PROJECT_TEMPLATE_NAME = "sandwich_default.spt"
 PIPE_SP_PROJECT_TEMPLATE_DIR = Path("painter_assets") / "templates"
@@ -41,14 +39,6 @@ PIPE_SP_PROJECT_TEMPLATE_DIR = Path("painter_assets") / "templates"
 # ---------------------------------------------------------------------------
 # Helpers used by dialogs and other sp modules
 # ---------------------------------------------------------------------------
-
-
-def docs_link_html() -> str:
-    """Return an HTML anchor tag linking to the Substance Painter docs page."""
-    url = get_documentation_path(PIPE_SP_DOCS_PAGE)
-    if "://" not in url:
-        url = QtCore.QUrl.fromLocalFile(url).toString()
-    return f'<a href="{url}">the documentation</a>'
 
 
 def project_path_for_variant(paths: AssetPaths, variant: str) -> Path:

@@ -25,6 +25,7 @@ from pipe.sp.progress import (
     PublishProgressUpdate,
     PublishStage,
 )
+from pipe.sp.util import texture_set_name
 from pipe.struct.db import Asset
 from pipe.struct.material import (
     DisplacementSource,
@@ -75,16 +76,6 @@ class _TargetExportOutcome:
     used_event_fallback: bool
 
 
-def _texture_set_name(tex_set: sp.textureset.TextureSet) -> str:
-    """Return texture set name across API versions."""
-    name_attr = getattr(tex_set, "name", None)
-    if callable(name_attr):
-        return name_attr()
-    if isinstance(name_attr, str):
-        return name_attr
-    return str(tex_set)
-
-
 def _channel_export_name(channel: sp.textureset.Channel) -> str:
     label_attr = getattr(channel, "label", None)
     label = label_attr() if callable(label_attr) else label_attr
@@ -94,9 +85,9 @@ def _channel_export_name(channel: sp.textureset.Channel) -> str:
 
 
 def _stack_root_path(stack: sp.textureset.Stack) -> str:
-    texture_set_name = _texture_set_name(stack.material())
+    ts_name = texture_set_name(stack.material())
     stack_name = stack.name()
-    return f"{texture_set_name}/{stack_name}" if stack_name else texture_set_name
+    return f"{ts_name}/{stack_name}" if stack_name else ts_name
 
 
 class Exporter:
@@ -143,13 +134,13 @@ class Exporter:
     ) -> list[_ResolvedExportTarget]:
         targets: list[_ResolvedExportTarget] = []
         for export_settings in exp_setting_arr:
-            texture_set_name = _texture_set_name(export_settings.tex_set)
+            ts_name = texture_set_name(export_settings.tex_set)
             try:
                 stack = export_settings.tex_set.get_stack()
             except ValueError as exc:
                 raise ValueError(
                     (
-                        f'Texture Set "{texture_set_name}" uses material layering.\n'
+                        f'Texture Set "{ts_name}" uses material layering.\n'
                         "This publish tool currently supports non-layered texture "
                         "sets only."
                     )
@@ -159,7 +150,7 @@ class Exporter:
                 _ResolvedExportTarget(
                     settings=export_settings,
                     stack=stack,
-                    texture_set_name=texture_set_name,
+                    texture_set_name=ts_name,
                 )
             )
         return targets
@@ -823,9 +814,7 @@ class Exporter:
         else:
             old_mat_info = MaterialInfo()
 
-        all_tex_sets = [
-            _texture_set_name(ts) for ts in sp.textureset.all_texture_sets()
-        ]
+        all_tex_sets = [texture_set_name(ts) for ts in sp.textureset.all_texture_sets()]
         for tex_set in list(old_mat_info.tex_sets.keys()):
             if tex_set not in all_tex_sets:
                 del old_mat_info.tex_sets[tex_set]
@@ -834,7 +823,7 @@ class Exporter:
             {
                 **old_mat_info.tex_sets,
                 **{
-                    _texture_set_name(export_settings.tex_set): TexSetInfo(
+                    texture_set_name(export_settings.tex_set): TexSetInfo(
                         displacement_source=export_settings.displacement_source,
                         has_udims=export_settings.tex_set.has_uv_tiles(),
                         normal_source=export_settings.normal_source,

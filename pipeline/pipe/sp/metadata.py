@@ -36,6 +36,7 @@ from shared.util import get_production_path
 
 from pipe.asset.paths import DCC_SUBSTANCE
 from pipe.db import DB
+from pipe.sp.util import texture_set_name
 from pipe.struct.db import Asset, build_asset_path
 
 log = logging.getLogger(__name__)
@@ -58,19 +59,7 @@ PIPE_SP_METADATA_SCHEMA_VERSION = 1
 # Shared utilities
 # ---------------------------------------------------------------------------
 
-
-def texture_set_name(tex_set: sp.textureset.TextureSet) -> str:
-    """Return the display name of a texture set.
-
-    Handles differences across Substance Painter API versions where ``name``
-    may be a method, a property, or unavailable.
-    """
-    name_attr = getattr(tex_set, "name", None)
-    if callable(name_attr):
-        return name_attr()
-    if isinstance(name_attr, str):
-        return name_attr
-    return str(tex_set)
+# texture_set_name is imported from pipe.sp.util
 
 
 def current_project_path() -> Path | None:
