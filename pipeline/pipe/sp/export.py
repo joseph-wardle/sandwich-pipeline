@@ -450,48 +450,69 @@ class Exporter:
         detail = "\n".join(details)
         raise RuntimeError(detail)
 
+    def _preflight_exports(
+        self,
+        resolved_targets: list[_ResolvedExportTarget],
+        *,
+        progress_callback: PublishProgressCallback | None = None,
+    ) -> dict[str, dict[tuple[str, str], list[str]]]:
+        """Validate export config and collect planned exports for all targets.
+
+        Calls ``list_project_textures`` once with a combined config, then
+        partitions the results by texture set name.  Raises ``ValueError``
+        early if the config is invalid or any target would produce no files.
+        """
+        if progress_callback is not None:
+            progress_callback(
+                PublishProgressUpdate(
+                    stage=PublishStage.PLANNING_EXPORT,
+                    message=(
+                        f"Validating export configuration for "
+                        f"{len(resolved_targets)} texture set(s)."
+                    ),
+                )
+            )
+
+        config = Exporter._generate_config(self._src_path, resolved_targets)
+        log.debug(config)
+        try:
+            all_planned = sp.export.list_project_textures(config)
+        except (ProjectError, ValueError) as exc:
+            raise ValueError(
+                "Export configuration is invalid.\n"
+                "Check enabled texture sets and channel settings, then try again.\n"
+                f"Details: {exc}"
+            ) from exc
+
+        # Partition planned exports by texture set name (first element of the
+        # (texture_set_name, stack_name) key that list_project_textures returns).
+        planned_by_target: dict[str, dict[tuple[str, str], list[str]]] = {}
+        for (ts_name, stack_name), paths in all_planned.items():
+            target_planned = planned_by_target.setdefault(ts_name, {})
+            target_planned[(ts_name, stack_name)] = paths
+
+        for target in resolved_targets:
+            target_planned = planned_by_target.get(target.texture_set_name, {})
+            if not any(target_planned.values()):
+                raise ValueError(
+                    "No textures match the current export configuration for "
+                    f'texture set "{target.texture_set_name}".'
+                )
+
+        return planned_by_target
+
     def _export_target(
         self,
         target: _ResolvedExportTarget,
         *,
+        planned_exports: dict[tuple[str, str], list[str]],
         target_index: int,
         target_count: int,
         progress_callback: PublishProgressCallback | None = None,
     ) -> _TargetExportOutcome:
         config = Exporter._generate_config(self._src_path, [target])
-        log.debug(config)
-
-        planned_message = (
-            "Collecting the source textures Painter plans to write "
-            f"for texture set {target_index}/{target_count}: "
-            f"{target.texture_set_name}."
-        )
-        if progress_callback is not None:
-            progress_callback(
-                PublishProgressUpdate(
-                    stage=PublishStage.PLANNING_EXPORT,
-                    message=planned_message,
-                    current=target_index - 1,
-                    total=target_count,
-                )
-            )
-
-        try:
-            planned_exports = sp.export.list_project_textures(config)
-        except (ProjectError, ValueError) as exc:
-            raise ValueError(
-                "Export configuration is invalid for texture set "
-                f'"{target.texture_set_name}".\n'
-                "Check enabled texture sets and channel settings, then try again.\n"
-                f"Details: {exc}"
-            ) from exc
 
         planned_export_count = self._planned_export_count(planned_exports)
-        if not any(planned_exports.values()):
-            raise ValueError(
-                "No textures match the current export configuration for "
-                f'texture set "{target.texture_set_name}".'
-            )
 
         if progress_callback is not None:
             progress_callback(
@@ -663,6 +684,26 @@ class Exporter:
                 [target.settings for target in resolved_targets]
             ),
         )
+
+        # Pre-flight: validate config and collect planned exports for all
+        # targets in a single list_project_textures call.  This catches
+        # invalid configs and empty texture sets before any export begins.
+        try:
+            planned_by_target = self._preflight_exports(
+                resolved_targets, progress_callback=progress_callback
+            )
+        except ValueError as exc:
+            self._set_error_message(str(exc))
+            self._emit_texture_export_event(
+                status="error",
+                action_id=export_action_id,
+                payload=export_payload,
+                duration_ms=_duration_ms(),
+                error_message=self._last_error_message,
+                exception_type=type(exc).__name__,
+            )
+            return False
+
         all_exported_textures: dict[tuple[str, str], list[str]] = {}
         planned_texture_count = 0
         returned_texture_count = 0
@@ -677,26 +718,11 @@ class Exporter:
             try:
                 outcome = self._export_target(
                     target,
+                    planned_exports=planned_by_target.get(target.texture_set_name, {}),
                     target_index=target_index,
                     target_count=len(resolved_targets),
                     progress_callback=progress_callback,
                 )
-            except ValueError as exc:
-                log.exception(
-                    'Export configuration is invalid for texture set "%s".',
-                    target.texture_set_name,
-                )
-                self._set_error_message(str(exc))
-                export_payload["planned_texture_count"] = planned_texture_count
-                self._emit_texture_export_event(
-                    status="error",
-                    action_id=export_action_id,
-                    payload=export_payload,
-                    duration_ms=_duration_ms(),
-                    error_message=self._last_error_message,
-                    exception_type=type(exc).__name__,
-                )
-                return False
             except RuntimeError as exc:
                 log.error(
                     'Texture export failed while processing texture set "%s".',
@@ -722,20 +748,6 @@ class Exporter:
             all_exported_textures.update(outcome.exported_textures)
 
         export_payload["planned_texture_count"] = planned_texture_count
-        if planned_texture_count <= 0:
-            self._set_error_message(
-                "No textures match the current export configuration."
-            )
-            log.warning("Export aborted: no matching textures in export configuration.")
-            self._emit_texture_export_event(
-                status="error",
-                action_id=export_action_id,
-                payload=export_payload,
-                duration_ms=_duration_ms(),
-                error_message=self._last_error_message,
-                exception_type="NoExportsPlanned",
-            )
-            return False
 
         export_payload["exported_texture_count"] = self._planned_export_count(
             all_exported_textures
