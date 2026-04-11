@@ -13,14 +13,10 @@ import substance_painter as sp
 if TYPE_CHECKING:
     import typing
 
-    RT = typing.TypeVar("RT")  # return type
-
-from env_sg import DB_Config
 from shared.util import resolve_mapped_path
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
 from pipe.asset.paths import paths_for_asset
-from pipe.db import DB
 from pipe.sp.progress import (
     PublishProgressCallback,
     PublishProgressUpdate,
@@ -37,7 +33,6 @@ from pipe.struct.material import (
 )
 from pipe.texconverter import TexConversionError, TexConverter
 
-lib_path = resolve_mapped_path(Path(__file__).parents[1] / "lib")
 log = logging.getLogger(__name__)
 
 
@@ -68,7 +63,6 @@ class _ExportEventSnapshot:
 
 @dataclass(frozen=True)
 class _TargetExportOutcome:
-    target: _ResolvedExportTarget
     planned_exports: dict[tuple[str, str], list[str]]
     exported_textures: dict[tuple[str, str], list[str]]
     returned_texture_count: int
@@ -95,7 +89,6 @@ class Exporter:
     """Class to manage exporting and converting textures"""
 
     _asset: Asset
-    _conn: DB
     _out_path: Path
     _preview_path: Path
     _src_path: Path
@@ -103,7 +96,6 @@ class Exporter:
 
     def __init__(self, asset: Asset) -> None:
         self._asset = asset
-        self._conn = DB.Get(DB_Config)
         self._last_error_message: str | None = None
 
     @property
@@ -248,9 +240,8 @@ class Exporter:
             error=error_data,
         )
 
-    def _set_error_message(self, message: str) -> str:
+    def _set_error_message(self, message: str) -> None:
         self._last_error_message = message.strip()
-        return self._last_error_message
 
     def _src_lock_path(self) -> Path:
         return self._src_path / ".lock"
@@ -396,7 +387,7 @@ class Exporter:
                 (sp.event.ExportTexturesAboutToStart, _on_about_to_start),
                 (sp.event.ExportTexturesEnded, _on_export_ended),
             ):
-                with suppress(Exception):
+                with suppress(RuntimeError):
                     sp.event.DISPATCHER.disconnect(event_type, callback)
 
         return snapshot, _disconnect
@@ -669,7 +660,6 @@ class Exporter:
             )
 
         return _TargetExportOutcome(
-            target=target,
             planned_exports=planned_exports,
             exported_textures=exported_textures,
             returned_texture_count=returned_texture_count,
@@ -872,7 +862,7 @@ class Exporter:
 
     def write_mat_info(
         self, export_settings_arr: typing.Iterable[TexSetExportSettings]
-    ) -> bool:
+    ) -> None:
         """Write out JSON file with information about the texturesets"""
         mat_info_path = self._out_path / "mat.json"
         old_mat_info: MaterialInfo
@@ -903,7 +893,6 @@ class Exporter:
         )
         with open(str(self._out_path / "mat.json"), "w", encoding="utf-8") as f:
             f.write(new_mat_info.to_json())
-        return True
 
     @staticmethod
     def _generate_config(

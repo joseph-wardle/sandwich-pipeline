@@ -409,9 +409,6 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         """Check for asset metadata and correct channel types before running
         the export"""
         return True
-        # metaUpdater = pipe.sp.metadata.MetadataUpdater()
-        # meta = metaUpdater.check() or metaUpdater.do_update()
-        # return meta  # and srgb
 
     @property
     def mat_var(self) -> str:
