@@ -35,7 +35,8 @@ from pipe.asset.paths import paths_for_asset
 from pipe.asset.version_adapter import asset_owner_for, substance_project_stream
 from pipe.db import DB
 from pipe.glui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButtons
-from pipe.sp.assetfile import PIPE_SP_DOCS_PAGE, get_active_asset_from_project
+from pipe.sp.dialogs import PIPE_SP_DOCS_PAGE
+from pipe.sp.metadata import get_active_asset_from_project
 from pipe.sp.export import Exporter, TexSetExportSettings
 from pipe.sp.local import get_main_qt_window
 from pipe.sp.progress import (
