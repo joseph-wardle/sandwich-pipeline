@@ -649,6 +649,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             )
             if not export_success:
                 log.error("Texture export failed for %s", request.asset_label)
+                sp.logging.error(f"Publish failed for {request.asset_label}")
                 error_message = exporter.last_error_message or (
                     "An error occurred while exporting textures. Please check the "
                     "console for more information."
@@ -747,6 +748,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 message = f"{message}\n{backup_status}"
             if houdini_status:
                 message = f"{message}\n{houdini_status}"
+            sp.logging.info(f"Publish complete for {request.asset_label}")
             self._show_publish_message(context, message)
         except Exception as exc:
             log.exception(

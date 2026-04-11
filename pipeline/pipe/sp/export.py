@@ -790,6 +790,12 @@ class Exporter:
             duration_ms=_duration_ms(),
         )
 
+        exported_count = self._planned_export_count(all_exported_textures)
+        sp.logging.info(
+            f"Exported {exported_count} texture(s) for "
+            f"{self._texture_export_asset_name()} to {self._out_path}"
+        )
+
         tex_converter = TexConverter(
             self._tex_path,
             self._preview_path,
@@ -806,6 +812,9 @@ class Exporter:
             tex_converter.convert_all()
         except TexConversionError:
             log.exception("Texture conversion failed.")
+            sp.logging.warning(
+                "TEX conversion failed; source textures exported but .tex files were not generated."
+            )
             self._set_error_message(
                 "Source textures exported, but TEX conversion failed.\n"
                 "Stop rendering this asset in Houdini and press "

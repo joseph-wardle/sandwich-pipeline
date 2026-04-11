@@ -294,11 +294,11 @@ def _open_existing_project_for_asset(
     if not _open_existing_project(project_path, parent):
         return
     store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
+    asset_label = asset.display_name or asset.name
     log.info(
-        "Opened Substance project for asset %s (variant=%s)",
-        asset.display_name or asset.name,
-        geo_variant,
+        "Opened Substance project for asset %s (variant=%s)", asset_label, geo_variant
     )
+    sp.logging.info(f"Opened project for {asset_label} (variant={geo_variant})")
 
 
 def _save_current_project_as_asset(
@@ -421,7 +421,9 @@ def _create_default_project_for_asset(
         store_asset_metadata_when_ready(asset, geo_variant=variant)
 
     run_when_project_editable(_finalize_save)
+    asset_label = asset.display_name or asset.name
     log.info("Created Substance project at %s", project_path)
+    sp.logging.info(f"Created default project for {asset_label} (variant={variant})")
 
 
 # ---------------------------------------------------------------------------
