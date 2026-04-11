@@ -588,9 +588,7 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         else:
             if fallback_path and variant_path and fallback_path != resolved:
                 self._mesh_status_label.setText(
-                    "Mesh source: {} (missing; fallback {} missing)".format(
-                        variant_path, fallback_path
-                    )
+                    f"Mesh source: {variant_path} (missing; fallback {fallback_path} missing)"
                 )
             else:
                 self._mesh_status_label.setText(f"Mesh source: {resolved} (missing)")

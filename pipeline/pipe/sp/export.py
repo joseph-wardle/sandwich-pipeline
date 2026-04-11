@@ -252,16 +252,10 @@ class Exporter:
             return
         try:
             lock_path.unlink()
-            log.warning(
-                "Removed stale Substance export lock %s (%s)",
-                lock_path,
-                context,
-            )
+            log.warning(f"Removed stale Substance export lock {lock_path} ({context})")
         except OSError:
             log.exception(
-                "Failed to remove Substance export lock %s (%s)",
-                lock_path,
-                context,
+                f"Failed to remove Substance export lock {lock_path} ({context})"
             )
 
     @staticmethod
@@ -428,8 +422,8 @@ class Exporter:
         }
         if ended_textures:
             log.warning(
-                "Substance export return was empty, but ExportTexturesEnded reported %d files.",
-                self._planned_export_count(ended_textures),
+                "Substance export return was empty, but "
+                f"ExportTexturesEnded reported {self._planned_export_count(ended_textures)} files."
             )
             return ended_textures
 
@@ -593,9 +587,8 @@ class Exporter:
 
         if export_result.status == sp.export.ExportStatus.Warning:
             log.warning(
-                'Texture export completed with warnings for "%s": %s',
-                target.texture_set_name,
-                export_result.message,
+                f'Texture export completed with warnings for "{target.texture_set_name}": '
+                f"{export_result.message}"
             )
         elif export_result.status != sp.export.ExportStatus.Success:
             result_message = str(getattr(export_result, "message", "") or "").strip()
@@ -633,17 +626,16 @@ class Exporter:
 
         if planned_export_count != event_planned_texture_count:
             log.warning(
-                'Substance planned export count mismatch for "%s": list_project_textures=%s, ExportTexturesAboutToStart=%s',
-                target.texture_set_name,
-                planned_export_count,
-                event_planned_texture_count,
+                "Substance planned export count mismatch for "
+                f'"{target.texture_set_name}": '
+                f"list_project_textures={planned_export_count}, "
+                f"ExportTexturesAboutToStart={event_planned_texture_count}"
             )
         if returned_texture_count != event_texture_count:
             log.warning(
-                'Substance export count mismatch for "%s": return=%s, ExportTexturesEnded=%s',
-                target.texture_set_name,
-                returned_texture_count,
-                event_texture_count,
+                f'Substance export count mismatch for "{target.texture_set_name}": '
+                f"return={returned_texture_count}, "
+                f"ExportTexturesEnded={event_texture_count}"
             )
 
         if progress_callback is not None:
@@ -692,7 +684,7 @@ class Exporter:
             return max(0, int((time.perf_counter() - export_started_at) * 1000))
 
         self._init_paths(mat_var, geo_var, material_layer)
-        log.info("Exporting textures to %s", self._out_path)
+        log.info(f"Exporting textures to {self._out_path}")
 
         self._cleanup_export_lock(context="before export")
         preexisting_src_count = self._existing_source_file_count()
@@ -761,8 +753,7 @@ class Exporter:
                 )
             except RuntimeError as exc:
                 log.error(
-                    'Texture export failed while processing texture set "%s".',
-                    target.texture_set_name,
+                    f'Texture export failed while processing texture set "{target.texture_set_name}".'
                 )
                 self._set_error_message(str(exc))
                 export_payload["planned_texture_count"] = planned_texture_count

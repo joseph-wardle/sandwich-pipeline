@@ -132,7 +132,7 @@ def _ensure_project_ready_for_version_action(
             ).exec_()
             return False
     except ServiceNotFoundError:
-        log.exception("Failed to query project edition state for %s.", action_name)
+        log.exception(f"Failed to query project edition state for {action_name}.")
         return False
 
     return True
@@ -171,7 +171,7 @@ def _ensure_project_saved_for_version_action(
         try:
             sp.project.save()
         except ProjectError:
-            log.exception("Failed to save project before %s.", action_name)
+            log.exception(f"Failed to save project before {action_name}.")
             MessageDialog(
                 parent,
                 "Failed to save the current project. Resolve file issues and try again.",
@@ -210,7 +210,7 @@ def _open_existing_project(path: Path, parent: QtWidgets.QWidget | None) -> bool
     try:
         sp.project.open(str(resolved_path))
     except ProjectError:
-        log.exception("Failed to open Substance Painter project: %s", resolved_path)
+        log.exception(f"Failed to open Substance Painter project: {resolved_path}")
         MessageDialog(
             parent,
             f"Failed to open the Substance Painter project:\n{resolved_path}",
@@ -226,7 +226,7 @@ def _save_current_project_as(path: Path, parent: QtWidgets.QWidget | None) -> bo
     try:
         sp.project.save_as(str(resolved_path))
     except ProjectError:
-        log.exception("Failed to save Substance Painter project as: %s", resolved_path)
+        log.exception(f"Failed to save Substance Painter project as: {resolved_path}")
         MessageDialog(
             parent,
             f"Failed to save the Substance Painter project:\n{resolved_path}",
@@ -244,7 +244,7 @@ def _close_current_project(
         sp.project.close()
     except ProjectError:
         log.exception(
-            "Failed to close Substance Painter project before %s.", action_context
+            f"Failed to close Substance Painter project before {action_context}."
         )
         MessageDialog(
             parent,
@@ -272,7 +272,7 @@ def _open_existing_project_for_asset(
             "No Substance Painter project exists yet. Use Save Current As or Create Default.",
             "Missing Substance Painter Project",
         ).exec_()
-        log.warning("Substance project missing at %s", project_path)
+        log.warning(f"Substance project missing at {project_path}")
         return
 
     cur = current_project_path()
@@ -296,7 +296,7 @@ def _open_existing_project_for_asset(
     store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
     asset_label = asset.display_name or asset.name
     log.info(
-        "Opened Substance project for asset %s (variant=%s)", asset_label, geo_variant
+        f"Opened Substance project for asset {asset_label} (variant={geo_variant})"
     )
     sp.logging.info(f"Opened project for {asset_label} (variant={geo_variant})")
 
@@ -327,7 +327,7 @@ def _save_current_project_as_asset(
     if not _save_current_project_as(project_path, parent):
         return
     store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
-    log.info("Saved Substance project to %s (variant=%s)", project_path, geo_variant)
+    log.info(f"Saved Substance project to {project_path} (variant={geo_variant})")
 
 
 def _create_default_project_for_asset(
@@ -342,9 +342,8 @@ def _create_default_project_for_asset(
     parent = get_main_qt_window()
     paths = paths_for_asset(asset)
     log.info(
-        "Creating default Substance project for %s (variant=%s)",
-        asset.display_name or asset.name,
-        variant,
+        "Creating default Substance project for "
+        f"{asset.display_name or asset.name} (variant={variant})"
     )
 
     mesh_path, variant_path, fallback_path = resolve_default_mesh_paths(
@@ -422,7 +421,7 @@ def _create_default_project_for_asset(
 
     run_when_project_editable(_finalize_save)
     asset_label = asset.display_name or asset.name
-    log.info("Created Substance project at %s", project_path)
+    log.info(f"Created Substance project at {project_path}")
     sp.logging.info(f"Created default project for {asset_label} (variant={variant})")
 
 
@@ -457,10 +456,8 @@ def launch_open_asset_textures() -> None:
     if not action or not asset:
         return
     log.info(
-        "Open Asset: selected %s (%s, variant=%s)",
-        asset.display_name or asset.name,
-        action,
-        geo_variant,
+        f"Open Asset: selected {asset.display_name or asset.name} "
+        f"({action}, variant={geo_variant})"
     )
     paths = paths_for_asset(asset)
     project_path = project_path_for_variant(paths, geo_variant)
@@ -575,10 +572,8 @@ def launch_version_browser_for_current_project() -> None:
             return
         store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
         log.info(
-            "Opened backup version %s for asset %s (variant=%s)",
-            backup_path,
-            asset.display_name or asset.name,
-            geo_variant,
+            f"Opened backup version {backup_path} for asset "
+            f"{asset.display_name or asset.name} (variant={geo_variant})"
         )
         return
 

@@ -288,7 +288,7 @@ def get_active_asset_from_project(conn: DB) -> Asset | None:
         try:
             return conn.get_asset_by_id(asset_id)
         except Exception as exc:
-            log.warning("Failed to resolve asset by id from metadata: %s", exc)
+            log.warning(f"Failed to resolve asset by id from metadata: {exc}")
 
     # Strategy 2: explicit asset path
     asset_path = selection.get("asset_path")
@@ -296,7 +296,7 @@ def get_active_asset_from_project(conn: DB) -> Asset | None:
         try:
             return conn.get_asset_by_attr("path", asset_path)
         except Exception as exc:
-            log.warning("Failed to resolve asset by path from metadata: %s", exc)
+            log.warning(f"Failed to resolve asset by path from metadata: {exc}")
 
     asset_subdirectory = selection.get("asset_subdirectory")
 
@@ -327,7 +327,7 @@ def get_active_asset_from_project(conn: DB) -> Asset | None:
     try:
         return conn.get_asset_by_name(asset_name)
     except Exception as exc:
-        log.warning("Failed to resolve asset from project metadata: %s", exc)
+        log.warning(f"Failed to resolve asset from project metadata: {exc}")
 
     return _asset_from_project_path(conn)
 
@@ -352,7 +352,7 @@ def _asset_from_project_path(conn: DB) -> Asset | None:
     try:
         return conn.get_asset_by_attr("path", rel_path_str)
     except Exception as exc:
-        log.warning("Failed to resolve asset from project path: %s", exc)
+        log.warning(f"Failed to resolve asset from project path: {exc}")
         return None
 
 
@@ -384,7 +384,7 @@ def store_asset_metadata_for_project(
         asset_subdirectory=asset.subdirectory,
         geo_variant=geo_variant,
     )
-    log.info("Stored asset metadata for project: %s", asset_display_name)
+    log.info(f"Stored asset metadata for project: {asset_display_name}")
 
 
 def store_asset_metadata_when_ready(

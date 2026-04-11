@@ -79,9 +79,8 @@ def run_asset_builder(asset: Asset, *, geo_variant: str) -> dict[str, Any]:
     env["PIPE_LOG_LEVEL"] = str(log.getEffectiveLevel())
 
     log.info(
-        "Running headless Houdini publish from Substance for %s (geo=%s)",
-        asset_name,
-        geo_variant,
+        f"Running headless Houdini publish from Substance for {asset_name} "
+        f"(geo={geo_variant})"
     )
     try:
         completed = subprocess.run(
@@ -101,17 +100,17 @@ def run_asset_builder(asset: Asset, *, geo_variant: str) -> dict[str, Any]:
         if payload is not None:
             raise HoudiniPublishError(_summarize_errors(payload)) from exc
         if stdout:
-            log.error("Houdini asset builder stdout:\n%s", stdout)
+            log.error(f"Houdini asset builder stdout:\n{stdout}")
         if exc.stderr:
-            log.error("Houdini asset builder stderr:\n%s", exc.stderr)
+            log.error(f"Houdini asset builder stderr:\n{exc.stderr}")
         raise HoudiniPublishError(
             f"Houdini publish failed with exit code {exc.returncode}"
         ) from exc
 
     payload = _parse_result(completed.stdout or "")
     if payload is None:
-        log.error("Houdini asset builder stdout:\n%s", completed.stdout or "")
-        log.error("Houdini asset builder stderr:\n%s", completed.stderr or "")
+        log.error(f"Houdini asset builder stdout:\n{completed.stdout or ''}")
+        log.error(f"Houdini asset builder stderr:\n{completed.stderr or ''}")
         raise HoudiniPublishError(
             "Failed to parse structured output from Houdini publish."
         )

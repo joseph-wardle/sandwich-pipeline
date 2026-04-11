@@ -467,11 +467,8 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             self._curr_asset.display_name or self._curr_asset.name or "Unknown Asset"
         )
         log.info(
-            "Publishing textures for %s (geo=%s, mat=%s, material_layer=%s)",
-            asset_label,
-            geo_var,
-            mat_var,
-            material_layer,
+            f"Publishing textures for {asset_label} "
+            f"(geo={geo_var}, mat={mat_var}, material_layer={material_layer})"
         )
 
         export_settings = [
@@ -492,7 +489,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 "No texture sets are enabled for export.",
             ).exec_()
             return
-        log.info("Exporting %d texture sets", len(export_settings))
+        log.info(f"Exporting {len(export_settings)} texture sets")
 
         request = _PendingPublishRequest(
             asset_label=asset_label,
@@ -615,12 +612,12 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             asset_updated = False
             if request.mat_var not in self._curr_asset.material_variants:
                 self._curr_asset.material_variants.add(request.mat_var)
-                log.info("Updating new material variant: %s", request.mat_var)
+                log.info(f"Updating new material variant: {request.mat_var}")
                 asset_updated = True
 
             if request.material_layer not in self._curr_asset.material_layers:
                 self._curr_asset.material_layers.add(request.material_layer)
-                log.info("Updating new material layer: %s", request.material_layer)
+                log.info(f"Updating new material layer: {request.material_layer}")
                 asset_updated = True
 
             if asset_updated:
@@ -671,7 +668,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 progress_callback=progress_dialog.update_progress,
             )
             if not export_success:
-                log.error("Texture export failed for %s", request.asset_label)
+                log.error(f"Texture export failed for {request.asset_label}")
                 sp.logging.error(f"Publish failed for {request.asset_label}")
                 error_message = exporter.last_error_message or (
                     "An error occurred while exporting textures. Please check the "
@@ -742,10 +739,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                         backup_status = (
                             f'Backup created: {version_label} "{request.version_title}"'
                         )
-                        log.info("Backup created at %s", result.backup_path)
+                        log.info(f"Backup created at {result.backup_path}")
                     else:
                         backup_status = "Backup created."
-                        log.info("Backup created for %s", project_path)
+                        log.info(f"Backup created for {project_path}")
                 else:
                     backup_status = "Backup skipped: no changes detected."
                     log.info("Backup skipped: no changes detected.")
@@ -764,7 +761,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 houdini_status = summarize_result(houdini_result)
             except HoudiniPublishError as exc:
                 houdini_status = f"Houdini publish failed: {exc}"
-                log.error("Headless Houdini publish failed from Substance: %s", exc)
+                log.error(f"Headless Houdini publish failed from Substance: {exc}")
 
             message = "Textures successfully exported!"
             if backup_status:
@@ -775,7 +772,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             self._show_publish_message(context, message)
         except Exception as exc:
             log.exception(
-                "Unexpected error while publishing textures for %s", request.asset_label
+                f"Unexpected error while publishing textures for {request.asset_label}"
             )
             self._show_publish_message(
                 context,
