@@ -1,71 +1,169 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
-import subprocess
+from dataclasses import dataclass
 from math import log2
 from pathlib import Path
 from re import findall
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from Qt import QtCore, QtWidgets
 from Qt.QtCore import QRegExp
 from Qt.QtGui import QIcon, QPixmap, QRegExpValidator
 from Qt.QtWidgets import (
     QComboBox,
+    QDialog,
     QLabel,
     QLayout,
     QMainWindow,
+    QProgressBar,
 )
 
 if TYPE_CHECKING:
     import typing
 
 import substance_painter as sp
-from env import Executables
 from env_sg import DB_Config
-from shared.util import get_documentation_path
-from software.houdini.dcc import HoudiniDCC
+from substance_painter.exception import ProjectError, ServiceNotFoundError
 
 from pipe.asset.paths import paths_for_asset
 from pipe.asset.version_adapter import asset_owner_for, substance_project_stream
 from pipe.db import DB
 from pipe.glui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButtons
-from pipe.sp.assetfile import PIPE_SP_DOCS_PAGE, get_active_asset_from_project
 from pipe.sp.export import Exporter, TexSetExportSettings
+from pipe.sp.houdini import HoudiniPublishError, run_asset_builder, summarize_result
 from pipe.sp.local import get_main_qt_window
+from pipe.sp.metadata import get_active_asset_from_project
+from pipe.sp.util import docs_link_html, texture_set_name
+from pipe.sp.progress import (
+    DEFAULT_PUBLISH_STAGE_SEQUENCE,
+    PublishProgressUpdate,
+    PublishStage,
+)
 from pipe.struct.db import Asset
 from pipe.struct.material import DisplacementSource, NormalSource, NormalType
 from pipe.util import checkbox_callback_helper, dict_index
 from pipe.versioning.store import backup_if_changed
 
 log = logging.getLogger(__name__)
-_HOUDINI_RESULT_START = "--BUILD-RESULT--"
-_HOUDINI_RESULT_END = "--END-BUILD-RESULT--"
 
 
-class HoudiniPublishError(RuntimeError):
-    """Raised when headless Houdini publish fails from Substance."""
+@dataclass(frozen=True)
+class _PendingPublishRequest:
+    asset_label: str
+    export_settings: tuple[TexSetExportSettings, ...]
+    geo_var: str
+    mat_var: str
+    material_layer: str
+    save_required: bool
+    stage_sequence: tuple[PublishStage, ...]
+    version_title: str
+    version_note: str | None
 
 
-def _docs_link_html() -> str:
-    url = get_documentation_path(PIPE_SP_DOCS_PAGE)
-    if "://" not in url:
-        url = QtCore.QUrl.fromLocalFile(url).toString()
-    return f'<a href="{url}">the documentation</a>'
+@dataclass
+class _ActivePublishContext:
+    request: _PendingPublishRequest
+    progress_dialog: "_PublishProgressDialog"
 
 
-def _texture_set_name(tex_set: sp.textureset.TextureSet) -> str:
-    name_attr = getattr(tex_set, "name", None)
-    if callable(name_attr):
-        return name_attr()
-    if isinstance(name_attr, str):
-        return name_attr
-    return str(tex_set)
+class _PublishProgressDialog(QDialog):
+    _allow_close: bool
+    _detail_label: QLabel
+    _progress_bar: QProgressBar
+    _stage_label: QLabel
+    _stage_sequence: tuple[PublishStage, ...]
+    _step_label: QLabel
+
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget | None,
+        *,
+        stage_sequence: typing.Sequence[PublishStage],
+    ) -> None:
+        super().__init__(parent)
+        self._allow_close = False
+        self._stage_sequence = tuple(stage_sequence)
+
+        self.setWindowTitle("Publishing Textures")
+        self.setModal(True)
+        self.setMinimumWidth(420)
+        self.setWindowFlags(
+            (self.windowFlags() & ~QtCore.Qt.WindowContextHelpButtonHint)
+            | QtCore.Qt.WindowStaysOnTopHint
+        )
+        self.setWindowModality(QtCore.Qt.WindowModal)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(8)
+
+        self._step_label = QLabel("")
+        self._step_label.setStyleSheet("font-size: 11px; color: #8a8a8a;")
+        layout.addWidget(self._step_label)
+
+        self._stage_label = QLabel("Preparing publish")
+        self._stage_label.setStyleSheet("font-size: 13px; font-weight: bold;")
+        layout.addWidget(self._stage_label)
+
+        self._detail_label = QLabel("")
+        self._detail_label.setWordWrap(True)
+        layout.addWidget(self._detail_label)
+
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setTextVisible(True)
+        self._progress_bar.setRange(0, 0)
+        layout.addWidget(self._progress_bar)
+
+    def event(self, event: QtCore.QEvent) -> bool:
+        if not self._allow_close and event.type() == QtCore.QEvent.Close:
+            event.ignore()
+            return True
+        return super().event(event)
+
+    def reject(self) -> None:
+        if self._allow_close:
+            super().reject()
+
+    def finish(self) -> None:
+        if self._allow_close:
+            return
+        self._allow_close = True
+        self.close()
+
+    def update_progress(self, update: PublishProgressUpdate) -> None:
+        step_index = self._step_index(update.stage)
+        self._step_label.setText(f"Step {step_index} of {len(self._stage_sequence)}")
+        self._stage_label.setText(update.stage.label)
+        self._detail_label.setText(update.message)
+
+        if update.is_determinate:
+            total = max(1, int(update.total or 0))
+            current = max(0, min(int(update.current or 0), total))
+            self._progress_bar.setRange(0, total)
+            self._progress_bar.setValue(current)
+            self._progress_bar.setFormat("%v / %m")
+        else:
+            self._progress_bar.setRange(0, 0)
+            self._progress_bar.setFormat("")
+
+        if not self.isVisible():
+            self.show()
+        self.raise_()
+        self.activateWindow()
+
+        QtWidgets.QApplication.processEvents()
+
+    def _step_index(self, stage: PublishStage) -> int:
+        try:
+            return self._stage_sequence.index(stage) + 1
+        except ValueError:
+            return len(self._stage_sequence)
 
 
 class SubstanceExportWindow(QMainWindow, ButtonPair):
+    _active_publish_context: _ActivePublishContext | None
     _curr_asset: Asset | None
     _central_widget: QtWidgets.QWidget
     _conn: DB
@@ -83,6 +181,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     def __init__(self, flags: QtCore.Qt.WindowFlags | None = None) -> None:
         super(SubstanceExportWindow, self).__init__(get_main_qt_window())
 
+        self._active_publish_context = None
         self._tex_set_dict = {}
 
         self._conn = DB.Get(DB_Config)
@@ -105,6 +204,15 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             return
 
         self._setup_publish_ui()
+
+    def event(self, event: QtCore.QEvent) -> bool:
+        if (
+            self._active_publish_context is not None
+            and event.type() == QtCore.QEvent.Close
+        ):
+            event.ignore()
+            return True
+        return super().event(event)
 
     def _setup_publish_ui(self) -> None:
         asset = self._curr_asset
@@ -213,7 +321,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         footer = QLabel(
             "Tip: Make sure your project was opened via Open Asset so the asset "
             "metadata is stored in the project. For more information, see "
-            f"{_docs_link_html()}."
+            f"{docs_link_html()}."
         )
         footer.setWordWrap(True)
         footer.setTextFormat(QtCore.Qt.RichText)
@@ -301,9 +409,6 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         """Check for asset metadata and correct channel types before running
         the export"""
         return True
-        # metaUpdater = pipe.sp.metadata.MetadataUpdater()
-        # meta = metaUpdater.check() or metaUpdater.do_update()
-        # return meta  # and srgb
 
     @property
     def mat_var(self) -> str:
@@ -327,6 +432,14 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         return note or None
 
     def do_export(self, isBatch: bool = False) -> None:
+        """Validate inputs and start the texture publish pipeline.
+
+        Runs pre-flight checks, gathers export settings from the UI, then
+        hands off to ``_begin_publish`` which manages the async progress
+        dialog and scheduling.
+        """
+        if self._active_publish_context is not None:
+            return
         if not self._curr_asset:
             return
         if not self._preflight():
@@ -340,7 +453,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 "Publish Textures",
             ).exec_()
             return
-        if not self._ensure_project_saved():
+        if not self._ensure_project_ready():
+            return
+        save_required = sp.project.needs_saving()
+        if save_required and not self._confirm_save_before_publish():
             return
 
         mat_var = self.mat_var.strip() or "default"
@@ -351,29 +467,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             self._curr_asset.display_name or self._curr_asset.name or "Unknown Asset"
         )
         log.info(
-            "Publishing textures for %s (geo=%s, mat=%s, material_layer=%s)",
-            asset_label,
-            geo_var,
-            mat_var,
-            material_layer,
+            f"Publishing textures for {asset_label} "
+            f"(geo={geo_var}, mat={mat_var}, material_layer={material_layer})"
         )
 
-        asset_updated = False
-        if mat_var not in self._curr_asset.material_variants:
-            self._curr_asset.material_variants.add(mat_var)
-            log.info("Updating new material variant: %s", mat_var)
-            asset_updated = True
-
-        if material_layer not in self._curr_asset.material_layers:
-            self._curr_asset.material_layers.add(material_layer)
-            log.info("Updating new material layer: %s", material_layer)
-            asset_updated = True
-
-        if asset_updated:
-            self._conn.update_asset(self._curr_asset)
-
-        log.info("Exporting!")
-        exporter = Exporter(self._curr_asset)
         export_settings = [
             TexSetExportSettings(
                 ts,
@@ -392,27 +489,219 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 "No texture sets are enabled for export.",
             ).exec_()
             return
-        log.info("Exporting %d texture sets", len(export_settings))
+        log.info(f"Exporting {len(export_settings)} texture sets")
 
-        if exporter.export(
-            export_settings,
-            mat_var,
-            geo_var,
-            material_layer,
-        ):
+        request = _PendingPublishRequest(
+            asset_label=asset_label,
+            export_settings=tuple(export_settings),
+            geo_var=geo_var,
+            mat_var=mat_var,
+            material_layer=material_layer,
+            save_required=save_required,
+            stage_sequence=tuple(
+                stage
+                for stage in DEFAULT_PUBLISH_STAGE_SEQUENCE
+                if save_required or stage is not PublishStage.SAVING_PROJECT
+            ),
+            version_title=version_title,
+            version_note=self.version_note,
+        )
+        self._begin_publish(request)
+
+    def _begin_publish(self, request: _PendingPublishRequest) -> None:
+        """Set up the progress dialog and kick off the publish.
+
+        Creates the non-closable progress dialog, disables the publish UI,
+        then defers to ``_schedule_publish_when_idle`` via a zero-delay
+        QTimer so Qt can paint the dialog before Substance Painter begins
+        synchronous work.
+        """
+        progress_dialog = _PublishProgressDialog(
+            self,
+            stage_sequence=request.stage_sequence,
+        )
+        context = _ActivePublishContext(
+            request=request,
+            progress_dialog=progress_dialog,
+        )
+        self._active_publish_context = context
+        self._set_publish_controls_enabled(False)
+
+        initial_stage = (
+            PublishStage.SAVING_PROJECT
+            if request.save_required
+            else PublishStage.PREPARING_PUBLISH
+        )
+        progress_dialog.update_progress(
+            PublishProgressUpdate(
+                stage=initial_stage,
+                message=(
+                    "Preparing to save the Substance Painter project and start publish."
+                    if request.save_required
+                    else "Preparing to start publish."
+                ),
+            )
+        )
+
+        # Let Qt paint the progress dialog before Painter begins synchronous work.
+        QtCore.QTimer.singleShot(
+            0,
+            lambda: self._schedule_publish_when_idle(context),
+        )
+
+    def _schedule_publish_when_idle(self, context: _ActivePublishContext) -> None:
+        """Wait for Substance Painter to finish any background work, then publish.
+
+        Uses ``sp.project.execute_when_not_busy`` to defer
+        ``_run_publish_request`` until Painter is idle.  This is necessary
+        because export API calls will fail while Painter is processing.
+        """
+        if not self._is_active_publish_context(context):
+            return
+
+        request = context.request
+        wait_stage = (
+            PublishStage.SAVING_PROJECT
+            if request.save_required
+            else PublishStage.PREPARING_PUBLISH
+        )
+        context.progress_dialog.update_progress(
+            PublishProgressUpdate(
+                stage=wait_stage,
+                message=(
+                    "Waiting for Substance Painter to become idle before saving and publishing."
+                    if request.save_required
+                    else "Waiting for Substance Painter to become idle before publishing."
+                ),
+            )
+        )
+
+        try:
+            sp.project.execute_when_not_busy(lambda: self._run_publish_request(context))
+        except (ProjectError, ServiceNotFoundError):
+            log.exception("Failed to schedule publish when Substance Painter is idle.")
+            self._show_publish_message(
+                context,
+                "Failed to start the publish in Substance Painter. Try again after the project finishes loading.",
+                title="Publish Startup Failed",
+            )
+
+    def _run_publish_request(self, context: _ActivePublishContext) -> None:
+        """Execute the full publish pipeline: save, export, backup, Houdini build.
+
+        Called by ``_schedule_publish_when_idle`` once Painter is idle.
+        Runs synchronously — the progress dialog was already shown by
+        ``_begin_publish``.  On completion (success or failure), dismisses
+        the progress dialog and re-enables the publish UI.
+        """
+        if not self._is_active_publish_context(context):
+            return
+        if not self._curr_asset:
+            self._show_publish_message(
+                context,
+                "The current asset could not be resolved for publish.",
+                title="Texture Export Failed",
+            )
+            return
+
+        request = context.request
+        progress_dialog = context.progress_dialog
+        exporter = Exporter(self._curr_asset)
+
+        try:
+            asset_updated = False
+            if request.mat_var not in self._curr_asset.material_variants:
+                self._curr_asset.material_variants.add(request.mat_var)
+                log.info(f"Updating new material variant: {request.mat_var}")
+                asset_updated = True
+
+            if request.material_layer not in self._curr_asset.material_layers:
+                self._curr_asset.material_layers.add(request.material_layer)
+                log.info(f"Updating new material layer: {request.material_layer}")
+                asset_updated = True
+
+            if asset_updated:
+                self._conn.update_asset(self._curr_asset)
+
+            log.info("Exporting!")
+
+            if request.save_required:
+                progress_dialog.update_progress(
+                    PublishProgressUpdate(
+                        stage=PublishStage.SAVING_PROJECT,
+                        message="Saving the Substance Painter project before publish.",
+                    )
+                )
+                try:
+                    sp.project.save()
+                except ProjectError:
+                    log.exception(
+                        "Failed to save Substance Painter project before publish."
+                    )
+                    self._show_publish_message(
+                        context,
+                        "Failed to save the project. Resolve any file issues and try again.",
+                        title="Save Failed",
+                    )
+                    return
+
+                if sp.project.needs_saving():
+                    self._show_publish_message(
+                        context,
+                        "The project still appears unsaved. Please save manually before publishing.",
+                        title="Save Required",
+                    )
+                    return
+
+            progress_dialog.update_progress(
+                PublishProgressUpdate(
+                    stage=PublishStage.PREPARING_PUBLISH,
+                    message="Preparing the publish configuration and enabled texture sets.",
+                )
+            )
+
+            export_success = exporter.export(
+                request.export_settings,
+                request.mat_var,
+                request.geo_var,
+                request.material_layer,
+                progress_callback=progress_dialog.update_progress,
+            )
+            if not export_success:
+                log.error(f"Texture export failed for {request.asset_label}")
+                sp.logging.error(f"Publish failed for {request.asset_label}")
+                error_message = exporter.last_error_message or (
+                    "An error occurred while exporting textures. Please check the "
+                    "console for more information."
+                )
+                self._show_publish_message(
+                    context,
+                    error_message,
+                    title="Texture Export Failed",
+                )
+                return
+
             backup_status = None
             project_path = sp.project.file_path() or ""
             if not project_path:
                 backup_status = "Backup skipped: project has no file path."
                 log.warning("Backup skipped: project has no file path.")
             else:
+                progress_dialog.update_progress(
+                    PublishProgressUpdate(
+                        stage=PublishStage.BACKING_UP_PROJECT,
+                        message="Saving a versioned backup of the Substance Painter project.",
+                    )
+                )
                 asset_paths = paths_for_asset(self._curr_asset)
                 publish_path = asset_paths.publish_textures_layer_dir(
-                    geo_var, mat_var, material_layer
+                    request.geo_var,
+                    request.mat_var,
+                    request.material_layer,
                 )
                 project_stream = substance_project_stream(
                     asset_paths,
-                    geo_var,
+                    request.geo_var,
                     owner=asset_owner_for(self._curr_asset),
                 )
                 result = backup_if_changed(
@@ -425,14 +714,14 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                     ext=project_stream.ext,
                     stream_label=project_stream.label,
                     working_path=project_stream.working_path,
-                    title=version_title,
+                    title=request.version_title,
                     publish_path=publish_path,
                     context="publish",
-                    note=self.version_note,
+                    note=request.version_note,
                     extra={
-                        "geo": geo_var,
-                        "material": mat_var,
-                        "material_layer": material_layer,
+                        "geo": request.geo_var,
+                        "material": request.mat_var,
+                        "material_layer": request.material_layer,
                     },
                     owner=project_stream.owner,
                 )
@@ -448,197 +737,85 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                             else result.backup_path.name
                         )
                         backup_status = (
-                            f'Backup created: {version_label} "{version_title}"'
+                            f'Backup created: {version_label} "{request.version_title}"'
                         )
-                        log.info("Backup created at %s", result.backup_path)
+                        log.info(f"Backup created at {result.backup_path}")
                     else:
                         backup_status = "Backup created."
-                        log.info("Backup created for %s", project_path)
+                        log.info(f"Backup created for {project_path}")
                 else:
                     backup_status = "Backup skipped: no changes detected."
                     log.info("Backup skipped: no changes detected.")
 
             houdini_status: str | None = None
             try:
-                houdini_result = self._run_houdini_asset_builder(geo_variant=geo_var)
-                houdini_status = self._summarize_houdini_result(houdini_result)
+                progress_dialog.update_progress(
+                    PublishProgressUpdate(
+                        stage=PublishStage.RUNNING_HOUDINI,
+                        message="Running the Houdini asset publish step.",
+                    )
+                )
+                houdini_result = run_asset_builder(
+                    self._curr_asset, geo_variant=request.geo_var
+                )
+                houdini_status = summarize_result(houdini_result)
             except HoudiniPublishError as exc:
                 houdini_status = f"Houdini publish failed: {exc}"
-                log.error("Headless Houdini publish failed from Substance: %s", exc)
+                log.error(f"Headless Houdini publish failed from Substance: {exc}")
 
             message = "Textures successfully exported!"
             if backup_status:
                 message = f"{message}\n{backup_status}"
             if houdini_status:
                 message = f"{message}\n{houdini_status}"
-            MessageDialog(
-                get_main_qt_window(),
-                message,
-            ).exec_()
-        else:
-            log.error("Texture export failed for %s", asset_label)
-            MessageDialog(
-                get_main_qt_window(),
-                (
-                    "An error occured while exporting textures. Please check the "
-                    "console for more information"
-                ),
-            ).exec_()
-
-    def _run_houdini_asset_builder(self, *, geo_variant: str) -> dict[str, Any]:
-        asset = self._curr_asset
-        assert asset is not None
-
-        if not Executables.hython.exists():
-            raise HoudiniPublishError(
-                f"Houdini executable not found at {Executables.hython}"
+            sp.logging.info(f"Publish complete for {request.asset_label}")
+            self._show_publish_message(context, message)
+        except Exception as exc:
+            log.exception(
+                f"Unexpected error while publishing textures for {request.asset_label}"
             )
-
-        asset_paths = paths_for_asset(asset)
-        asset_name = asset.name or asset.display_name or asset_paths.root.name
-        command = [
-            str(Executables.hython),
-            "-m",
-            "pipe.h.assetbuilder",
-            "--asset-root",
-            str(asset_paths.root),
-            "--asset-name",
-            asset_name,
-            "--variant",
-            geo_variant,
-            "--ensure-builder",
-            "--publish",
-            "--respect-existing",
-        ]
-
-        if asset.asset_path:
-            command.extend(["--asset-path", asset.asset_path])
-        if asset.id is not None:
-            command.extend(["--asset-id", str(asset.id)])
-
-        dcc = HoudiniDCC(is_python_shell=True)
-        env = dcc._get_env_vars()
-        env["PIPE_LOG_LEVEL"] = str(log.getEffectiveLevel())
-
-        log.info(
-            "Running headless Houdini publish from Substance for %s (geo=%s)",
-            asset_name,
-            geo_variant,
-        )
-        try:
-            completed = subprocess.run(
-                command,
-                check=True,
-                capture_output=True,
-                text=True,
-                env=env,
+            self._show_publish_message(
+                context,
+                "An unexpected error occurred while publishing textures.\n"
+                f"Details: {exc}",
+                title="Texture Export Failed",
             )
-        except FileNotFoundError as exc:
-            raise HoudiniPublishError(
-                "Failed to execute hython; verify Houdini is installed."
-            ) from exc
-        except subprocess.CalledProcessError as exc:
-            stdout = exc.stdout or ""
-            payload = self._parse_houdini_result(stdout)
-            if payload is not None:
-                summary = self._summarize_houdini_errors(payload)
-                raise HoudiniPublishError(summary) from exc
-            if stdout:
-                log.error("Houdini asset builder stdout:\n%s", stdout)
-            if exc.stderr:
-                log.error("Houdini asset builder stderr:\n%s", exc.stderr)
-            raise HoudiniPublishError(
-                f"Houdini publish failed with exit code {exc.returncode}"
-            ) from exc
+        finally:
+            self._finish_publish_context(context)
 
-        payload = self._parse_houdini_result(completed.stdout or "")
-        if payload is None:
-            log.error("Houdini asset builder stdout:\n%s", completed.stdout or "")
-            log.error("Houdini asset builder stderr:\n%s", completed.stderr or "")
-            raise HoudiniPublishError(
-                "Failed to parse structured output from Houdini publish."
-            )
+    def _is_active_publish_context(self, context: _ActivePublishContext) -> bool:
+        return self._active_publish_context is context
 
-        if payload.get("status") != "success":
-            raise HoudiniPublishError(self._summarize_houdini_errors(payload))
-        return payload
+    def _finish_publish_context(self, context: _ActivePublishContext) -> None:
+        if self._active_publish_context is not context:
+            return
+        self._active_publish_context = None
+        context.progress_dialog.finish()
+        self._set_publish_controls_enabled(True)
 
-    @staticmethod
-    def _parse_houdini_result(stdout: str) -> dict[str, Any] | None:
-        start = stdout.find(_HOUDINI_RESULT_START)
-        end = stdout.find(_HOUDINI_RESULT_END)
-        if start == -1 or end == -1:
-            return None
-        json_text = stdout[start + len(_HOUDINI_RESULT_START) : end]
-        try:
-            payload = json.loads(json_text)
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(payload, dict):
-            return None
-        return payload
+    def _set_publish_controls_enabled(self, enabled: bool) -> None:
+        self._central_widget.setEnabled(enabled)
+        self.buttons.setEnabled(enabled)
 
-    @staticmethod
-    def _summarize_houdini_errors(payload: dict[str, Any]) -> str:
-        errors = payload.get("errors", [])
-        if isinstance(errors, list):
-            messages = [
-                str(entry.get("message", ""))
-                for entry in errors
-                if isinstance(entry, dict) and entry.get("message")
-            ]
-            if messages:
-                return "; ".join(messages)
-        publish_payload = payload.get("publish")
-        if isinstance(publish_payload, dict):
-            publish_errors = publish_payload.get("errors", [])
-            if isinstance(publish_errors, list):
-                messages = [
-                    str(entry.get("message", ""))
-                    for entry in publish_errors
-                    if isinstance(entry, dict) and entry.get("message")
-                ]
-                if messages:
-                    return "; ".join(messages)
-        return "Unknown Houdini publish error."
+    def _show_publish_message(
+        self,
+        context: _ActivePublishContext,
+        message: str,
+        *,
+        title: str | None = None,
+    ) -> None:
+        self._finish_publish_context(context)
+        MessageDialog(
+            get_main_qt_window(),
+            message,
+            title or "Publish Textures",
+        ).exec_()
 
-    @staticmethod
-    def _summarize_houdini_result(payload: dict[str, Any]) -> str:
-        status = str(payload.get("status", "unknown")).capitalize()
-        parts = [f"Houdini publish: {status}"]
+    def _ensure_project_ready(self) -> bool:
+        """Check that the project is open, idle, loaded, and saved to disk.
 
-        summary = payload.get("summary")
-        if isinstance(summary, dict):
-            if summary.get("builder_created"):
-                parts.append("builder created")
-            else:
-                parts.append("builder reused")
-
-        publish_payload = payload.get("publish")
-        if isinstance(publish_payload, dict):
-            export = publish_payload.get("export")
-            if isinstance(export, dict):
-                export_path = str(export.get("export_path", "")).strip()
-                if export_path:
-                    parts.append(f"exported {Path(export_path).name}")
-
-            gallery = publish_payload.get("gallery")
-            if isinstance(gallery, dict):
-                gallery_status = str(gallery.get("status", "")).strip()
-                if gallery_status:
-                    parts.append(f"gallery {gallery_status}")
-
-            warnings = publish_payload.get("warnings", [])
-            if isinstance(warnings, list) and warnings:
-                parts.append(f"{len(warnings)} publish warning(s)")
-
-        warnings = payload.get("warnings", [])
-        if isinstance(warnings, list) and warnings:
-            parts.append(f"{len(warnings)} warning(s)")
-
-        return ", ".join(parts)
-
-    def _ensure_project_saved(self) -> bool:
+        Shows a message dialog and returns False if any precondition fails.
+        """
         if not sp.project.is_open():
             MessageDialog(
                 get_main_qt_window(),
@@ -665,7 +842,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                     "Project Loading",
                 ).exec_()
                 return False
-        except Exception:
+        except ServiceNotFoundError:
             log.exception("Failed to query project edition state before publish.")
             return False
 
@@ -678,39 +855,18 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             ).exec_()
             return False
 
-        if sp.project.needs_saving():
-            dialog = MessageDialogCustomButtons(
-                get_main_qt_window(),
-                "The project has unsaved changes. Save before publishing?",
-                "Save Required",
-                has_cancel_button=True,
-                ok_name="Save",
-                cancel_name="Cancel",
-            )
-            if not dialog.exec_():
-                return False
-            try:
-                sp.project.save()
-            except Exception:
-                MessageDialog(
-                    get_main_qt_window(),
-                    "Failed to save the project. Resolve any file issues and try again.",
-                    "Save Failed",
-                ).exec_()
-                log.exception(
-                    "Failed to save Substance Painter project before publish."
-                )
-                return False
-
-            if sp.project.needs_saving():
-                MessageDialog(
-                    get_main_qt_window(),
-                    "The project still appears unsaved. Please save manually before publishing.",
-                    "Save Required",
-                ).exec_()
-                return False
-
         return True
+
+    def _confirm_save_before_publish(self) -> bool:
+        dialog = MessageDialogCustomButtons(
+            get_main_qt_window(),
+            "The project has unsaved changes. Save before publishing?",
+            "Save Required",
+            has_cancel_button=True,
+            ok_name="Save",
+            cancel_name="Cancel",
+        )
+        return bool(dialog.exec_())
 
 
 class TexSetWidget(QtWidgets.QWidget):
@@ -777,7 +933,7 @@ class TexSetWidget(QtWidgets.QWidget):
             MessageDialog(
                 get_main_qt_window(),
                 (
-                    f'Texture Set "{_texture_set_name(self._tex_set)}" uses material '
+                    f'Texture Set "{texture_set_name(self._tex_set)}" uses material '
                     "layering. This publish tool currently supports non-layered "
                     "texture sets only."
                 ),
@@ -806,7 +962,7 @@ class TexSetWidget(QtWidgets.QWidget):
         layout.addWidget(self._enabled_checkbox, 10, QtCore.Qt.AlignTop)
 
         message = QLabel(
-            f"{_texture_set_name(self._tex_set)} "
+            f"{texture_set_name(self._tex_set)} "
             "(material layering not supported by this exporter)"
         )
         message.setWordWrap(True)
@@ -836,7 +992,7 @@ class TexSetWidget(QtWidgets.QWidget):
         layout.addWidget(settings_container, 90)
 
         # Texture set title
-        self.label = QLabel(_texture_set_name(self._tex_set))
+        self.label = QLabel(texture_set_name(self._tex_set))
         self.label.setStyleSheet("font-size: 11px; font-weight: bold;")
         settings_layout.addWidget(self.label, 0, 0, 1, 3)
 
