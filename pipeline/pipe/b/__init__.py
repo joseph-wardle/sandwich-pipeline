@@ -1,6 +1,7 @@
-from . import assetfile, operator
+from . import assetfile, publish, register
 
 __all__ = [
     "assetfile",
-    "operator",
+    "publish",
+    "register",
 ]

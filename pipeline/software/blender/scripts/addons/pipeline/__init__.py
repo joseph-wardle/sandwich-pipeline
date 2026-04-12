@@ -3,11 +3,29 @@ import logging
 import bpy
 from bpy.types import Operator
 from bpy.utils import register_class, unregister_class
-from pipe.b.operator import get_decorated_operators
+from pipe.b.assetfile import PipelineAssetProps
+from pipe.b.register import get_decorated_classes, get_decorated_operators
 
 bl_info = {"name": "Sandwich Pipeline", "blender": (5, 0, 1), "category": "Pipeline"}
 
-registered_operators: set[type[Operator]] = set()
+registered_classes: set[
+    type[
+        bpy.types.Panel
+        | bpy.types.UIList
+        | bpy.types.Menu
+        | bpy.types.Header
+        | bpy.types.Operator
+        | bpy.types.KeyingSetInfo
+        | bpy.types.RenderEngine
+        | bpy.types.AssetShelf
+        | bpy.types.FileHandler
+        | bpy.types.PropertyGroup
+        | bpy.types.AddonPreferences
+        | bpy.types.NodeTree
+        | bpy.types.Node
+        | bpy.types.NodeSocket
+    ]
+] = set()
 menu_operators: list[type[Operator]] = []
 
 log = logging.getLogger("pipe.b.addon")
@@ -45,15 +63,24 @@ def draw_pipeline(self, context):
 
 
 def register():
-    global registered_operators
+    global registered_classes
+
     operators_to_register = get_decorated_operators()
     for operator_description in operators_to_register:
         operator = operator_description.operator
         register_class(operator)
-        registered_operators.add(operator)
+        registered_classes.add(operator)
         if operator_description.add_to_menu:
             menu_operators.append(operator)
         log.debug(f"{operator} registered as operator.")
+
+    classes_to_register = get_decorated_classes()
+    for cls in classes_to_register:
+        register_class(cls)
+        registered_classes.add(cls)
+        log.debug(f"{operator} registered as Blender class.")
+
+    bpy.types.Scene.pipeline_asset = bpy.props.PointerProperty(type=PipelineAssetProps)  # type: ignore
     bpy.utils.register_class(PIPELINE_MT_menu)
     bpy.utils.register_class(PIPELINE_PT_tools)
     bpy.types.TOPBAR_MT_editor_menus.append(draw_pipeline)
@@ -64,9 +91,10 @@ def unregister():
     bpy.types.TOPBAR_MT_editor_menus.remove(draw_pipeline)
     bpy.utils.unregister_class(PIPELINE_PT_tools)
     bpy.utils.unregister_class(PIPELINE_MT_menu)
-    for operator in registered_operators:
-        unregister_class(operator)
+    for cls in registered_classes:
+        unregister_class(cls)
     menu_operators.clear()
+    del bpy.types.Scene.pipeline_asset  # type: ignore
     log.info("Pipeline addon unloaded!")
 
 

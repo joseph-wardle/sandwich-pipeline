@@ -3,9 +3,15 @@ from bpy.types import Context
 from env_sg import DB_Config
 
 from pipe.asset import paths_for_asset
-from pipe.b.operator import blender_operator
+from pipe.b.register import blender_class, blender_operator
 from pipe.db import DB, DBInterface
 from pipe.struct.db import Asset
+
+
+@blender_class
+class PipelineAssetProps(bpy.types.PropertyGroup):
+    name: bpy.props.StringProperty()  # type: ignore
+    display_name: bpy.props.StringProperty()  # type: ignore
 
 
 def get_asset_names():
@@ -22,13 +28,13 @@ def get_asset_names():
 class PIPELINE_OT_open_asset(bpy.types.Operator):
     bl_idname = "pipeline.open_asset"
     bl_label = "Open/Create Asset File"
-
+    asset: Asset
     asset_name: bpy.props.StringProperty()  # type: ignore
 
     def invoke(self, context: Context, event):
         conn = DB.Get(DB_Config)
-        asset = conn.get_asset_by_display_name(self.asset_name)
-        paths = paths_for_asset(asset)
+        self.asset = conn.get_asset_by_display_name(self.asset_name)
+        paths = paths_for_asset(self.asset)
 
         self._target_path = paths.blender_model_path.resolve()
         if not self._target_path.exists():
@@ -45,6 +51,8 @@ class PIPELINE_OT_open_asset(bpy.types.Operator):
             bpy.ops.wm.open_mainfile(filepath=str(path))
         else:
             bpy.ops.wm.read_homefile(app_template="")
+            bpy.context.scene.pipeline_asset.name = self.asset.name  # type: ignore
+            bpy.context.scene.pipeline_asset.display_name = self.asset.display_name  # type: ignore
             bpy.ops.wm.save_as_mainfile(filepath=str(path))
         return {"FINISHED"}
 
