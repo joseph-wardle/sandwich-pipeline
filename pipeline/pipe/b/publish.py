@@ -9,6 +9,8 @@ from pipe.db import DB
 
 @blender_operator(add_to_menu=True)
 class PIPELINE_OT_publish_asset(Operator):
+    """Publish the selected meshes as the asset model USD file."""
+
     bl_idname = "pipeline.publish_asset"
     bl_label = "Publish Selected"
 

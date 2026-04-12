@@ -70,6 +70,8 @@ def on_asset_selected(self, context):
 
 @blender_operator(add_to_menu=True)
 class PIPELINE_OT_search_and_open_asset(bpy.types.Operator):
+    """Open a search menu to find and open an asset file."""
+
     bl_idname = "pipeline.search_assets"
     bl_label = "Open Asset"
     bl_property = "asset_id"
