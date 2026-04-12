@@ -20,7 +20,7 @@ class PIPELINE_OT_publish_asset(Operator):
         if open_asset_name:
             asset = conn.get_asset_by_name(open_asset_name)
             paths = paths_for_asset(asset)
-            self._target_path = paths.publish_asset_usd.resolve()
+            self._target_path = paths.publish_source_model_usd.resolve()
 
         else:
             self.report(
