@@ -1,3 +1,6 @@
-from . import operator, test
+from . import assetfile, operator
 
-__all__ = ["operator", "test"]
+__all__ = [
+    "assetfile",
+    "operator",
+]

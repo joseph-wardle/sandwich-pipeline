@@ -8,6 +8,7 @@ from pipe.b.operator import get_decorated_operators
 bl_info = {"name": "Sandwich Pipeline", "blender": (5, 0, 1), "category": "Pipeline"}
 
 registered_operators: set[type[Operator]] = set()
+menu_operators: list[type[Operator]] = []
 
 log = logging.getLogger("pipe.b.addon")
 
@@ -23,7 +24,7 @@ class PIPELINE_PT_tools(bpy.types.Panel):
         layout = self.layout
         if layout is None:
             return
-        for operator in registered_operators:
+        for operator in menu_operators:
             layout.operator(operator.bl_idname)
 
 
@@ -35,7 +36,7 @@ class PIPELINE_MT_menu(bpy.types.Menu):
         layout = self.layout
         if layout is None:
             return
-        for operator in registered_operators:
+        for operator in menu_operators:
             layout.operator(operator.bl_idname)
 
 
@@ -45,9 +46,13 @@ def draw_pipeline(self, context):
 
 def register():
     global registered_operators
-    registered_operators = get_decorated_operators()
-    for operator in registered_operators:
+    operators_to_register = get_decorated_operators()
+    for operator_description in operators_to_register:
+        operator = operator_description.operator
         register_class(operator)
+        registered_operators.add(operator)
+        if operator_description.add_to_menu:
+            menu_operators.append(operator)
         log.debug(f"{operator} registered as operator.")
     bpy.utils.register_class(PIPELINE_MT_menu)
     bpy.utils.register_class(PIPELINE_PT_tools)
@@ -61,6 +66,7 @@ def unregister():
     bpy.utils.unregister_class(PIPELINE_MT_menu)
     for operator in registered_operators:
         unregister_class(operator)
+    menu_operators.clear()
     log.info("Pipeline addon unloaded!")
 
 

@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 # Asset root-level filenames
 MODEL_FILENAME = "model.mb"
+BLENDER_MODEL_FILENAME = "model.blend"
 TEXTURES_FILENAME = "textures.spp"
 TEXTURES_VARIANT_TEMPLATE = "textures.{variant}.spp"
 ASSET_BUILDER_FILENAME = "asset_builder.hipnc"
@@ -136,6 +137,10 @@ class AssetPaths:
     @property
     def model_path(self) -> Path:
         return self.root / MODEL_FILENAME
+
+    @property
+    def blender_model_path(self) -> Path:
+        return self.root / BLENDER_MODEL_FILENAME
 
     @property
     def textures_path(self) -> Path:
