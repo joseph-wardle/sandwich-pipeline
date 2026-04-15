@@ -806,6 +806,7 @@ class AssetPublisher(Publisher):
                     ),
                     "selection": True,
                     "stripNamespaces": True,
+                    "exportCollectionBasedBindings": True,
                     **self._get_mayausd_kwargs(),
                 }
 
