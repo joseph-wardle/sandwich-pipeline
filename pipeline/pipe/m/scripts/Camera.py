@@ -1,8 +1,10 @@
 import maya.cmds as cmds
 import re
 
-# Global variable to store the camera file path
-cameraFilePath = None
+from shared.util import get_previs_path
+
+# Global variable to store the camera file path (cross-platform)
+cameraFilePath = str(get_previs_path() / "Rigs/boboShotCam_v01.mb")
 
 # Dictionary to track the last used shot number for each sequence
 sequence_shot_tracker = {"A": 0, "B": 0, "C": 0, "D": 0, "E": 0, "F": 0, "G": 0}
@@ -61,16 +63,9 @@ def reference_camera():
     cmds.file(cameraFilePath, r=True, namespace=shotCode)
 
 
-# Create a function to set the camera file path based on the OS choice
-def set_file_path(os_choice):
-    global cameraFilePath
-    if os_choice == "Windows":
-        cameraFilePath = "G:/bobo/previs/Rigs/boboShotCam_v01.mb"
-    elif os_choice == "Linux":
-        cameraFilePath = "/groups/bobo/previs/Rigs/boboShotCam_v01.mb"
-    else:
-        cmds.error("Invalid OS selection!")
-    reference_camera()  # Call the function to reference the camera after OS selection
+# Reference the camera with the configured path
+def reference_camera_from_ui():
+    reference_camera()
 
 
 # Create the main UI for selecting the operating system and sequence name
@@ -80,16 +75,10 @@ def show_camera_reference_ui():
 
     camera_window = cmds.window(
         "CameraReferenceUI",
-        title="Select Operating System and Sequence",
+        title="Reference Camera",
         widthHeight=(300, 150),
     )
     cmds.columnLayout(adjustableColumn=True)
-
-    # OS selection
-    cmds.text(label="Select Operating System:")
-    cmds.optionMenu("osMenu", label="Operating System")
-    cmds.menuItem(label="Windows")
-    cmds.menuItem(label="Linux")
 
     # Sequence selection
     cmds.text(label="Select Sequence Name:")
@@ -102,12 +91,10 @@ def show_camera_reference_ui():
     cmds.menuItem(label="F")
     cmds.menuItem(label="G")
 
-    # Button to apply the selection and reference the camera
+    # Button to reference the camera
     cmds.button(
         label="Reference Camera",
-        command=lambda x: set_file_path(
-            cmds.optionMenu("osMenu", query=True, value=True)
-        ),
+        command=lambda x: reference_camera_from_ui(),
     )
 
     cmds.showWindow(camera_window)
