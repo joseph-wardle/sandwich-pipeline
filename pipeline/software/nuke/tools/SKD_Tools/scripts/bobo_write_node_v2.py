@@ -6,14 +6,14 @@ from typing import Any
 import nuke
 from env_sg import DB_Config
 from pipe.db import DB
-from shared.util import get_production_path
+from shared.util import get_edit_path, get_production_path
 
 project_file = nuke.root()["name"].value()
 
-DEPT_DIR_MAP = {
+DEPT_DIR_MAP: dict[str, str] = {
     "Lighting": "lighting",
     "Compositing": "comp",
-    "FX": "FX",  # keep your existing uppercase folder
+    "FX": "fx",
     "Shading": "lighting",
 }
 
@@ -195,7 +195,7 @@ def increment_version_num(curr_version):
 
 def get_version_num():
     # path to the shot versions json
-    json_path = str(get_production_path()) + "/json/shot_versions.json"
+    json_path = get_production_path() / "json/shot_versions.json"
 
     with open(json_path, "r") as f:
         shot_data = json.load(f)
@@ -221,9 +221,7 @@ def get_users_name():
     """
     # Get the current login username
     username = os.getlogin()
-
-    json_path = str(get_production_path()) + "/json/usernames.json"
-    # print(str(json_path))
+    json_path = get_production_path() / "json/usernames.json"
 
     # Open and load the JSON file.
     with open(json_path, "r") as f:
@@ -245,10 +243,8 @@ def get_week_range():
 def get_output_file_info_mov(create_missing=True):
     currDept = getDepartment()
     subdir = DEPT_DIR_MAP.get(currDept, currDept.lower())
-    base_path = os.path.join("/groups/bobo/edit/shots", subdir)
-    # change this path per department
+    base_path = get_edit_path() / subdir
     start_of_week, end_of_week = get_week_range()
-
     shot_code = get_shot_code()
 
     valid_subfolder = None  # Store the most recent valid subfolder if found
@@ -685,7 +681,7 @@ def createLinks(groupNode, text_nodes, mov_node, exr_node, switch):
 
 
 # get the department
-def getDepartment():
+def getDepartment() -> str:
     grp = nuke.thisGroup()
     if grp and grp.knob("departmentDropdown"):
         return grp["departmentDropdown"].value()
