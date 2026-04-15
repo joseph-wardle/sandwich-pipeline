@@ -9,6 +9,7 @@ import nuke
 from env_sg import DB_Config
 from pipe.db import DB
 from Qt import QtCore, QtGui, QtWidgets
+from shared.util import get_production_path
 
 simple_window = None
 
@@ -128,7 +129,7 @@ class CascadingComboBox(QtWidgets.QWidget):
         widget = self.thumbnail_list.itemWidget(item)
         render_folder = cast(Any, widget).layout().itemAt(0).widget().text()
 
-        base_path = "/groups/bobo/production/shot"
+        base_path = str(get_production_path() / "shot")
         render_dir = os.path.join(base_path, self.default_shot, "render", render_folder)
 
         camera_path = ""
@@ -219,7 +220,7 @@ class CascadingComboBox(QtWidgets.QWidget):
 
     def update_renders(self, shot_num):
         self.thumbnail_list.clear()
-        base_path = "/groups/bobo/production/shot"
+        base_path = str(get_production_path() / "shot")
         shot_path = os.path.join(base_path, shot_num, "render")
         items_list = []
 
@@ -289,7 +290,7 @@ class CascadingComboBox(QtWidgets.QWidget):
         render_folder = cast(Any, widget).layout().itemAt(0).widget().text()
         self.current_render = render_folder
 
-        base_path = "/groups/bobo/production/shot"
+        base_path = str(get_production_path() / "shot")
         shot_path = os.path.join(base_path, self.default_shot, "render", render_folder)
         self.thumbnail_list.clear()
 
