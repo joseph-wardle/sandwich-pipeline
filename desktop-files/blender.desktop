@@ -1,0 +1,18 @@
+[Desktop Entry]
+Comment[en_US]=
+Comment=
+Exec=/groups/sandwich/.pipeline/.venv/bin/python /groups/sandwich/.pipeline/pipeline blender
+GenericName[en_US]=Sandwich Kwon Do Blender Launcher\s
+GenericName=Sandwich Kwon Do Blender Launcher\s
+Icon=/groups/sandwich/.pipeline/pipeline/lib/icon/blender.png
+MimeType=
+Name[en_US]=Toaster
+Name=Toaster
+Path=
+StartupNotify=true
+StartupWMClass=Mayo
+Terminal=false
+TerminalOptions=
+Type=Application
+X-KDE-SubstituteUID=false
+X-KDE-Username=

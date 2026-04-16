@@ -37,6 +37,7 @@ dev = [
     "types-substance-painter>=2023.8.3.0.0,<2024",
     "nptyping>=2.5.0,<3",
     "ty>=0.0.20",
+    "fake-bpy-module-5-0>=20260128",
 ]
 
 [tool.ruff]

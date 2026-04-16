@@ -24,6 +24,15 @@ wheels = [
 ]
 
 [[package]]
+name = "fake-bpy-module-5-0"
+version = "20260128"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/6e/f9bfe57e5a50aaf80b10b6eccf210853a3a689e9cad8f35eb9fe3baeb4e7/fake_bpy_module_5_0-20260128.tar.gz", hash = "sha256:917e3275ccd18e009faaed12c99d32190c0e01b95d29a89232d658bbc87792f8", size = 894185, upload-time = "2026-01-28T15:37:50.023Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/30/9ef62bc8f4189893f28ade1d48eef219d1c5de1011eb86585396c55e051d/fake_bpy_module_5_0-20260128-py3-none-any.whl", hash = "sha256:e245f8da6821de37d68e433e1e82aa63f655a487c9de08bb0573deb53d5da30e", size = 1022618, upload-time = "2026-01-28T15:37:46.024Z" },
+]
+
+[[package]]
 name = "ffmpeg-python"
 version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -183,6 +192,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "fake-bpy-module-5-0" },
     { name = "maya-stubs" },
     { name = "nptyping" },
     { name = "ruff" },
@@ -212,6 +222,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "fake-bpy-module-5-0", specifier = ">=20260128" },
     { name = "maya-stubs", specifier = ">=0.4.1,<0.5" },
     { name = "nptyping", specifier = ">=2.5.0,<3" },
     { name = "ruff", specifier = ">=0.5.7,<0.6" },
