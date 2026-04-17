@@ -1,0 +1,38 @@
+from maya import cmds
+
+from .. import RigBuildTest
+from ..common import (
+    format_max_items,
+    is_visible,
+)
+
+HIDDEN_NODE_TYPES = {"ikHandle", "locator", "clusterHandle", "follicle", "lattice"}
+
+
+class TestHiddenRigNodes(RigBuildTest):
+    """
+    Checks that the scene has no visible rig nodes (ikHandles, locators, etc.).
+    These nodes don't hide in the viewport when disabling NURBS curves with alt+1 which is annoying for animators.
+    """
+
+    def __init__(self):
+        super().__init__("No visible rig nodes")
+
+    def run(self) -> bool:
+        rig_nodes: list[str] = []
+        for node_type in HIDDEN_NODE_TYPES:
+            shapes = cmds.ls(type=node_type) or []
+            rig_nodes.extend(shapes)
+        rig_nodes_set: set[str] = set(rig_nodes)
+        problem_rig_nodes: list[str] = [
+            rig_node for rig_node in rig_nodes_set if is_visible(rig_node)
+        ]
+
+        if problem_rig_nodes:
+            self.log_warn(
+                f"Scene has visible rig nodes: {format_max_items(problem_rig_nodes, 'node(s)')}"
+            )
+            return False
+        else:
+            self.log_success()
+            return True

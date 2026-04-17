@@ -2,6 +2,7 @@ from maya import cmds
 
 from .. import RigBuildTest
 from ..common import (
+    GEO_GROUP_NAME,
     GEO_SET_NAME,
     format_max_items,
     get_all_visible_meshes,
@@ -19,7 +20,7 @@ class TestGeoInSet(RigBuildTest):
         super().__init__("All geometry in set")
 
     def run(self) -> bool:
-        visible_geo: set[str] = set(get_all_visible_meshes())
+        visible_geo: set[str] = get_all_visible_meshes()
         problem_meshes: set[str]
         try:
             meshes_in_set: list[str] = cmds.sets(GEO_SET_NAME, query=True)  # type: ignore
@@ -33,7 +34,39 @@ class TestGeoInSet(RigBuildTest):
         if problem_meshes:
             self.log_warn(
                 f"Scene has geometry that isn't in the geo set: "
-                f'{format_max_items(problem_meshes, "mesh(es)")} needs added to the "{GEO_SET_NAME}" set.'
+                f'{format_max_items(problem_meshes, "mesh(es)")} need added to the "{GEO_SET_NAME}" set.'
+            )
+            return False
+        else:
+            self.log_success()
+            return True
+
+
+class TestGeoInGroup(RigBuildTest):
+    """
+    Checks that the scene has no visible geometry that isn't in the geo group.
+    This group is used for animation export and as such all non-control visible geometry should be in it.
+    """
+
+    def __init__(self):
+        super().__init__("All geometry in group")
+
+    def run(self) -> bool:
+        if not cmds.objExists(GEO_GROUP_NAME):
+            self.log_warn(f'Scene missing the geo group "{GEO_GROUP_NAME}"')
+            return False
+        visible_geo: set[str] = get_all_visible_meshes()
+        objects_in_group: list[str] = (
+            cmds.listRelatives(GEO_GROUP_NAME, allDescendents=True) or []
+        )
+        visible_meshes_not_in_group = visible_geo - set(objects_in_group)
+        problem_meshes = set(
+            mesh for mesh in visible_meshes_not_in_group if not is_control(mesh)
+        )
+        if problem_meshes:
+            self.log_warn(
+                f"Scene has geometry that isn't in the geo group: "
+                f'{format_max_items(problem_meshes, "mesh(es)")} need added to the "{GEO_GROUP_NAME}" group.'
             )
             return False
         else:
