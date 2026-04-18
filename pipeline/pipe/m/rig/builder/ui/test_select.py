@@ -171,7 +171,7 @@ class TestSelectList(QListView):
         else:
             self._set_border_color(None)
 
-    def _on_test_finished(self, test: RigBuildTest, passed: bool) -> None:
+    def on_test_finished(self, test: RigBuildTest, passed: bool) -> None:
         for item in self.test_items:
             if type(item.test) is type(test):
                 item.update_status(passed)
@@ -182,7 +182,7 @@ class TestSelectList(QListView):
                 break
 
     def _on_test_finished_local(self, test: RigBuildTest, passed: bool) -> None:
-        self._on_test_finished(test, passed)
+        self.on_test_finished(test, passed)
         if self._progress_manager is not None:
             self._progress_manager.update_progress_from_test_run(test, passed)
 
