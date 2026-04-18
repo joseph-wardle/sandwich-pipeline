@@ -19,13 +19,15 @@ class TestHiddenRigNodes(RigBuildTest):
         super().__init__("No visible rig nodes")
 
     def run(self) -> bool:
-        rig_nodes: list[str] = []
+        rig_nodes: list[tuple[str, str]] = []
         for node_type in HIDDEN_NODE_TYPES:
             shapes = cmds.ls(type=node_type) or []
-            rig_nodes.extend(shapes)
-        rig_nodes_set: set[str] = set(rig_nodes)
+            rig_nodes.extend((shape, node_type) for shape in shapes)
+        rig_nodes_set: set[tuple[str, str]] = set(rig_nodes)
         problem_rig_nodes: list[str] = [
-            rig_node for rig_node in rig_nodes_set if is_visible(rig_node)
+            f"{rig_node[0]}: {rig_node[1]}"
+            for rig_node in rig_nodes_set
+            if is_visible(rig_node[0])
         ]
 
         if problem_rig_nodes:
