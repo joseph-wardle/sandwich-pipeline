@@ -106,9 +106,6 @@ class TestGeoNotSelectable(RigBuildTest):
         super().__init__("No selectable geometry")
 
     def run(self) -> bool:
-        if not cmds.objExists(GEO_GROUP_NAME):
-            self.log_warn(f'Scene missing the geo group "{GEO_GROUP_NAME}"')
-            return False
         visible_geo: set[str] = get_all_visible_meshes()
         selectable_geo = set(
             geo for geo in visible_geo if _get_effective_display_type(geo) == 0
