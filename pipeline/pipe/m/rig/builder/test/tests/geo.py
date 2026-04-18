@@ -1,4 +1,5 @@
 from maya import cmds
+from maya.api.OpenMaya import MFnDependencyNode
 
 from .. import RigBuildTest
 from ..common import (
@@ -6,6 +7,7 @@ from ..common import (
     GEO_SET_NAME,
     format_max_items,
     get_all_visible_meshes,
+    get_dag_path,
     is_control,
 )
 
@@ -67,6 +69,56 @@ class TestGeoInGroup(RigBuildTest):
             self.log_warn(
                 f"Scene has geometry that isn't in the geo group: "
                 f'{format_max_items(problem_meshes, "mesh(es)")} need added to the "{GEO_GROUP_NAME}" group.'
+            )
+            return False
+        else:
+            self.log_success()
+            return True
+
+
+def _get_effective_display_type(object: str) -> int:
+    """
+    Returns the effective overrideDisplayType considering inheritance.
+    0 = Normal, 1 = Template, 2 = Reference
+    """
+    path = get_dag_path(object)
+
+    while True:
+        fn = MFnDependencyNode(path.node())
+        override_enabled = fn.findPlug("overrideEnabled", False).asBool()
+        if override_enabled:
+            return fn.findPlug("overrideDisplayType", False).asInt()
+        if path.length() == 0:
+            break
+        try:
+            path.pop()  # move to parent
+        except RuntimeError:
+            break
+    return 0  # default: Normal
+
+
+class TestGeoNotSelectable(RigBuildTest):
+    """
+    Checks that the scene has no visible geometry that is selectable (other than controls).
+    """
+
+    def __init__(self):
+        super().__init__("No selectable geometry")
+
+    def run(self) -> bool:
+        if not cmds.objExists(GEO_GROUP_NAME):
+            self.log_warn(f'Scene missing the geo group "{GEO_GROUP_NAME}"')
+            return False
+        visible_geo: set[str] = get_all_visible_meshes()
+        selectable_geo = set(
+            geo for geo in visible_geo if _get_effective_display_type(geo) == 0
+        )
+        selectable_visible_geo = visible_geo & selectable_geo
+        problem_geo = set(geo for geo in selectable_visible_geo if not is_control(geo))
+        if problem_geo:
+            self.log_warn(
+                f"Scene has geometry that is selectable: "
+                f'{format_max_items(problem_geo, "mesh(es)")} need to set to reference display to make them unselectable.'
             )
             return False
         else:

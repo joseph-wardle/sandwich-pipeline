@@ -2,7 +2,7 @@ from ...test.core import RigBuildTest
 from .control import TestControlsInSet, TestControlsTagged, TestControlsZeroed
 from .cycle import TestCyclesDG
 from .duplicate import TestDuplicateDagNames
-from .geo import TestGeoInGroup, TestGeoInSet
+from .geo import TestGeoInGroup, TestGeoInSet, TestGeoNotSelectable
 from .hierarchy import TestRootNodeNaming, TestSingleHierachy
 from .joint import TestHiddenJoints
 from .namespace import TestNamespaces
@@ -19,6 +19,7 @@ RIG_BUILD_TESTS: list[type[RigBuildTest]] = [
     TestDuplicateDagNames,
     TestGeoInSet,
     TestGeoInGroup,
+    TestGeoNotSelectable,
     TestSingleHierachy,
     TestRootNodeNaming,
     TestNamespaces,
@@ -40,6 +41,7 @@ __all__ = [
     "TestDuplicateDagNames",
     "TestGeoInGroup",
     "TestGeoInSet",
+    "TestGeoNotSelectable",
     "TestSingleHierachy",
     "TestRootNodeNaming",
     "TestHiddenJoints",
