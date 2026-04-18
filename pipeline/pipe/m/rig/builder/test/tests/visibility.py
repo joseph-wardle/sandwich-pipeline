@@ -21,7 +21,7 @@ class TestHiddenRigNodes(RigBuildTest):
     def run(self) -> bool:
         rig_nodes: list[tuple[str, str]] = []
         for node_type in HIDDEN_NODE_TYPES:
-            shapes = cmds.ls(type=node_type) or []
+            shapes = cmds.ls(exactType=node_type) or []
             rig_nodes.extend((shape, node_type) for shape in shapes)
         rig_nodes_set: set[tuple[str, str]] = set(rig_nodes)
         problem_rig_nodes: list[str] = [
