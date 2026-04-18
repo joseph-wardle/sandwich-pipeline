@@ -304,7 +304,7 @@ def apply_mov_path_to_ui_and_write(group):
 
 
 def get_output_file_info_exr():
-    base_path = "/groups/bobo/edit/shots/comp/"
+    base_path = str(get_edit_path() / "comp") + "/"
 
     # setting the file parameter
     file_name = get_shot_code()
@@ -388,7 +388,7 @@ def update_mov_node(write_node):
 
 def make_demoReel_mov_node():
     shot_code = get_shot_code() + ".mov"
-    folder_path = "/groups/bobo/edit/Reel_Shots"
+    folder_path = str(get_production_path().parent / "edit/Reel_Shots")
 
     # Create the full file path.
     full_path = os.path.join(folder_path, shot_code)
