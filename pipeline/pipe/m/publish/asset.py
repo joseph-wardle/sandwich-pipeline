@@ -1259,7 +1259,7 @@ ILLEGAL_SHADER_RULES: set[ShaderRule] = {
         "Unnamed material (material name has default shader name in it)",
     ),
 }
-ILLEGAL_SHADER_TYPES = {"aiStandardSurface"}
+ILLEGAL_SHADER_TYPES = {"aiStandardSurface", "aiAmbientOcclusion"}
 
 
 class ModelChecker(MCUI):
