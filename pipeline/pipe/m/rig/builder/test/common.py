@@ -7,6 +7,8 @@ from maya.api.OpenMaya import MDagPath, MFnDagNode, MItDag, MSelectionList
 
 CONTROLS_SET_NAME = "rig_controllers_grp"
 GEO_SET_NAME = "rig_geo_grp"
+ROOT_NODE_NAME = "rig"
+GEO_GROUP_NAME = "geo"
 
 
 def get_dag_path(transform: str) -> MDagPath:
@@ -65,12 +67,12 @@ def get_all_controls_by_name() -> list[str]:
     ]
 
 
-def get_all_visible_meshes() -> list[str]:
+def get_all_visible_meshes() -> set[str]:
     mesh_shapes: list[str] = cmds.ls(type="mesh")
     mesh_transforms: list[str] = cmds.listRelatives(mesh_shapes, parent=True) or []  # type: ignore
 
-    visible_geo: set[str] = set(geo for geo in mesh_transforms if is_visible(geo))
-    return list(visible_geo)
+    visible_geo = set(geo for geo in mesh_transforms if is_visible(geo))
+    return visible_geo
 
 
 def is_control(transform: str, strict: bool = True) -> bool:

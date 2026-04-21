@@ -8,6 +8,9 @@ from Qt.QtWidgets import QApplication, QHBoxLayout, QListView, QPushButton, QWid
 from ..progress import TestProgressManager
 from ..test import RIG_BUILD_TESTS, RigBuildTest, TestRunner
 
+PASSED_COLOR = QColor(0, 94, 75)
+FAILED_COLOR = QColor(130, 42, 50)
+
 
 class TestSelectListModel(QStandardItemModel):
     def __init__(self, parent: QtCore.QObject | None):
@@ -27,6 +30,7 @@ class TestItem(QStandardItem):
         super().__init__(test.name)
         self.test = test
         self.test_enabled: bool = True
+        self.test_passed: bool | None = None
         self.setEditable(False)
         self.setSelectable(False)
         self.setCheckable(True)
@@ -40,12 +44,14 @@ class TestItem(QStandardItem):
         self.update_status(result)
 
     def update_status(self, passed: bool):
+        self.test_passed = passed
         if passed:
-            self.setBackground(QBrush(QColor(0, 94, 75)))
+            self.setBackground(QBrush(PASSED_COLOR))
         else:
-            self.setBackground(QBrush(QColor(130, 42, 50)))
+            self.setBackground(QBrush(FAILED_COLOR))
 
     def clear_status(self):
+        self.test_passed = None
         self.setBackground(QBrush())
 
     def is_enabled(self) -> bool:
@@ -98,19 +104,6 @@ class TestSelectList(QListView):
         self.test_items: list[TestItem] = []
         self.populate_tests([test() for test in RIG_BUILD_TESTS])
 
-    def resizeEvent(self, e) -> None:
-        super().resizeEvent(e)
-        self._reposition_overlay()
-
-    def _reposition_overlay(self) -> None:
-        overlay = self._button_overlay
-        viewport = self.viewport()
-        overlay.adjustSize()
-        x = viewport.width() - overlay.width()
-        y = viewport.height() - overlay.height()
-        overlay.move(x, y)
-        overlay.raise_()
-
     def populate_tests(self, tests: Sequence[RigBuildTest]) -> None:
         for test in tests:
             self.add_item(test)
@@ -122,6 +115,7 @@ class TestSelectList(QListView):
         self.test_items.append(item)
 
     def clear_test_status(self) -> None:
+        self._set_border_color(None)
         for test_item in self.test_items:
             test_item.clear_status()
 
@@ -164,12 +158,26 @@ class TestSelectList(QListView):
         self._progress_manager.update_progress_finished()
         self._progress_manager = None
 
+    def _update_overall_status(self) -> None:
+        enabled_items = [i for i in self.test_items if i.is_enabled()]
+
+        if not enabled_items:
+            self._set_border_color(None)
+
+        if all(test.test_passed is True for test in enabled_items):
+            self._set_border_color(PASSED_COLOR)
+        elif any(test.test_passed is False for test in enabled_items):
+            self._set_border_color(FAILED_COLOR)  # red
+        else:
+            self._set_border_color(None)
+
     def on_test_finished(self, test: RigBuildTest, passed: bool) -> None:
         for item in self.test_items:
             if type(item.test) is type(test):
                 item.update_status(passed)
                 if not passed:
                     self.scrollTo(item.index(), QListView.ScrollHint.EnsureVisible)
+                self._update_overall_status()
                 QApplication.processEvents()
                 break
 
@@ -189,3 +197,27 @@ class TestSelectList(QListView):
     def connect_progress(self, progress_slot: Callable[[float], None]) -> None:
         """Stores the slot (e.g., progress_bar.update_progress) to connect later."""
         self._progress_slot = progress_slot  # type: ignore
+
+    def _set_border_color(self, color: QColor | None = None) -> None:
+        if color is not None:
+            self.setStyleSheet(f"""
+                QListView {{
+                    border: 2px solid rgba{color.getRgb()};
+                    border-radius: 3px;
+                }}
+            """)
+        else:
+            self.setStyleSheet("")
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        self._reposition_overlay()
+
+    def _reposition_overlay(self) -> None:
+        overlay = self._button_overlay
+        viewport = self.viewport()
+        overlay.adjustSize()
+        x = viewport.width() - overlay.width()
+        y = viewport.height() - overlay.height()
+        overlay.move(x, y)
+        overlay.raise_()

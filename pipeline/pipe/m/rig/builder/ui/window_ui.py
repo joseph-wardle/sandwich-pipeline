@@ -41,7 +41,7 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
         # Build Section
         self.top_container = QWidget()
         self.main_splitter.addWidget(self.top_container)
-        self.main_splitter.setStretchFactor(0, 1)
+        self.main_splitter.setStretchFactor(0, 3)
 
         self.top_layout = QVBoxLayout(self.top_container)
         self.top_layout.setContentsMargins(0, 0, 0, 4)
