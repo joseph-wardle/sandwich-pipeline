@@ -1202,7 +1202,7 @@ class AssetPublisher(Publisher):
             message_string = "\n".join(failure_messages)
             MessageDialog(
                 self._window,
-                "The selected model had material issue(s) that need resolved: \n"
+                "The selected model has material issue(s) that need resolved: \n"
                 f"{message_string}",
             ).exec_()
             return False
