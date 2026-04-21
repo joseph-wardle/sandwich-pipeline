@@ -1199,7 +1199,7 @@ class AssetPublisher(Publisher):
             failure_messages: list[str] = []
             for message, items in failures.items():
                 failure_messages.append(f"{message}: {', '.join(items)}")
-            message_string = ",\n".join(failure_messages)
+            message_string = "\n".join(failure_messages)
             MessageDialog(
                 self._window,
                 "The selected model had material issue(s) that need resolved: \n"
