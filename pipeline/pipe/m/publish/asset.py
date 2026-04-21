@@ -1253,7 +1253,9 @@ ILLEGAL_SHADER_RULES: set[ShaderRule] = {
     ShaderRule(re.compile(r"\d$"), "Material name with a trailing digit"),
     ShaderRule(re.compile(r"SG$"), 'Material name that ends with "SG"'),
     ShaderRule(
-        re.compile(r"standardSurface|openPBRSurface|lambert|phong|blinn"),
+        re.compile(
+            r"aiStandardSurface|standardSurface|openPBRSurface|lambert|phong|blinn"
+        ),
         "Unnamed material (material name has default shader name in it)",
     ),
 }
