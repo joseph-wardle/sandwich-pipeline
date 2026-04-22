@@ -7,10 +7,9 @@ import re
 import shutil
 import subprocess
 import time
-import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional, Sequence, cast
+from typing import Any, Sequence, cast
 
 import maya.cmds as mc
 from env import Executables
@@ -48,9 +47,6 @@ from pipe.struct.db import Asset, SGEntity
 from pipe.versioning import BackupResult
 from pipe.versioning.store import backup_if_changed
 
-if TYPE_CHECKING:
-    pass
-
 from .publisher import Publisher
 
 try:
@@ -83,7 +79,7 @@ class HoudiniBuildError(RuntimeError):
 
 class _PublishAssetVariantControls:
     _geo_var_dropdown: QComboBox
-    _conn: Optional[DB]
+    _conn: DB | None
 
     def _init_variant_controls(self) -> None:
         geo_var_widget = QWidget(cast(QWidget, self))
@@ -192,10 +188,10 @@ class PublishAssetOptionsDialog(
 ):
     """Publish dialog for the current scene asset (read-only asset name)."""
 
-    _selected_asset_name: Optional[str]
+    _selected_asset_name: str | None
 
     def __init__(
-        self, parent: QWidget | None, items: Sequence[str], conn: Optional[DB]
+        self, parent: QWidget | None, items: Sequence[str], conn: DB | None
     ) -> None:
         super().__init__(
             parent,
@@ -259,7 +255,7 @@ class PublishAssetPickerDialog(
     """Fallback dialog that lets users choose the asset to publish."""
 
     def __init__(
-        self, parent: QWidget | None, items: Sequence[str], conn: Optional[DB]
+        self, parent: QWidget | None, items: Sequence[str], conn: DB | None
     ) -> None:
         super().__init__(
             parent,
@@ -691,7 +687,7 @@ class AssetPublisher(Publisher):
             return f"{message}\n\n" + "\n".join(details)
         return message
 
-    def publish(self):
+    def publish(self) -> None:
         publish_telemetry = self._new_publish_telemetry_state()
         publish_path: Path | None = None
         try:
@@ -831,7 +827,7 @@ class AssetPublisher(Publisher):
                     try:
                         mc.mayaUSDExport(**kwargs)  # type: ignore[attr-defined]
                     except Exception as exc:
-                        print(traceback.format_exc())
+                        log.exception("USD export failed")
                         MessageDialog(
                             self._window,
                             "WARNING: Publish failed! Please check the console for more information",

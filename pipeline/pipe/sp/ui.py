@@ -79,12 +79,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     _version_title_field: QtWidgets.QLineEdit
     _version_note_field: QtWidgets.QTextEdit
 
-    # _mat_var_enabled: QtWidgets.QCheckBox
-    # _metadataManager: pipe.sp.metadata.MetadataUpdater
     _tex_set_dict: dict[sp.textureset.TextureSet, "TexSetWidget"]
 
     def __init__(self, flags: QtCore.Qt.WindowFlags | None = None) -> None:
-        super(SubstanceExportWindow, self).__init__(get_main_qt_window())
+        super().__init__(get_main_qt_window())
 
         self._active_publish_context = None
         self._tex_set_dict = {}
