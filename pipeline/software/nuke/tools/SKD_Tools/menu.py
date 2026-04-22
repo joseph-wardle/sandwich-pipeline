@@ -10,52 +10,52 @@ nuke.pluginAddPath("./scripts")
 
 
 def make_bobo_read_node():
-    import bobo_read_node  # type: ignore[import-not-found]
+    import bobo_read_node
 
     # run the normal read now
     bobo_read_node.auto_read_latest_exr()
 
 
 def make_bobo_fx_read_node():
-    import bobo_read_node  # type: ignore[import-not-found]
+    import bobo_read_node
 
     # run the FX read now
     bobo_read_node.auto_read_latest_fx_exr()
 
 
 def make_bobo_cfx_read_node():
-    import bobo_read_node  # type: ignore[import-not-found]
+    import bobo_read_node
 
     # run the FX read now
     bobo_read_node.auto_read_latest_cfx_exr()
 
 
 def make_bobo_write_node():
-    import bobo_write_node_v2  # type: ignore[import-not-found]
+    import bobo_write_node_v2
 
     bobo_write_node_v2.main()
 
 
 def import_render_layers():
-    import render_layer_selector  # type: ignore[import-not-found]
+    import render_layer_selector
 
     render_layer_selector.run()
 
 
 def import_USD_cam():
-    import import_usd_camera  # type: ignore[import-not-found]
+    import import_usd_camera
 
     import_usd_camera.run()
 
 
 def choose_shot():
-    import open_shot  # type: ignore[import-not-found]
+    import open_shot
 
     open_shot.run()
 
 
 def set_frameRange_and_aspectRatio():
-    import set_frameRange_and_aspectRatio  # type: ignore[import-not-found]
+    import set_frameRange_and_aspectRatio
 
     set_frameRange_and_aspectRatio.run()
 
