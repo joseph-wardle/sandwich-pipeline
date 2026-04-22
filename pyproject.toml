@@ -92,6 +92,7 @@ replace-imports-with-any = [
 [tool.ty.environment]
 extra-paths = [
     "pipeline/software/maya/scripts/",
+    "pipeline/software/nuke/tools/SKD_Tools/scripts",
     "pipeline/",
 ]
 
@@ -117,7 +118,8 @@ exclude = [
     "pipeline/**/studiolibrary/**",
     "pipeline/**/timeline_marker/**",
     "pipeline/**/houdini/scripts/**",
-    "pipeline/**/maya/scripts/**"
+    "pipeline/**/maya/scripts/**",
+    "pipeline/software/houdini/hsite/**/scripts/"
 ]
 
 
