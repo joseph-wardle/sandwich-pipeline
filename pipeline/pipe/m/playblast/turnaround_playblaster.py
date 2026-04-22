@@ -135,7 +135,10 @@ class TurnaroundPlayblaster:
                         aim_height_bias=config.aim_height_bias,
                     ) as camera_shape,
                 ):
-                    progress.begin_step("Capturing shaded pass", "Rendering frames...")
+                    progress.begin_step(
+                        "Capturing shaded pass",
+                        "Rendering frames \u2014 this may take a moment...",
+                    )
                     self._capture_pass(
                         output_base=shaded_base,
                         camera_shape=camera_shape,
@@ -145,7 +148,8 @@ class TurnaroundPlayblaster:
 
                     if config.include_wireframe_pass:
                         progress.begin_step(
-                            "Capturing wireframe pass", "Rendering frames..."
+                            "Capturing wireframe pass",
+                            "Rendering frames \u2014 this may take a moment...",
                         )
                         self._capture_pass(
                             output_base=wireframe_base,
@@ -273,6 +277,8 @@ class TurnaroundPlayblaster:
                 f"{destination_base.name}.{destination_frame:04d}.png"
             )
             shutil.copyfile(source_path, destination_path)
+            if offset % 10 == 0:
+                QtWidgets.QApplication.processEvents()
 
     def _encode_output_movies(self, *, combined_base: Path) -> None:
         image_pattern = str(combined_base) + ".%04d.png"
@@ -315,6 +321,7 @@ class TurnaroundPlayblaster:
                 output_path = Path(str(output_base) + f".{preset.ext}")
                 output_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
                 shutil.copyfile(temp_movie_path, output_path)
+                QtWidgets.QApplication.processEvents()
 
 
 @contextmanager

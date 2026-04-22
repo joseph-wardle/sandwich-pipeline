@@ -823,7 +823,7 @@ class AssetPublisher(Publisher):
                     title="Publishing Asset",
                     steps=publish_steps,
                 ) as progress:
-                    progress.begin_step("Exporting USD")
+                    progress.begin_step("Exporting USD", "This may take a moment...")
                     try:
                         mc.mayaUSDExport(**kwargs)  # type: ignore[attr-defined]
                     except Exception as exc:
@@ -856,7 +856,10 @@ class AssetPublisher(Publisher):
                             raise
 
                     if ENABLE_HOUDINI_ASSET_BUILD:
-                        progress.begin_step("Building Houdini component")
+                        progress.begin_step(
+                            "Building Houdini component",
+                            "This may take a moment...",
+                        )
                     try:
                         self._postpublish()
                     except Exception as exc:

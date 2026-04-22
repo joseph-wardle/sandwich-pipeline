@@ -226,7 +226,7 @@ def publish_component(
             if backup is None:
                 return _finalize_result(result)
 
-            progress.begin_step("Exporting component")
+            progress.begin_step("Exporting component", "This may take a moment...")
             export = _export_component(context=context, options=opts, result=result)
             if export is None:
                 return _finalize_result(result)
