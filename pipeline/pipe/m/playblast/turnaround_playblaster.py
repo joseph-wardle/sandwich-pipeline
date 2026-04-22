@@ -11,8 +11,10 @@ from typing import Iterable
 
 import ffmpeg  # type: ignore[import-untyped]
 import maya.cmds as mc
+from Qt import QtWidgets
 from mayacapture.capture import capture  # type: ignore[import-not-found]
 
+from pipe.glui.progress import progress_scope
 from pipe.m.util import maintain_selection
 from pipe.playblast_artist import resolve_artist_display_name
 from pipe.util import Playblaster
@@ -95,10 +97,15 @@ class TurnaroundPlayblaster:
         self._config = config
         return self
 
-    def playblast(self) -> None:
+    def playblast(self, *, parent: QtWidgets.QWidget | None = None) -> None:
         config = self._config
         if not config.review_roots:
             raise ValueError("No review roots were resolved for turnaround export.")
+
+        steps = ["Capturing shaded pass"]
+        if config.include_wireframe_pass:
+            steps.append("Capturing wireframe pass")
+        steps += ["Assembling frames", "Encoding movies"]
 
         with tempfile.TemporaryDirectory(prefix="skd_turnaround_") as temp_dir:
             temp_root = Path(temp_dir)
@@ -106,44 +113,62 @@ class TurnaroundPlayblaster:
             wireframe_base = temp_root / "turnaround_wireframe"
             combined_base = temp_root / "turnaround_combined"
 
-            with (
-                applied_hud(*_turnaround_huds(config.asset_label, config.review_roots)),
-                maintain_selection(),
-                _preserved_current_time(),
-                _staged_turntable_roots(
-                    config.review_roots,
-                    frames_per_pass=config.frames_per_pass,
-                ) as staged_roots,
-                _temporary_turnaround_camera(
-                    staged_roots,
-                    focal_length=config.focal_length,
-                    camera_padding=config.camera_padding,
-                    aim_height_bias=config.aim_height_bias,
-                ) as camera_shape,
-            ):
-                self._capture_pass(
-                    output_base=shaded_base,
-                    camera_shape=camera_shape,
-                    review_roots=staged_roots,
-                    wireframe_on_shaded=False,
-                )
-
-                if config.include_wireframe_pass:
+            with progress_scope(
+                parent=parent,
+                title="Turnaround Playblast",
+                steps=steps,
+            ) as progress:
+                with (
+                    applied_hud(
+                        *_turnaround_huds(config.asset_label, config.review_roots)
+                    ),
+                    maintain_selection(),
+                    _preserved_current_time(),
+                    _staged_turntable_roots(
+                        config.review_roots,
+                        frames_per_pass=config.frames_per_pass,
+                    ) as staged_roots,
+                    _temporary_turnaround_camera(
+                        staged_roots,
+                        focal_length=config.focal_length,
+                        camera_padding=config.camera_padding,
+                        aim_height_bias=config.aim_height_bias,
+                    ) as camera_shape,
+                ):
+                    progress.begin_step(
+                        "Capturing shaded pass",
+                        "Rendering frames \u2014 this may take a moment...",
+                    )
                     self._capture_pass(
-                        output_base=wireframe_base,
+                        output_base=shaded_base,
                         camera_shape=camera_shape,
                         review_roots=staged_roots,
-                        wireframe_on_shaded=True,
+                        wireframe_on_shaded=False,
                     )
 
-            self._assemble_combined_sequence(
-                shaded_base=shaded_base,
-                wireframe_base=wireframe_base
-                if config.include_wireframe_pass
-                else None,
-                combined_base=combined_base,
-            )
-            self._encode_output_movies(combined_base=combined_base)
+                    if config.include_wireframe_pass:
+                        progress.begin_step(
+                            "Capturing wireframe pass",
+                            "Rendering frames \u2014 this may take a moment...",
+                        )
+                        self._capture_pass(
+                            output_base=wireframe_base,
+                            camera_shape=camera_shape,
+                            review_roots=staged_roots,
+                            wireframe_on_shaded=True,
+                        )
+
+                progress.begin_step("Assembling frames")
+                self._assemble_combined_sequence(
+                    shaded_base=shaded_base,
+                    wireframe_base=wireframe_base
+                    if config.include_wireframe_pass
+                    else None,
+                    combined_base=combined_base,
+                )
+
+                progress.begin_step("Encoding movies", "Running FFmpeg...")
+                self._encode_output_movies(combined_base=combined_base)
 
     def _capture_pass(
         self,
@@ -252,6 +277,8 @@ class TurnaroundPlayblaster:
                 f"{destination_base.name}.{destination_frame:04d}.png"
             )
             shutil.copyfile(source_path, destination_path)
+            if offset % 10 == 0:
+                QtWidgets.QApplication.processEvents()
 
     def _encode_output_movies(self, *, combined_base: Path) -> None:
         image_pattern = str(combined_base) + ".%04d.png"
@@ -294,6 +321,7 @@ class TurnaroundPlayblaster:
                 output_path = Path(str(output_base) + f".{preset.ext}")
                 output_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
                 shutil.copyfile(temp_movie_path, output_path)
+                QtWidgets.QApplication.processEvents()
 
 
 @contextmanager

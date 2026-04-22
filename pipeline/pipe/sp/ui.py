@@ -13,11 +13,9 @@ from Qt.QtCore import QRegExp
 from Qt.QtGui import QIcon, QPixmap, QRegExpValidator
 from Qt.QtWidgets import (
     QComboBox,
-    QDialog,
     QLabel,
     QLayout,
     QMainWindow,
-    QProgressBar,
 )
 
 if TYPE_CHECKING:
@@ -31,6 +29,7 @@ from pipe.asset.paths import paths_for_asset
 from pipe.asset.version_adapter import asset_owner_for, substance_project_stream
 from pipe.db import DB
 from pipe.glui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButtons
+from pipe.glui.progress import ProgressDialog
 from pipe.sp.export import Exporter, TexSetExportSettings
 from pipe.sp.houdini import HoudiniPublishError, run_asset_builder, summarize_result
 from pipe.sp.local import get_main_qt_window
@@ -65,101 +64,7 @@ class _PendingPublishRequest:
 @dataclass
 class _ActivePublishContext:
     request: _PendingPublishRequest
-    progress_dialog: "_PublishProgressDialog"
-
-
-class _PublishProgressDialog(QDialog):
-    _allow_close: bool
-    _detail_label: QLabel
-    _progress_bar: QProgressBar
-    _stage_label: QLabel
-    _stage_sequence: tuple[PublishStage, ...]
-    _step_label: QLabel
-
-    def __init__(
-        self,
-        parent: QtWidgets.QWidget | None,
-        *,
-        stage_sequence: typing.Sequence[PublishStage],
-    ) -> None:
-        super().__init__(parent)
-        self._allow_close = False
-        self._stage_sequence = tuple(stage_sequence)
-
-        self.setWindowTitle("Publishing Textures")
-        self.setModal(True)
-        self.setMinimumWidth(420)
-        self.setWindowFlags(
-            (self.windowFlags() & ~QtCore.Qt.WindowContextHelpButtonHint)
-            | QtCore.Qt.WindowStaysOnTopHint
-        )
-        self.setWindowModality(QtCore.Qt.WindowModal)
-
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(8)
-
-        self._step_label = QLabel("")
-        self._step_label.setStyleSheet("font-size: 11px; color: #8a8a8a;")
-        layout.addWidget(self._step_label)
-
-        self._stage_label = QLabel("Preparing publish")
-        self._stage_label.setStyleSheet("font-size: 13px; font-weight: bold;")
-        layout.addWidget(self._stage_label)
-
-        self._detail_label = QLabel("")
-        self._detail_label.setWordWrap(True)
-        layout.addWidget(self._detail_label)
-
-        self._progress_bar = QProgressBar()
-        self._progress_bar.setTextVisible(True)
-        self._progress_bar.setRange(0, 0)
-        layout.addWidget(self._progress_bar)
-
-    def event(self, event: QtCore.QEvent) -> bool:
-        if not self._allow_close and event.type() == QtCore.QEvent.Close:
-            event.ignore()
-            return True
-        return super().event(event)
-
-    def reject(self) -> None:
-        if self._allow_close:
-            super().reject()
-
-    def finish(self) -> None:
-        if self._allow_close:
-            return
-        self._allow_close = True
-        self.close()
-
-    def update_progress(self, update: PublishProgressUpdate) -> None:
-        step_index = self._step_index(update.stage)
-        self._step_label.setText(f"Step {step_index} of {len(self._stage_sequence)}")
-        self._stage_label.setText(update.stage.label)
-        self._detail_label.setText(update.message)
-
-        if update.is_determinate:
-            total = max(1, int(update.total or 0))
-            current = max(0, min(int(update.current or 0), total))
-            self._progress_bar.setRange(0, total)
-            self._progress_bar.setValue(current)
-            self._progress_bar.setFormat("%v / %m")
-        else:
-            self._progress_bar.setRange(0, 0)
-            self._progress_bar.setFormat("")
-
-        if not self.isVisible():
-            self.show()
-        self.raise_()
-        self.activateWindow()
-
-        QtWidgets.QApplication.processEvents()
-
-    def _step_index(self, stage: PublishStage) -> int:
-        try:
-            return self._stage_sequence.index(stage) + 1
-        except ValueError:
-            return len(self._stage_sequence)
+    progress_dialog: ProgressDialog
 
 
 class SubstanceExportWindow(QMainWindow, ButtonPair):
@@ -174,12 +79,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     _version_title_field: QtWidgets.QLineEdit
     _version_note_field: QtWidgets.QTextEdit
 
-    # _mat_var_enabled: QtWidgets.QCheckBox
-    # _metadataManager: pipe.sp.metadata.MetadataUpdater
     _tex_set_dict: dict[sp.textureset.TextureSet, "TexSetWidget"]
 
     def __init__(self, flags: QtCore.Qt.WindowFlags | None = None) -> None:
-        super(SubstanceExportWindow, self).__init__(get_main_qt_window())
+        super().__init__(get_main_qt_window())
 
         self._active_publish_context = None
         self._tex_set_dict = {}
@@ -516,9 +419,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         QTimer so Qt can paint the dialog before Substance Painter begins
         synchronous work.
         """
-        progress_dialog = _PublishProgressDialog(
+        progress_dialog = ProgressDialog(
             self,
-            stage_sequence=request.stage_sequence,
+            title="Publishing Textures",
+            total_steps=len(request.stage_sequence),
         )
         context = _ActivePublishContext(
             request=request,
@@ -532,7 +436,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             if request.save_required
             else PublishStage.PREPARING_PUBLISH
         )
-        progress_dialog.update_progress(
+        self._send_publish_progress(
             PublishProgressUpdate(
                 stage=initial_stage,
                 message=(
@@ -565,7 +469,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             if request.save_required
             else PublishStage.PREPARING_PUBLISH
         )
-        context.progress_dialog.update_progress(
+        self._send_publish_progress(
             PublishProgressUpdate(
                 stage=wait_stage,
                 message=(
@@ -605,7 +509,6 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             return
 
         request = context.request
-        progress_dialog = context.progress_dialog
         exporter = Exporter(self._curr_asset)
 
         try:
@@ -626,7 +529,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             log.info("Exporting!")
 
             if request.save_required:
-                progress_dialog.update_progress(
+                self._send_publish_progress(
                     PublishProgressUpdate(
                         stage=PublishStage.SAVING_PROJECT,
                         message="Saving the Substance Painter project before publish.",
@@ -653,7 +556,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                     )
                     return
 
-            progress_dialog.update_progress(
+            self._send_publish_progress(
                 PublishProgressUpdate(
                     stage=PublishStage.PREPARING_PUBLISH,
                     message="Preparing the publish configuration and enabled texture sets.",
@@ -665,7 +568,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 request.mat_var,
                 request.geo_var,
                 request.material_layer,
-                progress_callback=progress_dialog.update_progress,
+                progress_callback=self._send_publish_progress,
             )
             if not export_success:
                 log.error(f"Texture export failed for {request.asset_label}")
@@ -687,7 +590,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 backup_status = "Backup skipped: project has no file path."
                 log.warning("Backup skipped: project has no file path.")
             else:
-                progress_dialog.update_progress(
+                self._send_publish_progress(
                     PublishProgressUpdate(
                         stage=PublishStage.BACKING_UP_PROJECT,
                         message="Saving a versioned backup of the Substance Painter project.",
@@ -749,7 +652,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
             houdini_status: str | None = None
             try:
-                progress_dialog.update_progress(
+                self._send_publish_progress(
                     PublishProgressUpdate(
                         stage=PublishStage.RUNNING_HOUDINI,
                         message="Running the Houdini asset publish step.",
@@ -792,6 +695,24 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         self._active_publish_context = None
         context.progress_dialog.finish()
         self._set_publish_controls_enabled(True)
+
+    def _send_publish_progress(self, update: PublishProgressUpdate) -> None:
+        """Adapt a ``PublishProgressUpdate`` to the shared ``ProgressDialog``."""
+        ctx = self._active_publish_context
+        if ctx is None:
+            return
+        stage_sequence = ctx.request.stage_sequence
+        try:
+            step = list(stage_sequence).index(update.stage) + 1
+        except ValueError:
+            step = len(stage_sequence)
+        ctx.progress_dialog.set_progress(
+            step=step,
+            stage=update.stage.label,
+            detail=update.message,
+            current=update.current,
+            total=update.total,
+        )
 
     def _set_publish_controls_enabled(self, enabled: bool) -> None:
         self._central_widget.setEnabled(enabled)

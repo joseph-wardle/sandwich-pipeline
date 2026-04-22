@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import substance_painter as sp
+from Qt import QtWidgets
 
 if TYPE_CHECKING:
     import typing
@@ -465,6 +466,7 @@ class Exporter:
             event_planned_texture_count += outcome.event_planned_texture_count
             used_event_fallback = used_event_fallback or outcome.used_event_fallback
             all_exported_textures.update(outcome.exported_textures)
+            QtWidgets.QApplication.processEvents()
 
         export_payload["planned_texture_count"] = planned_texture_count
         export_payload["exported_texture_count"] = planned_export_count(

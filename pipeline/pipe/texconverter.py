@@ -26,6 +26,21 @@ from pipe.util import silent_startupinfo
 log = logging.getLogger(__name__)
 
 
+def _process_qt_events() -> None:
+    """Flush pending Qt events so progress dialogs can repaint.
+
+    Safe to call when no QApplication exists (headless / batch mode).
+    """
+    try:
+        from Qt import QtWidgets
+
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.processEvents()
+    except Exception:
+        pass
+
+
 def _nearest_pow2(n: int) -> int:
     return 1 << (n - 1).bit_length()
 
@@ -443,6 +458,8 @@ class TexConverter:
                         log.debug(stdout)
                     if p.stderr and (stderr := p.stderr.read().decode("utf-8")):
                         log.debug(stderr)
+
+                _process_qt_events()
 
                 if skip_check:
                     continue

@@ -794,7 +794,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
             return
 
         try:
-            self.playblaster.configure(config).playblast()
+            self.playblaster.configure(config).playblast(parent=self)
         except Exception as exc:
             log.exception("Turnaround export failed")
             MessageDialog(

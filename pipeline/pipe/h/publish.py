@@ -22,8 +22,10 @@ from pathlib import Path
 from typing import Any, Mapping, NotRequired, TypedDict, cast
 
 import hou
+from Qt import QtWidgets
 
 from pipe.asset.version_adapter import asset_owner_from_metadata
+from pipe.glui.progress import progress_scope
 from pipe.versioning import stream_key_for
 from pipe.versioning.model import DCC_HOUDINI
 from pipe.versioning.store import (
@@ -191,8 +193,20 @@ class _PublishContext:
     export_path: Path
 
 
+_PUBLISH_STEPS = [
+    "Backing up project",
+    "Exporting component",
+    "Collecting thumbnail",
+    "Syncing gallery",
+    "Running hooks",
+]
+
+
 def publish_component(
-    node_path: str, options: PublishOptions | Mapping[str, Any] | None = None
+    node_path: str,
+    options: PublishOptions | Mapping[str, Any] | None = None,
+    *,
+    parent: QtWidgets.QWidget | None = None,
 ) -> PublishResult:
     """Publish a component output node with a reproducible backup snapshot."""
     opts = _coerce_options(options)
@@ -202,39 +216,49 @@ def publish_component(
         if context is None:
             return _finalize_result(result)
 
-        backup = _backup_snapshot(context=context, options=opts, result=result)
-        if backup is None:
-            return _finalize_result(result)
+        with progress_scope(
+            parent=parent,
+            title="Publishing Component",
+            steps=_PUBLISH_STEPS,
+        ) as progress:
+            progress.begin_step("Backing up project")
+            backup = _backup_snapshot(context=context, options=opts, result=result)
+            if backup is None:
+                return _finalize_result(result)
 
-        export = _export_component(context=context, options=opts, result=result)
-        if export is None:
-            return _finalize_result(result)
+            progress.begin_step("Exporting component", "This may take a moment...")
+            export = _export_component(context=context, options=opts, result=result)
+            if export is None:
+                return _finalize_result(result)
 
-        thumbnail, thumbnail_bytes = _collect_thumbnail(
-            context=context, options=opts, result=result
-        )
-        result["thumbnail"] = thumbnail
+            progress.begin_step("Collecting thumbnail")
+            thumbnail, thumbnail_bytes = _collect_thumbnail(
+                context=context, options=opts, result=result
+            )
+            result["thumbnail"] = thumbnail
 
-        gallery = _sync_gallery(
-            context=context,
-            options=opts,
-            result=result,
-            thumbnail_bytes=thumbnail_bytes,
-            backup_version=backup["backup_version"],
-        )
-        result["gallery"] = gallery
+            progress.begin_step("Syncing gallery")
+            gallery = _sync_gallery(
+                context=context,
+                options=opts,
+                result=result,
+                thumbnail_bytes=thumbnail_bytes,
+                backup_version=backup["backup_version"],
+            )
+            result["gallery"] = gallery
 
-        hooks = _run_hooks(
-            context=context,
-            options=opts,
-            result=result,
-            backup=backup,
-            export=export,
-            gallery=gallery,
-        )
-        result["hooks"] = hooks
-        result["backup"] = backup
-        result["export"] = export
+            progress.begin_step("Running hooks")
+            hooks = _run_hooks(
+                context=context,
+                options=opts,
+                result=result,
+                backup=backup,
+                export=export,
+                gallery=gallery,
+            )
+            result["hooks"] = hooks
+            result["backup"] = backup
+            result["export"] = export
     except Exception as exc:
         _error(result, "UnhandledPublishException", str(exc))
     return _finalize_result(result)

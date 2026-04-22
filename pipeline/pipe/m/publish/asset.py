@@ -7,10 +7,9 @@ import re
 import shutil
 import subprocess
 import time
-import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional, Sequence, cast
+from typing import Any, Sequence, cast
 
 import maya.cmds as mc
 from env import Executables
@@ -37,6 +36,7 @@ from pipe.glui.dialogs import (
     MessageDialog,
     MessageDialogCustomButtons,
 )
+from pipe.glui.progress import progress_scope
 from pipe.m.assetfile import (
     read_asset_metadata,
     resolve_asset_from_scene_path,
@@ -46,9 +46,6 @@ from pipe.m.util import maintain_selection
 from pipe.struct.db import Asset, SGEntity
 from pipe.versioning import BackupResult
 from pipe.versioning.store import backup_if_changed
-
-if TYPE_CHECKING:
-    pass
 
 from .publisher import Publisher
 
@@ -82,7 +79,7 @@ class HoudiniBuildError(RuntimeError):
 
 class _PublishAssetVariantControls:
     _geo_var_dropdown: QComboBox
-    _conn: Optional[DB]
+    _conn: DB | None
 
     def _init_variant_controls(self) -> None:
         geo_var_widget = QWidget(cast(QWidget, self))
@@ -191,10 +188,10 @@ class PublishAssetOptionsDialog(
 ):
     """Publish dialog for the current scene asset (read-only asset name)."""
 
-    _selected_asset_name: Optional[str]
+    _selected_asset_name: str | None
 
     def __init__(
-        self, parent: QWidget | None, items: Sequence[str], conn: Optional[DB]
+        self, parent: QWidget | None, items: Sequence[str], conn: DB | None
     ) -> None:
         super().__init__(
             parent,
@@ -258,7 +255,7 @@ class PublishAssetPickerDialog(
     """Fallback dialog that lets users choose the asset to publish."""
 
     def __init__(
-        self, parent: QWidget | None, items: Sequence[str], conn: Optional[DB]
+        self, parent: QWidget | None, items: Sequence[str], conn: DB | None
     ) -> None:
         super().__init__(
             parent,
@@ -690,7 +687,7 @@ class AssetPublisher(Publisher):
             return f"{message}\n\n" + "\n".join(details)
         return message
 
-    def publish(self):
+    def publish(self) -> None:
         publish_telemetry = self._new_publish_telemetry_state()
         publish_path: Path | None = None
         try:
@@ -816,71 +813,88 @@ class AssetPublisher(Publisher):
                     **self._get_mayausd_kwargs(),
                 }
 
-                try:
-                    mc.mayaUSDExport(**kwargs)  # type: ignore[attr-defined]
-                except Exception as exc:
-                    print(traceback.format_exc())
-                    MessageDialog(
-                        self._window,
-                        "WARNING: Publish failed! Please check the console for more information",
-                        "Export Failed",
-                    ).exec_()
-                    self._emit_publish_error(
-                        publish_telemetry,
-                        error_code_name="export",
-                        error_message=str(exc),
-                        exception_type=type(exc).__name__,
-                        publish_path=publish_path,
-                    )
-                    return
+                publish_steps = ["Exporting USD"]
+                if ENABLE_HOUDINI_ASSET_BUILD:
+                    publish_steps.append("Building Houdini component")
+                publish_steps.append("Backing up asset")
 
-                if self._IS_WINDOWS:
+                with progress_scope(
+                    parent=self._window,
+                    title="Publishing Asset",
+                    steps=publish_steps,
+                ) as progress:
+                    progress.begin_step("Exporting USD", "This may take a moment...")
                     try:
-                        shutil.move(temp_publish_path, self._publish_path)
+                        mc.mayaUSDExport(**kwargs)  # type: ignore[attr-defined]
+                    except Exception as exc:
+                        log.exception("USD export failed")
+                        MessageDialog(
+                            self._window,
+                            "WARNING: Publish failed! Please check the console for more information",
+                            "Export Failed",
+                        ).exec_()
+                        self._emit_publish_error(
+                            publish_telemetry,
+                            error_code_name="export",
+                            error_message=str(exc),
+                            exception_type=type(exc).__name__,
+                            publish_path=publish_path,
+                        )
+                        return
+
+                    if self._IS_WINDOWS:
+                        try:
+                            shutil.move(temp_publish_path, self._publish_path)
+                        except Exception as exc:
+                            self._emit_publish_error(
+                                publish_telemetry,
+                                error_code_name="windows_move",
+                                error_message=str(exc),
+                                exception_type=type(exc).__name__,
+                                publish_path=publish_path,
+                            )
+                            raise
+
+                    if ENABLE_HOUDINI_ASSET_BUILD:
+                        progress.begin_step(
+                            "Building Houdini component",
+                            "This may take a moment...",
+                        )
+                    try:
+                        self._postpublish()
                     except Exception as exc:
                         self._emit_publish_error(
                             publish_telemetry,
-                            error_code_name="windows_move",
+                            error_code_name="copy",
                             error_message=str(exc),
                             exception_type=type(exc).__name__,
                             publish_path=publish_path,
                         )
                         raise
 
-                try:
-                    self._postpublish()
-                except Exception as exc:
-                    self._emit_publish_error(
-                        publish_telemetry,
-                        error_code_name="copy",
-                        error_message=str(exc),
-                        exception_type=type(exc).__name__,
-                        publish_path=publish_path,
-                    )
-                    raise
-
-                asset = None
-                if getattr(self, "_entity", None):
-                    asset = cast(Asset, self._entity)
-                if asset is None:
-                    asset = self._scene_asset or self._resolve_scene_asset()
-                try:
-                    if asset:
-                        self._run_backup(asset)
-                    else:
-                        self._backup_status = (
-                            "Backup skipped: asset could not be resolved."
+                    progress.begin_step("Backing up asset")
+                    asset = None
+                    if getattr(self, "_entity", None):
+                        asset = cast(Asset, self._entity)
+                    if asset is None:
+                        asset = self._scene_asset or self._resolve_scene_asset()
+                    try:
+                        if asset:
+                            self._run_backup(asset)
+                        else:
+                            self._backup_status = (
+                                "Backup skipped: asset could not be resolved."
+                            )
+                            log.warning("Backup skipped: asset could not be resolved.")
+                    except Exception as exc:
+                        self._emit_publish_error(
+                            publish_telemetry,
+                            error_code_name="copy",
+                            error_message=str(exc),
+                            exception_type=type(exc).__name__,
+                            publish_path=publish_path,
                         )
-                        log.warning("Backup skipped: asset could not be resolved.")
-                except Exception as exc:
-                    self._emit_publish_error(
-                        publish_telemetry,
-                        error_code_name="copy",
-                        error_message=str(exc),
-                        exception_type=type(exc).__name__,
-                        publish_path=publish_path,
-                    )
-                    raise
+                        raise
 
                 self._emit_publish_success(
                     publish_telemetry,

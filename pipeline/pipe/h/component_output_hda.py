@@ -167,7 +167,11 @@ def publish(node: hou.Node) -> Mapping[str, Any]:
     _repair_broken_output_paths(node)
 
     options = _collect_publish_options(node)
-    result = publish_component(node.path(), options)
+    try:
+        parent = hou.qt.mainWindow()
+    except Exception:
+        parent = None
+    result = publish_component(node.path(), options, parent=parent)
     _write_status(node, title="Publish", payload=result)
     _apply_node_color(node, result)
     _show_ui_message(result, title="SKD Publish")
