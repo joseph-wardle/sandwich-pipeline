@@ -419,7 +419,7 @@ class Publisher:
                 }
 
                 try:
-                    mc.mayaUSDExport(**kwargs)  # type: ignore[attr-defined]
+                    mc.mayaUSDExport(**kwargs)  # type: ignore
                 except Exception as exc:
                     print(traceback.format_exc())
                     MessageDialog(

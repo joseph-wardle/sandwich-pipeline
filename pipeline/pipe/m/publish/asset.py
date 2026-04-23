@@ -825,7 +825,7 @@ class AssetPublisher(Publisher):
                 ) as progress:
                     progress.begin_step("Exporting USD", "This may take a moment...")
                     try:
-                        mc.mayaUSDExport(**kwargs)  # type: ignore[attr-defined]
+                        mc.mayaUSDExport(**kwargs)  # type: ignore
                     except Exception as exc:
                         log.exception("USD export failed")
                         MessageDialog(
@@ -1185,7 +1185,7 @@ class AssetPublisher(Publisher):
     def check_material_bindings_of_selected(self) -> bool:
         selected: list[str] = mc.ls(selection=True)
         selected_nodes = (
-            mc.listRelatives(selected, allDescendents=True, fullPath=True) or []
+            mc.listRelatives(selected, allDescendents=True, fullPath=True) or []  # type: ignore
         )
         shading_groups: set[str] = set()
         for node in selected_nodes:
@@ -1193,7 +1193,7 @@ class AssetPublisher(Publisher):
                 node, shapes=True, fullPath=True
             )
             if shapes:
-                shading_groups.update(mc.listConnections(shapes, type="shadingEngine"))
+                shading_groups.update(mc.listConnections(shapes, type="shadingEngine"))  # type: ignore
         failures: dict[str, list[str]] = {}
         for shading_group in shading_groups:
             shaders: list[str] = mc.listConnections(
@@ -1201,7 +1201,7 @@ class AssetPublisher(Publisher):
             )
             if shaders:
                 shader = shaders[0]
-                shader_type: str = mc.nodeType(shader)
+                shader_type: str = mc.nodeType(shader)  # type: ignore
                 if shader_type in ILLEGAL_SHADER_TYPES:
                     failures.setdefault("Non-allowed shader type", []).append(
                         f"{shading_group} ({shader_type})"

@@ -1,5 +1,6 @@
-import maya.cmds as cmds
 import os
+
+import maya.cmds as cmds
 
 
 # --- Utility: Get next available plane name ---
@@ -38,7 +39,7 @@ def get_texture_file():
 # --- Main logic ---
 def FXCard():
     plane_name = get_next_plane_name()
-    plane = cmds.polyPlane(
+    plane: str = cmds.polyPlane(  # type: ignore
         name=plane_name, width=10, height=10, subdivisionsX=3, subdivisionsY=3
     )[0]
 
@@ -112,7 +113,7 @@ def FXCard():
         renderable=True, noSurfaceShader=True, empty=True, name=f"{shader_name}SG"
     )
     cmds.connectAttr(f"{shader}.outColor", f"{shading_group}.surfaceShader", force=True)
-    cmds.sets(plane, e=True, forceElement=shading_group)
+    cmds.sets(plane, e=True, forceElement=shading_group)  # type: ignore
 
     print(
         f"✅ Created {plane} with a {material_type} material using {os.path.basename(texture_path)}"

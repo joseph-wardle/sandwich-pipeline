@@ -11,8 +11,8 @@ from typing import Iterable
 
 import ffmpeg  # type: ignore[import-untyped]
 import maya.cmds as mc
-from Qt import QtWidgets
 from mayacapture.capture import capture  # type: ignore[import-not-found]
+from Qt import QtWidgets
 
 from pipe.glui.progress import progress_scope
 from pipe.m.util import maintain_selection
@@ -415,12 +415,12 @@ def _temporary_turnaround_camera(
     del size_y
     del aim_height_bias
 
-    camera_transform, camera_shape = mc.camera(name=_unique_name("assetTurnaround_cam"))
-    aim_locator = mc.spaceLocator(name=_unique_name("assetTurnaroundAim_LOC"))[0]
+    camera_transform, camera_shape = mc.camera(name=_unique_name("assetTurnaround_cam"))  # type: ignore
+    aim_locator: str = mc.spaceLocator(name=_unique_name("assetTurnaroundAim_LOC"))[0]  # type: ignore
     aim_constraint = None
 
     try:
-        mc.setAttr(f"{camera_shape}.focalLength", focal_length)
+        mc.setAttr(f"{camera_shape}.focalLength", focal_length)  # type: ignore
         distance = _camera_distance_for_radius(
             camera_shape,
             radius=radius,
@@ -428,14 +428,14 @@ def _temporary_turnaround_camera(
         )
         near_clip = max(0.1, distance - (radius * 2.0))
         far_clip = max(distance + (radius * 4.0), 1000.0)
-        mc.setAttr(f"{camera_shape}.nearClipPlane", near_clip)
-        mc.setAttr(f"{camera_shape}.farClipPlane", far_clip)
+        mc.setAttr(f"{camera_shape}.nearClipPlane", near_clip)  # type: ignore
+        mc.setAttr(f"{camera_shape}.farClipPlane", far_clip)  # type: ignore
 
         camera_position = (center[0], center[1], center[2] - distance)
         aim_position = center
         mc.xform(camera_transform, worldSpace=True, translation=camera_position)
         mc.xform(aim_locator, worldSpace=True, translation=aim_position)
-        aim_constraint = mc.aimConstraint(
+        aim_constraint = mc.aimConstraint(  # type: ignore
             aim_locator,
             camera_transform,
             aimVector=(0, 0, -1),
@@ -445,8 +445,8 @@ def _temporary_turnaround_camera(
         )[0]
         yield str(camera_shape)
     finally:
-        if aim_constraint and mc.objExists(aim_constraint):
-            mc.delete(aim_constraint)
+        if aim_constraint and mc.objExists(aim_constraint):  # type: ignore
+            mc.delete(aim_constraint)  # type: ignore
         if mc.objExists(aim_locator):
             mc.delete(aim_locator)
         if mc.objExists(camera_transform):
@@ -515,7 +515,7 @@ def _polygon_point_count_label(review_roots: tuple[str, ...]) -> str:
 def _polygon_point_count(review_roots: tuple[str, ...]) -> int:
     mesh_shapes: dict[str, str] = {}
     for root in review_roots:
-        for mesh in mc.ls(root, dag=True, long=True, type="mesh") or []:
+        for mesh in mc.ls(root, dagObjects=True, long=True, type="mesh") or []:
             mesh_path = str(mesh)
             if not mc.objExists(mesh_path):
                 continue
@@ -609,7 +609,7 @@ def _exact_bounding_box(
     if not resolved_nodes:
         raise ValueError("Bounding box requires at least one node.")
 
-    min_x, min_y, min_z, max_x, max_y, max_z = mc.exactWorldBoundingBox(resolved_nodes)
+    min_x, min_y, min_z, max_x, max_y, max_z = mc.exactWorldBoundingBox(resolved_nodes)  # type: ignore
     return (
         float(min_x),
         float(min_y),
@@ -671,11 +671,11 @@ def _set_linear_turntable_animation(
 ) -> None:
     start_frame = 1
     end_key_frame = frames_per_pass + 1
-    mc.setAttr(f"{turntable_group}.rotateX", 0)
-    mc.setAttr(f"{turntable_group}.rotateY", 0)
-    mc.setAttr(f"{turntable_group}.rotateZ", 0)
-    mc.setKeyframe(turntable_group, attribute="rotateY", t=start_frame, v=0.0)
-    mc.setKeyframe(turntable_group, attribute="rotateY", t=end_key_frame, v=360.0)
+    mc.setAttr(f"{turntable_group}.rotateX", 0)  # type: ignore
+    mc.setAttr(f"{turntable_group}.rotateY", 0)  # type: ignore
+    mc.setAttr(f"{turntable_group}.rotateZ", 0)  # type: ignore
+    mc.setKeyframe(turntable_group, attribute="rotateY", t=start_frame, v=0.0)  # type: ignore
+    mc.setKeyframe(turntable_group, attribute="rotateY", t=end_key_frame, v=360.0)  # type: ignore
     mc.keyTangent(
         turntable_group,
         attribute="rotateY",

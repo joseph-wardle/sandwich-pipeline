@@ -196,7 +196,7 @@ class TestSelectList(QListView):
 
     def connect_progress(self, progress_slot: Callable[[float], None]) -> None:
         """Stores the slot (e.g., progress_bar.update_progress) to connect later."""
-        self._progress_slot = progress_slot  # type: ignore
+        self._progress_slot = progress_slot
 
     def _set_border_color(self, color: QColor | None = None) -> None:
         if color is not None:

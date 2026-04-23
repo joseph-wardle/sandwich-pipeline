@@ -84,7 +84,7 @@ class LayoutMaker:
 
             return None
 
-        if not mc.pluginInfo("mayaUsdPlugin", q=True, loaded=True):
+        if not mc.pluginInfo("mayaUsdPlugin", query=True, loaded=True):
             mc.loadPlugin("mayaUsdPlugin")
 
         stage = LayoutMaker.get_stage()
@@ -122,7 +122,7 @@ class LayoutMaker:
     @staticmethod
     def add_reference():
         # Ensure USD plugin is loaded
-        if not mc.pluginInfo("mayaUsdPlugin", q=True, loaded=True):
+        if not mc.pluginInfo("mayaUsdPlugin", query=True, loaded=True):
             mc.loadPlugin("mayaUsdPlugin")
 
         stage = LayoutMaker.get_stage()
@@ -279,4 +279,4 @@ class LayoutMaker:
         )
 
         # Set the file path attribute of the proxyShape node
-        mc.setAttr(proxy_shape + ".filePath", maya_set_path, type="string")
+        mc.setAttr(proxy_shape + ".filePath", str(maya_set_path), type="string")

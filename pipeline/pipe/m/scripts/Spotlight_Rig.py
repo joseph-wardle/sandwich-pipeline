@@ -31,23 +31,23 @@ def create_spotlight_rig_auto_index():
         "spotLight", name=light_shape_name, parent=light_transform
     )
 
-    cmds.setAttr(f"{light_shape}.decayRate", 2)  # Quadratic decay
-    cmds.setAttr(f"{light_shape}.intensity", 100000)
-    cmds.setAttr(f"{light_shape}.useDepthMapShadows", 1)
-    cmds.setAttr(f"{light_shape}.dmapResolution", 16384)
-    cmds.setAttr(f"{light_transform}.scale", 72, 72, 72, type="double3")
+    cmds.setAttr(f"{light_shape}.decayRate", 2)  # Quadratic decay  # type: ignore
+    cmds.setAttr(f"{light_shape}.intensity", 100000)  # type: ignore
+    cmds.setAttr(f"{light_shape}.useDepthMapShadows", 1)  # type: ignore
+    cmds.setAttr(f"{light_shape}.dmapResolution", 16384)  # type: ignore
+    cmds.setAttr(f"{light_transform}.scale", 72, 72, 72, type="double3")  # type: ignore
 
     # --- Create root control ---
-    root_ctrl = cmds.circle(name=root_ctrl_name, normal=(0, 1, 0))[0]
-    cmds.setAttr(f"{root_ctrl}.scale", 67, 67, 67, type="double3")
-    cmds.setAttr(f"{root_ctrl}.translateY", -8)
-    cmds.makeIdentity(root_ctrl, apply=True, t=1, r=1, s=1)
+    root_ctrl: str = cmds.circle(name=root_ctrl_name, normal=(0, 1, 0))[0]  # type: ignore
+    cmds.setAttr(f"{root_ctrl}.scale", 67, 67, 67, type="double3")  # type: ignore
+    cmds.setAttr(f"{root_ctrl}.translateY", -8)  # type: ignore
+    cmds.makeIdentity(root_ctrl, apply=True, t=1, r=1, s=1)  # type: ignore
 
     # --- Create tumble control ---
-    tumble_ctrl = cmds.circle(name=tumble_ctrl_name, normal=(0, 1, 0))[0]
-    cmds.setAttr(f"{tumble_ctrl}.scale", 34, 34, 34, type="double3")
-    cmds.setAttr(f"{tumble_ctrl}.rotateX", 90)
-    cmds.makeIdentity(tumble_ctrl, apply=True, t=1, r=1, s=1)
+    tumble_ctrl: str = cmds.circle(name=tumble_ctrl_name, normal=(0, 1, 0))[0]  # type: ignore
+    cmds.setAttr(f"{tumble_ctrl}.scale", 34, 34, 34, type="double3")  # type: ignore
+    cmds.setAttr(f"{tumble_ctrl}.rotateX", 90)  # type: ignore
+    cmds.makeIdentity(tumble_ctrl, apply=True, t=1, r=1, s=1)  # type: ignore
 
     # --- Create offset groups ---
     light_offset = cmds.group(light_transform, name=light_offset_name)

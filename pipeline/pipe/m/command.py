@@ -247,7 +247,7 @@ def register_command_from_description(
     if command.help_url:
         runtime_command_optional_args["helpUrl"] = command.help_url
     else:
-        source_code_url = get_function_source_code_url(command.function)  # type: ignore
+        source_code_url = get_function_source_code_url(command.function)
         if source_code_url is not None:
             runtime_command_optional_args["helpUrl"] = source_code_url
 
@@ -274,7 +274,7 @@ def register_command_from_description(
         command=command_string,  # type: ignore
         plugin="pipeline",
         default=default,
-        **runtime_command_optional_args,  # type: ignore
+        **runtime_command_optional_args,
     )
     registered_commands.append(command_name)
     add_named_command(command_name, command.label, command.hotkey)

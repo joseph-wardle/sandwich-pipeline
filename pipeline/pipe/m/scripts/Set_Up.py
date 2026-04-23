@@ -16,14 +16,14 @@ def setup():
 
     # Create the main WORLD group if it doesn't exist
     if not cmds.objExists(main_group):
-        cmds.group(empty=True, name=main_group)  # type: ignore
+        cmds.group(empty=True, name=main_group)
     else:
         print(f"{main_group} already exists.")
 
     # Create child groups and parent them to WORLD
     for grp in child_groups:
         if not cmds.objExists(grp):
-            new_grp = cmds.group(empty=True, name=grp)  # type: ignore
+            new_grp = cmds.group(empty=True, name=grp)
             cmds.parent(new_grp, main_group)
         else:
             print(f"{grp} already exists.")

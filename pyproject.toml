@@ -54,7 +54,6 @@ exclude = [
     "maya-timeline-marker_git",
     "modelChecker",
     "modelChecker_git",
-    'pin_shift.py',
     "rjg",
     'y-rig',
     "studiolibrary",
@@ -63,7 +62,7 @@ exclude = [
 ]
 
 [tool.ty.rules]
-unused-type-ignore-comment = "ignore"
+# unused-type-ignore-comment = "ignore"
 
 [tool.ty.analysis]
 allowed-unresolved-imports = [
@@ -76,11 +75,6 @@ allowed-unresolved-imports = [
 replace-imports-with-any = [
     # shotgun_api3 is untyped; treat as Any to avoid churn.
     "shotgun_api3.**",
-    # Keep Maya command modules dynamic to avoid high-volume legacy churn.
-    "maya.cmds",
-    "maya.cmds.**",
-    "maya.mel",
-    "maya.mel.**",
     # `mayaUsd` remains dynamic and is not fully typed.
     "mayaUsd",
     "mayaUsd.**",
@@ -105,15 +99,9 @@ exclude = [
     "pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease",
     "pipeline/lib/VFX-LYNX/**",
     "pipeline/lib/ae_SVG/**",
-    "pipeline/**/dwpicker*",
-    "pipeline/**/dwpicker*/**",
     "pipeline/lib/python/**",
     "pipeline/**/mayacapture/**",
     "pipeline/**/maya-timeline-marker_git/**",
-    "pipeline/**/modelChecker*",
-    "pipeline/**/modelChecker*/**",
-    "pipeline/**/pin_shift.py",
-    "pipeline/**/rjg/**",
     "pipeline/lib/y-rig/**",
     "pipeline/**/studiolibrary/**",
     "pipeline/**/timeline_marker/**",

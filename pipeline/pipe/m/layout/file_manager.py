@@ -1,23 +1,22 @@
 from __future__ import annotations
 
 import logging
-import mayaUsd  # type: ignore[import-not-found] # noqa: F401
-import maya.cmds as mc
-import mayaUsd.lib as mayaUsdLib  # type: ignore[import-not-found]
-
 from pathlib import Path
-from pxr import Usd, UsdGeom, Gf
+
+import maya.cmds as mc
+import mayaUsd  # type: ignore[import-not-found] # noqa: F401
+import mayaUsd.lib as mayaUsdLib  # type: ignore[import-not-found]
+from env_sg import DB_Config
 from mayaUsd.lib import proxyAccessor as pa
+from pxr import Gf, Usd, UsdGeom
+from shared.util import get_production_path
 
 from pipe.db import DB
 from pipe.m.local import get_main_qt_window
-from pipe.struct.db import SGEntity, Environment
+from pipe.struct.db import Environment, SGEntity
 from pipe.util import FileManager, log_errors
-from shared.util import get_production_path
 
 from .publish import MLayoutPublisher
-
-from env_sg import DB_Config
 
 log = logging.getLogger(__name__)
 
@@ -70,7 +69,7 @@ class MLayoutFileManager(FileManager):
 
     @classmethod
     def get_stage(cls) -> Usd.Stage:
-        return mc.ls(type="mayaUsdProxyShape", long=True)[0]  # type: ignore[return-value]
+        return mc.ls(type="mayaUsdProxyShape", long=True)[0]  # type: ignore
 
     @classmethod
     @log_errors
@@ -78,10 +77,10 @@ class MLayoutFileManager(FileManager):
         """Function to run on file open via script node"""
 
         # change default render resolution
-        mc.setAttr("defaultResolution.width", 1920)  # type: ignore[arg-type]
-        mc.setAttr("defaultResolution.height", 1080)  # type: ignore[arg-type]
-        mc.setAttr("defaultResolution.pixelAspect", 1.0)  # type: ignore[arg-type]
-        mc.setAttr("defaultResolution.deviceAspectRatio", 1920 / 1080)  # type: ignore[arg-type]
+        mc.setAttr("defaultResolution.width", 1920)  # type: ignore
+        mc.setAttr("defaultResolution.height", 1080)  # type: ignore
+        mc.setAttr("defaultResolution.pixelAspect", 1.0)  # type: ignore
+        mc.setAttr("defaultResolution.deviceAspectRatio", 1920 / 1080)  # type: ignore
 
         mc.scriptJob(
             event=("SelectionChanged", MLayoutFileManager.change_usd_selection),
@@ -149,7 +148,7 @@ class MLayoutFileManager(FileManager):
         mc.file(save=True, type="mayaBinary")
 
         # Ensure mayaUsdPlugin is loaded
-        if not mc.pluginInfo("mayaUsdPlugin", q=True, loaded=True):  # type: ignore[call-arg]
+        if not mc.pluginInfo("mayaUsdPlugin", query=True, loaded=True):
             mc.loadPlugin("mayaUsdPlugin")
 
         # Create transform and proxyShape nodes

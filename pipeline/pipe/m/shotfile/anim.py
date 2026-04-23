@@ -63,7 +63,7 @@ class MAnimShotFileManager(MShotFileManager):
         # Duplicate the USD camera into a temp Maya camera
         CAM_NAME = "shotCam"
         try:
-            mc.mayaUsdDiscardEdits(CAM_NAME)
+            mc.mayaUsdDiscardEdits(CAM_NAME)  # type: ignore
         except RuntimeError:
             pass
         finally:
@@ -72,7 +72,7 @@ class MAnimShotFileManager(MShotFileManager):
                 for prim in cls.get_stage().Traverse(Usd.PrimIsDefined)
                 if cast(Any, prim).IsA(UsdGeom.Camera) and prim.GetName() == CAM_NAME
             )
-            mc.mayaUsdEditAsMaya(
+            mc.mayaUsdEditAsMaya(  # type: ignore
                 cls.get_stage_shape() + "," + str(camera_prim.GetPrimPath())
             )
             cam_path = _find_usd_shotcam()
@@ -104,7 +104,7 @@ class MAnimShotFileManager(MShotFileManager):
             rig_path = get_rig_filepath_from_asset(asset)
 
             if rig_path.exists():
-                mc.file(rig_path, reference=True, namespace=asset.name)
+                mc.file(rig_path, reference=True, namespace=asset.name)  # type: ignore
             else:
                 log.warning(
                     f"Couldn't find the rig file for {asset.display_name} even though it's tagged as rigged"
