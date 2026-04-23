@@ -25,7 +25,7 @@ class AnimPostProcessor:
         hou.playbar.setFrameRange(shot.cut_in - 5, shot.cut_out + 5)
         hou.playbar.setPlaybackRange(shot.cut_in - 5, shot.cut_out + 5)
 
-        stage_ctx: hou.Node = hou.node("/stage")  # type: ignore[assignment]
+        stage_ctx: hou.Node = hou.node("/stage")  # type: ignore
 
         load_layers = []
         sets = shot.sets
@@ -35,11 +35,11 @@ class AnimPostProcessor:
                 load_layer = stage_ctx.createNode(
                     "dbclark::main::Bobo_Load_Layers::1.0"
                 )
-                load_layer.parm("shot").set(f"$JOB/{shot_path}")  # type: ignore[union-attr]
+                load_layer.parm("shot").set(f"$JOB/{shot_path}")  # type: ignore
                 for dep in ["cfx", "fx", "envfx", "flo", "lighting", "render"]:
-                    load_layer.parm(f"{dep}_enable").set(0)  # type: ignore[union-attr]
+                    load_layer.parm(f"{dep}_enable").set(0)  # type: ignore
                 if layout and layout.environment_path:
-                    load_layer.parm("layout_path").set(  # type: ignore[unresolved-attribute]
+                    load_layer.parm("layout_path").set(  # type: ignore
                         f"$JOB/{layout.environment_path}/main.usd"
                     )
                 load_layers.append(load_layer)
@@ -54,11 +54,11 @@ class AnimPostProcessor:
             )
             layout = self._conn.get_env_by_stub(env_stub)
             load_layer = stage_ctx.createNode("dbclark::main::Bobo_Load_Layers::1.0")
-            load_layer.parm("shot").set(f"$JOB/{shot_path}")  # type: ignore[union-attr]
+            load_layer.parm("shot").set(f"$JOB/{shot_path}")  # type: ignore
             for dep in ["cfx", "fx", "envfx", "flo" "lighting", "render"]:
-                load_layer.parm(f"{dep}_enable").set(0)  # type: ignore[union-attr]
+                load_layer.parm(f"{dep}_enable").set(0)  # type: ignore
             if layout and layout.environment_path:
-                load_layer.parm("layout_path").set(  # type: ignore[unresolved-attribute]
+                load_layer.parm("layout_path").set(  # type: ignore
                     f"$JOB/{layout.environment_path}/main.usd"
                 )
             load_layers.append(load_layer)
@@ -79,9 +79,9 @@ class AnimPostProcessor:
         postprocess.setInput(0, layer_break)
 
         publish = stage_ctx.createNode("usd_rop")
-        publish.parm("trange").set("normal")  # type: ignore[union-attr]
-        publish.parm("lopoutput").set(f"$JOB/{shot_path}/anim/usd/post-process.usd")  # type: ignore[union-attr]
-        publish.parm("savestyle").set("flattenalllayers")  # type: ignore[union-attr]
+        publish.parm("trange").set("normal")  # type: ignore
+        publish.parm("lopoutput").set(f"$JOB/{shot_path}/anim/usd/post-process.usd")  # type: ignore
+        publish.parm("savestyle").set("flattenalllayers")  # type: ignore
         publish.setInput(0, postprocess)
 
-        publish.parm("execute").pressButton()  # type: ignore[union-attr]
+        publish.parm("execute").pressButton()  # type: ignore

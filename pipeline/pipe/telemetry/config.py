@@ -98,7 +98,7 @@ def _parse_level(raw_value: Optional[str]) -> TelemetryLevel:
             f"Invalid PIPE_TELEMETRY_LEVEL value {raw_value!r}. "
             f"Expected one of {_LEVEL_VALUES}."
         )
-    return normalized  # type: ignore[return-value]
+    return normalized  # type: ignore
 
 
 def _parse_or_default(

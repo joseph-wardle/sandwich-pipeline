@@ -4,8 +4,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import hou
     from typing import Any, Protocol
+
+    import hou
 
     class T_ParmData(Protocol):
         _node: hou.Node
@@ -43,12 +44,12 @@ def create_property(
         return getattr(self._node.parm(parm), get_eval_fn(typ))()
 
     def getter_toggled(self: T_ParmData):
-        if self._node.parm("toggle_" + parm).evalAsInt():  # type: ignore[union-attr]
+        if self._node.parm("toggle_" + parm).evalAsInt():  # type: ignore
             return getter(self)
         return None
 
     def setter(self: T_ParmData, value):
-        self._node.parm(parm).set(get_cast(typ)(value))  # type: ignore[union-attr]
+        self._node.parm(parm).set(get_cast(typ)(value))  # type: ignore
 
     return property(
         getter_toggled if has_toggle else getter, setter if writable else None
@@ -73,7 +74,7 @@ class ParmData(type):
             cls.__init__.__name__: __init__,
         }
 
-        annotations: dict[str, str] = attrs.get("__annotations__")  # type: ignore[assignment]
+        annotations: dict[str, str] = attrs.get("__annotations__")  # type: ignore
         if annotations:
             for attr, typ in annotations.items():
                 has_toggle = False

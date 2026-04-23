@@ -1,23 +1,21 @@
 from __future__ import annotations
 
-from .filemanager import FileManager
-from .playblaster import Playblaster
-from .struct import dict_index, dotdict
-
 import logging
 import platform
 import subprocess
 import sys
-
 from functools import wraps
-from Qt import QtWidgets
-
 from typing import TYPE_CHECKING
 
+from Qt import QtWidgets
+
+from .filemanager import FileManager
+from .playblaster import Playblaster
+from .struct import dict_index, dotdict
 
 if TYPE_CHECKING:
-    from typing import Any, Callable, Sequence
     from types import ModuleType
+    from typing import Any, Callable, Sequence
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +67,7 @@ def reload_pipe(extra_modules: Sequence[ModuleType] | None = None) -> None:
 
 try:
 
-    def silent_startupinfo() -> subprocess.STARTUPINFO | None:  # type: ignore[name-defined]
+    def silent_startupinfo() -> subprocess.STARTUPINFO | None:  # type: ignore
         """Returns a Windows-only object to make sure tasks launched through
         subprocess don't open a cmd window.
 
@@ -79,8 +77,8 @@ try:
         """
         startupinfo = None
         if platform.system() == "Windows":
-            startupinfo = subprocess.STARTUPINFO()  # type: ignore[attr-defined]
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore[attr-defined]
+            startupinfo = subprocess.STARTUPINFO()  # type: ignore
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore
         return startupinfo
 except Exception:
 

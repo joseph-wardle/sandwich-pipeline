@@ -186,9 +186,9 @@ def load_category_rules_file(path: Path) -> tuple[StorageCategoryRule, ...]:
         if not isinstance(item, dict):
             raise ValueError(f"rule {index} must be an object")
 
-        category = item.get("category")
-        path_regexes = item.get("path_regexes", [])
-        suffixes = item.get("suffixes", [])
+        category = item.get("category")  # type: ignore
+        path_regexes = item.get("path_regexes", [])  # type: ignore
+        suffixes = item.get("suffixes", [])  # type: ignore
 
         if not isinstance(category, str):
             raise ValueError(f"rule {index} category must be a string")

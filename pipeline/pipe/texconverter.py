@@ -464,7 +464,7 @@ class TexConverter:
                 if skip_check:
                     continue
 
-                img = Path(cast(str, p.args[-1]))  # type: ignore[index]
+                img = Path(cast(str, p.args[-1]))  # type: ignore
 
                 # check file has been touched recently
                 if start_time < img.stat().st_mtime:

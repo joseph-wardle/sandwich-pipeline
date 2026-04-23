@@ -49,7 +49,7 @@ class ExportChaserMode(IntEnum):
 
 @attrs.define
 class ChaserArgs:
-    mode: ExportChaserMode = attrs.field(converter=int)
+    mode: ExportChaserMode = attrs.field(converter=ExportChaserMode)
     timeline: Optional[Timeline] = attrs.field(
         default=None,
         kw_only=True,

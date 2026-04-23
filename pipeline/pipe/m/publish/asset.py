@@ -103,8 +103,8 @@ class _PublishAssetVariantControls:
         self._geo_var_dropdown.setValidator(geo_var_validator)
         geo_var_settings_layout.addWidget(self._geo_var_dropdown, 70)
         geo_var_layout.addWidget(geo_var_settings_widget, 90)
-        insert_at = max(self._layout.count() - 1, 0)  # type: ignore[attr-defined]
-        self._layout.insertWidget(insert_at, geo_var_widget)  # type: ignore[attr-defined]
+        insert_at = max(self._layout.count() - 1, 0)  # type: ignore
+        self._layout.insertWidget(insert_at, geo_var_widget)  # type: ignore
 
     def get_selected_variant(self) -> str:
         return self._geo_var_dropdown.currentText()

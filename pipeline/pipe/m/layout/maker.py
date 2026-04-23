@@ -4,12 +4,12 @@ from typing import cast
 
 import maya.cmds as mc
 import maya.OpenMayaUI as omui
-import mayaUsd.lib as mayaUsdLib  # type: ignore[import-not-found]
+import mayaUsd.lib as mayaUsdLib
 from env_sg import DB_Config
 from pxr import Kind, Usd, UsdGeom
-from PySide6 import QtWidgets  # type: ignore[import-not-found]
+from Qt import QtWidgets
+from Qt.QtCompat import wrapInstance
 from shared.util import get_production_path
-from shiboken6 import wrapInstance  # type: ignore[import-not-found]
 
 from pipe.db import DB
 from pipe.glui.dialogs import FilteredListDialog

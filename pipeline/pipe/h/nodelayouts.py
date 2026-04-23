@@ -7,8 +7,7 @@ from typing import Any, Optional, cast
 
 # mypy: disable-error-code="union-attr"
 import hou
-import loptoolutils  # type: ignore[import-not-found]
-
+import loptoolutils  # type: ignore
 from . import variants
 
 """Node-graph builders for Houdini Solaris tools.
