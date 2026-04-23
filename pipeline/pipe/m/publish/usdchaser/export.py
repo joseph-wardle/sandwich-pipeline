@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import attrs
-import mayaUsd.lib as mayaUsdLib  # type: ignore[import-not-found]
+import mayaUsd.lib as mayaUsdLib
 from pxr import Sdf, Usd
 
 from pipe.asset import paths_for_asset
@@ -49,7 +49,7 @@ class ExportChaserMode(IntEnum):
 
 @attrs.define
 class ChaserArgs:
-    mode: ExportChaserMode = attrs.field(converter=ExportChaserMode)
+    mode: ExportChaserMode = attrs.field(converter=lambda v: ExportChaserMode(int(v)))
     timeline: Optional[Timeline] = attrs.field(
         default=None,
         kw_only=True,
