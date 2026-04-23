@@ -743,7 +743,7 @@ def history_as_records(
     for entry in reversed(history_payload):
         if not isinstance(entry, dict):
             continue
-        records.append(_entry_as_record(entry))
+        records.append(_entry_as_record(entry))  # type: ignore
     return records
 
 

@@ -1,6 +1,6 @@
-import maya.cmds as cmds
 import os
 
+import maya.cmds as cmds
 from shared.util import get_groups_path
 
 # Corrected rig paths
@@ -30,12 +30,12 @@ class ReferenceAndMatchRig:
 
         cmds.button(label="Reference and Match Rig", command=self.on_apply)
 
-        cmds.showWindow(window)
+        cmds.showWindow(window)  # type: ignore
 
     def get_rigs_with_cam_namespace(self):
         rigs = []
-        for ref in cmds.file(query=True, reference=True) or []:
-            namespace = cmds.referenceQuery(ref, namespace=True).replace(":", "")
+        for ref in cmds.file(query=True, reference=True) or []:  # type: ignore
+            namespace = cmds.referenceQuery(ref, namespace=True).replace(":", "")  # type: ignore
             if "CAM" in namespace:
                 rigs.append(namespace)
         return rigs
@@ -69,11 +69,11 @@ class ReferenceAndMatchRig:
             target_ctrl = f"{target_ns}:{ctrl}"
 
             if cmds.objExists(source_ctrl) and cmds.objExists(target_ctrl):
-                pos = cmds.xform(target_ctrl, query=True, ws=True, t=True)
-                rot = cmds.xform(target_ctrl, query=True, ws=True, ro=True)
+                pos = cmds.xform(target_ctrl, query=True, ws=True, t=True)  # type: ignore
+                rot = cmds.xform(target_ctrl, query=True, ws=True, ro=True)  # type: ignore
 
-                cmds.xform(source_ctrl, ws=True, t=pos)
-                cmds.xform(source_ctrl, ws=True, ro=rot)
+                cmds.xform(source_ctrl, ws=True, t=pos)  # type: ignore
+                cmds.xform(source_ctrl, ws=True, ro=rot)  # type: ignore
             else:
                 print(f"Skipping '{ctrl}' — not found in one of the rigs.")
 
@@ -84,11 +84,11 @@ class ReferenceAndMatchRig:
             cmds.warning(f"Rig file not found: {rig_path}")
             return
 
-        selected_rig_ns = cmds.optionMenu(self.rig_option_menu, query=True, value=True)
+        selected_rig_ns = cmds.optionMenu(self.rig_option_menu, query=True, value=True)  # type: ignore
         new_ns = self.generate_new_namespace(selected_rig_ns)
 
         # Reference rig
-        cmds.file(rig_path, reference=True, namespace=new_ns)
+        cmds.file(rig_path, reference=True, namespace=new_ns)  # type: ignore
 
         self.match_transforms(f"{new_ns}", f"{selected_rig_ns}")
         cmds.confirmDialog(

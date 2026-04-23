@@ -1,5 +1,7 @@
 from typing import Literal, Optional, Sequence, Union
+
 import maya.api.OpenMaya as om2
+import maya.cmds as cmds
 from maya.api.OpenMaya import (
     MColor,
     MColorArray,
@@ -15,20 +17,17 @@ from maya.api.OpenMaya import (
     MSpace,
     MVector,
 )
-import maya.cmds as cmds
 
 from pipe.m.command import maya_command
 
 from .color import lch_to_lab, oklab_to_linear_srgb
-
-from .math import remap
-
 from .gradient import (
     OKLCH_HEATMAP_GRADIENT,
     Gradient,
     fast_sample_lch_gradient_as_linear_srgb,
     sample_spline_gradient,
 )
+from .math import remap
 
 X_MIRROR = MMatrix(((-1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1)))
 Y_MIRROR = MMatrix(((1, 0, 0, 0), (0, -1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1)))
@@ -110,7 +109,7 @@ def color_from_symmetry_error(
 
     viz_errors: list[float] = []
     point: MPoint
-    for i, point in enumerate(mesh_points):  # type: ignore
+    for i, point in enumerate(mesh_points):
         mirrored_point: MPoint = point * mirror_matrix
         mirrored_position: MPoint = MPoint(
             mesh_intersector.getClosestPoint(mirrored_point).point
@@ -171,10 +170,10 @@ def color_by_gradient(shape: str, gradient: Gradient = OKLCH_HEATMAP_GRADIENT):
     vertex_indices: list[int] = []
     vertex_colors: list[MColor] = []
     point: MPoint
-    for i, point in enumerate(mesh_points):  # type: ignore
+    for i, point in enumerate(mesh_points):
         heatmap_color_oklch = sample_spline_gradient(
             gradient=gradient,
-            position=point.x,  # type: ignore
+            position=point.x,
         )
         heatmap_color_oklab = lch_to_lab(heatmap_color_oklch)
         heatmap_color_linear_srgb = oklab_to_linear_srgb(heatmap_color_oklab)

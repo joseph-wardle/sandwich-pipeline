@@ -1,6 +1,6 @@
-import maya.cmds as cmds
 import re
 
+import maya.cmds as cmds
 from shared.util import get_previs_path
 
 # Global variable to store the camera file path (cross-platform)
@@ -12,14 +12,14 @@ sequence_shot_tracker = {"A": 0, "B": 0, "C": 0, "D": 0, "E": 0, "F": 0, "G": 0}
 
 # Function to get the last shot number from existing references for a specific sequence
 def get_last_shot_num_for_sequence(sequence):
-    refs = cmds.file(q=True, reference=True)
+    refs: list[str] = cmds.file(q=True, reference=True)  # type: ignore
     shot_nums = []
 
     # Regex to match shot code format: "SequenceName_###"
     pattern = re.compile(rf"^{sequence}_(\d{{3}})_CAM$")
 
     for ref in refs:
-        ns = cmds.file(ref, q=True, namespace=True)
+        ns: str = cmds.file(ref, q=True, namespace=True)  # type: ignore
         match = pattern.search(ns)
         if match:
             # Extract the shot number and convert to integer
@@ -42,7 +42,7 @@ def reference_camera():
         return
 
     # Get the selected sequence name
-    seqName = cmds.optionMenu("seqMenu", query=True, value=True)
+    seqName: str = cmds.optionMenu("seqMenu", query=True, value=True)  # type: ignore
 
     # Get the last used shot number for the current sequence
     last_shot_num = get_last_shot_num_for_sequence(seqName)
@@ -60,7 +60,7 @@ def reference_camera():
     shotCode = seqName + "_" + "{:03d}".format(shotNum) + "_CAM"
 
     # Reference the camera file with the selected file path
-    cmds.file(cameraFilePath, r=True, namespace=shotCode)
+    cmds.file(cameraFilePath, r=True, namespace=shotCode)  # type: ignore
 
 
 # Reference the camera with the configured path
@@ -97,7 +97,7 @@ def show_camera_reference_ui():
         command=lambda x: reference_camera_from_ui(),
     )
 
-    cmds.showWindow(camera_window)
+    cmds.showWindow(camera_window)  # type: ignore
 
 
 # Call the UI to show the window

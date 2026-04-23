@@ -11,6 +11,8 @@ from functools import partialmethod as pm
 from typing import Any, Callable, Iterable, Optional, Unpack
 from typing import Sequence as SequenceT
 
+import shotgun_api3
+
 from pipe.struct.db import (
     Asset,
     AssetStub,
@@ -27,7 +29,6 @@ from pipe.struct.db import (
     normalize_display_name,
 )
 
-import shotgun_api3
 from .interface import DBInterface
 from .typing import (
     AttrMappingKwargs,
@@ -165,7 +166,7 @@ class SGaaDB(DBInterface):
                         context.load_verify_locations(self.__ca_certs)
                     self.sock = context.wrap_socket(self.sock)
                 else:
-                    self.sock = ssl.wrap_socket(  # type: ignore[deprecated]
+                    self.sock = ssl.wrap_socket(  # type: ignore
                         self.sock,
                         ca_certs=self.__ca_certs,
                         cert_reqs=ssl.CERT_REQUIRED,
@@ -442,7 +443,7 @@ class SGaaDB(DBInterface):
     _entity_attr_custom_mappers: dict[
         str, Callable[[list[dict], str, Unpack[AttrMappingKwargs]], list[str]]
     ] = {
-        Asset.__name__: _asset_attr_mapper.__func__,  # type: ignore[attr-defined]
+        Asset.__name__: _asset_attr_mapper.__func__,  # type: ignore
     }
 
     def get_entity_attr_list(
@@ -517,18 +518,18 @@ class SGaaDB(DBInterface):
             self.expire_cache()
         return True
 
-    get_entity_code_list: T_GetEntityCodeList = pm(_get_entity_attr_list_swap, "code")  # type: ignore[assignment] # noqa: F405
-    get_entity_by_code: T_GetEntityByCode = pm(_get_entity_by_attr_swap, "code")  # type: ignore[assignment] # noqa: F405
+    get_entity_code_list: T_GetEntityCodeList = pm(_get_entity_attr_list_swap, "code")  # type: ignore # noqa: F405
+    get_entity_by_code: T_GetEntityByCode = pm(_get_entity_by_attr_swap, "code")  # type: ignore # noqa: F405
 
-    get_asset_attr_list: T_GetAssetAttrList = pm(get_entity_attr_list, Asset)  # type: ignore[assignment] # noqa: F405
-    get_asset_by_attr: T_GetAssetByAttr = pm(get_entity_by_attr, Asset)  # type: ignore[assignment] # noqa: F405
-    get_asset_by_display_name: T_GetAssetByDisplayName = pm(get_asset_by_attr, "code")  # type: ignore[assignment] # noqa: F405
-    get_asset_by_id: T_GetAssetById = pm(get_asset_by_attr, "id")  # type: ignore[assignment] # noqa: F405
-    get_asset_by_stub: T_GetAssetByStub = pm(get_entity_by_stub, Asset)  # type: ignore[assignment] # noqa: F405
+    get_asset_attr_list: T_GetAssetAttrList = pm(get_entity_attr_list, Asset)  # type: ignore # noqa: F405
+    get_asset_by_attr: T_GetAssetByAttr = pm(get_entity_by_attr, Asset)  # type: ignore # noqa: F405
+    get_asset_by_display_name: T_GetAssetByDisplayName = pm(get_asset_by_attr, "code")  # type: ignore # noqa: F405
+    get_asset_by_id: T_GetAssetById = pm(get_asset_by_attr, "id")  # type: ignore # noqa: F405
+    get_asset_by_stub: T_GetAssetByStub = pm(get_entity_by_stub, Asset)  # type: ignore # noqa: F405
     get_asset_display_name_list: T_GetAssetDisplayNameList = pm(  # noqa: F405
         get_asset_attr_list, "code"
-    )  # type: ignore[assignment] # noqa: F405
-    get_assets_by_stub: T_GetAssetsByStub = pm(get_entities_by_stub, Asset)  # type: ignore[assignment] # noqa: F405
+    )  # type: ignore # noqa: F405
+    get_assets_by_stub: T_GetAssetsByStub = pm(get_entities_by_stub, Asset)  # type: ignore # noqa: F405
 
     def get_asset_by_name(self, name: str) -> Asset:
         target = normalize_display_name(name)
@@ -996,34 +997,34 @@ class SGaaDB(DBInterface):
             names.sort()
         return names
 
-    get_user_attr_list: T_GetAttrList = pm(get_entity_attr_list, User)  # type: ignore[assignment] # noqa: F405
-    get_user_by_attr: T_GetUserByAttr = pm(get_entity_by_attr, User)  # type: ignore[assignment] # noqa: F405
-    get_user_name_list: T_GetUserNameList = pm(get_user_attr_list, "name")  # type: ignore[assignment] # noqa: F405
-    get_user_by_name: T_GetUserByName = pm(get_user_by_attr, "name")  # type: ignore[assignment] # noqa: F405
+    get_user_attr_list: T_GetAttrList = pm(get_entity_attr_list, User)  # type: ignore # noqa: F405
+    get_user_by_attr: T_GetUserByAttr = pm(get_entity_by_attr, User)  # type: ignore # noqa: F405
+    get_user_name_list: T_GetUserNameList = pm(get_user_attr_list, "name")  # type: ignore # noqa: F405
+    get_user_by_name: T_GetUserByName = pm(get_user_by_attr, "name")  # type: ignore # noqa: F405
 
-    get_env_attr_list: T_GetAttrList = pm(get_entity_attr_list, Environment)  # type: ignore[assignment] # noqa: F405
-    get_env_by_attr: T_GetEnvByAttr = pm(get_entity_by_attr, Environment)  # type: ignore[assignment] # noqa: F405
-    get_env_by_code: T_GetEnvByCode = pm(get_env_by_attr, "code")  # type: ignore[assignment] # noqa: F405
-    get_env_by_id: T_GetEnvById = pm(get_env_by_attr, "id")  # type: ignore[assignment] # noqa: F405
-    get_env_by_stub: T_GetEnvByStub = pm(get_entity_by_stub, Environment)  # type: ignore[assignment] # noqa: F405
-    get_env_code_list: T_GetCodeList = pm(get_env_attr_list, "code")  # type: ignore[assignment] # noqa: F405
-    get_envs_by_stub: T_GetEnvsByStub = pm(get_entities_by_stub, Environment)  # type: ignore[assignment] # noqa: F405
+    get_env_attr_list: T_GetAttrList = pm(get_entity_attr_list, Environment)  # type: ignore # noqa: F405
+    get_env_by_attr: T_GetEnvByAttr = pm(get_entity_by_attr, Environment)  # type: ignore # noqa: F405
+    get_env_by_code: T_GetEnvByCode = pm(get_env_by_attr, "code")  # type: ignore # noqa: F405
+    get_env_by_id: T_GetEnvById = pm(get_env_by_attr, "id")  # type: ignore # noqa: F405
+    get_env_by_stub: T_GetEnvByStub = pm(get_entity_by_stub, Environment)  # type: ignore # noqa: F405
+    get_env_code_list: T_GetCodeList = pm(get_env_attr_list, "code")  # type: ignore # noqa: F405
+    get_envs_by_stub: T_GetEnvsByStub = pm(get_entities_by_stub, Environment)  # type: ignore # noqa: F405
 
-    get_sequence_attr_list: T_GetAttrList = pm(get_entity_attr_list, Sequence)  # type: ignore[assignment] # noqa: F405
-    get_sequence_by_attr: T_GetSeqByAttr = pm(get_entity_by_attr, Sequence)  # type: ignore[assignment] # noqa: F405
-    get_sequence_by_code: T_GetSeqByCode = pm(get_sequence_by_attr, "code")  # type: ignore[assignment] # noqa: F405
-    get_sequence_by_id: T_GetSeqById = pm(get_sequence_by_attr, "id")  # type: ignore[assignment] # noqa: F405
-    get_sequence_by_stub: T_GetSeqByStub = pm(get_entity_by_stub, Sequence)  # type: ignore[assignment] # noqa: F405
-    get_sequence_code_list: T_GetCodeList = pm(get_sequence_attr_list, "code")  # type: ignore[assignment] # noqa: F405
-    get_sequences_by_stub: T_GetSeqsByStub = pm(get_entities_by_stub, Sequence)  # type: ignore[assignment] # noqa: F405
+    get_sequence_attr_list: T_GetAttrList = pm(get_entity_attr_list, Sequence)  # type: ignore # noqa: F405
+    get_sequence_by_attr: T_GetSeqByAttr = pm(get_entity_by_attr, Sequence)  # type: ignore # noqa: F405
+    get_sequence_by_code: T_GetSeqByCode = pm(get_sequence_by_attr, "code")  # type: ignore # noqa: F405
+    get_sequence_by_id: T_GetSeqById = pm(get_sequence_by_attr, "id")  # type: ignore # noqa: F405
+    get_sequence_by_stub: T_GetSeqByStub = pm(get_entity_by_stub, Sequence)  # type: ignore # noqa: F405
+    get_sequence_code_list: T_GetCodeList = pm(get_sequence_attr_list, "code")  # type: ignore # noqa: F405
+    get_sequences_by_stub: T_GetSeqsByStub = pm(get_entities_by_stub, Sequence)  # type: ignore # noqa: F405
 
-    get_shot_attr_list: T_GetAttrList = pm(get_entity_attr_list, Shot)  # type: ignore[assignment] # noqa: F405
-    get_shot_by_attr: T_GetShotByAttr = pm(get_entity_by_attr, Shot)  # type: ignore[assignment] # noqa: F405
-    get_shot_by_code: T_GetShotByCode = pm(get_shot_by_attr, "code")  # type: ignore[assignment] # noqa: F405
-    get_shot_by_id: T_GetShotById = pm(get_shot_by_attr, "id")  # type: ignore[assignment] # noqa: F405
-    get_shot_by_stub: T_GetShotByStub = pm(get_entity_by_stub, Shot)  # type: ignore[assignment] # noqa: F405
-    get_shot_code_list: T_GetCodeList = pm(get_shot_attr_list, "code")  # type: ignore[assignment] # noqa: F405
-    get_shots_by_stub: T_GetShotsByStub = pm(get_entities_by_stub, Shot)  # type: ignore[assignment] # noqa: F405
+    get_shot_attr_list: T_GetAttrList = pm(get_entity_attr_list, Shot)  # type: ignore # noqa: F405
+    get_shot_by_attr: T_GetShotByAttr = pm(get_entity_by_attr, Shot)  # type: ignore # noqa: F405
+    get_shot_by_code: T_GetShotByCode = pm(get_shot_by_attr, "code")  # type: ignore # noqa: F405
+    get_shot_by_id: T_GetShotById = pm(get_shot_by_attr, "id")  # type: ignore # noqa: F405
+    get_shot_by_stub: T_GetShotByStub = pm(get_entity_by_stub, Shot)  # type: ignore # noqa: F405
+    get_shot_code_list: T_GetCodeList = pm(get_shot_attr_list, "code")  # type: ignore # noqa: F405
+    get_shots_by_stub: T_GetShotsByStub = pm(get_entities_by_stub, Shot)  # type: ignore # noqa: F405
 
 
 class _Query(ABC):

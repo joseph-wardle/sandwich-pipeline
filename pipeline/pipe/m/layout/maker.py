@@ -4,12 +4,12 @@ from typing import cast
 
 import maya.cmds as mc
 import maya.OpenMayaUI as omui
-import mayaUsd.lib as mayaUsdLib  # type: ignore[import-not-found]
+import mayaUsd.lib as mayaUsdLib
 from env_sg import DB_Config
 from pxr import Kind, Usd, UsdGeom
-from PySide6 import QtWidgets  # type: ignore[import-not-found]
+from Qt import QtWidgets
+from Qt.QtCompat import wrapInstance
 from shared.util import get_production_path
-from shiboken6 import wrapInstance  # type: ignore[import-not-found]
 
 from pipe.db import DB
 from pipe.glui.dialogs import FilteredListDialog
@@ -84,7 +84,7 @@ class LayoutMaker:
 
             return None
 
-        if not mc.pluginInfo("mayaUsdPlugin", q=True, loaded=True):
+        if not mc.pluginInfo("mayaUsdPlugin", query=True, loaded=True):
             mc.loadPlugin("mayaUsdPlugin")
 
         stage = LayoutMaker.get_stage()
@@ -122,7 +122,7 @@ class LayoutMaker:
     @staticmethod
     def add_reference():
         # Ensure USD plugin is loaded
-        if not mc.pluginInfo("mayaUsdPlugin", q=True, loaded=True):
+        if not mc.pluginInfo("mayaUsdPlugin", query=True, loaded=True):
             mc.loadPlugin("mayaUsdPlugin")
 
         stage = LayoutMaker.get_stage()
@@ -279,4 +279,4 @@ class LayoutMaker:
         )
 
         # Set the file path attribute of the proxyShape node
-        mc.setAttr(proxy_shape + ".filePath", maya_set_path, type="string")
+        mc.setAttr(proxy_shape + ".filePath", str(maya_set_path), type="string")

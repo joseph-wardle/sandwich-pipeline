@@ -23,9 +23,13 @@ from pipe.util import FileManager, log_errors
 from pipe.versioning import (
     VersionStreamSpec,
     list_version_records,
-    promote_version as _promote_version,
-    save_version as _save_version,
     version_label,
+)
+from pipe.versioning import (
+    promote_version as _promote_version,
+)
+from pipe.versioning import (
+    save_version as _save_version,
 )
 
 from .timeline import shot_timeline_generator
@@ -168,10 +172,10 @@ class MShotFileManager(FileManager):
         )
 
         # change default render resolution
-        mc.setAttr("defaultResolution.width", 1920)  # type: ignore[arg-type]
-        mc.setAttr("defaultResolution.height", 1080)  # type: ignore[arg-type]
-        mc.setAttr("defaultResolution.pixelAspect", 1.0)  # type: ignore[arg-type]
-        mc.setAttr("defaultResolution.deviceAspectRatio", 1920 / 1080)  # type: ignore[arg-type]
+        mc.setAttr("defaultResolution.width", 1920)  # type: ignore
+        mc.setAttr("defaultResolution.height", 1080)  # type: ignore
+        mc.setAttr("defaultResolution.pixelAspect", 1.0)  # type: ignore
+        mc.setAttr("defaultResolution.deviceAspectRatio", 1920 / 1080)  # type: ignore
 
         # set session USD target layer to the override layer
         try:
@@ -186,7 +190,7 @@ class MShotFileManager(FileManager):
                     mc.warning("Could not determine shot code; USD edit target not set")
                     return
             assert shot_code is not None
-            mc.mayaUsdEditTarget(  # type: ignore[attr-defined]
+            mc.mayaUsdEditTarget(  # type: ignore
                 cls.get_stage_shape(),
                 edit=True,
                 editTarget=cls._edit_target_path_for_shot(shot_code),

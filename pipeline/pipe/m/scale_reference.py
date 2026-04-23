@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 import maya.cmds as mc
+from env_sg import DB_Config
 from Qt import QtWidgets
 from Qt.QtWidgets import (
     QComboBox,
@@ -14,7 +15,6 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from env_sg import DB_Config
 from pipe.asset.paths import paths_for_asset
 from pipe.db import DB
 from pipe.glui.dialogs import ButtonPair, MessageDialog
@@ -65,7 +65,7 @@ class ScaleReference:
 
 def _import_usd_scale_reference(name: str, usd_path, scale: float) -> None:
     """Create a mayaUsdProxyShape scale reference node in the current scene."""
-    if not mc.pluginInfo("mayaUsdPlugin", q=True, loaded=True):
+    if not mc.pluginInfo("mayaUsdPlugin", query=True, loaded=True):
         mc.loadPlugin("mayaUsdPlugin")
 
     if mc.objExists(name):
@@ -74,7 +74,7 @@ def _import_usd_scale_reference(name: str, usd_path, scale: float) -> None:
     transform = mc.createNode("transform", name=name)
     shape = mc.createNode("mayaUsdProxyShape", name=f"{name}Shape", parent=transform)
     mc.setAttr(f"{shape}.filePath", str(usd_path), type="string")
-    mc.setAttr(f"{transform}.scale", scale, scale, scale)
+    mc.setAttr(f"{transform}.scale", scale, scale, scale)  # type: ignore
     mc.select(transform)
 
 
@@ -191,9 +191,11 @@ class ScaleReferenceDialog(ButtonPair, QtWidgets.QDialog):
 
     def _remove_all_refs(self) -> None:
         prefix = f"{_NODE_PREFIX}_"
-        nodes = [n for n in (mc.ls(transforms=True) or []) if n.startswith(prefix)]
+        nodes: list[str] = [
+            n for n in (mc.ls(transforms=True) or []) if n.startswith(prefix)
+        ]
         if nodes:
-            mc.delete(nodes)
+            mc.delete(nodes)  # type: ignore
         self._hide_status()
 
 

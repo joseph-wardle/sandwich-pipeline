@@ -83,7 +83,7 @@ class PrevisAssetPublisher(Publisher):
 
     @staticmethod
     def fill_mesh_from_selection(usd_mesh):
-        selection = cmds.ls(selection=True, dag=True, type="mesh")
+        selection = cmds.ls(selection=True, dagObjects=True, type="mesh")
         # cmds.scale(0.01, 0.01, 0.01)
         if not selection:
             raise RuntimeError("No mesh selected in Maya.")

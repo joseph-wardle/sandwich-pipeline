@@ -24,7 +24,7 @@ _con.register_structure_hook_factory(
     lambda cls: cattrs.gen.make_dict_structure_fn(
         cls,
         _con,
-        **{  # type: ignore[arg-type]
+        **{  # type: ignore
             f.name: cattrs.gen.override(
                 rename=f.metadata.get(_SG_NAME, None),
                 struct_hook=f.metadata.get(_STRUCT_HOOK, None),

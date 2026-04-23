@@ -19,7 +19,7 @@ def group_top_level_nodes(
     if nodes is not None:
         top_level_nodes = cmds.ls(nodes, assemblies=True)  # type: ignore
     else:
-        top_level_nodes = cmds.ls(assemblies=True)  # type: ignore
+        top_level_nodes = cmds.ls(assemblies=True)
 
     if not top_level_nodes:
         raise RuntimeError("No transforms found in imported model!")

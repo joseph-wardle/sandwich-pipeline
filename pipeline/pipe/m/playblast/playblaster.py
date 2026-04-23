@@ -142,7 +142,7 @@ def applied_hud(
 ) -> Generator[None, None, None]:
     # hide current huds and store current state
     orig_visibility: dict[str, bool] = {}
-    orig_huds: list[str] = mc.headsUpDisplay(query=True, listHeadsUpDisplays=True)  # type: ignore[assignment]
+    orig_huds: list[str] = mc.headsUpDisplay(query=True, listHeadsUpDisplays=True)  # type: ignore
     for hud in orig_huds:
         vis = bool(mc.headsUpDisplay(hud, query=True, visible=True))
         orig_visibility[hud] = vis
@@ -166,7 +166,7 @@ def applied_hud(
 
         mc.headsUpDisplay(
             chud.name,
-            block=mc.headsUpDisplay(nextFreeBlock=chud.section),  # type: ignore[arg-type]
+            block=mc.headsUpDisplay(nextFreeBlock=chud.section),  # type: ignore
             blockSize=chud.blockSize,
             command=chud.command,
             label=chud.label,

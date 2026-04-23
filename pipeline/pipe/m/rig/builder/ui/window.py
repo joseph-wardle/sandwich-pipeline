@@ -30,7 +30,7 @@ def _restore() -> None:
     global _window_instance
 
     # Always recreate the widget on restore
-    _window_instance = RigBuilderWindow(parent=get_maya_main_window())  # type: ignore
+    _window_instance = RigBuilderWindow(parent=get_maya_main_window())
 
     # Locate the workspace control that Maya already created.
     workspace_ptr = MQtUtil.findControl(WORKSPACE_CONTROL_NAME)
@@ -59,11 +59,11 @@ def launch() -> None:
 
     delete_workspace_control(WORKSPACE_CONTROL_NAME)
 
-    _window_instance = RigBuilderWindow(parent=get_main_qt_window())  # type: ignore
+    _window_instance = RigBuilderWindow(parent=get_main_qt_window())
     _window_instance.show(
-        dockable=True,  # type: ignore
-        uiScript=UI_SCRIPT,  # type: ignore
-        workspaceControlName=WORKSPACE_CONTROL_NAME,  # type: ignore
+        dockable=True,
+        uiScript=UI_SCRIPT,
+        workspaceControlName=WORKSPACE_CONTROL_NAME,
     )
 
 

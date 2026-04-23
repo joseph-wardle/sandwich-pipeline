@@ -57,7 +57,7 @@ log = logging.getLogger(__name__)
 class ClickableQLabel(QLabel):
     clicked = QtCore.Signal()
 
-    def mousePressEvent(self, event):  # type: ignore[override]
+    def mousePressEvent(self, event):  # type: ignore
         self.clicked.emit()
         super().mousePressEvent(event)
 

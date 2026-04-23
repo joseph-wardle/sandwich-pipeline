@@ -30,7 +30,7 @@ DEFAULT_SOURCE_URI = "ocio://cg-config-v1.0.0_aces-v1.3_ocio-v2.1"
 
 def _load_ocio():
     try:
-        import PyOpenColorIO as ocio  # type: ignore
+        import PyOpenColorIO as ocio
     except Exception as exc:
         raise RuntimeError(
             "PyOpenColorIO is required. Run this script with a Python "

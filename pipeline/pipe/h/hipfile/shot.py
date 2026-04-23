@@ -14,9 +14,8 @@ from pipe.shot.version_adapter import (
     houdini_department_stream,
     shot_owner_for,
 )
-from pipe.versioning import path_matches_stream
 from pipe.struct.db import EnvironmentStub, SGEntity, Shot, validate_shot_code_token
-from pipe.versioning import VersionStreamSpec
+from pipe.versioning import VersionStreamSpec, path_matches_stream
 
 from .filemanager import HFileManager
 
@@ -297,7 +296,7 @@ class HShotFileManager(HFileManager):
 
             publish = stage.createNode("usd_rop")
             publish.setName("PUBLISH")
-            publish.parm("lopoutput").set("$HIP/usd/main.usd")  # type: ignore[union-attr]
+            publish.parm("lopoutput").set("$HIP/usd/main.usd")  # type: ignore
 
             begin_dep.setInput(0, layer_break)
             end_dep.setInput(0, begin_dep)
@@ -524,7 +523,7 @@ class HShotFileManager(HFileManager):
                 print("\nDetails:\n" + details)
 
     def _get_stage(self) -> hou.Node:
-        stage: hou.Node = hou.node("/stage")  # type: ignore[assignment]
+        stage: hou.Node = hou.node("/stage")  # type: ignore
         return stage
 
     def _set_shot_context(self, shot: Shot) -> None:
@@ -634,7 +633,7 @@ class HShotFileManager(HFileManager):
             return load_layers
 
         # Fallback to depreciated single set logic if no sets are assigned
-        env_stub = shot.set or self._conn.get_sequence_by_stub(shot.sequence).set  # type: ignore[arg-type]
+        env_stub = shot.set or self._conn.get_sequence_by_stub(shot.sequence).set  # type: ignore
         load_layer = self._create_load_layer(
             stage=stage,
             shot=shot,
@@ -654,16 +653,16 @@ class HShotFileManager(HFileManager):
     ) -> hou.Node:
         load_layer = stage.createNode("dbclark::main::Bobo_Load_Layers::1.0")
         load_layer.setUserData("nodeshape", "bulge_down")
-        load_layer.parm("shot").set("$JOB/`@SHOT`")  # type: ignore[union-attr]
+        load_layer.parm("shot").set("$JOB/`@SHOT`")  # type: ignore
 
         for department in muted_departments:
-            load_layer.parm(f"{department}_enable").set(0)  # type: ignore[union-attr]
+            load_layer.parm(f"{department}_enable").set(0)  # type: ignore
 
         layout = (
             self._conn.get_env_by_stub(environment_stub) if environment_stub else None
         )
         if layout:
-            load_layer.parm("layout_path").set(  # type: ignore[unresolved-attribute]
+            load_layer.parm("layout_path").set(  # type: ignore
                 f"$JOB/{layout.environment_path}/main.usd"
             )
 

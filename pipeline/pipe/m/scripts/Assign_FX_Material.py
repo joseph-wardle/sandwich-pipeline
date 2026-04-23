@@ -31,7 +31,7 @@ def assign_texture_with_dropdown():
         label="Cancel", command=lambda *_: cmds.deleteUI("shaderAssignWin", window=True)
     )
 
-    cmds.showWindow(window)
+    cmds.showWindow(window)  # type: ignore
 
 
 def continue_with_texture():

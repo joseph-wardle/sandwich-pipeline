@@ -78,7 +78,7 @@ def scale_down_geo(stage: Usd.Stage, scale_factor: float = 0.01) -> None:
                     matrix_data.SetTranslateOnly(translate)
                     xformop.Set(matrix_data, frame)
 
-        if not (prim.IsA(UsdGeom.Mesh) or prim.IsA(UsdGeom.BasisCurves)):  # type: ignore[call-overload]
+        if not (prim.IsA(UsdGeom.Mesh) or prim.IsA(UsdGeom.BasisCurves)):  # type: ignore
             continue
 
         # don't recurse deeper than this
@@ -117,7 +117,7 @@ TOPOLOGY_ATTRIBS = (
 def make_topo_attrs_default(stage: Usd.Stage) -> None:
     root_prim = stage.GetPseudoRoot()
     for prim in (it := iter(Usd.PrimRange(root_prim))):
-        if not (prim.IsA(UsdGeom.Mesh) or prim.IsA(UsdGeom.BasisCurves)):  # type: ignore[call-overload]
+        if not (prim.IsA(UsdGeom.Mesh) or prim.IsA(UsdGeom.BasisCurves)):  # type: ignore
             continue
 
         # don't recurse deeper than this
@@ -298,10 +298,10 @@ def float_range_compare_factory(
     keep_start: float | None, keep_end: float | None
 ) -> Callable[[float], bool]:
     def check_start(val: float) -> bool:
-        return isclose(val, keep_start, rel_tol=1e-4) or (keep_start < val)  # type: ignore[arg-type, operator]
+        return isclose(val, keep_start, rel_tol=1e-4) or (keep_start < val)  # type: ignore
 
     def check_end(val: float) -> bool:
-        return isclose(val, keep_end, rel_tol=1e-4) or (val < keep_end)  # type: ignore[arg-type, operator]
+        return isclose(val, keep_end, rel_tol=1e-4) or (val < keep_end)  # type: ignore
 
     def check_both(val: float) -> bool:
         return check_start(val) and check_end(val)
