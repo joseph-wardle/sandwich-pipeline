@@ -1,6 +1,41 @@
+from __future__ import annotations
+
+from typing import Iterable
+
 from Qt import QtCore
-from Qt.QtGui import QStandardItem, QStandardItemModel
-from Qt.QtWidgets import QHBoxLayout, QListView, QWidget
+from Qt.QtCore import Qt
+from Qt.QtGui import QPainter, QStandardItem, QStandardItemModel
+from Qt.QtWidgets import QHBoxLayout, QListView, QStyledItemDelegate, QWidget
+
+from .styling import local_override_color
+
+
+class RigItemDelegate(QStyledItemDelegate):
+    DOT_SIZE = 6
+    DOT_COLOR = local_override_color
+
+    def __init__(self, list_view: RigSelectList):
+        super().__init__(list_view)
+        self._list_view = list_view
+
+    def paint(self, painter: QPainter, option, index):
+        super().paint(painter, option, index)
+
+        rig_name = index.data(Qt.UserRole)
+        if rig_name not in self._list_view.local_override_rigs:
+            return
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(self.DOT_COLOR)
+        painter.setPen(Qt.NoPen)
+
+        d = self.DOT_SIZE
+        x = option.rect.right() - d - 5
+        y = option.rect.center().y() - d // 2
+        painter.drawEllipse(x, y, d, d)
+
+        painter.restore()
 
 
 class RigItem(QStandardItem):
@@ -24,10 +59,20 @@ class RigSelectList(QListView):
 
         self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.setSpacing(2)
+        self._local_override_rigs: set[str] = set()
+        self.setItemDelegate(RigItemDelegate(self))
 
     def add_item(self, name: str, display_name: str | None = None):
         item = RigItem(name, display_name)
         self.item_model.appendRow(item)
+
+    @property
+    def local_override_rigs(self) -> set[str]:
+        return self._local_override_rigs
+
+    def set_override_rigs(self, rigs: Iterable[str]):
+        self._local_override_rigs = set(rigs)
+        self.viewport().update()
 
 
 class RigSelect(QWidget):
@@ -42,18 +87,18 @@ class RigSelect(QWidget):
         pass
 
     def setup_ui(self):
-        main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(4, 4, 4, 4)
-        main_layout.setSpacing(4)
+        self.main_layout = QHBoxLayout(self)
+        self.main_layout.setContentsMargins(4, 4, 4, 4)
+        self.main_layout.setSpacing(4)
         self.setMinimumSize(32, 28)
-        self.setLayout(main_layout)
+        self.setLayout(self.main_layout)
 
         self.rig_panel = RigSelectList()
         self.rig_panel.selectionModel().currentChanged.connect(self._on_rig_changed)
-        main_layout.addWidget(self.rig_panel)
+        self.main_layout.addWidget(self.rig_panel)
 
         self.variant_panel = RigSelectList()
-        main_layout.addWidget(self.variant_panel)
+        self.main_layout.addWidget(self.variant_panel)
         self.variant_panel.selectionModel().currentChanged.connect(
             self._on_variant_changed
         )

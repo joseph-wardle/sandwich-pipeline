@@ -3,7 +3,6 @@ from __future__ import annotations
 import Qt
 from maya.app.general.mayaMixin import MayaQWidgetDockableMixin  # type: ignore
 from Qt.QtWidgets import (
-    QCheckBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
@@ -13,9 +12,13 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
+from pipe.m.rig.builder.ui.expander import ExpanderWidget
+
+from .chip_bar import ChipBar
 from .logbox import RigBuildLogBox
 from .progress_bar import RigBuildProgressBar
 from .rig_type_tabs import RigTypeTabWidget
+from .switch import SwitchWithLabel
 from .test_select import TestSelectList
 
 
@@ -28,10 +31,9 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
     def setup_ui(self) -> None:
         self.setObjectName(self.window_object_name)
         self.setWindowTitle("The Rig-Build-inator")
-
         # ---------- MAIN LAYOUT ----------
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(8, 4, 8, 0)
+        main_layout.setContentsMargins(4, 4, 4, 4)
         self.setLayout(main_layout)
 
         self.main_splitter = QSplitter()
@@ -45,6 +47,7 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
 
         self.top_layout = QVBoxLayout(self.top_container)
         self.top_layout.setContentsMargins(0, 0, 0, 4)
+        self.top_layout.setSpacing(4)
         self.build_label = QLabel()
         self.build_label.setText("Build")
         self.top_layout.addWidget(self.build_label)
@@ -54,13 +57,16 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
         self.prop_select = self.build_tabs.create_tab("prop", "Prop")
 
         # Build Options
+        self.build_options_expander = ExpanderWidget("Build Options", expanded=True)
+        self.top_layout.addWidget(self.build_options_expander)
+        self.rig_build_scope_select = ChipBar(["Full", "Body", "Face"])
+        self.build_options_expander.addWidget(self.rig_build_scope_select)
+        self.dev_build_switch = SwitchWithLabel("Dev Build")
+        self.build_options_expander.addWidget(self.dev_build_switch)
+
         self.build_horizontal_layout = QHBoxLayout()
         self.build_horizontal_layout.setContentsMargins(0, 0, 0, 0)
         self.top_layout.addLayout(self.build_horizontal_layout)
-
-        self.dev_build_switch = QCheckBox()
-        self.dev_build_switch.setText("Dev Build")
-        self.build_horizontal_layout.addWidget(self.dev_build_switch, 1)
 
         self.build_rig_button = QPushButton()
         self.build_rig_button.setText("Build Rig")

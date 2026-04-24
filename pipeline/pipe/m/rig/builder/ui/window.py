@@ -85,25 +85,33 @@ class RigBuilderWindow(RigBuilderWindowUI):
 
         self.character_select.rig_changed.connect(
             lambda rig_name: setattr(
-                self.settings.LAST_CHARACTER_RIG, "value", rig_name
+                RigBuilderSettings.LAST_CHARACTER_RIG, "value", rig_name
             )
         )
+        self.character_select.rig_panel.set_override_rigs(["mr_yoon"])
         self.character_select.variant_changed.connect(
             lambda variant_name: setattr(
-                self.settings.LAST_CHARACTER_VARIANT, "value", variant_name
+                RigBuilderSettings.LAST_CHARACTER_VARIANT, "value", variant_name
             )
         )
         self.prop_select.rig_changed.connect(
-            lambda rig_name: setattr(self.settings.LAST_PROP_RIG, "value", rig_name)
+            lambda rig_name: setattr(
+                RigBuilderSettings.LAST_PROP_RIG, "value", rig_name
+            )
         )
         self.prop_select.variant_changed.connect(
             lambda variant_name: setattr(
-                self.settings.LAST_PROP_VARIANT, "value", variant_name
+                RigBuilderSettings.LAST_PROP_VARIANT, "value", variant_name
+            )
+        )
+        self.rig_build_scope_select.selection_changed.connect(
+            lambda chip_label: setattr(
+                RigBuilderSettings.LAST_BUILD_SCOPE, "value", chip_label
             )
         )
 
         self.dev_build_switch.toggled.connect(
-            lambda checked: setattr(self.settings.DEV_BUILD, "value", checked)
+            lambda checked: setattr(RigBuilderSettings.DEV_BUILD, "value", checked)
         )
         self.build_tabs.currentChanged.connect(self._on_tab_changed)
 
@@ -135,29 +143,33 @@ class RigBuilderWindow(RigBuilderWindowUI):
         self.db_thread.start()
 
     def _load_settings(self):
-        self.settings = RigBuilderSettings
-        self.dev_build_switch.setChecked(self.settings.DEV_BUILD.value)
-        self.build_tabs.set_current_tab(self.settings.LAST_TAB.value)
+        self.dev_build_switch.setChecked(RigBuilderSettings.DEV_BUILD.value)
+        self.build_tabs.set_current_tab(RigBuilderSettings.LAST_TAB.value)
 
     def _on_dev_build_changed(self, checked: bool):
-        self.settings.DEV_BUILD.value = checked
+        RigBuilderSettings.DEV_BUILD.value = checked
 
     def _on_tab_changed(self, index: int):
-        self.settings.LAST_TAB.value = index
+        RigBuilderSettings.LAST_TAB.value = index
 
     def _on_rig_data_received(
         self, characters: list[tuple[str, str]], props: list[tuple[str, str]]
     ):
         """Update the UI widgets once the DB query returns."""
         self.character_select.populate_rigs(characters)  # Update your widget method
-        self.character_select.select_rig(self.settings.LAST_CHARACTER_RIG.value)
+        self.character_select.select_rig(RigBuilderSettings.LAST_CHARACTER_RIG.value)
         self.prop_select.populate_rigs(props)
-        self.prop_select.select_rig(self.settings.LAST_PROP_RIG.value)
+        self.prop_select.select_rig(RigBuilderSettings.LAST_PROP_RIG.value)
         # TODO: Actually handle variants here, when changing the selected rig, and in the build.
         self.character_select.populate_variants(["default"])
-        self.character_select.select_variant(self.settings.LAST_CHARACTER_VARIANT.value)
+        self.character_select.select_variant(
+            RigBuilderSettings.LAST_CHARACTER_VARIANT.value
+        )
         self.prop_select.populate_variants(["default"])
-        self.prop_select.select_variant(self.settings.LAST_PROP_VARIANT.value)
+        self.prop_select.select_variant(RigBuilderSettings.LAST_PROP_VARIANT.value)
+        self.rig_build_scope_select.select_chip(
+            RigBuilderSettings.LAST_BUILD_SCOPE.value
+        )
 
     def _get_rig_to_build(self) -> tuple[str, str] | None:
         current_tab = self.build_tabs.get_current_tab()

@@ -8,3 +8,4 @@ class RigBuilderSettings:
     LAST_CHARACTER_VARIANT = StringOptionVar("rigBuilder.lastCharacterVariant", "")
     LAST_PROP_RIG = StringOptionVar("rigBuilder.lastPropRig", "")
     LAST_PROP_VARIANT = StringOptionVar("rigBuilder.lastPropVariant", "")
+    LAST_BUILD_SCOPE = StringOptionVar("rigBuilder.lastBuildScope", "")
