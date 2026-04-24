@@ -220,18 +220,50 @@ class SGDiffable(Diffable):
         return sg_diff
 
 
+# Never triggers lazy hydration: partials always carry these by construction,
+# or they are derivable in __attrs_post_init__ from fields that are carried.
+_HYDRATE_IDENTITY_FIELDS: frozenset[str] = frozenset({"id", "code", "path"})
+
+# Never overwritten during hydration: id is invariant; the rest is internal
+# state owned by this base class or by Diffable.
+_HYDRATE_COPY_SKIP: frozenset[str] = frozenset(
+    {
+        "id",
+        "_db",
+        "_hydrated",
+        "_initial_state",
+    }
+)
+
+
 @attrs.define(eq=False)
 class SGEntity(SGDiffable):
     """Base class for every ShotGrid entity.
 
     Equality is by ``(type, id)`` only: a partial entity (linked ref with
     only ``id`` + ``code``) and a fully fetched entity with the same id are
-    considered equal. Phase 2 adds a ``_db`` back-reference for lazy-fetch.
+    considered equal.
+
+    When a caller reads any other field while ``None``, the entity calls
+    back to its ``ShotGrid`` connection, re-fetches itself, and fills in
+    every field in place. Hydration fires at most once per instance.
+
+    This is an intentional exception to the rule that all mutations should be
+    explicit. The alternative (forcing callers to remember which
+    entities came from a linked ref) undermines  self-documentation
+    at call sites.  The back-reference is stripped on pickle.
     """
 
     id: int = field(kw_only=True, on_setattr=attrs.setters.frozen)
     code: str | None = field(default=None, kw_only=True)
     path: str | None = field(default=None, kw_only=True, metadata={_SG_NAME: "sg_path"})
+
+    # Private back-reference to the ShotGrid connection that produced this
+    # entity.  Typed ``Any`` to avoid a circular import — ``pipe.db.shotgrid``
+    # already imports every entity class from here.  ``CODING_STANDARD.md``
+    # §"Localize dynamic boundaries" permits this narrow Any.
+    _db: Any = field(init=False, default=None, eq=False, repr=False)
+    _hydrated: bool = field(init=False, default=False, eq=False, repr=False)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SGEntity):
@@ -240,6 +272,38 @@ class SGEntity(SGDiffable):
 
     def __hash__(self) -> int:
         return hash((type(self).__name__, self.id))
+
+    def __getattribute__(self, name: str) -> Any:
+        value = object.__getattribute__(self, name)
+        if value is not None:
+            return value
+        if name.startswith("_") or name in _HYDRATE_IDENTITY_FIELDS:
+            return value
+        db = object.__getattribute__(self, "_db")
+        if db is None or object.__getattribute__(self, "_hydrated"):
+            return value
+        # Set the flag before fetching so any reentry short-circuits.
+        object.__setattr__(self, "_hydrated", True)
+        fresh = db.reload(self)
+        for f in attrs.fields(type(self)):
+            if f.name in _HYDRATE_COPY_SKIP:
+                continue
+            # Read the raw slot value on ``fresh`` — ``fresh`` is also
+            # db-attached so ``getattr`` would re-trigger its own lazy-fetch.
+            object.__setattr__(self, f.name, object.__getattribute__(fresh, f.name))
+        return object.__getattribute__(self, name)
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Strip ``_db`` on pickle so serialized entities carry no live connection."""
+        state = {f.name: getattr(self, f.name) for f in attrs.fields(type(self))}
+        state["_db"] = None
+        state["_hydrated"] = False
+        state["_initial_state"] = getattr(self, "_initial_state", {})
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        for name, value in state.items():
+            object.__setattr__(self, name, value)
 
 
 # ---------------------------------------------------------------------------
@@ -511,7 +575,10 @@ class Shot(SGEntity):
         return build_shot_path(self.code)
 
     def __attrs_post_init__(self) -> None:
-        self.path = self.shot_path
+        # Skip path derivation on partial shots that arrived as linked refs
+        # without a name — validate_shot_code_token would reject ``None``.
+        if self.code is not None:
+            self.path = self.shot_path
         super().__attrs_post_init__()
 
     def sg_diff(self) -> dict[str, Any]:
@@ -519,7 +586,8 @@ class Shot(SGEntity):
 
         Shot path is derived from ``code`` and must never write to ``sg_path``.
         """
-        self.path = self.shot_path
+        if self.code is not None:
+            self.path = self.shot_path
         diff = super().sg_diff()
         diff.pop("path", None)
         diff.pop("sg_path", None)

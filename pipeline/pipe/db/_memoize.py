@@ -46,7 +46,7 @@ def ttl_cache(seconds: float) -> Callable[[Callable[..., T]], Callable[..., T]]:
                     f"arguments only; got positional {args!r}."
                 )
             state = _get_state(self)
-            key = (fn_name, frozenset(kwargs.items()))
+            key = (fn_name, frozenset((k, _freeze(v)) for k, v in kwargs.items()))
             now = time.monotonic()
             with state.lock:
                 hit = state.entries.get(key)
@@ -87,3 +87,19 @@ def _get_state(instance: object) -> _CacheState:
         state = _CacheState()
         object.__setattr__(instance, _CACHE_ATTR, state)
     return state
+
+
+def _freeze(value: Any) -> Any:
+    """Convert a kwarg value into a hashable cache-key component.
+
+    `find_*` methods legitimately take ``set[str]`` / ``list[str]`` / ``dict``
+    filter arguments; those are unhashable by default.  This freezes them
+    into hashable equivalents so the cache key can still be constructed.
+    """
+    if isinstance(value, (set, frozenset)):
+        return frozenset(value)
+    if isinstance(value, list):
+        return tuple(value)
+    if isinstance(value, dict):
+        return frozenset((k, _freeze(v)) for k, v in value.items())
+    return value

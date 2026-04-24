@@ -42,27 +42,26 @@ class Diffable(JsonSerializable):
         if type(self.__class__.__setattr__) is _frozen_setattrs:
             object.__setattr__(self, "_initial_state", {})
 
-        # get a deepcopy of each slot
+        # get a deepcopy of each non-private slot.  Private fields (those
+        # prefixed with ``_``) hold internal bookkeeping — diff state itself,
+        # ShotGrid back-references — and must never appear in diffs.
         name: str
         state: dict[str, Any] = {}
         for name in (f.name for f in attrs.fields(self.__class__)):
-            if name == "_initial_state":
+            if name.startswith("_"):
                 continue
             state[name] = deepcopy(getattr(self, name))
 
-        # save the initial state
         object.__setattr__(self, "_initial_state", state)
 
     def diff(self) -> dict[str, Any]:
         if self._initial_state == {}:
             return {}
 
-        # loop through keys and find changes
         diff: dict[str, Any] = {}
         name: str
         for name in (f.name for f in attrs.fields(self.__class__)):
-            if name == "_initial_state":
-                # prevent infinite loop
+            if name.startswith("_"):
                 continue
             if (val := getattr(self, name)) != self._initial_state[name]:
                 diff[name] = val

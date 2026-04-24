@@ -7,7 +7,7 @@ Raw `shotgun_api3` dicts, filters, and `Fault` exceptions never leave this file.
 Read this file top-to-bottom to understand the full ShotGrid surface the
 pipeline uses. Sections, in order:
 
-* Connection and configuration (`SG_Config`, `ChildMode`, `ShotGrid`).
+* Connection and configuration (`SG_Config`, `ShotGrid`).
 * Read verbs - `get_*` (single entity) and `find_*` (list of entities).
 * Write verbs — first-class, idempotent, return the refreshed entity.
 * Version creation, movie upload, playlist linking.
@@ -19,29 +19,44 @@ from __future__ import annotations
 import http.client
 import logging
 import os
+import socket
 import ssl
+import time
+import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any, TypeVar
 
+import attrs
 import shotgun_api3
 
+from pipe.db._memoize import invalidate, ttl_cache
+from pipe.db.errors import (
+    ShotGridAmbiguous,
+    ShotGridError,
+    ShotGridNotFound,
+    ShotGridWriteError,
+)
 from pipe.struct.db import (
     Asset,
     Environment,
     Playlist,
+    SGEntity,
     Sequence,
     Shot,
     Task,
     User,
     Version,
+    build_asset_path,
+    build_environment_path,
+    normalize_display_name,
 )
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 log = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 
 # ---------------------------------------------------------------------------
@@ -64,23 +79,94 @@ class SG_Config:
     sg_server: str
 
 
-class ChildMode(Enum):
-    """How asset queries treat parent/child asset relationships.
+# ---------------------------------------------------------------------------
+# Module-level constants — field lists and filter fragments.
+#
+# These are the only ShotGrid field-name strings the pipeline knows about.
+# If ShotGrid schema changes, every rename starts here.
+# ---------------------------------------------------------------------------
 
-    Replaces the legacy `DBInterface.ChildQueryMode` enum. Only shapes
-    asset queries — no other entity type has parent/child in this pipeline.
-    """
 
-    # Leaf assets plus top-level assets that have no children.
-    LEAVES = 0
-    # Every asset, regardless of relationship.
-    ALL = 1
-    # Only assets that have a parent.
-    CHILDREN = 2
-    # Only assets that have at least one child.
-    PARENTS = 3
-    # Top-level assets regardless of whether they have children.
-    ROOTS = 4
+_SG_FIELDS_ASSET: tuple[str, ...] = (
+    "id",
+    "code",
+    "tags",
+    "sg_asset_type",
+    "sg_subdirectory",
+    "sg_material_variants",
+    "sg_geometry_variants",
+    "sg_material_layers",
+    # Internal-only: used to filter roots_only=True. Never surfaced on Asset.
+    "parents",
+)
+_SG_FIELDS_SHOT: tuple[str, ...] = (
+    "id",
+    "code",
+    "assets",
+    "sg_cut_in",
+    "sg_cut_out",
+    "sg_cut_duration",
+    "sg_sequence",
+    "sg_set",
+    "sg_sets",
+)
+_SG_FIELDS_SEQUENCE: tuple[str, ...] = (
+    "id",
+    "code",
+    "shots",
+    "sg_set",
+    "sg_sets",
+)
+_SG_FIELDS_ENVIRONMENT: tuple[str, ...] = ("id", "code", "sg_subdirectory")
+_SG_FIELDS_USER: tuple[str, ...] = ("id", "name", "login")
+_SG_FIELDS_TASK: tuple[str, ...] = ("id", "content", "entity", "sg_status_list")
+_SG_FIELDS_VERSION: tuple[str, ...] = (
+    "id",
+    "code",
+    "entity",
+    "sg_task",
+    "user",
+    "sg_path_to_frames",
+    "sg_uploaded_movie",
+    "description",
+)
+_SG_FIELDS_PLAYLIST: tuple[str, ...] = (
+    "id",
+    "code",
+    "sg_status_list",
+    "versions",
+)
+
+# Active-record filters: skip records that are marked out-of-project / disabled.
+_SG_STATUS_ACTIVE_FILTER: tuple[str, str, str] = ("sg_status_list", "is_not", "oop")
+_SG_STATUS_ACTIVE_USER_FILTER: tuple[str, str, str] = (
+    "sg_status_list",
+    "is_not",
+    "dis",
+)
+
+# Assets with these sg_asset_type values are not "real" assets (environments
+# are their own entity surface, the others are legacy). Used by find_assets.
+_SG_ASSET_TYPE_EXCLUDES: tuple[str, ...] = (
+    "Environment",
+    "FX",
+    "Graphic",
+    "Matte Painting",
+    "Vehicle",
+    "Tool",
+    "Font",
+)
+
+# Every ``self._sg.*`` call is wrapped with these. ShotGrid's client raises
+# Fault for API-level errors; everything else is a network-layer failure that
+# an artist should see as a clean "could not reach ShotGrid" message.
+_NETWORK_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    shotgun_api3.Fault,
+    OSError,
+    urllib.error.URLError,
+    http.client.HTTPException,
+    socket.timeout,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +190,10 @@ class ShotGrid:
     _project_id: int
 
     _conn_instances: dict[SG_Config, ShotGrid] = {}
+
+    # Retry spacing for ``upload_movie`` — the list length is also the retry
+    # count.  Monkeypatchable per-test so the suite does not wait 14 seconds.
+    _UPLOAD_BACKOFF_SECONDS: tuple[float, ...] = (2.0, 4.0, 8.0)
 
     # ---- connection --------------------------------------------------------
 
@@ -168,15 +258,46 @@ class ShotGrid:
         _require_exactly_one_selector(
             id=id, name=name, display_name=display_name, path=path
         )
-        raise NotImplementedError("Phase 0 skeleton")
+        selector, value = _selected(
+            id=id, name=name, display_name=display_name, path=path
+        )
+        filters = self._asset_scope_filters()
+        if selector == "id":
+            filters.append(("id", "is", value))
+        elif selector == "display_name":
+            filters.append(("code", "is", value))
+        # ``name`` and ``path`` are derived fields — no SG-side filter exists.
+        # Fetch the scoped list and match in Python.
+        rows = _read_or_raise(
+            lambda: self._sg.find("Asset", filters, list(_SG_FIELDS_ASSET)),
+            entity_type="Asset",
+            selector=selector,
+            value=value,
+        )
+        if selector == "name":
+            rows = [r for r in rows if normalize_display_name(r.get("code")) == value]
+        elif selector == "path":
+            rows = [
+                r
+                for r in rows
+                if build_asset_path(r.get("code"), r.get("sg_subdirectory")) == value
+            ]
+        return self._one_or_raise(
+            entity_type="Asset",
+            selector=selector,
+            value=value,
+            rows=rows,
+            cls=Asset,
+        )
 
+    @ttl_cache(seconds=60)
     def find_assets(
         self,
         *,
         type: str | None = None,
         tags: set[str] | None = None,
         require_all_tags: bool = False,
-        child_mode: ChildMode = ChildMode.LEAVES,
+        roots_only: bool = False,
     ) -> list[Asset]:
         """Return every asset matching the given filters.
 
@@ -185,13 +306,31 @@ class ShotGrid:
             tags: Restrict to assets carrying these tag strings.
             require_all_tags: If ``True``, require every tag in ``tags``.
                 If ``False`` (default), match any of them.
-            child_mode: How to treat parent/child relationships. See
-                :class:`ChildMode`.
+            roots_only: If ``True``, only return top-level assets (no
+                parent). Useful for UI dropdowns that hide variant children.
 
         Returns:
             A list of :class:`Asset`, possibly empty. Never ``None``.
         """
-        raise NotImplementedError("Phase 0 skeleton")
+        filters: list[Any] = self._asset_scope_filters()
+        if type is not None:
+            filters.append(("sg_asset_type", "is", type))
+        if tags:
+            filters.append(
+                {
+                    "filter_operator": "all" if require_all_tags else "any",
+                    "filters": [("tags", "name_is", t) for t in tags],
+                }
+            )
+        rows = _read_or_raise(
+            lambda: self._sg.find("Asset", filters, list(_SG_FIELDS_ASSET)),
+            entity_type="Asset",
+            selector="filters",
+            value=None,
+        )
+        if roots_only:
+            rows = [r for r in rows if not r.get("parents")]
+        return self._many(rows, Asset)
 
     # ---- reads: shots ------------------------------------------------------
 
@@ -212,8 +351,24 @@ class ShotGrid:
             TypeError: Zero or more than one selector was provided.
         """
         _require_exactly_one_selector(id=id, code=code)
-        raise NotImplementedError("Phase 0 skeleton")
+        selector, value = _selected(id=id, code=code)
+        sg_filter = ("id", "is", value) if selector == "id" else ("code", "is", value)
+        filters = [self._project_filter(), _SG_STATUS_ACTIVE_FILTER, sg_filter]
+        rows = _read_or_raise(
+            lambda: self._sg.find("Shot", filters, list(_SG_FIELDS_SHOT)),
+            entity_type="Shot",
+            selector=selector,
+            value=value,
+        )
+        return self._one_or_raise(
+            entity_type="Shot",
+            selector=selector,
+            value=value,
+            rows=rows,
+            cls=Shot,
+        )
 
+    @ttl_cache(seconds=60)
     def find_shots(
         self,
         *,
@@ -224,7 +379,16 @@ class ShotGrid:
         Args:
             sequence: If given, restrict to shots in this sequence.
         """
-        raise NotImplementedError("Phase 0 skeleton")
+        filters: list[Any] = [self._project_filter(), _SG_STATUS_ACTIVE_FILTER]
+        if sequence is not None:
+            filters.append(("sg_sequence", "is", _entity_ref("Sequence", sequence)))
+        rows = _read_or_raise(
+            lambda: self._sg.find("Shot", filters, list(_SG_FIELDS_SHOT)),
+            entity_type="Shot",
+            selector="filters",
+            value=None,
+        )
+        return self._many(rows, Shot)
 
     # ---- reads: sequences --------------------------------------------------
 
@@ -241,11 +405,34 @@ class ShotGrid:
             TypeError: Zero or more than one selector was provided.
         """
         _require_exactly_one_selector(id=id, code=code)
-        raise NotImplementedError("Phase 0 skeleton")
+        selector, value = _selected(id=id, code=code)
+        sg_filter = ("id", "is", value) if selector == "id" else ("code", "is", value)
+        filters = [self._project_filter(), _SG_STATUS_ACTIVE_FILTER, sg_filter]
+        rows = _read_or_raise(
+            lambda: self._sg.find("Sequence", filters, list(_SG_FIELDS_SEQUENCE)),
+            entity_type="Sequence",
+            selector=selector,
+            value=value,
+        )
+        return self._one_or_raise(
+            entity_type="Sequence",
+            selector=selector,
+            value=value,
+            rows=rows,
+            cls=Sequence,
+        )
 
+    @ttl_cache(seconds=60)
     def find_sequences(self) -> list[Sequence]:
         """Return every sequence on the project."""
-        raise NotImplementedError("Phase 0 skeleton")
+        filters = [self._project_filter(), _SG_STATUS_ACTIVE_FILTER]
+        rows = _read_or_raise(
+            lambda: self._sg.find("Sequence", filters, list(_SG_FIELDS_SEQUENCE)),
+            entity_type="Sequence",
+            selector="filters",
+            value=None,
+        )
+        return self._many(rows, Sequence)
 
     # ---- reads: environments -----------------------------------------------
 
@@ -264,11 +451,52 @@ class ShotGrid:
             TypeError: Zero or more than one selector was provided.
         """
         _require_exactly_one_selector(id=id, code=code, path=path)
-        raise NotImplementedError("Phase 0 skeleton")
+        selector, value = _selected(id=id, code=code, path=path)
+        filters: list[Any] = [
+            self._project_filter(),
+            _SG_STATUS_ACTIVE_FILTER,
+            ("sg_asset_type", "is", "Environment"),
+        ]
+        if selector == "id":
+            filters.append(("id", "is", value))
+        elif selector == "code":
+            filters.append(("code", "is", value))
+        rows = _read_or_raise(
+            lambda: self._sg.find("Asset", filters, list(_SG_FIELDS_ENVIRONMENT)),
+            entity_type="Environment",
+            selector=selector,
+            value=value,
+        )
+        if selector == "path":
+            rows = [
+                r
+                for r in rows
+                if build_environment_path(r.get("code"), r.get("sg_subdirectory"))
+                == value
+            ]
+        return self._one_or_raise(
+            entity_type="Environment",
+            selector=selector,
+            value=value,
+            rows=rows,
+            cls=Environment,
+        )
 
+    @ttl_cache(seconds=60)
     def find_environments(self) -> list[Environment]:
         """Return every environment asset on the project."""
-        raise NotImplementedError("Phase 0 skeleton")
+        filters = [
+            self._project_filter(),
+            _SG_STATUS_ACTIVE_FILTER,
+            ("sg_asset_type", "is", "Environment"),
+        ]
+        rows = _read_or_raise(
+            lambda: self._sg.find("Asset", filters, list(_SG_FIELDS_ENVIRONMENT)),
+            entity_type="Environment",
+            selector="filters",
+            value=None,
+        )
+        return self._many(rows, Environment)
 
     # ---- reads: users ------------------------------------------------------
 
@@ -293,11 +521,42 @@ class ShotGrid:
             TypeError: Zero or more than one selector was provided.
         """
         _require_exactly_one_selector(id=id, login=login, name=name)
-        raise NotImplementedError("Phase 0 skeleton")
+        selector, value = _selected(id=id, login=login, name=name)
+        filters: list[Any] = [_SG_STATUS_ACTIVE_USER_FILTER]
+        if selector == "id":
+            filters.append(("id", "is", value))
+        elif selector == "login":
+            filters.append(("login", "is", value))
+        else:  # name
+            filters.append(("name", "is", value))
+        rows = _read_or_raise(
+            lambda: self._sg.find("HumanUser", filters, list(_SG_FIELDS_USER)),
+            entity_type="User",
+            selector=selector,
+            value=value,
+        )
+        return self._one_or_raise(
+            entity_type="User",
+            selector=selector,
+            value=value,
+            rows=rows,
+            cls=User,
+        )
 
+    @ttl_cache(seconds=60)
     def find_users(self) -> list[User]:
-        """Return every active ShotGrid ``HumanUser`` on the project."""
-        raise NotImplementedError("Phase 0 skeleton")
+        """Return every active ShotGrid ``HumanUser``. Not project-scoped."""
+        rows = _read_or_raise(
+            lambda: self._sg.find(
+                "HumanUser",
+                [_SG_STATUS_ACTIVE_USER_FILTER],
+                list(_SG_FIELDS_USER),
+            ),
+            entity_type="User",
+            selector="filters",
+            value=None,
+        )
+        return self._many(rows, User)
 
     # ---- reads: tasks ------------------------------------------------------
 
@@ -310,8 +569,22 @@ class ShotGrid:
         Raises:
             ShotGridNotFound: No task matches.
         """
-        raise NotImplementedError("Phase 0 skeleton")
+        filters = [self._project_filter(), ("id", "is", id)]
+        rows = _read_or_raise(
+            lambda: self._sg.find("Task", filters, list(_SG_FIELDS_TASK)),
+            entity_type="Task",
+            selector="id",
+            value=id,
+        )
+        return self._one_or_raise(
+            entity_type="Task",
+            selector="id",
+            value=id,
+            rows=rows,
+            cls=Task,
+        )
 
+    @ttl_cache(seconds=60)
     def find_tasks(
         self,
         *,
@@ -326,7 +599,20 @@ class ShotGrid:
             asset: Restrict to tasks on this asset.
             user: Restrict to tasks assigned to this user.
         """
-        raise NotImplementedError("Phase 0 skeleton")
+        filters: list[Any] = [self._project_filter()]
+        if shot is not None:
+            filters.append(("entity", "is", _entity_ref("Shot", shot)))
+        if asset is not None:
+            filters.append(("entity", "is", _entity_ref("Asset", asset)))
+        if user is not None:
+            filters.append(("task_assignees", "in", [_entity_ref("HumanUser", user)]))
+        rows = _read_or_raise(
+            lambda: self._sg.find("Task", filters, list(_SG_FIELDS_TASK)),
+            entity_type="Task",
+            selector="filters",
+            value=None,
+        )
+        return self._many(rows, Task)
 
     # ---- reads: playlists --------------------------------------------------
 
@@ -336,15 +622,42 @@ class ShotGrid:
         Raises:
             ShotGridNotFound: No playlist matches.
         """
-        raise NotImplementedError("Phase 0 skeleton")
+        filters = [self._project_filter(), ("id", "is", id)]
+        rows = _read_or_raise(
+            lambda: self._sg.find("Playlist", filters, list(_SG_FIELDS_PLAYLIST)),
+            entity_type="Playlist",
+            selector="id",
+            value=id,
+        )
+        return self._one_or_raise(
+            entity_type="Playlist",
+            selector="id",
+            value=id,
+            rows=rows,
+            cls=Playlist,
+        )
 
+    @ttl_cache(seconds=60)
     def find_recent_playlists(self, *, limit: int = 10) -> list[Playlist]:
         """Return the most recently updated active review playlists.
 
         Args:
             limit: How many rows to return. Defaults to 10.
         """
-        raise NotImplementedError("Phase 0 skeleton")
+        filters = [self._project_filter()]
+        rows = _read_or_raise(
+            lambda: self._sg.find(
+                "Playlist",
+                filters,
+                list(_SG_FIELDS_PLAYLIST),
+                order=[{"field_name": "updated_at", "direction": "desc"}],
+                limit=limit,
+            ),
+            entity_type="Playlist",
+            selector="filters",
+            value=None,
+        )
+        return self._many(rows, Playlist)
 
     # ---- writes: assets ----------------------------------------------------
 
@@ -361,27 +674,57 @@ class ShotGrid:
         Raises:
             ShotGridWriteError: ShotGrid rejected the update.
         """
-        raise NotImplementedError("Phase 0 skeleton")
+        return self._edit_asset_csv_field(
+            asset,
+            field="sg_material_variants",
+            name=name,
+            add=True,
+        )
 
     def remove_material_variant(self, asset: Asset, name: str) -> Asset:
         """Unregister ``name`` as a material variant on ``asset``. Idempotent."""
-        raise NotImplementedError("Phase 0 skeleton")
+        return self._edit_asset_csv_field(
+            asset,
+            field="sg_material_variants",
+            name=name,
+            add=False,
+        )
 
     def add_geometry_variant(self, asset: Asset, name: str) -> Asset:
         """Register ``name`` as a geometry variant on ``asset``. Idempotent."""
-        raise NotImplementedError("Phase 0 skeleton")
+        return self._edit_asset_csv_field(
+            asset,
+            field="sg_geometry_variants",
+            name=name,
+            add=True,
+        )
 
     def remove_geometry_variant(self, asset: Asset, name: str) -> Asset:
         """Unregister ``name`` as a geometry variant on ``asset``. Idempotent."""
-        raise NotImplementedError("Phase 0 skeleton")
+        return self._edit_asset_csv_field(
+            asset,
+            field="sg_geometry_variants",
+            name=name,
+            add=False,
+        )
 
     def add_material_layer(self, asset: Asset, name: str) -> Asset:
         """Register ``name`` as a material layer on ``asset``. Idempotent."""
-        raise NotImplementedError("Phase 0 skeleton")
+        return self._edit_asset_csv_field(
+            asset,
+            field="sg_material_layers",
+            name=name,
+            add=True,
+        )
 
     def remove_material_layer(self, asset: Asset, name: str) -> Asset:
         """Unregister ``name`` as a material layer on ``asset``. Idempotent."""
-        raise NotImplementedError("Phase 0 skeleton")
+        return self._edit_asset_csv_field(
+            asset,
+            field="sg_material_layers",
+            name=name,
+            add=False,
+        )
 
     def set_asset_subdirectory(self, asset: Asset, subdirectory: str | None) -> Asset:
         """Set the asset's on-disk subdirectory (e.g. ``"char"``, ``"prop"``).
@@ -391,7 +734,56 @@ class ShotGrid:
         Raises:
             ShotGridWriteError: ShotGrid rejected the update.
         """
-        raise NotImplementedError("Phase 0 skeleton")
+        if asset.subdirectory == subdirectory:
+            return self.reload(asset)
+        payload = {"sg_subdirectory": subdirectory if subdirectory is not None else ""}
+        _write_or_raise(
+            lambda: self._sg.update("Asset", asset.id, payload),
+            entity_type="Asset",
+            entity_id=asset.id,
+            field="sg_subdirectory",
+        )
+        invalidate(self)
+        return self.reload(asset)
+
+    def _edit_asset_csv_field(
+        self,
+        asset: Asset,
+        *,
+        field: str,
+        name: str,
+        add: bool,
+    ) -> Asset:
+        """Add or remove ``name`` from one of the CSV-set fields on ``asset``.
+
+        Shared impl for ``add_material_variant`` / ``add_geometry_variant`` /
+        ``add_material_layer`` and their ``remove_*`` counterparts.
+
+        Note: read-modify-write on a comma-separated string is *not* safe
+        against concurrent writers. This matches legacy SGaaDB behavior; if
+        concurrent variant writes become a real problem, move to a proper SG
+        multi-entity relationship field.
+        """
+        _CSV_ATTR_BY_FIELD = {
+            "sg_material_variants": "material_variants",
+            "sg_geometry_variants": "geometry_variants",
+            "sg_material_layers": "material_layers",
+        }
+        local_attr = _CSV_ATTR_BY_FIELD[field]
+        current: set[str] = getattr(asset, local_attr) or set()
+        if (name in current) == add:
+            return self.reload(asset)
+        new_values = current | {name} if add else current - {name}
+        _write_or_raise(
+            lambda: self._sg.update(
+                "Asset", asset.id, {field: ",".join(sorted(new_values))}
+            ),
+            entity_type="Asset",
+            entity_id=asset.id,
+            field=field,
+        )
+        invalidate(self)
+        return self.reload(asset)
 
     # ---- versions ----------------------------------------------------------
 
@@ -425,7 +817,17 @@ class ShotGrid:
             ShotGridWriteError: ShotGrid rejected the Version create or a
                 downstream upload / link step failed.
         """
-        raise NotImplementedError("Phase 0 skeleton")
+        return self._create_version(
+            parent_type="Shot",
+            parent=shot,
+            code=code,
+            user=user,
+            task=task,
+            video=video,
+            description=description,
+            playlist=playlist,
+            extra_fields=extra_fields,
+        )
 
     def create_asset_version(
         self,
@@ -447,7 +849,64 @@ class ShotGrid:
         Raises:
             ShotGridWriteError: The create, upload, or link failed.
         """
-        raise NotImplementedError("Phase 0 skeleton")
+        return self._create_version(
+            parent_type="Asset",
+            parent=asset,
+            code=code,
+            user=user,
+            task=task,
+            video=video,
+            description=description,
+            playlist=playlist,
+            extra_fields=extra_fields,
+        )
+
+    def _create_version(
+        self,
+        *,
+        parent_type: str,
+        parent: Shot | Asset,
+        code: str,
+        user: User | None,
+        task: Task | None,
+        video: Path | str | None,
+        description: str | None,
+        playlist: Playlist | None,
+        extra_fields: dict[str, Any] | None,
+    ) -> Version:
+        payload: dict[str, Any] = {
+            "code": code,
+            "entity": {"type": parent_type, "id": parent.id},
+            "project": {"type": "Project", "id": self._project_id},
+        }
+        if user is not None:
+            payload["user"] = _entity_ref("HumanUser", user)
+        if task is not None:
+            payload["sg_task"] = _entity_ref("Task", task)
+        if description is not None:
+            payload["description"] = description
+        if extra_fields:
+            conflicts = set(extra_fields) & set(payload)
+            if conflicts:
+                raise ValueError(
+                    f"extra_fields cannot override structured keys: {sorted(conflicts)}"
+                )
+            payload.update(extra_fields)
+        row = _write_or_raise(
+            lambda: self._sg.create("Version", payload, list(_SG_FIELDS_VERSION)),
+            entity_type="Version",
+            entity_id=None,
+            field=None,
+        )
+        version = Version.from_sg(row)
+        self._attach_db(version)
+        if video is not None:
+            version = self.upload_movie(version, video)
+        if playlist is not None:
+            self.link_to_playlist(version, playlist)
+            version = self.reload(version)
+        invalidate(self)
+        return version
 
     # ---- uploads -----------------------------------------------------------
 
@@ -470,7 +929,37 @@ class ShotGrid:
         Raises:
             ShotGridWriteError: Every retry failed.
         """
-        raise NotImplementedError("Phase 0 skeleton")
+        path_str = str(path)
+        last_exc: BaseException | None = None
+        backoffs = self._UPLOAD_BACKOFF_SECONDS
+        for attempt, backoff in enumerate(backoffs, start=1):
+            try:
+                self._sg.upload(
+                    "Version",
+                    version.id,
+                    path_str,
+                    field_name="sg_uploaded_movie",
+                )
+                return self.reload(version)
+            except _NETWORK_EXCEPTIONS as exc:
+                last_exc = exc
+                log.warning(
+                    "upload_movie attempt %d/%d failed for Version id=%d; "
+                    "retrying in %ss: %s",
+                    attempt,
+                    len(backoffs),
+                    version.id,
+                    backoff,
+                    exc,
+                )
+                if attempt < len(backoffs):
+                    time.sleep(backoff)
+        raise ShotGridWriteError(
+            entity_type="Version",
+            entity_id=version.id,
+            field="sg_uploaded_movie",
+            cause=last_exc,
+        ) from last_exc
 
     # ---- playlist links ----------------------------------------------------
 
@@ -486,7 +975,19 @@ class ShotGrid:
         Raises:
             ShotGridWriteError: ShotGrid rejected the link.
         """
-        raise NotImplementedError("Phase 0 skeleton")
+        _write_or_raise(
+            lambda: self._sg.update(
+                "Playlist",
+                playlist.id,
+                {"versions": [{"type": "Version", "id": version.id}]},
+                multi_entity_update_modes={"versions": "add"},
+            ),
+            entity_type="Playlist",
+            entity_id=playlist.id,
+            field="versions",
+        )
+        invalidate(self)
+        return self.reload(playlist)
 
     # ---- refresh -----------------------------------------------------------
 
@@ -514,7 +1015,112 @@ class ShotGrid:
         Raises:
             ShotGridNotFound: ``entity.id`` no longer exists in ShotGrid.
         """
-        raise NotImplementedError("Phase 0 skeleton")
+        if isinstance(entity, Asset):
+            return self.get_asset(id=entity.id)
+        if isinstance(entity, Environment):
+            return self.get_environment(id=entity.id)
+        if isinstance(entity, Shot):
+            return self.get_shot(id=entity.id)
+        if isinstance(entity, Sequence):
+            return self.get_sequence(id=entity.id)
+        if isinstance(entity, User):
+            return self.get_user(id=entity.id)
+        if isinstance(entity, Task):
+            return self.get_task(id=entity.id)
+        if isinstance(entity, Playlist):
+            return self.get_playlist(id=entity.id)
+        if isinstance(entity, Version):
+            return self._reload_version(entity)
+        raise TypeError(f"Cannot reload unknown entity type: {type(entity).__name__}")
+
+    def _reload_version(self, version: Version) -> Version:
+        """Re-fetch a Version by id. Version has no public ``get_version``
+        because callers hold the Version returned by ``create_*_version`` /
+        ``upload_movie``; this exists for the lazy-fetch + reload paths."""
+        rows = _read_or_raise(
+            lambda: self._sg.find(
+                "Version",
+                [self._project_filter(), ("id", "is", version.id)],
+                list(_SG_FIELDS_VERSION),
+            ),
+            entity_type="Version",
+            selector="id",
+            value=version.id,
+        )
+        return self._one_or_raise(
+            entity_type="Version",
+            selector="id",
+            value=version.id,
+            rows=rows,
+            cls=Version,
+        )
+
+    # ---- internals: query + hydration helpers -----------------------------
+
+    def _project_filter(self) -> tuple[str, str, dict[str, Any]]:
+        """The filter fragment that scopes every project-local query."""
+        return ("project", "is", {"type": "Project", "id": self._project_id})
+
+    def _asset_scope_filters(self) -> list[Any]:
+        """Filters shared by every Asset query — project, status, type excludes."""
+        return [
+            self._project_filter(),
+            _SG_STATUS_ACTIVE_FILTER,
+            {
+                "filter_operator": "all",
+                "filters": [
+                    ("sg_asset_type", "is_not", t) for t in _SG_ASSET_TYPE_EXCLUDES
+                ],
+            },
+        ]
+
+    def _attach_db(self, value: Any) -> None:
+        """Recursively wire this connection onto every ``SGEntity`` in ``value``.
+
+        Uses ``object.__getattribute__`` to read fields directly, so walking a
+        partial entity does not itself trigger lazy hydration.
+        """
+        if isinstance(value, SGEntity):
+            object.__setattr__(value, "_db", self)
+            for f in attrs.fields(type(value)):
+                if f.name.startswith("_"):
+                    continue
+                self._attach_db(object.__getattribute__(value, f.name))
+        elif isinstance(value, list):
+            for item in value:
+                self._attach_db(item)
+
+    def _one_or_raise(
+        self,
+        *,
+        entity_type: str,
+        selector: str,
+        value: object,
+        rows: list[dict[str, Any]],
+        cls: type[SGEntity],
+    ) -> Any:
+        """Convert a SG result list into exactly one hydrated entity, or raise."""
+        if not rows:
+            raise ShotGridNotFound(
+                entity_type=entity_type, selector=selector, value=value
+            )
+        if len(rows) > 1:
+            raise ShotGridAmbiguous(
+                entity_type=entity_type,
+                selector=selector,
+                value=value,
+                matching_ids=[r["id"] for r in rows],
+            )
+        entity = cls.from_sg(rows[0])
+        self._attach_db(entity)
+        return entity
+
+    def _many(self, rows: list[dict[str, Any]], cls: type[SGEntity]) -> list[Any]:
+        """Structure a ShotGrid result list into entities with ``_db`` attached."""
+        result = [cls.from_sg(r) for r in rows]
+        for e in result:
+            self._attach_db(e)
+        return result
 
     # ---- internals: Houdini SSL workaround --------------------------------
     # DCC workaround: Houdini's bundled Python ships without modern SSL, so
@@ -623,10 +1229,9 @@ class ShotGrid:
 def _require_exactly_one_selector(**selectors: object) -> None:
     """Raise ``TypeError`` unless exactly one kwarg is non-``None``.
 
-    Used by every ``get_*`` method to enforce the unique-selector contract
-    at the call site — before any ShotGrid traffic, and before the Phase 0
-    ``NotImplementedError``. This keeps the contract tests meaningful while
-    the bodies are still stubs.
+    Used by every ``get_*`` method so callers see a TypeError at the call
+    site (before any ShotGrid traffic) when they supply zero or multiple
+    selectors.
     """
     provided = [name for name, value in selectors.items() if value is not None]
     if len(provided) == 1:
@@ -637,3 +1242,57 @@ def _require_exactly_one_selector(**selectors: object) -> None:
     raise TypeError(
         f"Provide exactly one of {names}; got multiple: {sorted(provided)}."
     )
+
+
+def _selected(**selectors: object) -> tuple[str, object]:
+    """Return ``(selector_name, value)`` for the one non-None selector.
+
+    Assumes ``_require_exactly_one_selector`` has already run.
+    """
+    for name, value in selectors.items():
+        if value is not None:
+            return name, value
+    # _require_exactly_one_selector has already validated; this is unreachable.
+    raise AssertionError("selector guard failed")
+
+
+def _entity_ref(sg_type: str, entity: SGEntity | None) -> dict[str, Any] | None:
+    """Build a ``{'type': ..., 'id': ...}`` link-ref or ``None``."""
+    if entity is None:
+        return None
+    return {"type": sg_type, "id": entity.id}
+
+
+def _read_or_raise(
+    call: Callable[[], _T],
+    *,
+    entity_type: str,
+    selector: str,
+    value: object,
+) -> _T:
+    """Run a ShotGrid read call; wrap network/Fault errors as ``ShotGridError``."""
+    try:
+        return call()
+    except _NETWORK_EXCEPTIONS as exc:
+        raise ShotGridError(
+            f"ShotGrid read failed for {entity_type} where {selector}={value!r}: {exc}"
+        ) from exc
+
+
+def _write_or_raise(
+    call: Callable[[], _T],
+    *,
+    entity_type: str,
+    entity_id: int | None,
+    field: str | None,
+) -> _T:
+    """Run a ShotGrid write call; wrap network/Fault errors as ``ShotGridWriteError``."""
+    try:
+        return call()
+    except _NETWORK_EXCEPTIONS as exc:
+        raise ShotGridWriteError(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            field=field,
+            cause=exc,
+        ) from exc
