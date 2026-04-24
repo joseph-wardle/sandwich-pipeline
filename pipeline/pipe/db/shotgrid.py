@@ -25,12 +25,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-import attrs
 import shotgun_api3
 
 from pipe.struct.db import (
     Asset,
     Environment,
+    Playlist,
     Sequence,
     Shot,
     Task,
@@ -81,24 +81,6 @@ class ChildMode(Enum):
     PARENTS = 3
     # Top-level assets regardless of whether they have children.
     ROOTS = 4
-
-
-# ---------------------------------------------------------------------------
-# Placeholder entity (Phase 1 moves this into ``pipe.struct.db``)
-# ---------------------------------------------------------------------------
-
-
-@attrs.define(frozen=True)
-class Playlist:
-    """A ShotGrid Playlist. Phase 1 promotes this to ``pipe.struct.db`` with
-    full ``_SG_NAME`` metadata alongside the other ``SGEntity`` subclasses.
-
-    For Phase 0 it carries only the minimum fields the sketch signatures
-    reference. Treat it as frozen; replace via Phase 1.
-    """
-
-    id: int
-    code: str
 
 
 # ---------------------------------------------------------------------------
