@@ -2,14 +2,23 @@ from Qt.QtCore import Property, QEasingCurve, QPropertyAnimation, QSize, Qt, Sig
 from Qt.QtGui import QColor, QPainter, QPainterPath
 from Qt.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
-from .core import blend_color
+from ..core import blend_color
 
 
 class SwitchWithLabel(QWidget):
-    def __init__(self, text: str = "", parent=None):
-        super().__init__(parent)
+    def __init__(
+        self,
+        text: str = "",
+        parent=None,
+        color_on: QColor | None = None,
+        color_off: QColor | None = None,
+        color_thumb: QColor | None = None,
+    ):
+        super().__init__(parent=parent)
 
-        self.switch = Switch(self)
+        self.switch = Switch(
+            self, color_on=color_on, color_off=color_off, color_thumb=color_thumb
+        )
         self.label = QLabel(text, self)
 
         layout = QHBoxLayout(self)

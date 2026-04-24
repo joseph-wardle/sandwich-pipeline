@@ -12,14 +12,17 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.m.rig.builder.ui.expander import ExpanderWidget
-
-from .chip_bar import ChipBar
-from .logbox import RigBuildLogBox
-from .progress_bar import RigBuildProgressBar
-from .rig_type_tabs import RigTypeTabWidget
-from .switch import SwitchWithLabel
-from .test_select import TestSelectList
+from .styling import local_override_color
+from .widgets import (
+    ChipBar,
+    DirectorySelect,
+    Expander,
+    RigBuildLogBox,
+    RigBuildProgressBar,
+    RigTypeTabWidget,
+    SwitchWithLabel,
+    TestSelectList,
+)
 
 
 class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
@@ -57,10 +60,16 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
         self.prop_select = self.build_tabs.create_tab("prop", "Prop")
 
         # Build Options
-        self.build_options_expander = ExpanderWidget("Build Options", expanded=True)
+        self.build_options_expander = Expander("Build Options", expanded=True)
         self.top_layout.addWidget(self.build_options_expander)
         self.rig_build_scope_select = ChipBar(["Full", "Body", "Face"])
         self.build_options_expander.addWidget(self.rig_build_scope_select)
+        self.local_override_switch = SwitchWithLabel(
+            "Local Override", color_on=local_override_color
+        )
+        self.build_options_expander.addWidget(self.local_override_switch)
+        self.local_override_dir = DirectorySelect(self)
+        self.build_options_expander.addWidget(self.local_override_dir)
         self.dev_build_switch = SwitchWithLabel("Dev Build")
         self.build_options_expander.addWidget(self.dev_build_switch)
 

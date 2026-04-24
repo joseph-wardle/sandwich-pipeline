@@ -7,7 +7,7 @@ from Qt.QtCore import Qt
 from Qt.QtGui import QPainter, QStandardItem, QStandardItemModel
 from Qt.QtWidgets import QHBoxLayout, QListView, QStyledItemDelegate, QWidget
 
-from .styling import local_override_color
+from ..styling import local_override_color
 
 
 class RigItemDelegate(QStyledItemDelegate):

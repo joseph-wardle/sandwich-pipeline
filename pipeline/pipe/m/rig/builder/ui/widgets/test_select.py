@@ -5,8 +5,8 @@ from Qt import QtCore
 from Qt.QtGui import QBrush, QColor, QStandardItem, QStandardItemModel
 from Qt.QtWidgets import QApplication, QHBoxLayout, QListView, QPushButton, QWidget
 
-from ..progress import TestProgressManager
-from ..test import RIG_BUILD_TESTS, RigBuildTest, TestRunner
+from ...progress import TestProgressManager
+from ...test import RIG_BUILD_TESTS, RigBuildTest, TestRunner
 
 PASSED_COLOR = QColor(0, 94, 75)
 FAILED_COLOR = QColor(130, 42, 50)

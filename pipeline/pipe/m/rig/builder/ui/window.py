@@ -182,11 +182,7 @@ class RigBuilderWindow(RigBuilderWindowUI):
 
     def _build_rig(self):
         rig_builder = build.RigBuilder()
-        dev_build = (
-            True
-            if self.dev_build_switch.checkState() == QtCore.Qt.CheckState.Checked
-            else False
-        )
+        dev_build = self.dev_build_switch.isChecked()
         current_tab = self.build_tabs.get_current_tab()
         rig_type = current_tab.get_rig_type()
         selected_rig = current_tab.get_selected_rig()

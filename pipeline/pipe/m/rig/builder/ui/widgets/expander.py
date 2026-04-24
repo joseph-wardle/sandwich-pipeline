@@ -2,13 +2,13 @@ from Qt.QtCore import QSize, Qt
 from Qt.QtWidgets import QFrame, QSizePolicy, QToolButton, QVBoxLayout, QWidget
 
 
-class ExpanderWidget(QFrame):
+class Expander(QFrame):
     def __init__(
         self, title: str, parent: QWidget | None = None, expanded: bool = False
     ):
         super().__init__(parent)
         self.setStyleSheet("""
-            ExpanderWidget {
+            Expander {
                 background: palette(midlight);
                 border-radius: 2px;
             }
@@ -42,7 +42,7 @@ class ExpanderWidget(QFrame):
 
         self._content = QFrame()
         self._content_layout = QVBoxLayout()
-        self._content_layout.setContentsMargins(6, 4, 6, 4)
+        self._content_layout.setContentsMargins(6, 2, 6, 6)
         self._content.setLayout(self._content_layout)
 
         self._on_toggle(expanded)
