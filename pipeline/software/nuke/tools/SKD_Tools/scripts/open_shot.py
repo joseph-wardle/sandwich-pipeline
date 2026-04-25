@@ -103,16 +103,11 @@ class MyWindow(QtWidgets.QWidget):
 
     def get_shots(self):
         from env_sg import DB_Config
-        from pipe.db import DB
 
-        conn = DB.Get(DB_Config)
+        from pipe.shotgrid import ShotGrid
 
-        # force refresh cache
-        conn.expire_cache()
-        conn.get_shot_code_list()
-
-        shots = conn.get_shot_code_list()
-        return shots
+        conn = ShotGrid.connect(DB_Config)
+        return [shot.code for shot in conn.find_shots() if shot.code]
 
     def parse_list(self, shots):
         for shot in shots:

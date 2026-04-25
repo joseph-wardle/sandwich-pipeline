@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pipe.struct.db import Asset
+from pipe.shotgrid import Asset
 from pipe.versioning import (
     VersionOwner,
     VersionStreamSpec,

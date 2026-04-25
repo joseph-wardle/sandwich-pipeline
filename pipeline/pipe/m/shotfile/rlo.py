@@ -7,7 +7,7 @@ from pipe.shot.version_adapter import (
     shot_owner_for,
 )
 from pipe.versioning import path_matches_stream
-from pipe.struct.db import SGEntity, Shot
+from pipe.shotgrid import SGEntity, Shot
 from pipe.versioning import VersionStreamSpec
 
 from .shotfile_manager import MShotFileManager
@@ -65,4 +65,4 @@ class MRLOShotFileManager(MShotFileManager):
         if result is None:
             return None
         shot, stream = result
-        return stream, shot.code, shot
+        return stream, shot.code or "", shot

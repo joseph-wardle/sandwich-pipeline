@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import maya.cmds as mc
 import maya.mel as mel
@@ -16,12 +15,11 @@ from shared.util import get_production_path
 
 from pipe.asset.paths import BACKUP_DIRNAME, paths_for_asset
 from pipe.asset.version_adapter import asset_owner_for, maya_model_stream
-from pipe.db import DB, DBInterface
 from pipe.glui.dialogs import FilteredListDialog, MessageDialog
 from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
 from pipe.glui.version_browser import VersionBrowserWidget
 from pipe.m.local import get_main_qt_window
-from pipe.struct.db import Asset, SGEntity
+from pipe.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
 from pipe.util import FileManager
 from pipe.versioning import (
     list_version_records,
@@ -43,22 +41,22 @@ FILEINFO_ASSET_SUBDIRECTORY = f"{FILEINFO_PREFIX}_subdirectory"
 
 @dataclass(frozen=True)
 class AssetMetadata:
-    id: Optional[int]
-    name: Optional[str]
-    display_name: Optional[str]
-    path: Optional[str]
-    subdirectory: Optional[str]
-    asset: Optional[Asset]
+    id: int | None
+    name: str | None
+    display_name: str | None
+    path: str | None
+    subdirectory: str | None
+    asset: Asset | None
 
 
-def _normalize_value(value: Optional[str]) -> Optional[str]:
+def _normalize_value(value: str | None) -> str | None:
     if value is None:
         return None
     value = str(value).strip()
     return value or None
 
 
-def _get_file_info_value(key: str) -> Optional[str]:
+def _get_file_info_value(key: str) -> str | None:
     try:
         raw_value = mc.fileInfo(key, query=True)
     except Exception:
@@ -71,7 +69,7 @@ def _get_file_info_value(key: str) -> Optional[str]:
     return None
 
 
-def _set_file_info_value(key: str, value: Optional[str]) -> None:
+def _set_file_info_value(key: str, value: str | None) -> None:
     mc.fileInfo(key, value or "")
 
 
@@ -91,7 +89,7 @@ def _set_dialog_button_tooltips(
 
 def write_asset_metadata(asset: Asset) -> None:
     """Write asset metadata to the current Maya scene fileInfo."""
-    _set_file_info_value(FILEINFO_ASSET_ID, str(asset.id) if asset.id else "")
+    _set_file_info_value(FILEINFO_ASSET_ID, str(asset.id))
     _set_file_info_value(FILEINFO_ASSET_NAME, _normalize_value(asset.name))
     _set_file_info_value(
         FILEINFO_ASSET_DISPLAY_NAME, _normalize_value(asset.display_name)
@@ -102,7 +100,7 @@ def write_asset_metadata(asset: Asset) -> None:
     )
 
 
-def read_asset_metadata(conn: DBInterface | None = None) -> AssetMetadata:
+def read_asset_metadata(conn: ShotGrid | None = None) -> AssetMetadata:
     """Read asset metadata from fileInfo and resolve to an Asset when possible."""
     asset_id_raw = _get_file_info_value(FILEINFO_ASSET_ID)
     asset_name = _get_file_info_value(FILEINFO_ASSET_NAME)
@@ -110,29 +108,28 @@ def read_asset_metadata(conn: DBInterface | None = None) -> AssetMetadata:
     asset_path = _get_file_info_value(FILEINFO_ASSET_PATH)
     asset_subdirectory = _get_file_info_value(FILEINFO_ASSET_SUBDIRECTORY)
 
-    asset_id: Optional[int]
+    asset_id: int | None
     if asset_id_raw:
         try:
             asset_id = int(asset_id_raw)
-        except Exception:
+        except ValueError:
             log.warning("Invalid asset id in fileInfo: %s", asset_id_raw)
             asset_id = None
     else:
         asset_id = None
 
     resolved: Asset | None = None
-    conn = conn or DB.Get(DB_Config)
-    if conn:
-        if asset_id is not None:
-            try:
-                resolved = conn.get_asset_by_id(asset_id)
-            except Exception as exc:
-                log.warning("Failed to resolve asset by id %s: %s", asset_id, exc)
-        if resolved is None and asset_path:
-            try:
-                resolved = conn.get_asset_by_attr("path", asset_path)
-            except Exception as exc:
-                log.warning("Failed to resolve asset by path %s: %s", asset_path, exc)
+    conn = conn or ShotGrid.connect(DB_Config)
+    if asset_id is not None:
+        try:
+            resolved = conn.get_asset(id=asset_id)
+        except ShotGridError as exc:
+            log.warning("Failed to resolve asset by id %s: %s", asset_id, exc)
+    if resolved is None and asset_path:
+        try:
+            resolved = conn.get_asset(path=asset_path)
+        except ShotGridError as exc:
+            log.warning("Failed to resolve asset by path %s: %s", asset_path, exc)
 
     return AssetMetadata(
         id=asset_id,
@@ -144,7 +141,7 @@ def read_asset_metadata(conn: DBInterface | None = None) -> AssetMetadata:
     )
 
 
-def _asset_root_from_scene_path(scene_path: Path) -> Optional[Path]:
+def _asset_root_from_scene_path(scene_path: Path) -> Path | None:
     if not scene_path:
         return None
     parent = scene_path.parent
@@ -153,7 +150,7 @@ def _asset_root_from_scene_path(scene_path: Path) -> Optional[Path]:
     return parent
 
 
-def _asset_path_from_root(asset_root: Path) -> Optional[str]:
+def _asset_path_from_root(asset_root: Path) -> str | None:
     if not asset_root:
         return None
     prod_root = get_production_path()
@@ -164,9 +161,7 @@ def _asset_path_from_root(asset_root: Path) -> Optional[str]:
     return rel_path.as_posix()
 
 
-def resolve_asset_from_scene_path(
-    conn: DBInterface, scene_path: Path
-) -> Optional[Asset]:
+def resolve_asset_from_scene_path(conn: ShotGrid, scene_path: Path) -> Asset | None:
     asset_root = _asset_root_from_scene_path(scene_path)
     if not asset_root:
         return None
@@ -174,8 +169,8 @@ def resolve_asset_from_scene_path(
     if not asset_path:
         return None
     try:
-        return conn.get_asset_by_attr("path", asset_path)
-    except Exception as exc:
+        return conn.get_asset(path=asset_path)
+    except ShotGridError as exc:
         log.debug("No asset found for scene path %s: %s", scene_path, exc)
         return None
 
@@ -183,11 +178,11 @@ def resolve_asset_from_scene_path(
 class AssetOpenDialog(FilteredListDialog):
     """Dialog for selecting an asset and previewing manifest metadata."""
 
-    _conn: DBInterface
+    _conn: ShotGrid
     _info_label: QtWidgets.QLabel
 
     def __init__(
-        self, parent: QtWidgets.QWidget | None, items: list[str], conn: DBInterface
+        self, parent: QtWidgets.QWidget | None, items: list[str], conn: ShotGrid
     ) -> None:
         super().__init__(
             parent,
@@ -225,8 +220,9 @@ class AssetOpenDialog(FilteredListDialog):
             self._info_label.setText("Select an asset to see details.")
             return
 
-        asset = self._conn.get_asset_by_name(selected)
-        if not asset:
+        try:
+            asset = self._conn.get_asset(name=selected)
+        except ShotGridError:
             self._info_label.setText("Could not resolve the selected asset.")
             return
 
@@ -265,7 +261,7 @@ class MAssetFileManager(FileManager):
     """Open or create Maya asset model files with manifest awareness."""
 
     def __init__(self) -> None:
-        conn = DB.Get(DB_Config)
+        conn = ShotGrid.connect(DB_Config)
         window = get_main_qt_window()
         super().__init__(conn, Asset, window)
 
@@ -297,7 +293,7 @@ class MAssetFileManager(FileManager):
         if asset:
             write_asset_metadata(asset)
 
-    def _ensure_scene_asset_metadata(self, scene_path: Optional[Path] = None) -> None:
+    def _ensure_scene_asset_metadata(self, scene_path: Path | None = None) -> None:
         meta = read_asset_metadata(self._conn)
         if meta.asset:
             expected_path = _normalize_value(meta.asset.asset_path)
@@ -328,10 +324,8 @@ class MAssetFileManager(FileManager):
             log.debug("Unable to infer asset metadata from scene path: %s", scene_path)
 
     def _prompt_asset_selection(self) -> Asset | None:
-        asset_names = self._conn.get_entity_code_list(
-            Asset,
-            sorted=True,
-            child_mode=DBInterface.ChildQueryMode.ROOTS,
+        asset_names = sorted(
+            a.display_name for a in self._conn.find_assets(roots_only=True)
         )
         dialog = AssetOpenDialog(self._main_window, asset_names, self._conn)
         if not dialog.exec_():
@@ -341,9 +335,10 @@ class MAssetFileManager(FileManager):
         if not selection:
             return None
 
-        asset = self._conn.get_asset_by_name(selection)
-        if asset:
-            return asset
+        try:
+            return self._conn.get_asset(display_name=selection)
+        except ShotGridError:
+            log.exception("Failed to resolve selected asset: %s", selection)
 
         MessageDialog(
             self._main_window,
@@ -533,7 +528,7 @@ class MAssetFileManager(FileManager):
             MessageDialog(
                 self._main_window,
                 (
-                    f'Created new version {version_label(promoted.version)} '
+                    f"Created new version {version_label(promoted.version)} "
                     f'"{promoted.title or "(untitled)"}" from the selected backup.\n'
                     "Open it from Version History to continue working from it."
                 ),

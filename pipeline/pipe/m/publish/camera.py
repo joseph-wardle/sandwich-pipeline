@@ -15,7 +15,7 @@ import maya.cmds as mc
 from shared.util import get_production_path
 
 from pipe.glui.dialogs import FilteredListDialog
-from pipe.struct.db import SGEntity, Shot
+from pipe.shotgrid import SGEntity, Shot
 
 from .publisher import Publisher
 from .usdchaser import ExportChaser, ExportChaserMode
@@ -58,10 +58,10 @@ class CameraPublisher(Publisher):
         super().__init__(PublishCameraDialog)
 
     def _get_entity_list(self) -> list[str]:
-        return self._conn.get_shot_code_list(sorted=True)
+        return sorted(s.code for s in self._conn.find_shots() if s.code is not None)
 
     def _get_entity_from_name(self, display_name: str) -> SGEntity | None:
-        return self._conn.get_shot_by_code(display_name)
+        return self._conn.get_shot(code=display_name)
 
     def _get_save_path(self) -> Path | None:
         shot = cast(Shot, self._entity)
@@ -73,8 +73,9 @@ class CameraPublisher(Publisher):
 
     def _get_mayausd_kwargs(self) -> dict[str, Any]:
         shot = cast(Shot, self._entity)
-        start = shot.cut_in - 5
-        end = shot.cut_out + 5
+        cut_in, cut_out = shot.frame_range
+        start = cut_in - 5
+        end = cut_out + 5
         return {
             "chaser": [ExportChaser.ID],
             "chaserArgs": [(ExportChaser.ID, "mode", ExportChaserMode.CAM)],

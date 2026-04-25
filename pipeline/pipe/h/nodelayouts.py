@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 # mypy: disable-error-code="union-attr"
 import hou
@@ -434,7 +434,7 @@ def _set_variant_generation_warnings(node: hou.Node, warnings: list[str]) -> Non
         )
 
 
-def lnd_clustersetup(kwargs: dict, parent: Optional[hou.Node] = None) -> hou.Node:
+def lnd_clustersetup(kwargs: dict, parent: hou.Node | None = None) -> hou.Node:
     out = cast(hou.Node, loptoolutils.genericTool(kwargs, "componentoutput"))
     out.setColor(hou.Color((0.616, 0.871, 0.769)))
 
@@ -496,7 +496,7 @@ def lnd_clustersetup(kwargs: dict, parent: Optional[hou.Node] = None) -> hou.Nod
 
 def create_skd_component_geometry(
     kwargs: dict,
-    parent: Optional[hou.Node] = None,
+    parent: hou.Node | None = None,
     *,
     node_name: str | None = None,
     geo_variant: str | None = None,
@@ -549,7 +549,7 @@ def create_skd_component_geometry(
 
 def create_skd_component_material(
     kwargs: dict,
-    parent: Optional[hou.Node] = None,
+    parent: hou.Node | None = None,
     *,
     node_name: str | None = None,
     geo_variant_name: str | None = None,
@@ -666,7 +666,7 @@ def _discover_asset_variants_from_shotgrid() -> (
     try:
         from env_sg import DB_Config
 
-        from pipe.db import DB
+        from pipe.shotgrid import ShotGrid, ShotGridError
     except Exception as exc:
         warnings.append(
             f"ShotGrid metadata unavailable for ASSET '{asset_name}': {exc}. Using filesystem-only variant discovery."
@@ -674,9 +674,9 @@ def _discover_asset_variants_from_shotgrid() -> (
         return (), (), warnings
 
     try:
-        connection = DB.Get(DB_Config)
-        asset = connection.get_asset_by_name(asset_name)
-    except Exception as exc:
+        connection = ShotGrid.connect(DB_Config)
+        asset = connection.get_asset(name=asset_name)
+    except ShotGridError as exc:
         warnings.append(
             f"Failed to query ShotGrid variants for ASSET '{asset_name}': {exc}. Using filesystem-only variant discovery."
         )
@@ -960,7 +960,7 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
 
 
 def create_skd_component_builder(
-    kwargs: dict, parent: Optional[hou.Node] = None
+    kwargs: dict, parent: hou.Node | None = None
 ) -> hou.Node:
     """Build the standard SKD Solaris component network."""
     out = _create_component_output_node(kwargs=kwargs, parent=parent)
@@ -1063,7 +1063,7 @@ def ensure_skd_layout(parent: hou.Node | None = None) -> hou.Node:
     return layout
 
 
-def skd_layout(kwargs: dict, parent: Optional[hou.Node] = None) -> hou.Node:
+def skd_layout(kwargs: dict, parent: hou.Node | None = None) -> hou.Node:
     if parent is not None:
         contextoptions: hou.Node = parent.createNode("editcontextoptions")
     else:

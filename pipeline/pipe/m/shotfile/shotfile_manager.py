@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from abc import abstractmethod
 from pathlib import Path
-from typing import Iterable, Optional, cast
+from typing import Iterable, cast
 
 import maya.api.OpenMaya as om
 import maya.cmds as mc
@@ -13,12 +13,17 @@ from pxr import Sdf, Usd, UsdGeom
 from shared.util import get_production_path
 from timeline_marker.ui import TimelineMarker  # type: ignore[import-not-found]
 
-from pipe.db import DB
 from pipe.glui.dialogs import MessageDialog
 from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
 from pipe.glui.version_browser import VersionBrowserWidget
 from pipe.m.local import get_main_qt_window
-from pipe.struct.db import SGEntity, Shot, build_shot_path, validate_shot_code_token
+from pipe.shotgrid import (
+    SGEntity,
+    Shot,
+    ShotGrid,
+    build_shot_path,
+    validate_shot_code_token,
+)
 from pipe.util import FileManager, log_errors
 from pipe.versioning import (
     VersionStreamSpec,
@@ -42,7 +47,7 @@ class MShotFileManager(FileManager):
     shot: Shot
 
     def __init__(self, **kwargs) -> None:
-        conn = DB.Get(DB_Config)
+        conn = ShotGrid.connect(DB_Config)
         window = get_main_qt_window()
         super().__init__(conn, Shot, window, versioning=True, **kwargs)
 
@@ -61,7 +66,7 @@ class MShotFileManager(FileManager):
         return path.replace("\\", "/")
 
     @classmethod
-    def _shot_code_from_file_info(cls) -> Optional[str]:
+    def _shot_code_from_file_info(cls) -> str | None:
         info = mc.fileInfo("code", query=True)
         if isinstance(info, (list, tuple)):
             if not info:
@@ -79,7 +84,7 @@ class MShotFileManager(FileManager):
             return None
 
     @classmethod
-    def _shot_code_from_scene_path(cls, scene_path: Optional[str]) -> Optional[str]:
+    def _shot_code_from_scene_path(cls, scene_path: str | None) -> str | None:
         """Resolve shot code from a scene path using canonical shot folder semantics.
 
         Preferred source is the directory token immediately after `shot/`.
@@ -117,8 +122,8 @@ class MShotFileManager(FileManager):
         layer_path: str,
         *,
         label: str,
-        insert_after: Optional[str] = None,
-    ) -> Optional[Sdf.Layer]:
+        insert_after: str | None = None,
+    ) -> Sdf.Layer | None:
         layer = Sdf.Layer.FindOrOpenRelativeToLayer(root_layer, layer_path)
         if not layer:
             log.warning("Could not open %s layer at %s", label, layer_path)
@@ -146,7 +151,7 @@ class MShotFileManager(FileManager):
         return layer
 
     @classmethod
-    def _find_root_layer_path(cls, scene_path: Path) -> Optional[Path]:
+    def _find_root_layer_path(cls, scene_path: Path) -> Path | None:
         for parent in scene_path.parents:
             candidate = parent / "maya_root.usd"
             if candidate.exists():
@@ -196,11 +201,11 @@ class MShotFileManager(FileManager):
                 editTarget=cls._edit_target_path_for_shot(shot_code),
             )
 
-            conn = DB.Get(DB_Config)
-            shot = conn.get_shot_by_code(shot_code)
+            conn = ShotGrid.connect(DB_Config)
+            shot = conn.get_shot(code=shot_code)
 
             # Import Timeline
-            frames, colors, comments = shot_timeline_generator(shot.cut_duration)
+            frames, colors, comments = shot_timeline_generator(shot.cut_duration or 0)
             TimelineMarker.clear()
             TimelineMarker.set(frames, colors, comments)
             mc.playbackOptions(
@@ -210,7 +215,13 @@ class MShotFileManager(FileManager):
                 maxTime=frames[-1],
             )
         except Exception:
-            mc.error("Warning! Could not set edit target!")
+            # Workflow boundary: many things can fail during file-open setup
+            # (ShotGrid lookup, USD edit target, timeline marker). Log + warn
+            # rather than crash the open.
+            log.exception("run_on_open failed")
+            mc.error(
+                "Could not finish file-open setup. Check the script editor for details."
+            )
 
     def _check_unsaved_changes(self) -> bool:
         if mc.file(query=True, modified=True):
@@ -281,14 +292,14 @@ class MShotFileManager(FileManager):
         if not shot_code:
             return None
 
-        shot = self._conn.get_shot_by_code(shot_code)
-        if shot:
+        shot = self._conn.get_shot(code=shot_code)
+        if shot.code:
             mc.fileInfo("code", shot.code)
         return shot
 
     def _generate_filename_ext(self, entity) -> tuple[str, str]:
         shot = cast(Shot, entity)
-        return shot.code, "mb"
+        return shot.code or "", "mb"
 
     def _open_file(self, path: Path) -> None:
         mc.file(str(path), open=True, force=True)
@@ -365,38 +376,25 @@ class MShotFileManager(FileManager):
 
             stage.SetEditTarget(Usd.EditTarget(env_override_layer))
 
-        env_stubs = self.shot.sets
-        if env_stubs:
-            for env_stub in env_stubs:
-                layout = self._conn.get_env_by_stub(env_stub)
-                if layout:
-                    env_path = layout.environment_path
-                    env_file_layer = self._ensure_sublayer(
-                        root_layer,
-                        env_path,
-                        label=f"environment layout ({layout.environment_path})",
-                    )
-                    if env_file_layer:
-                        # locked_layers.append(env_file_layer.identifier)
-                        env_file_layer.SetPermissionToSave(False)
-        else:
-            # Fallback to depreciated single set logic if no sets are assigned
-            if not (env_stub := self.shot.set):  # type: ignore[assignment]
-                if not self.shot.sequence:
-                    env_stub = None
-                else:
-                    env_stub = self._conn.get_sequence_by_stub(self.shot.sequence).set
+        # Linked Environment refs from `shot.sets` / `shot.set` / `shot.sequence.set`
+        # arrive partial; accessing `.environment_path` triggers lazy-fetch.
+        envs = self.shot.sets
+        if not envs:
+            sequence = self.shot.sequence
+            sole_env = self.shot.set or (sequence.set if sequence else None)
+            envs = [sole_env] if sole_env else []
 
-            if env_stub and (env := self._conn.get_env_by_stub(env_stub)):
-                env_path = env.environment_path
-                env_file_layer = self._ensure_sublayer(
-                    root_layer,
-                    env_path,
-                    label=f"environment layout ({env.environment_path})",
-                )
-                if env_file_layer:
-                    # locked_layers.append(env_file_layer.identifier)
-                    env_file_layer.SetPermissionToSave(False)
+        for env in envs:
+            if env is None:
+                continue
+            env_path = env.environment_path
+            env_file_layer = self._ensure_sublayer(
+                root_layer,
+                env_path,
+                label=f"environment layout ({env_path})",
+            )
+            if env_file_layer:
+                env_file_layer.SetPermissionToSave(False)
 
         # for id in locked_layers:
         #     mc.mayaUsdLayerEditor(id, edit=True, lockLayer=(2, 0, stageShape))
@@ -437,7 +435,7 @@ class MShotFileManager(FileManager):
         mc.optionVar(intValue=("mayaUsd_SerializedUsdEditsLocation", 2))
 
         # Save shot code to file
-        mc.fileInfo("code", self.shot.code)
+        mc.fileInfo("code", self.shot.code or "")
         mc.file(save=True, force=True)
 
     # ------------------------------------------------------------------

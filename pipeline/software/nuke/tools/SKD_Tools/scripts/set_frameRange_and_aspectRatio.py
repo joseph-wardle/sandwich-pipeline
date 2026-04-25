@@ -1,7 +1,9 @@
-import nuke
-from pipe.db import DB
-from env_sg import DB_Config
 import os
+
+import nuke
+from env_sg import DB_Config
+
+from pipe.shotgrid import ShotGrid
 
 project_file = nuke.root()["name"].value()
 
@@ -17,9 +19,10 @@ def get_project_name():
 
 
 def get_frame_range(project_name):
-    conn = DB.Get(DB_Config)
-    shot_info = conn.get_shot_by_code(project_name)
-    return [shot_info.cut_in, shot_info.cut_out]
+    conn = ShotGrid.connect(DB_Config)
+    shot = conn.get_shot(code=project_name)
+    cut_in, cut_out = shot.frame_range
+    return [cut_in, cut_out]
 
 
 def set_frame_range(frame_in, frame_out):

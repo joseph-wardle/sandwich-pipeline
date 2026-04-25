@@ -10,7 +10,7 @@ from pxr import Sdf
 if TYPE_CHECKING:
     from typing import Any
 
-    from pipe.struct.db import Shot
+    from pipe.shotgrid import Shot
 
 import maya.cmds as mc
 from shared.util import get_production_path
@@ -48,7 +48,7 @@ class AnimPublisher(Publisher):
             error.exec_()
             self._init_success = False
 
-        self._shot = self._conn.get_shot_by_code(shot_code)
+        self._shot = self._conn.get_shot(code=shot_code)
 
     def _prepublish(self) -> bool:
         if not self._init_success:

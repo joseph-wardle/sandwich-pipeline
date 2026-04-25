@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, Literal
 import hou
 from env_sg import DB_Config
 
-from pipe.db import DB
 from pipe.glui.dialogs import MessageDialog
 from pipe.h import local
 from pipe.playblast_artist import resolve_artist_display_name
@@ -21,7 +20,7 @@ from pipe.playblast_shotgrid import (
     resolve_preferred_upload_movie_path,
     upload_playblast_version,
 )
-from pipe.struct.db import Shot
+from pipe.shotgrid import Shot, ShotGrid
 from pipe.util import Playblaster
 
 from .playblaster import HPlayblaster
@@ -114,9 +113,9 @@ def launch_playblast() -> None:
     MessageDialog(parent, success_message, "Playblast").exec_()
 
 
-def _resolve_connection_or_report(parent: QtWidgets.QWidget | None) -> Any | None:
+def _resolve_connection_or_report(parent: QtWidgets.QWidget | None) -> ShotGrid | None:
     try:
-        return DB.Get(DB_Config)
+        return ShotGrid.connect(DB_Config)
     except Exception as exc:
         log.error("ShotGrid connection failed: %s", exc, exc_info=True)
         MessageDialog(parent, "Could not connect to ShotGrid.", "Playblast").exec_()
@@ -125,7 +124,7 @@ def _resolve_connection_or_report(parent: QtWidgets.QWidget | None) -> Any | Non
 
 def _generate_export_config_or_report(
     dialog: HPlayblastDialog,
-    conn: Any,
+    conn: ShotGrid,
     parent: QtWidgets.QWidget | None,
 ) -> HoudiniPlayblastExportConfig | None:
     try:
@@ -142,7 +141,7 @@ def _generate_export_config_or_report(
 
 def _generate_export_config(
     dialog: HPlayblastDialog,
-    conn: Any,
+    conn: ShotGrid,
 ) -> HoudiniPlayblastExportConfig:
     context = _build_launch_context(dialog)
     shot = _resolve_source_shot(conn, context)
@@ -198,7 +197,7 @@ def _build_launch_context(
 
 
 def _resolve_source_shot(
-    conn: Any,
+    conn: ShotGrid,
     context: HoudiniPlayblastLaunchContext,
 ) -> Shot:
     if context.source_mode == "custom":
@@ -209,7 +208,7 @@ def _resolve_source_shot(
 
     shot_code = context.shot_code or ""
     try:
-        return conn.get_shot_by_code(shot_code)
+        return conn.get_shot(code=shot_code)
     except Exception as exc:
         log.error("Shot lookup failed for %s: %s", shot_code, exc, exc_info=True)
         raise ValueError(f"Shot '{shot_code}' not found in ShotGrid.") from exc
@@ -357,7 +356,6 @@ def _upload_shot_playblast_to_shotgrid(
         movie_path=movie_path,
         version_name=version_name,
         description=context.shotgrid_description or None,
-        path_to_frames=str(movie_path),
         artist_display_name=artist_name,
         upload_target=upload_target,
         review_playlist_id=review_playlist_id,

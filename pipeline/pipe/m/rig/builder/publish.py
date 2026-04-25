@@ -7,7 +7,7 @@ from env_sg import DB_Config
 from maya import cmds
 
 from pipe.asset.paths import paths_for_asset
-from pipe.db import DB
+from pipe.shotgrid import ShotGrid
 from pipe.versioning.store import next_version, versioned_filename
 
 from .build import RigBuilder
@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 class RigPublisher:
     def __init__(self) -> None:
-        self._conn = DB.Get(DB_Config)
+        self._conn = ShotGrid.connect(DB_Config)
 
         self.root_progress = ProgressStep("Build, Publish and Test")
         self.build_progress = ProgressStep("Rig Build", 15)
@@ -69,7 +69,7 @@ class RigPublisher:
     def _publish_rig_model(self, rig_name: str):
         from pipe.m.publish.usdchaser.export import ExportChaser, ExportChaserMode
 
-        publish_asset = self._conn.get_asset_by_name(rig_name)
+        publish_asset = self._conn.get_asset(name=rig_name)
         publish_asset_paths = paths_for_asset(publish_asset)
         rig_model_publish_path = publish_asset_paths.rig_path / "usd/geo.usd"
         cmds.mayaUSDExport(  # type: ignore
@@ -87,7 +87,7 @@ class RigPublisher:
         )
 
     def _publish_rig(self, rig_name: str) -> bool:
-        publish_asset = self._conn.get_asset_by_name(rig_name)
+        publish_asset = self._conn.get_asset(name=rig_name)
         publish_asset_paths = paths_for_asset(publish_asset)
         rig_publish_path = publish_asset_paths.rig_path
         rig_versions_path = publish_asset_paths.rig_versions_path

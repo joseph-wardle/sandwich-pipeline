@@ -30,7 +30,6 @@ from software.houdini.dcc import HoudiniDCC
 
 from pipe.asset.paths import paths_for_asset
 from pipe.asset.version_adapter import asset_owner_for, maya_model_stream
-from pipe.db import DB
 from pipe.glui.dialogs import (
     FilteredListDialog,
     MessageDialog,
@@ -43,7 +42,7 @@ from pipe.m.assetfile import (
     write_asset_metadata,
 )
 from pipe.m.util import maintain_selection
-from pipe.struct.db import Asset, SGEntity
+from pipe.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
 from pipe.versioning import BackupResult
 from pipe.versioning.store import backup_if_changed
 
@@ -79,7 +78,7 @@ class HoudiniBuildError(RuntimeError):
 
 class _PublishAssetVariantControls:
     _geo_var_dropdown: QComboBox
-    _conn: DB | None
+    _conn: ShotGrid | None
 
     def _init_variant_controls(self) -> None:
         geo_var_widget = QWidget(cast(QWidget, self))
@@ -111,7 +110,7 @@ class _PublishAssetVariantControls:
 
     def _populate_geo_var(self, asset: Asset | None) -> None:
         if asset and hasattr(asset, "geometry_variants"):
-            variants = sorted(v for v in asset.geometry_variants if v)
+            variants = sorted(v for v in (asset.geometry_variants or ()) if v)
         else:
             variants = []
         if not variants:
@@ -191,7 +190,7 @@ class PublishAssetOptionsDialog(
     _selected_asset_name: str | None
 
     def __init__(
-        self, parent: QWidget | None, items: Sequence[str], conn: DB | None
+        self, parent: QWidget | None, items: Sequence[str], conn: ShotGrid | None
     ) -> None:
         super().__init__(
             parent,
@@ -224,9 +223,16 @@ class PublishAssetOptionsDialog(
 
         insert_at = max(self._layout.count() - 1, 0)
         self._layout.insertStretch(insert_at, 1)
-        asset = None
+        asset: Asset | None = None
         if self._conn and self._selected_asset_name:
-            asset = self._conn.get_asset_by_display_name(self._selected_asset_name)
+            try:
+                asset = self._conn.get_asset(display_name=self._selected_asset_name)
+            except ShotGridError:
+                log.warning(
+                    "Could not resolve scene asset %r; geometry variant list "
+                    "will fall back to defaults.",
+                    self._selected_asset_name,
+                )
         self._populate_geo_var(asset)
 
         ok_btn = self.buttons.button(QDialogButtonBox.Ok)
@@ -255,7 +261,7 @@ class PublishAssetPickerDialog(
     """Fallback dialog that lets users choose the asset to publish."""
 
     def __init__(
-        self, parent: QWidget | None, items: Sequence[str], conn: DB | None
+        self, parent: QWidget | None, items: Sequence[str], conn: ShotGrid | None
     ) -> None:
         super().__init__(
             parent,
@@ -286,9 +292,14 @@ class PublishAssetPickerDialog(
 
     def _on_item_selected(self) -> None:
         selected = self.get_selected_item()
-        if self._conn and selected:
-            asset = self._conn.get_asset_by_display_name(selected)
-        else:
+        if not (self._conn and selected):
+            self._update_accept_state()
+            return
+        try:
+            asset = self._conn.get_asset(display_name=selected)
+        except ShotGridError:
+            log.warning("Could not resolve asset %r in publish picker.", selected)
+            self._populate_geo_var(None)
             self._update_accept_state()
             return
         self._populate_geo_var(asset)
@@ -501,10 +512,10 @@ class AssetPublisher(Publisher):
     def _get_entity_list(self) -> list[str]:
         if self._scene_asset:
             return [self._scene_asset.display_name]
-        return self._conn.get_asset_display_name_list(sorted=True)
+        return sorted(a.display_name for a in self._conn.find_assets())
 
     def _get_entity_from_name(self, display_name: str) -> SGEntity | None:
-        return self._conn.get_asset_by_display_name(display_name)
+        return self._conn.get_asset(display_name=display_name)
 
     def _get_asset(self) -> Asset | None:
         """Get the asset from the database."""
@@ -512,7 +523,11 @@ class AssetPublisher(Publisher):
         asset_display_name = dialog.get_selected_item()
         if not asset_display_name:
             return None
-        return self._conn.get_asset_by_display_name(asset_display_name)
+        try:
+            return self._conn.get_asset(display_name=asset_display_name)
+        except ShotGridError:
+            log.exception("Could not resolve asset %r for publish.", asset_display_name)
+            return None
 
     def _get_variant_name(self) -> str | None:
         """Get the variant name from the dialog."""
@@ -578,10 +593,9 @@ class AssetPublisher(Publisher):
 
         self._geo_variant = variant_name
 
-        if variant_name not in asset.geometry_variants:
-            asset.geometry_variants.add(variant_name)
+        if variant_name not in (asset.geometry_variants or set()):
             log.info(f"Updating new geo variant: {variant_name}")
-            self._conn.update_asset(asset)
+            asset = self._conn.add_geometry_variant(asset, variant_name)
 
         name, basename = self._compute_component_basename(asset, variant_name)
         asset_paths = paths_for_asset(asset)
@@ -754,7 +768,7 @@ class AssetPublisher(Publisher):
                                 SGEntity,
                                 self._get_entity_from_name(self._selected_item),
                             )
-                        except AssertionError as exc:
+                        except ShotGridError as exc:
                             entity_label = Asset.__name__
                             MessageDialog(
                                 self._window,

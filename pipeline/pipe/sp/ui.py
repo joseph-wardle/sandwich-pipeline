@@ -27,9 +27,9 @@ from substance_painter.exception import ProjectError, ServiceNotFoundError
 
 from pipe.asset.paths import paths_for_asset
 from pipe.asset.version_adapter import asset_owner_for, substance_project_stream
-from pipe.db import DB
 from pipe.glui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButtons
 from pipe.glui.progress import ProgressDialog
+from pipe.shotgrid import Asset, ShotGrid
 from pipe.sp.export import Exporter, TexSetExportSettings
 from pipe.sp.houdini import HoudiniPublishError, run_asset_builder, summarize_result
 from pipe.sp.local import get_main_qt_window
@@ -40,7 +40,6 @@ from pipe.sp.progress import (
     PublishProgressUpdate,
     PublishStage,
 )
-from pipe.struct.db import Asset
 from pipe.struct.material import DisplacementSource, NormalSource, NormalType
 from pipe.util import checkbox_callback_helper, dict_index
 from pipe.versioning.store import backup_if_changed
@@ -71,7 +70,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     _active_publish_context: _ActivePublishContext | None
     _curr_asset: Asset | None
     _central_widget: QtWidgets.QWidget
-    _conn: DB
+    _conn: ShotGrid
     _main_layout: QLayout
     _mat_var_dropdown: QComboBox
     _geo_var_dropdown: QComboBox
@@ -87,7 +86,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         self._active_publish_context = None
         self._tex_set_dict = {}
 
-        self._conn = DB.Get(DB_Config)
+        self._conn = ShotGrid.connect(DB_Config)
         if not sp.project.is_open():
             MessageDialog(
                 get_main_qt_window(),
@@ -169,7 +168,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         texture_set_scroll_area.setWidgetResizable(True)
         self._main_layout.addWidget(texture_set_scroll_area, 1)
 
-        mat_items = self._variant_items(asset.material_variants, "default")
+        mat_items = self._variant_items(asset.material_variants or (), "default")
         mat_default = "default" if "default" in mat_items else mat_items[0]
         self._mat_var_dropdown = self._build_variant_dropdown(
             label_text="Material Variant:",
@@ -184,7 +183,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         )
 
         geo_items = [
-            str(v) for v in sorted(v for v in asset.geometry_variants if v)
+            str(v) for v in sorted(v for v in (asset.geometry_variants or ()) if v)
         ] or ["main"]
         geo_default = "main" if "main" in geo_items else geo_items[0]
         self._geo_var_dropdown = self._build_variant_dropdown(
@@ -195,7 +194,9 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             editable=False,
         )
 
-        material_layer_items = self._variant_items(asset.material_layers, "default")
+        material_layer_items = self._variant_items(
+            asset.material_layers or (), "default"
+        )
         material_layer_default = (
             "default" if "default" in material_layer_items else material_layer_items[0]
         )
@@ -512,19 +513,19 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         exporter = Exporter(self._curr_asset)
 
         try:
-            asset_updated = False
-            if request.mat_var not in self._curr_asset.material_variants:
-                self._curr_asset.material_variants.add(request.mat_var)
+            current_variants = self._curr_asset.material_variants or set()
+            if request.mat_var not in current_variants:
                 log.info(f"Updating new material variant: {request.mat_var}")
-                asset_updated = True
+                self._curr_asset = self._conn.add_material_variant(
+                    self._curr_asset, request.mat_var
+                )
 
-            if request.material_layer not in self._curr_asset.material_layers:
-                self._curr_asset.material_layers.add(request.material_layer)
+            current_layers = self._curr_asset.material_layers or set()
+            if request.material_layer not in current_layers:
                 log.info(f"Updating new material layer: {request.material_layer}")
-                asset_updated = True
-
-            if asset_updated:
-                self._conn.update_asset(self._curr_asset)
+                self._curr_asset = self._conn.add_material_layer(
+                    self._curr_asset, request.material_layer
+                )
 
             log.info("Exporting!")
 

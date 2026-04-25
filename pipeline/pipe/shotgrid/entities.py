@@ -1,44 +1,44 @@
-"""ShotGrid entity types and path helpers for the sandwich pipeline.
+"""Entity classes for ShotGrid records.
 
-Every Python object that represents a ShotGrid entity lives here: ``Asset``,
-``Shot``, ``Sequence``, ``Environment``, ``User``, ``Task``, ``Version``,
-``Playlist``. They are constructed via ``Entity.from_sg(sg_dict)`` at the
-ShotGrid boundary and are the only form data takes inside the pipeline.
+Every Python object that represents a ShotGrid record lives here:
+:class:`Asset`, :class:`Shot`, :class:`Sequence`, :class:`Environment`,
+:class:`User`, :class:`Task`, :class:`Version`, :class:`Playlist`.  They are
+constructed via ``Entity.from_sg(sg_dict)`` at the ShotGrid boundary and are
+the only form ShotGrid data takes inside the pipeline.
 
 Partial entities
 ----------------
 When ShotGrid returns a linked reference — e.g. the sequence linked to a shot
 — the dict carries only ``{"type": "Sequence", "id": 3, "name": "a10"}``.
-Those become *partial* entities: ``id`` and ``code`` are set, everything else
-is ``None``. Callers that need a full entity should re-fetch via
-``db.get_<entity>(id=...)``. Phase 2 will add lazy auto-fetch.
+Those become *partial* entities: ``id`` and ``code`` are set, every other
+field is ``None``.  Reading any other field on a partial entity that is bound
+to a :class:`pipe.shotgrid.client.ShotGrid` connection lazily fetches the full
+record from ShotGrid; see :meth:`SGEntity.__getattribute__`.
 
 Equality and hashing
 --------------------
-Two entities of the same Python type with the same ``id`` are equal, whether
+Two entities of the same Python type with the same ``id`` are equal — whether
 one is partial and the other fully fetched.  Sets and dicts deduplicate them
 correctly.
-
-Stub compatibility
-------------------
-``SGEntityStub``, ``AssetStub``, ``ShotStub``, ``SequenceStub``,
-``EnvironmentStub``, ``UserStub``, and ``TaskStub`` survive at the bottom of
-this file so that ``pipe.db.sgaadb``, ``pipe.db.interface``, and a handful of
-DCC helpers that have not yet been migrated keep importing cleanly.  Phase 4
-deletes them alongside the old client.
 """
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from typing import Any, TypeVar
 
 import attrs
 import cattrs
 from attrs import field
 
-from pipe.struct.util import Diffable
+from pipe.shotgrid.errors import ShotGridError
+from pipe.shotgrid.paths import (
+    build_asset_path,
+    build_environment_path,
+    build_shot_path,
+    normalize_display_name,
+    normalize_subdirectory,
+    split_csv_set,
+)
 
 _S = TypeVar("_S")
 
@@ -65,139 +65,80 @@ _con.register_structure_hook_factory(
 
 
 # ---------------------------------------------------------------------------
-# Path helpers (pure functions — no ShotGrid calls)
+# Entity base class
 # ---------------------------------------------------------------------------
 
+# Identity fields are present on every entity (full or partial) by construction.
+# Reading them must never trigger lazy hydration — that would recurse.
+_HYDRATE_IDENTITY_FIELDS: frozenset[str] = frozenset({"id", "code"})
 
-def normalize_display_name(name: str | None) -> str:
-    """Normalize a ShotGrid display name into a pipeline-safe identifier.
+# Internal state owned by ``SGEntity`` itself.  Never overwritten when a
+# partial entity hydrates and copies fields from its fresh counterpart.
+_HYDRATE_COPY_SKIP: frozenset[str] = frozenset({"id", "_db", "_hydrated"})
 
-    Steps: unicode normalize → encode ASCII → lowercase → spaces to underscores
-    → strip non-alphanumeric characters.
+
+@attrs.define(eq=False)
+class SGEntity:
+    """Base class for every ShotGrid entity.
+
+    Equality is by ``(type, id)`` only: a partial entity (linked ref with
+    only ``id`` + ``code``) and a fully fetched entity with the same id are
+    considered equal.
+
+    When a caller reads any field that is ``None`` on a partial entity bound
+    to a :class:`pipe.shotgrid.client.ShotGrid` connection, the entity calls
+    back to its connection, re-fetches itself, and fills in every field in
+    place.  Hydration fires at most once per instance.
+
+    This is an intentional exception to the rule that mutations should be
+    explicit.  The alternative (forcing callers to remember which entities
+    came from a linked ref) undermines self-documentation at call sites.  The
+    back-reference is stripped on pickle.
     """
-    if not name:
-        return ""
-    ascii_name = (
-        unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
-    )
-    normalized_name = ascii_name.strip().lower().replace(" ", "_")
-    normalized_name = re.sub(r"[^a-z0-9_]", "", normalized_name)
-    return normalized_name
 
+    id: int = field(kw_only=True, on_setattr=attrs.setters.frozen)
+    code: str | None = field(default=None, kw_only=True)
 
-def normalize_subdirectory(subdirectory: str | None) -> str | None:
-    """Normalize and validate an asset subdirectory token.
+    # Private back-reference to the ShotGrid connection that produced this
+    # entity.  Typed ``Any`` to avoid a circular import with
+    # :mod:`pipe.shotgrid.client`.
+    _db: Any = field(init=False, default=None, eq=False, repr=False)
+    _hydrated: bool = field(init=False, default=False, eq=False, repr=False)
 
-    The subdirectory must be a single folder name (no path separators).
-    """
-    if subdirectory is None:
-        return None
-    normalized = str(subdirectory).strip()
-    if not normalized:
-        return None
-    if normalized in {".", ".."}:
-        raise ValueError("Asset subdirectory cannot be '.' or '..'")
-    if "/" in normalized or "\\" in normalized:
-        raise ValueError(
-            "Asset subdirectory must be a single folder name without path separators"
-        )
-    return normalized
+    # ---- Construction from / to raw ShotGrid dicts ------------------------
 
-
-def build_asset_path(display_name: str | None, subdirectory: str | None) -> str:
-    """Build the canonical relative asset path.
-
-    Result format: ``asset/<optional-subdirectory>/<normalized-asset-name>``
-    """
-    asset_name = normalize_display_name(display_name) or "asset"
-    path_parts = ["asset"]
-    normalized_subdirectory = normalize_subdirectory(subdirectory)
-    if normalized_subdirectory:
-        path_parts.append(normalized_subdirectory)
-    path_parts.append(asset_name)
-    return "/".join(path_parts)
-
-
-def build_environment_path(display_name: str | None, subdirectory: str | None) -> str:
-    """Build the canonical relative environment path.
-
-    Result format: ``set/<optional-subdirectory>/<normalized-environment-name>``
-    """
-    env_name = normalize_display_name(display_name) or "set"
-    path_parts = ["set"]
-    normalized_subdirectory = normalize_subdirectory(subdirectory)
-    if normalized_subdirectory:
-        path_parts.append(normalized_subdirectory)
-    path_parts.append(env_name)
-    return "/".join(path_parts)
-
-
-def validate_shot_code_token(shot_code: str | None) -> str:
-    """Validate a shot code for safe use as a single path token.
-
-    Rules: required, non-empty, not ``.`` or ``..``, no path separators.
-    """
-    if shot_code is None:
-        raise ValueError("Shot code is required")
-
-    token = str(shot_code).strip()
-    if not token:
-        raise ValueError("Shot code cannot be empty")
-    if token in {".", ".."}:
-        raise ValueError("Shot code cannot be '.' or '..'")
-    if "/" in token or "\\" in token:
-        raise ValueError(
-            "Shot code must be a single folder name without path separators"
-        )
-
-    return token
-
-
-def build_shot_path(shot_code: str | None) -> str:
-    """Build the canonical relative shot path: ``shot/<shot_code>``."""
-    return "/".join(("shot", validate_shot_code_token(shot_code)))
-
-
-def _split_csv_set(value: str | None) -> set[str]:
-    """Parse a comma-separated ShotGrid string into normalized variant tokens."""
-    if not value:
-        return set()
-    return {token.strip() for token in value.split(",") if token.strip()}
-
-
-# ---------------------------------------------------------------------------
-# Entity base classes
-# ---------------------------------------------------------------------------
-
-
-@attrs.define
-class SGDiffable(Diffable):
     @classmethod
     def from_sg(cls: type[_S], sg_dict: dict | None) -> _S:
+        """Structure a raw ShotGrid result row into an entity instance."""
         if not sg_dict:
-            raise TypeError(f"Cannot create {cls.__name__} from empty dict")
+            raise ValueError(
+                f"Cannot create {cls.__name__} from an empty ShotGrid dict"
+            )
         return _con.structure(sg_dict, cls)
 
-    def to_sg(self, exclude: list[str] = []) -> dict[str, Any]:
-        """Return dict in ShotGrid format from this object."""
-        data = _con.unstructure(self)
-        result = {}
+    def to_sg(self, exclude: list[str] | None = None) -> dict[str, Any]:
+        """Return this entity as a ShotGrid-shaped dict.
 
+        ``exclude`` lists *Python* field names to omit from the output.
+        """
+        excluded = set(exclude or ())
+        data = _con.unstructure(self)
+        result: dict[str, Any] = {}
         for f in attrs.fields(self.__class__):
-            if f.name in exclude:
+            if f.name in excluded or f.name.startswith("_"):
                 continue
             sg_key = f.metadata.get(_SG_NAME, f.name)
             val = data.get(f.name)
-            if val is not None:
-                if hook := f.metadata.get(_UNSTRUCT_HOOK):
-                    val = hook(val, None)
-                result[sg_key] = val
-
+            if val is None:
+                continue
+            if hook := f.metadata.get(_UNSTRUCT_HOOK):
+                val = hook(val, None)
+            result[sg_key] = val
         return result
 
     @classmethod
     def map_sg_field_names(cls: type[attrs.AttrsInstance], name: str) -> str:
-        """Map a local field name to its ShotGrid key."""
+        """Map a Python attribute name to its ShotGrid field name."""
         return next(
             (
                 f.metadata.get(_SG_NAME, None) or f.name
@@ -207,63 +148,7 @@ class SGDiffable(Diffable):
             "",
         )
 
-    def sg_diff(self) -> dict[str, Any]:
-        """Return only changed fields in ShotGrid key format, ready for ``sg.update``."""
-        sg_diff: dict[str, Any] = self.diff()
-        for f in attrs.fields(self.__class__):
-            if f.name in sg_diff:
-                if hk := f.metadata.get(_UNSTRUCT_HOOK, None):
-                    sg_diff[f.name] = hk(sg_diff[f.name], None)
-                if nname := f.metadata.get(_SG_NAME, None):
-                    sg_diff[nname] = sg_diff[f.name]
-                    del sg_diff[f.name]
-        return sg_diff
-
-
-# Never triggers lazy hydration: partials always carry these by construction,
-# or they are derivable in __attrs_post_init__ from fields that are carried.
-_HYDRATE_IDENTITY_FIELDS: frozenset[str] = frozenset({"id", "code", "path"})
-
-# Never overwritten during hydration: id is invariant; the rest is internal
-# state owned by this base class or by Diffable.
-_HYDRATE_COPY_SKIP: frozenset[str] = frozenset(
-    {
-        "id",
-        "_db",
-        "_hydrated",
-        "_initial_state",
-    }
-)
-
-
-@attrs.define(eq=False)
-class SGEntity(SGDiffable):
-    """Base class for every ShotGrid entity.
-
-    Equality is by ``(type, id)`` only: a partial entity (linked ref with
-    only ``id`` + ``code``) and a fully fetched entity with the same id are
-    considered equal.
-
-    When a caller reads any other field while ``None``, the entity calls
-    back to its ``ShotGrid`` connection, re-fetches itself, and fills in
-    every field in place. Hydration fires at most once per instance.
-
-    This is an intentional exception to the rule that all mutations should be
-    explicit. The alternative (forcing callers to remember which
-    entities came from a linked ref) undermines  self-documentation
-    at call sites.  The back-reference is stripped on pickle.
-    """
-
-    id: int = field(kw_only=True, on_setattr=attrs.setters.frozen)
-    code: str | None = field(default=None, kw_only=True)
-    path: str | None = field(default=None, kw_only=True, metadata={_SG_NAME: "sg_path"})
-
-    # Private back-reference to the ShotGrid connection that produced this
-    # entity.  Typed ``Any`` to avoid a circular import — ``pipe.db.shotgrid``
-    # already imports every entity class from here.  ``CODING_STANDARD.md``
-    # §"Localize dynamic boundaries" permits this narrow Any.
-    _db: Any = field(init=False, default=None, eq=False, repr=False)
-    _hydrated: bool = field(init=False, default=False, eq=False, repr=False)
+    # ---- Identity, equality, lazy hydration -------------------------------
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SGEntity):
@@ -298,7 +183,6 @@ class SGEntity(SGDiffable):
         state = {f.name: getattr(self, f.name) for f in attrs.fields(type(self))}
         state["_db"] = None
         state["_hydrated"] = False
-        state["_initial_state"] = getattr(self, "_initial_state", {})
         return state
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -349,7 +233,7 @@ class Asset(SGEntity):
         kw_only=True,
         metadata={
             _SG_NAME: "sg_material_variants",
-            _STRUCT_HOOK: lambda mv, _: _split_csv_set(mv),
+            _STRUCT_HOOK: lambda mv, _: split_csv_set(mv),
             _UNSTRUCT_HOOK: lambda mv, _: ",".join(mv) if mv else "",
         },
     )
@@ -358,7 +242,7 @@ class Asset(SGEntity):
         kw_only=True,
         metadata={
             _SG_NAME: "sg_geometry_variants",
-            _STRUCT_HOOK: lambda mv, _: _split_csv_set(mv),
+            _STRUCT_HOOK: lambda mv, _: split_csv_set(mv),
             _UNSTRUCT_HOOK: lambda mv, _: ",".join(mv) if mv else "",
         },
     )
@@ -367,7 +251,7 @@ class Asset(SGEntity):
         kw_only=True,
         metadata={
             _SG_NAME: "sg_material_layers",
-            _STRUCT_HOOK: lambda mv, _: _split_csv_set(mv),
+            _STRUCT_HOOK: lambda mv, _: split_csv_set(mv),
             _UNSTRUCT_HOOK: lambda mv, _: ",".join(mv) if mv else "",
         },
     )
@@ -388,6 +272,11 @@ class Asset(SGEntity):
         return build_asset_path(self.display_name, self.subdirectory)
 
     @property
+    def path(self) -> str:
+        """Alias for :attr:`asset_path`. Always derived; never stored."""
+        return self.asset_path
+
+    @property
     def tex_path(self) -> str:
         return f"{self.asset_path}/publish/tex/"
 
@@ -397,26 +286,11 @@ class Asset(SGEntity):
 
     def __attrs_post_init__(self) -> None:
         self.subdirectory = normalize_subdirectory(self.subdirectory)
-        self.path = self.asset_path
-        super().__attrs_post_init__()
-
-    def sg_diff(self) -> dict[str, Any]:
-        """Return only changed ShotGrid fields for this asset.
-
-        Asset path is derived and must never write back to the deprecated
-        ``sg_path`` field.
-        """
-        self.path = self.asset_path
-        diff = super().sg_diff()
-        diff.pop("tags", None)
-        diff.pop("path", None)
-        diff.pop("sg_path", None)
-        return diff
 
 
 @attrs.define(eq=False)
 class Environment(SGEntity):
-    """A ShotGrid Environment (custom entity representing a set / location)."""
+    """A ShotGrid Environment (an ``Asset`` row with ``sg_asset_type='Environment'``)."""
 
     subdirectory: str | None = field(
         default=None,
@@ -443,21 +317,13 @@ class Environment(SGEntity):
         """Canonical relative path for this environment."""
         return build_environment_path(self.display_name, self.subdirectory)
 
+    @property
+    def path(self) -> str:
+        """Alias for :attr:`environment_path`. Always derived; never stored."""
+        return self.environment_path
+
     def __attrs_post_init__(self) -> None:
         self.subdirectory = normalize_subdirectory(self.subdirectory)
-        self.path = self.environment_path
-        super().__attrs_post_init__()
-
-    def sg_diff(self) -> dict[str, Any]:
-        """Return only changed ShotGrid fields for this environment.
-
-        Environment path is derived and must never write back to ``sg_path``.
-        """
-        self.path = self.environment_path
-        diff = super().sg_diff()
-        diff.pop("path", None)
-        diff.pop("sg_path", None)
-        return diff
 
 
 @attrs.define(eq=False)
@@ -574,24 +440,23 @@ class Shot(SGEntity):
         """Canonical relative path for this shot: ``shot/<shot_code>``."""
         return build_shot_path(self.code)
 
-    def __attrs_post_init__(self) -> None:
-        # Skip path derivation on partial shots that arrived as linked refs
-        # without a name — validate_shot_code_token would reject ``None``.
-        if self.code is not None:
-            self.path = self.shot_path
-        super().__attrs_post_init__()
+    @property
+    def path(self) -> str:
+        """Alias for :attr:`shot_path`. Always derived; never stored."""
+        return self.shot_path
 
-    def sg_diff(self) -> dict[str, Any]:
-        """Return only changed ShotGrid fields for this shot.
+    @property
+    def frame_range(self) -> tuple[int, int]:
+        """Inclusive ``(cut_in, cut_out)`` for this shot.
 
-        Shot path is derived from ``code`` and must never write to ``sg_path``.
+        Raises :class:`ShotGridError` when either field is missing in
+        ShotGrid — the message names the shot so artists know what to fix.
         """
-        if self.code is not None:
-            self.path = self.shot_path
-        diff = super().sg_diff()
-        diff.pop("path", None)
-        diff.pop("sg_path", None)
-        return diff
+        if self.cut_in is None or self.cut_out is None:
+            raise ShotGridError(
+                f"Shot {self.code!r} is missing cut_in/cut_out in ShotGrid."
+            )
+        return self.cut_in, self.cut_out
 
 
 @attrs.define(eq=False)
@@ -678,11 +543,7 @@ class Version(SGEntity):
 
 @attrs.define(eq=False)
 class Playlist(SGEntity):
-    """A ShotGrid Playlist — a named collection of Versions for review.
-
-    Promoted from the Phase 0 placeholder in ``pipe.db.shotgrid`` to a full
-    ``SGEntity`` with ShotGrid field metadata.
-    """
+    """A ShotGrid Playlist — a named collection of Versions for review."""
 
     sg_status_list: str | None = field(
         default=None,
@@ -701,62 +562,5 @@ class Playlist(SGEntity):
             ),
         },
     )
-
-
-# ---------------------------------------------------------------------------
-# Phase 4 deletes everything below this banner.
-#
-# These stub classes exist only so that ``pipe.db.sgaadb``, ``pipe.db.interface``,
-# ``pipe.db.typing``, ``pipe.h.animpostprocess``, and ``pipe.h.hipfile.shot``
-# keep importing cleanly while the old client is still in use.  They are NOT
-# part of the new API.  Do not use them in new code.
-# ---------------------------------------------------------------------------
-
-
-@attrs.define
-class SGEntityStub(SGDiffable):
-    id: int
-
-
-@attrs.frozen
-class AssetStub(SGEntityStub):  # ty: ignore[invalid-frozen-dataclass-subclass]
-    """Represent "stubs" that come from ShotGrid."""
-
-    display_name: str = field(metadata={_SG_NAME: "name"})
-
-
-@attrs.define
-class EnvironmentStub(AssetStub):  # ty: ignore[invalid-frozen-dataclass-subclass]
-    pass
-
-
-@attrs.frozen
-class SequenceStub(SGEntityStub):  # ty: ignore[invalid-frozen-dataclass-subclass]
-    """Represent sequence "stubs" that come from ShotGrid."""
-
-    code: str = field(metadata={_SG_NAME: "name"})
-
-
-@attrs.frozen
-class ShotStub(SGEntityStub):  # ty: ignore[invalid-frozen-dataclass-subclass]
-    """Represent shot "stubs" that come from ShotGrid."""
-
-    code: str = field(metadata={_SG_NAME: "name"})
-
-    @property
-    def sg_ref(self) -> dict[str, Any]:
-        return {"type": "Shot", "id": self.id}
-
-
-@attrs.frozen
-class UserStub(SGEntityStub):  # ty: ignore[invalid-frozen-dataclass-subclass]
-    """Represent user "stubs" that come from ShotGrid."""
-
-    name: str = field(metadata={_SG_NAME: "login"})
-
-
-@attrs.frozen
-class TaskStub(SGEntityStub):  # ty: ignore[invalid-frozen-dataclass-subclass]
-    """Represent task "stubs" that come from ShotGrid."""
-
-    id: int
+    updated_at: Any | None = field(default=None, kw_only=True)
+    created_at: Any | None = field(default=None, kw_only=True)

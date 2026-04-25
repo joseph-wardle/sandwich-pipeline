@@ -1,14 +1,15 @@
 """ShotGrid client for `sandwich-pipeline`.
 
 This module is the single entry point for every pipeline interaction with
-ShotGrid ((a.k.a ShotGun Studio (a.k.a. Autodesk Flow Production Tracking)).
-Raw `shotgun_api3` dicts, filters, and `Fault` exceptions never leave this file.
+ShotGrid (a.k.a. ShotGun Studio, a.k.a. Autodesk Flow Production Tracking).
+Raw ``shotgun_api3`` dicts, filters, and ``Fault`` exceptions never leave
+this file.
 
 Read this file top-to-bottom to understand the full ShotGrid surface the
 pipeline uses. Sections, in order:
 
-* Connection and configuration (`SG_Config`, `ShotGrid`).
-* Read verbs - `get_*` (single entity) and `find_*` (list of entities).
+* Connection and configuration (``SG_Config``, ``ShotGrid``).
+* Read verbs — ``get_*`` (single entity) and ``find_*`` (list of entities).
 * Write verbs — first-class, idempotent, return the refreshed entity.
 * Version creation, movie upload, playlist linking.
 * Internals — singleton cache, Houdini SSL workaround, selector validation.
@@ -32,14 +33,8 @@ from typing import Any, TypeVar
 import attrs
 import shotgun_api3
 
-from pipe.db._memoize import invalidate, ttl_cache
-from pipe.db.errors import (
-    ShotGridAmbiguous,
-    ShotGridError,
-    ShotGridNotFound,
-    ShotGridWriteError,
-)
-from pipe.struct.db import (
+from pipe.shotgrid._memoize import invalidate, ttl_cache
+from pipe.shotgrid.entities import (
     Asset,
     Environment,
     Playlist,
@@ -49,6 +44,14 @@ from pipe.struct.db import (
     Task,
     User,
     Version,
+)
+from pipe.shotgrid.errors import (
+    ShotGridAmbiguous,
+    ShotGridError,
+    ShotGridNotFound,
+    ShotGridWriteError,
+)
+from pipe.shotgrid.paths import (
     build_asset_path,
     build_environment_path,
     normalize_display_name,
@@ -135,6 +138,8 @@ _SG_FIELDS_PLAYLIST: tuple[str, ...] = (
     "code",
     "sg_status_list",
     "versions",
+    "updated_at",
+    "created_at",
 )
 
 # Active-record filters: skip records that are marked out-of-project / disabled.
@@ -181,9 +186,10 @@ class ShotGrid:
     per :class:`SG_Config` so the same process never opens two sockets to the
     same project. Direct ``__init__`` usage is possible but bypasses the cache.
 
-    Every read method returns a fully-typed entity from ``pipe.struct.db`` or
-    raises a subclass of :class:`ShotGridError`. Every write verb returns the
-    refreshed entity so callers do not have to re-fetch.
+    Every read method returns a fully-typed entity from
+    :mod:`pipe.shotgrid.entities` or raises a subclass of
+    :class:`ShotGridError`. Every write verb returns the refreshed entity so
+    callers do not have to re-fetch.
     """
 
     _sg: shotgun_api3.Shotgun
@@ -191,9 +197,10 @@ class ShotGrid:
 
     _conn_instances: dict[SG_Config, ShotGrid] = {}
 
-    # Retry spacing for ``upload_movie`` — the list length is also the retry
-    # count.  Monkeypatchable per-test so the suite does not wait 14 seconds.
-    _UPLOAD_BACKOFF_SECONDS: tuple[float, ...] = (2.0, 4.0, 8.0)
+    # Backoff *between* failed ``upload_movie`` attempts.  Three attempts total:
+    # initial, then sleep 2s, retry, sleep 4s, retry.  Monkeypatched to zeros
+    # in tests so the suite does not wait 6 seconds for the failure paths.
+    _UPLOAD_BACKOFF_SECONDS: tuple[float, ...] = (2.0, 4.0)
 
     # ---- connection --------------------------------------------------------
 
@@ -639,7 +646,7 @@ class ShotGrid:
 
     @ttl_cache(seconds=60)
     def find_recent_playlists(self, *, limit: int = 10) -> list[Playlist]:
-        """Return the most recently updated active review playlists.
+        """Return the most recently updated review playlists, newest first.
 
         Args:
             limit: How many rows to return. Defaults to 10.
@@ -653,6 +660,32 @@ class ShotGrid:
                 order=[{"field_name": "updated_at", "direction": "desc"}],
                 limit=limit,
             ),
+            entity_type="Playlist",
+            selector="filters",
+            value=None,
+        )
+        return self._many(rows, Playlist)
+
+    @ttl_cache(seconds=60)
+    def find_playlists(
+        self,
+        *,
+        code_contains: str | None = None,
+    ) -> list[Playlist]:
+        """Return playlists matching the given filters.
+
+        Args:
+            code_contains: Restrict to playlists whose ``code`` contains this
+                substring (e.g. ``"Lighting"`` for "Lighting Dailies").
+
+        Returns:
+            A list of :class:`Playlist`, possibly empty.
+        """
+        filters: list[Any] = [self._project_filter()]
+        if code_contains:
+            filters.append(("code", "contains", code_contains))
+        rows = _read_or_raise(
+            lambda: self._sg.find("Playlist", filters, list(_SG_FIELDS_PLAYLIST)),
             entity_type="Playlist",
             selector="filters",
             value=None,
@@ -760,9 +793,9 @@ class ShotGrid:
         ``add_material_layer`` and their ``remove_*`` counterparts.
 
         Note: read-modify-write on a comma-separated string is *not* safe
-        against concurrent writers. This matches legacy SGaaDB behavior; if
-        concurrent variant writes become a real problem, move to a proper SG
-        multi-entity relationship field.
+        against concurrent writers. If concurrent variant writes become a real
+        problem, move the underlying ShotGrid field to a proper multi-entity
+        relationship.
         """
         _CSV_ATTR_BY_FIELD = {
             "sg_material_variants": "material_variants",
@@ -811,7 +844,8 @@ class ShotGrid:
             description: Optional artist-authored description.
             playlist: If given, the created Version is linked to this playlist.
             extra_fields: Escape hatch for one-off SG field writes. Prefer
-                extending :class:`pipe.struct.db.Version` over using this.
+                extending :class:`pipe.shotgrid.entities.Version` over using
+                this.
 
         Raises:
             ShotGridWriteError: ShotGrid rejected the Version create or a
@@ -900,6 +934,7 @@ class ShotGrid:
         )
         version = Version.from_sg(row)
         self._attach_db(version)
+        object.__setattr__(version, "_hydrated", True)
         if video is not None:
             version = self.upload_movie(version, video)
         if playlist is not None:
@@ -913,8 +948,15 @@ class ShotGrid:
     def upload_movie(self, version: Version, path: Path | str) -> Version:
         """Upload a movie file to an existing :class:`Version` row.
 
-        Retries the underlying ``shotgun_api3.upload`` call up to three times
-        with exponential backoff (2s, 4s, 8s). The final failure raises
+        Performs three things atomically from the caller's perspective:
+
+        1. Uploads the file to ``sg_uploaded_movie`` (the SG-hosted attachment).
+        2. Writes the same path to ``sg_path_to_frames`` (the source-on-disk
+           text field) so the two never drift apart.
+        3. Reloads the Version and returns the refreshed entity.
+
+        The upload call retries on transient network failures.  Three attempts
+        total, with 2s and 4s waits between them; the final failure raises
         :class:`ShotGridWriteError` and preserves the underlying
         ``shotgun_api3.Fault`` as ``__cause__`` for developer debugging.
 
@@ -923,16 +965,31 @@ class ShotGrid:
             path: Path to the movie file on disk.
 
         Returns:
-            The refreshed :class:`Version` with its ``sg_uploaded_movie``
-            field populated.
+            The refreshed :class:`Version` with both ``sg_uploaded_movie``
+            and ``sg_path_to_frames`` populated.
 
         Raises:
-            ShotGridWriteError: Every retry failed.
+            ShotGridWriteError: Every upload attempt failed, or the
+                ``sg_path_to_frames`` follow-up write failed.
         """
         path_str = str(path)
-        last_exc: BaseException | None = None
+        self._upload_movie_with_retry(version, path_str)
+        _write_or_raise(
+            lambda: self._sg.update(
+                "Version", version.id, {"sg_path_to_frames": path_str}
+            ),
+            entity_type="Version",
+            entity_id=version.id,
+            field="sg_path_to_frames",
+        )
+        return self.reload(version)
+
+    def _upload_movie_with_retry(self, version: Version, path_str: str) -> None:
+        """Run ``self._sg.upload`` with the configured backoff schedule."""
         backoffs = self._UPLOAD_BACKOFF_SECONDS
-        for attempt, backoff in enumerate(backoffs, start=1):
+        total_attempts = len(backoffs) + 1
+        last_exc: BaseException | None = None
+        for attempt in range(1, total_attempts + 1):
             try:
                 self._sg.upload(
                     "Version",
@@ -940,20 +997,22 @@ class ShotGrid:
                     path_str,
                     field_name="sg_uploaded_movie",
                 )
-                return self.reload(version)
+                return
             except _NETWORK_EXCEPTIONS as exc:
                 last_exc = exc
+                if attempt == total_attempts:
+                    break
+                wait = backoffs[attempt - 1]
                 log.warning(
                     "upload_movie attempt %d/%d failed for Version id=%d; "
                     "retrying in %ss: %s",
                     attempt,
-                    len(backoffs),
+                    total_attempts,
                     version.id,
-                    backoff,
+                    wait,
                     exc,
                 )
-                if attempt < len(backoffs):
-                    time.sleep(backoff)
+                time.sleep(wait)
         raise ShotGridWriteError(
             entity_type="Version",
             entity_id=version.id,
@@ -966,7 +1025,7 @@ class ShotGrid:
     def link_to_playlist(self, version: Version, playlist: Playlist) -> Playlist:
         """Add ``version`` to ``playlist`` without replacing existing members.
 
-        Uses ShotGrid's ``multi_entity_update_modes={"playlists": "add"}``
+        Uses ShotGrid's ``multi_entity_update_modes={"versions": "add"}``
         so other versions already on the playlist are preserved.
 
         Returns:
@@ -1113,6 +1172,9 @@ class ShotGrid:
             )
         entity = cls.from_sg(rows[0])
         self._attach_db(entity)
+        # Root entities born from a full SG row never need to lazy-fetch
+        # themselves; only nested partial refs inside them do.
+        object.__setattr__(entity, "_hydrated", True)
         return entity
 
     def _many(self, rows: list[dict[str, Any]], cls: type[SGEntity]) -> list[Any]:
@@ -1120,6 +1182,7 @@ class ShotGrid:
         result = [cls.from_sg(r) for r in rows]
         for e in result:
             self._attach_db(e)
+            object.__setattr__(e, "_hydrated", True)
         return result
 
     # ---- internals: Houdini SSL workaround --------------------------------

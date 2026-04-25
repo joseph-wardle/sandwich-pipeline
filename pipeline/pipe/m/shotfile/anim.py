@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import maya.cmds as mc
 from pxr import Usd, UsdGeom
@@ -10,7 +10,7 @@ from pipe.shot.version_adapter import (
     maya_anim_stream,
     shot_owner_for,
 )
-from pipe.struct.db import Shot
+from pipe.shotgrid import Shot
 from pipe.versioning import VersionStreamSpec, path_matches_stream
 
 from .shotfile_manager import MShotFileManager
@@ -18,7 +18,7 @@ from .shotfile_manager import MShotFileManager
 log = logging.getLogger(__name__)
 
 
-def _find_usd_shotcam() -> Optional[str]:
+def _find_usd_shotcam() -> str | None:
     """Locate the shot camera brought in via MayaUSD"""
     # look for any transform named shotCam under the mayaUsd proxy (__mayaUsd__ in its path)
     candidates = [
@@ -96,9 +96,9 @@ class MAnimShotFileManager(MShotFileManager):
     def _setup_scene(self) -> None:
         self._import_camera()
 
-        # Import Rigs
-        for asset_stub in self.shot.assets:
-            asset = self._conn.get_asset_by_stub(asset_stub)
+        # Import Rigs. ``self.shot.assets`` carries partial Assets (id + code
+        # only); accessing ``asset.is_rigged`` lazy-fetches the full record.
+        for asset in self.shot.assets or []:
             if not asset.is_rigged:
                 continue
             rig_path = get_rig_filepath_from_asset(asset)
@@ -139,4 +139,4 @@ class MAnimShotFileManager(MShotFileManager):
         if result is None:
             return None
         shot, stream = result
-        return stream, shot.code, shot
+        return stream, shot.code or "", shot

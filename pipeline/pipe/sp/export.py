@@ -40,7 +40,7 @@ from pipe.sp.progress import (
     PublishProgressUpdate,
     PublishStage,
 )
-from pipe.struct.db import Asset
+from pipe.shotgrid import Asset
 from pipe.texconverter import TexConversionError, TexConverter
 
 log = logging.getLogger(__name__)

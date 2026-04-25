@@ -14,7 +14,14 @@ from pipe.shot.version_adapter import (
     houdini_department_stream,
     shot_owner_for,
 )
-from pipe.struct.db import EnvironmentStub, SGEntity, Shot, validate_shot_code_token
+from pipe.shotgrid import (
+    Environment,
+    SGEntity,
+    Shot,
+    ShotGridError,
+    ShotGridNotFound,
+    validate_shot_code_token,
+)
 from pipe.versioning import VersionStreamSpec, path_matches_stream
 
 from .filemanager import HFileManager
@@ -148,7 +155,7 @@ class HShotFileManager(HFileManager):
 
         if not shot_code:
             return None
-        return self._conn.get_shot_by_code(shot_code)
+        return self._conn.get_shot(code=shot_code)
 
     def _resolve_current_shot_stream(
         self,
@@ -380,14 +387,15 @@ class HShotFileManager(HFileManager):
         exc: Exception,
         tb: str,
     ) -> tuple[str, str, str]:
-        if isinstance(exc, StopIteration):
-            if "get_env_by_stub" in tb:
+        if isinstance(exc, ShotGridNotFound):
+            entity_type = exc.entity_type.lower()
+            if entity_type == "environment":
                 return (
                     "SHOT_SETUP_ENV_NOT_FOUND",
                     "The environment assigned to this shot could not be found.",
                     "Check the shot's set(s) or sequence environment assignment in ShotGrid.",
                 )
-            if "get_sequence_by_stub" in tb:
+            if entity_type == "sequence":
                 return (
                     "SHOT_SETUP_SEQUENCE_NOT_FOUND",
                     "The sequence assigned to this shot could not be found in ShotGrid.",
@@ -530,69 +538,43 @@ class HShotFileManager(HFileManager):
         hou.setContextOption("SHOT", shot.shot_path)
 
     def _set_playbar_ranges(self, shot: Shot) -> None:
-        start = shot.cut_in - 5
-        end = shot.cut_out + 5
-        hou.playbar.setFrameRange(start, end)
-        hou.playbar.setPlaybackRange(start, end)
+        cut_in, cut_out = shot.frame_range
+        hou.playbar.setFrameRange(cut_in - 5, cut_out + 5)
+        hou.playbar.setPlaybackRange(cut_in - 5, cut_out + 5)
 
-    def _resolve_environment_path(
-        self,
-        *,
-        shot: Shot,
-        environment_stub: EnvironmentStub | None,
-    ) -> str | None:
-        if environment_stub is None:
+    @staticmethod
+    def _environment_path_or_none(env: Environment | None) -> str | None:
+        """Read ``env.environment_path``; partials lazy-fetch on access."""
+        if env is None:
             return None
         try:
-            layout = self._conn.get_env_by_stub(environment_stub)
-        except StopIteration:
+            return env.environment_path
+        except ShotGridError:
+            # Partial-entity hydration failed (deleted ref or network blip).
+            # Skipping gracefully so a single bad linked ref doesn't block the
+            # whole open-shot workflow.
             log.warning(
-                "Skipping missing environment while opening shot %s: %s",
-                shot.code,
-                environment_stub,
+                "Skipping environment id=%s; could not resolve from ShotGrid.",
+                env.id,
+                exc_info=True,
             )
             return None
-        return layout.environment_path if layout else None
-
-    def _resolve_sequence_environment_stub(
-        self,
-        shot: Shot,
-    ) -> EnvironmentStub | None:
-        if shot.sequence is None:
-            return None
-        try:
-            sequence = self._conn.get_sequence_by_stub(shot.sequence)
-        except StopIteration:
-            log.warning(
-                "Skipping missing sequence while opening shot %s: %s",
-                shot.code,
-                shot.sequence,
-            )
-            return None
-        return sequence.set
 
     def _set_environment_paths(self, shot: Shot) -> None:
         sets = shot.sets
         if sets:
-            for idx, environment_stub in enumerate(sets):
-                environment_path = self._resolve_environment_path(
-                    shot=shot,
-                    environment_stub=environment_stub,
-                )
-                if environment_path:
-                    hou.putenv(f"SET{idx+1}_PATH", environment_path)
+            for idx, env in enumerate(sets):
+                env_path = self._environment_path_or_none(env)
+                if env_path:
+                    hou.putenv(f"SET{idx + 1}_PATH", env_path)
             return
 
         # Fallback to deprecated single-set logic if no sets are assigned.
-        fallback_environment_stub = shot.set or self._resolve_sequence_environment_stub(
-            shot
-        )
-        environment_path = self._resolve_environment_path(
-            shot=shot,
-            environment_stub=fallback_environment_stub,
-        )
-        if environment_path:
-            hou.putenv("SET_PATH", environment_path)
+        sequence = shot.sequence
+        fallback_env = shot.set or (sequence.set if sequence else None)
+        env_path = self._environment_path_or_none(fallback_env)
+        if env_path:
+            hou.putenv("SET_PATH", env_path)
 
     def _get_muted_departments(self) -> list[str]:
         department = self._department_value()
@@ -621,24 +603,25 @@ class HShotFileManager(HFileManager):
         sets = shot.sets
 
         if sets:
-            for idx, environment_stub in enumerate(sets):
+            for idx, env in enumerate(sets):
                 load_layer = self._create_load_layer(
                     stage=stage,
                     shot=shot,
                     muted_departments=muted_departments,
-                    environment_stub=environment_stub,
+                    environment=env,
                 )
                 load_layer.setPosition((idx * 2, 6))
                 load_layers.append(load_layer)
             return load_layers
 
-        # Fallback to depreciated single set logic if no sets are assigned
-        env_stub = shot.set or self._conn.get_sequence_by_stub(shot.sequence).set  # type: ignore
+        # Fallback to depreciated single set logic if no sets are assigned.
+        sequence = shot.sequence
+        fallback_env = shot.set or (sequence.set if sequence else None)
         load_layer = self._create_load_layer(
             stage=stage,
             shot=shot,
             muted_departments=muted_departments,
-            environment_stub=env_stub,
+            environment=fallback_env,
         )
         load_layers.append(load_layer)
         return load_layers
@@ -649,7 +632,7 @@ class HShotFileManager(HFileManager):
         stage: hou.Node,
         shot: Shot,
         muted_departments: list[str],
-        environment_stub,
+        environment: Environment | None,
     ) -> hou.Node:
         load_layer = stage.createNode("dbclark::main::Bobo_Load_Layers::1.0")
         load_layer.setUserData("nodeshape", "bulge_down")
@@ -658,12 +641,10 @@ class HShotFileManager(HFileManager):
         for department in muted_departments:
             load_layer.parm(f"{department}_enable").set(0)  # type: ignore
 
-        layout = (
-            self._conn.get_env_by_stub(environment_stub) if environment_stub else None
-        )
-        if layout:
+        env_path = self._environment_path_or_none(environment)
+        if env_path:
             load_layer.parm("layout_path").set(  # type: ignore
-                f"$JOB/{layout.environment_path}/main.usd"
+                f"$JOB/{env_path}/main.usd"
             )
 
         return load_layer

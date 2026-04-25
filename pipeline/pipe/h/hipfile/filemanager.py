@@ -7,11 +7,10 @@ import hou
 from env_sg import DB_Config
 
 import pipe.h
-from pipe.db import DB
 from pipe.glui.dialogs import MessageDialog
 from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
 from pipe.glui.version_browser import VersionBrowserWidget
-from pipe.struct.db import SGEntity
+from pipe.shotgrid import SGEntity, ShotGrid
 from pipe.util import FileManager
 from pipe.versioning import (
     VersionStreamSpec,
@@ -31,7 +30,7 @@ class HFileManager(FileManager):
         versioning: bool = False,
         version_glob: str = "",
     ) -> None:
-        conn = DB.Get(DB_Config)
+        conn = ShotGrid.connect(DB_Config)
         window = pipe.h.local.get_main_qt_window()
         super().__init__(
             conn, entity_type, window, versioning=versioning, version_glob=version_glob

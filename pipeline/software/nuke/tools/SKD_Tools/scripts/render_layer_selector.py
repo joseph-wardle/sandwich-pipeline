@@ -7,8 +7,9 @@ from typing import cast
 
 import nuke
 from env_sg import DB_Config
-from pipe.db import DB
 from Qt import QtCore, QtGui, QtWidgets
+
+from pipe.shotgrid import ShotGrid
 
 simple_window = None
 
@@ -105,9 +106,8 @@ class CascadingComboBox(QtWidgets.QWidget):
     def get_shots(self):
         """Fetch the list of shots from the database."""
         try:
-            conn = DB.Get(DB_Config)
-            shots = conn.get_shot_code_list()
-            return shots
+            conn = ShotGrid.connect(DB_Config)
+            return [shot.code for shot in conn.find_shots() if shot.code]
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Error", f"Failed to fetch shots: {e}")
             return []

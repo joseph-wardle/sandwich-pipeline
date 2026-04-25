@@ -24,7 +24,7 @@ from shared.util import resolve_mapped_path
 
 from pipe.asset.paths import paths_for_asset
 from pipe.asset.version_adapter import asset_owner_for, substance_project_stream
-from pipe.db import DB
+from pipe.shotgrid import Asset, ShotGrid
 from pipe.glui.dialogs import MessageDialog, MessageDialogCustomButtons
 from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
 from pipe.glui.version_browser import VersionBrowserWidget
@@ -45,7 +45,6 @@ from pipe.sp.metadata import (
     run_when_project_editable,
     store_asset_metadata_when_ready,
 )
-from pipe.struct.db import Asset
 from pipe.versioning import (
     list_version_records,
     promote_version,
@@ -442,8 +441,8 @@ def launch_open_asset_textures() -> None:
         sp.project.execute_when_not_busy(launch_open_asset_textures)
         return
 
-    conn = DB.Get(DB_Config)
-    asset_names = conn.get_asset_name_list(sorted=True)
+    conn = ShotGrid.connect(DB_Config)
+    asset_names = sorted(a.name for a in conn.find_assets())
     parent = get_main_qt_window()
 
     select_dialog = SubstanceAssetSelectDialog(parent, asset_names, conn)
@@ -505,7 +504,7 @@ def launch_version_browser_for_current_project() -> None:
     ):
         return
 
-    conn = DB.Get(DB_Config)
+    conn = ShotGrid.connect(DB_Config)
     asset = get_active_asset_from_project(conn)
     if not asset:
         MessageDialog(
@@ -609,7 +608,7 @@ def launch_version_browser_for_current_project() -> None:
         MessageDialog(
             parent,
             (
-                f'Created new version {version_label(promoted_record.version)} '
+                f"Created new version {version_label(promoted_record.version)} "
                 f'"{promoted_record.title or "(untitled)"}" from the selected backup.\n'
                 "Open it from Version History to continue working from it."
             ),
@@ -630,7 +629,7 @@ def launch_save_version() -> None:
     if project_path is None:
         return
 
-    conn = DB.Get(DB_Config)
+    conn = ShotGrid.connect(DB_Config)
     asset = get_active_asset_from_project(conn)
     if not asset:
         MessageDialog(
@@ -669,7 +668,7 @@ def launch_save_version() -> None:
     MessageDialog(
         parent,
         (
-            f'Saved {version_label(version_record.version)} '
+            f"Saved {version_label(version_record.version)} "
             f'"{version_record.title or "(untitled)"}".'
         ),
         "Version Saved",

@@ -1,6 +1,5 @@
 import os
 import shutil
-from typing import cast
 
 import maya.cmds as mc
 import maya.OpenMayaUI as omui
@@ -11,9 +10,8 @@ from Qt import QtWidgets
 from Qt.QtCompat import wrapInstance
 from shared.util import get_production_path
 
-from pipe.db import DB
 from pipe.glui.dialogs import FilteredListDialog
-from pipe.struct.db import Environment
+from pipe.shotgrid import ShotGrid
 
 from .file_manager import HOUDINI_TO_MAYA_SCALE
 
@@ -161,8 +159,8 @@ class LayoutMaker:
 
         selected_layout = layout_dialog.get_selected_item()
 
-        conn = DB.Get(DB_Config)
-        asset_display_names = conn.get_asset_display_name_list(sorted=True)
+        conn = ShotGrid.connect(DB_Config)
+        asset_display_names = sorted(a.display_name for a in conn.find_assets())
 
         asset_dialog = SelectFromGroup(
             asset_display_names, "Reference Asset", "Select your asset"
@@ -175,7 +173,7 @@ class LayoutMaker:
             mc.warning("No asset selected.")
             return
 
-        selected_asset = conn.get_asset_by_display_name(selected_asset_display_name)
+        selected_asset = conn.get_asset(display_name=selected_asset_display_name)
 
         # Define the reference prim under the selected layout group
         base_path = f"/{env_prim.GetName()}/{set_prim.GetName()}/{selected_layout}"
@@ -223,11 +221,8 @@ class LayoutMaker:
         if result == "Cancel":
             return
 
-        conn = DB.Get(DB_Config)
-        set_list = conn.get_entity_code_list(
-            Environment,
-            sorted=True,
-        )
+        conn = ShotGrid.connect(DB_Config)
+        set_list = sorted(e.display_name for e in conn.find_environments())
 
         set_dialog = SelectFromGroup(
             set_list, "Match Houdini", "Choose layout to match"
@@ -240,8 +235,8 @@ class LayoutMaker:
             mc.error("No asset selected.")
             return
 
-        set = conn.get_entity_by_code(Environment, selected_set_name)
-        set_path = cast(str, set.path)
+        set = conn.get_environment(code=selected_set_name)
+        set_path = set.path
 
         houdini_set_path = get_production_path() / set_path / "main.usd"
         maya_set_path = get_production_path() / set_path / "maya_layout.usd"

@@ -13,7 +13,13 @@ from pipe.environment.version_adapter import (
 )
 from pipe.versioning import path_matches_stream
 from pipe.glui.dialogs import MessageDialog
-from pipe.struct.db import Environment, SGEntity, normalize_display_name
+from pipe.shotgrid import (
+    Environment,
+    SGEntity,
+    ShotGridError,
+    ShotGridNotFound,
+    normalize_display_name,
+)
 from pipe.versioning import VersionStreamSpec
 
 from .. import nodelayouts
@@ -53,37 +59,33 @@ class HEnvFileManager(HFileManager):
             return None
 
         try:
-            resolved = self._conn.get_env_by_code(normalized_context)
-            if isinstance(resolved, Environment):
-                return resolved
-        except Exception:
+            return self._conn.get_environment(code=normalized_context)
+        except ShotGridNotFound:
+            # Expected when the context option is a normalized name (or similar
+            # near-miss); fall through to the slower normalized-name search.
             pass
+        except ShotGridError:
+            log.warning(
+                "ShotGrid lookup for environment code %r failed; "
+                "trying normalized-name fallback.",
+                normalized_context,
+                exc_info=True,
+            )
 
         normalized_name = normalize_display_name(normalized_context)
         if not normalized_name:
             return None
 
-        try:
-            env_codes = self._conn.get_env_code_list(sorted=False)
-        except Exception:
-            return None
-
-        for env_code in env_codes:
-            if normalize_display_name(env_code) != normalized_name:
-                continue
-            try:
-                resolved = self._conn.get_env_by_code(env_code)
-            except Exception:
-                continue
-            if isinstance(resolved, Environment):
-                return resolved
-        return None
+        return self._find_environment_by_normalized_name(normalized_name)
 
     @staticmethod
     def _environment_root_relative_for_hip(hip_path: Path) -> str | None:
         try:
             relative_path = hip_path.resolve().relative_to(get_production_path())
-        except Exception:
+        except (OSError, ValueError):
+            # OSError: the HIP doesn't resolve (network mount glitch, missing file).
+            # ValueError: the HIP lives outside the production root.
+            # Both mean we can't derive an environment from the path.
             return None
 
         if ".backup" in relative_path.parts:
@@ -98,9 +100,16 @@ class HEnvFileManager(HFileManager):
         return parent_path.as_posix()
 
     def _resolve_environment_for_hip(self, hip_path: Path) -> Environment | None:
+        # ``hou.contextOption`` returns ``None`` (which ``str()`` happily turns
+        # into ``"None"``) when the option is unset; the broad catch is here
+        # because Houdini may also raise ``hou.OperationFailed`` while a scene
+        # is mid-load and we still need a usable fallback.
         try:
             context_environment = str(hou.contextOption("ENVIRON")).strip()
         except Exception:
+            log.debug(
+                "hou.contextOption('ENVIRON') unavailable; ignoring.", exc_info=True
+            )
             context_environment = ""
 
         if context_environment:
@@ -112,38 +121,33 @@ class HEnvFileManager(HFileManager):
         if relative_root:
             env_name_from_path = normalize_display_name(Path(relative_root).name)
             if env_name_from_path:
-                try:
-                    env_codes = self._conn.get_env_code_list(sorted=False)
-                except Exception:
-                    env_codes = []
-                for env_code in env_codes:
-                    if normalize_display_name(env_code) != env_name_from_path:
-                        continue
-                    try:
-                        resolved = self._conn.get_env_by_code(env_code)
-                    except Exception:
-                        continue
-                    if isinstance(resolved, Environment):
-                        return resolved
+                from_path = self._find_environment_by_normalized_name(
+                    env_name_from_path
+                )
+                if from_path is not None:
+                    return from_path
 
         normalized_stem = normalize_display_name(hip_path.stem.rsplit(".v", 1)[0])
         if not normalized_stem:
             return None
+        return self._find_environment_by_normalized_name(normalized_stem)
 
+    def _find_environment_by_normalized_name(
+        self, normalized_name: str
+    ) -> Environment | None:
+        """Walk every Environment and return the first whose normalized name matches."""
         try:
-            env_codes = self._conn.get_env_code_list(sorted=False)
-        except Exception:
+            envs = self._conn.find_environments()
+        except ShotGridError:
+            log.warning(
+                "Could not list environments while resolving %r; treating as no match.",
+                normalized_name,
+                exc_info=True,
+            )
             return None
-
-        for env_code in env_codes:
-            if normalize_display_name(env_code) != normalized_stem:
-                continue
-            try:
-                resolved = self._conn.get_env_by_code(env_code)
-            except Exception:
-                continue
-            if isinstance(resolved, Environment):
-                return resolved
+        for env in envs:
+            if normalize_display_name(env.code) == normalized_name:
+                return env
         return None
 
     def _resolve_current_set_stream(

@@ -1,11 +1,11 @@
 """Preflight checks to run on file load"""
 
 import substance_painter as sp
-
-from pipe.db import DB
 from env_sg import DB_Config
 
-conn = DB.Get(DB_Config)
+from pipe.shotgrid import ShotGrid
+
+conn = ShotGrid.connect(DB_Config)
 
 
 def start_plugin():

@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from pipe.shotgrid import ShotGrid, ShotGridError, Task, User
+
 log = logging.getLogger(__name__)
 
 UPLOAD_STATUS_SUCCESS = "success"
@@ -25,12 +27,10 @@ class PlayblastVersionUploadRequest:
     movie_path: Path | str
     version_name: str
     description: str | None = None
-    path_to_frames: str | None = None
     artist_display_name: str | None = None
     task_id: int | None = None
     upload_target: str = UPLOAD_TARGET_VERSION_ONLY
     review_playlist_id: int | None = None
-    upload_field: str = "sg_uploaded_movie"
     extra_version_fields: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -42,12 +42,10 @@ class AssetPlayblastVersionUploadRequest:
     movie_path: Path | str
     version_name: str
     description: str | None = None
-    path_to_frames: str | None = None
     artist_display_name: str | None = None
     task_id: int | None = None
     upload_target: str = UPLOAD_TARGET_VERSION_ONLY
     review_playlist_id: int | None = None
-    upload_field: str = "sg_uploaded_movie"
     extra_version_fields: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -78,7 +76,6 @@ class PlayblastVersionUploadResult:
     version_name: str
     movie_path: Path | None = None
     version_id: int | None = None
-    attachment_id: int | None = None
     warnings: tuple[str, ...] = ()
 
     @property
@@ -96,7 +93,6 @@ class AssetPlayblastVersionUploadResult:
     version_name: str
     movie_path: Path | None = None
     version_id: int | None = None
-    attachment_id: int | None = None
     warnings: tuple[str, ...] = ()
 
     @property
@@ -110,12 +106,10 @@ class _NormalizedUploadRequest:
     movie_path: Path
     version_name: str
     description: str | None
-    path_to_frames: str | None
     artist_display_name: str | None
     task_id: int | None
     upload_target: str
     review_playlist_id: int | None
-    upload_field: str
     extra_version_fields: dict[str, Any]
 
 
@@ -125,12 +119,10 @@ class _NormalizedAssetUploadRequest:
     movie_path: Path
     version_name: str
     description: str | None
-    path_to_frames: str | None
     artist_display_name: str | None
     task_id: int | None
     upload_target: str
     review_playlist_id: int | None
-    upload_field: str
     extra_version_fields: dict[str, Any]
 
 
@@ -169,32 +161,26 @@ def resolve_preferred_upload_movie_path(
 
 def list_recent_review_playlists(
     *,
-    conn: Any | None = None,
+    conn: ShotGrid | None = None,
     limit: int = 10,
 ) -> tuple[PlayblastReviewPlaylistOption, ...]:
-    """Return normalized recent review playlists for UI upload target selectors."""
-
+    """Return recent review playlists as UI-friendly options."""
     connection = conn or _default_db_connection()
-    raw_rows = connection.get_recent_review_playlists(limit=limit)
-
-    normalized_options: list[PlayblastReviewPlaylistOption] = []
-    seen_playlist_ids: set[int] = set()
-    for raw_row in raw_rows:
-        option = _normalize_review_playlist_option(raw_row)
-        if option is None:
-            continue
-        if option.playlist_id in seen_playlist_ids:
-            continue
-        seen_playlist_ids.add(option.playlist_id)
-        normalized_options.append(option)
-
-    return tuple(normalized_options)
+    return tuple(
+        PlayblastReviewPlaylistOption(
+            playlist_id=playlist.id,
+            code=(playlist.code or "").strip(),
+            updated_at=playlist.updated_at,
+            created_at=playlist.created_at,
+        )
+        for playlist in connection.find_recent_playlists(limit=limit)
+    )
 
 
 def upload_playblast_version(
     request: PlayblastVersionUploadRequest,
     *,
-    conn: Any | None = None,
+    conn: ShotGrid | None = None,
 ) -> PlayblastVersionUploadResult:
     """Create a ShotGrid Version for a shot and upload the playblast movie.
 
@@ -209,15 +195,18 @@ def upload_playblast_version(
     try:
         connection = conn or _default_db_connection()
     except Exception as exc:
+        # Connect-time failures (missing env_sg.py, import errors, etc.) are
+        # not ShotGridErrors; keep this catch broad and surface a friendly
+        # message to the artist.
         log.exception("Could not resolve ShotGrid connection")
         return _failed_result(
             normalized,
-            "Could not connect to ShotGrid: " f"{_format_exception_details(exc)}",
+            f"Could not connect to ShotGrid: {_format_exception_details(exc)}",
         )
 
     try:
-        shot = connection.get_shot_by_code(normalized.shot_code)
-    except Exception as exc:
+        shot = connection.get_shot(code=normalized.shot_code)
+    except ShotGridError as exc:
         log.exception("Could not resolve shot '%s' in ShotGrid", normalized.shot_code)
         return _failed_result(
             normalized,
@@ -226,58 +215,37 @@ def upload_playblast_version(
             f"{_format_exception_details(exc)}",
         )
 
-    shot_id = _extract_entity_id(shot)
-    if shot_id is None:
-        return _failed_result(
-            normalized,
-            f"Shot '{normalized.shot_code}' is missing a valid ShotGrid id.",
-        )
-
     warnings: list[str] = []
-    user_id = _resolve_user_id(connection, normalized.artist_display_name, warnings)
+    user = _resolve_user(connection, normalized.artist_display_name, warnings)
+    task = _resolve_task(connection, normalized.task_id, warnings)
 
     try:
-        created_version = connection.create_version_for_shot(
-            shot=shot,
+        version = connection.create_shot_version(
+            shot,
             code=normalized.version_name,
-            user=user_id,
-            task=normalized.task_id,
-            video_path=normalized.path_to_frames,
+            user=user,
+            task=task,
             description=normalized.description,
-            # Review linking is handled as a separate final step so upload success
-            # is preserved even if playlist linking fails.
-            playlist_id=None,
-            extra_fields=normalized.extra_version_fields,
+            extra_fields=dict(normalized.extra_version_fields) or None,
         )
-    except Exception as exc:
+    except ShotGridError as exc:
         log.exception(
             "ShotGrid Version creation failed for shot '%s'", normalized.shot_code
         )
         return _failed_result(
             normalized,
-            "ShotGrid Version creation failed: " f"{_format_exception_details(exc)}",
+            f"ShotGrid Version creation failed: {_format_exception_details(exc)}",
             warnings=warnings,
         )
 
-    version_id = _extract_entity_id(created_version)
-    if version_id is None:
-        return _failed_result(
-            normalized,
-            "ShotGrid did not return a valid Version id after creation.",
-            warnings=warnings,
-        )
-
+    version_id = version.id
     try:
-        attachment_id = connection.upload_version_movie(
-            version_id,
-            str(normalized.movie_path),
-            field=normalized.upload_field,
-        )
-    except Exception as exc:
+        connection.upload_movie(version, normalized.movie_path)
+    except ShotGridError as exc:
         log.exception("ShotGrid movie upload failed for Version %s", version_id)
         return _failed_result(
             normalized,
-            "ShotGrid movie upload failed: " f"{_format_exception_details(exc)}",
+            f"ShotGrid movie upload failed: {_format_exception_details(exc)}",
             version_id=version_id,
             warnings=warnings,
         )
@@ -288,12 +256,10 @@ def upload_playblast_version(
         and normalized.review_playlist_id is not None
     ):
         try:
-            connection.link_version_to_playlist(
-                version_id=version_id,
-                playlist_id=normalized.review_playlist_id,
-            )
+            playlist = connection.get_playlist(id=normalized.review_playlist_id)
+            connection.link_to_playlist(version, playlist)
             review_linked = True
-        except Exception as exc:
+        except ShotGridError as exc:
             failure_reason = _format_exception_details(exc)
             log.exception(
                 "ShotGrid review link failed "
@@ -319,7 +285,6 @@ def upload_playblast_version(
         version_name=normalized.version_name,
         movie_path=normalized.movie_path,
         version_id=version_id,
-        attachment_id=_extract_entity_id(attachment_id),
         warnings=tuple(warnings),
     )
 
@@ -327,7 +292,7 @@ def upload_playblast_version(
 def upload_asset_playblast_version(
     request: AssetPlayblastVersionUploadRequest,
     *,
-    conn: Any | None = None,
+    conn: ShotGrid | None = None,
 ) -> AssetPlayblastVersionUploadResult:
     """Create a ShotGrid Version for an asset and upload the playblast movie."""
 
@@ -339,15 +304,17 @@ def upload_asset_playblast_version(
     try:
         connection = conn or _default_db_connection()
     except Exception as exc:
+        # See note in upload_playblast_version: connect-time failures are
+        # not ShotGridErrors, so this catch stays broad.
         log.exception("Could not resolve ShotGrid connection")
         return _failed_asset_result(
             normalized,
-            "Could not connect to ShotGrid: " f"{_format_exception_details(exc)}",
+            f"Could not connect to ShotGrid: {_format_exception_details(exc)}",
         )
 
     try:
-        asset = connection.get_asset_by_display_name(normalized.asset_display_name)
-    except Exception as exc:
+        asset = connection.get_asset(display_name=normalized.asset_display_name)
+    except ShotGridError as exc:
         log.exception(
             "Could not resolve asset '%s' in ShotGrid", normalized.asset_display_name
         )
@@ -358,60 +325,38 @@ def upload_asset_playblast_version(
             f"{_format_exception_details(exc)}",
         )
 
-    asset_id = _extract_entity_id(asset)
-    if asset_id is None:
-        return _failed_asset_result(
-            normalized,
-            (
-                f"Asset '{normalized.asset_display_name}' is missing a valid "
-                "ShotGrid id."
-            ),
-        )
-
     warnings: list[str] = []
-    user_id = _resolve_user_id(connection, normalized.artist_display_name, warnings)
+    user = _resolve_user(connection, normalized.artist_display_name, warnings)
+    task = _resolve_task(connection, normalized.task_id, warnings)
 
     try:
-        created_version = connection.create_version_for_asset(
-            asset=asset,
+        version = connection.create_asset_version(
+            asset,
             code=normalized.version_name,
-            user=user_id,
-            task=normalized.task_id,
-            video_path=normalized.path_to_frames,
+            user=user,
+            task=task,
             description=normalized.description,
-            playlist_id=None,
-            extra_fields=normalized.extra_version_fields,
+            extra_fields=dict(normalized.extra_version_fields) or None,
         )
-    except Exception as exc:
+    except ShotGridError as exc:
         log.exception(
             "ShotGrid Version creation failed for asset '%s'",
             normalized.asset_display_name,
         )
         return _failed_asset_result(
             normalized,
-            "ShotGrid Version creation failed: " f"{_format_exception_details(exc)}",
+            f"ShotGrid Version creation failed: {_format_exception_details(exc)}",
             warnings=warnings,
         )
 
-    version_id = _extract_entity_id(created_version)
-    if version_id is None:
-        return _failed_asset_result(
-            normalized,
-            "ShotGrid did not return a valid Version id after creation.",
-            warnings=warnings,
-        )
-
+    version_id = version.id
     try:
-        attachment_id = connection.upload_version_movie(
-            version_id,
-            str(normalized.movie_path),
-            field=normalized.upload_field,
-        )
-    except Exception as exc:
+        connection.upload_movie(version, normalized.movie_path)
+    except ShotGridError as exc:
         log.exception("ShotGrid movie upload failed for Version %s", version_id)
         return _failed_asset_result(
             normalized,
-            "ShotGrid movie upload failed: " f"{_format_exception_details(exc)}",
+            f"ShotGrid movie upload failed: {_format_exception_details(exc)}",
             version_id=version_id,
             warnings=warnings,
         )
@@ -422,12 +367,10 @@ def upload_asset_playblast_version(
         and normalized.review_playlist_id is not None
     ):
         try:
-            connection.link_version_to_playlist(
-                version_id=version_id,
-                playlist_id=normalized.review_playlist_id,
-            )
+            playlist = connection.get_playlist(id=normalized.review_playlist_id)
+            connection.link_to_playlist(version, playlist)
             review_linked = True
-        except Exception as exc:
+        except ShotGridError as exc:
             failure_reason = _format_exception_details(exc)
             log.exception(
                 "ShotGrid review link failed "
@@ -453,7 +396,6 @@ def upload_asset_playblast_version(
         version_name=normalized.version_name,
         movie_path=normalized.movie_path,
         version_id=version_id,
-        attachment_id=_extract_entity_id(attachment_id),
         warnings=tuple(warnings),
     )
 
@@ -500,16 +442,6 @@ def _normalize_request(
             movie_path=movie_path,
         )
 
-    upload_field = str(request.upload_field).strip()
-    if not upload_field:
-        return PlayblastVersionUploadResult(
-            status=UPLOAD_STATUS_FAILED,
-            message="Upload field cannot be empty.",
-            shot_code=shot_code,
-            version_name=version_name,
-            movie_path=movie_path,
-        )
-
     upload_target = _normalize_upload_target(request.upload_target)
     if upload_target is None:
         return PlayblastVersionUploadResult(
@@ -537,7 +469,6 @@ def _normalize_request(
         review_playlist_id = None
 
     description = _optional_text(request.description)
-    path_to_frames = _optional_text(request.path_to_frames) or str(movie_path)
     artist_display_name = _optional_text(request.artist_display_name)
     task_id = _optional_positive_int(request.task_id)
 
@@ -555,12 +486,10 @@ def _normalize_request(
         movie_path=movie_path,
         version_name=version_name,
         description=description,
-        path_to_frames=path_to_frames,
         artist_display_name=artist_display_name,
         task_id=task_id,
         upload_target=upload_target,
         review_playlist_id=review_playlist_id,
-        upload_field=upload_field,
         extra_version_fields=normalized_extra_fields,
     )
 
@@ -607,16 +536,6 @@ def _normalize_asset_request(
             movie_path=movie_path,
         )
 
-    upload_field = str(request.upload_field).strip()
-    if not upload_field:
-        return AssetPlayblastVersionUploadResult(
-            status=UPLOAD_STATUS_FAILED,
-            message="Upload field cannot be empty.",
-            asset_display_name=asset_display_name,
-            version_name=version_name,
-            movie_path=movie_path,
-        )
-
     upload_target = _normalize_upload_target(request.upload_target)
     if upload_target is None:
         return AssetPlayblastVersionUploadResult(
@@ -644,7 +563,6 @@ def _normalize_asset_request(
         review_playlist_id = None
 
     description = _optional_text(request.description)
-    path_to_frames = _optional_text(request.path_to_frames) or str(movie_path)
     artist_display_name = _optional_text(request.artist_display_name)
     task_id = _optional_positive_int(request.task_id)
 
@@ -662,12 +580,10 @@ def _normalize_asset_request(
         movie_path=movie_path,
         version_name=version_name,
         description=description,
-        path_to_frames=path_to_frames,
         artist_display_name=artist_display_name,
         task_id=task_id,
         upload_target=upload_target,
         review_playlist_id=review_playlist_id,
-        upload_field=upload_field,
         extra_version_fields=normalized_extra_fields,
     )
 
@@ -689,25 +605,6 @@ def _is_valid_movie_file(path: Path) -> bool:
         return path.exists() and path.is_file() and path.stat().st_size > 0
     except Exception:
         return False
-
-
-def _normalize_review_playlist_option(
-    raw_row: Any,
-) -> PlayblastReviewPlaylistOption | None:
-    if not isinstance(raw_row, Mapping):
-        return None
-
-    playlist_id = _extract_entity_id(raw_row)
-    if playlist_id is None:
-        return None
-
-    code = str(raw_row.get("code") or "").strip()
-    return PlayblastReviewPlaylistOption(
-        playlist_id=playlist_id,
-        code=code,
-        updated_at=raw_row.get("updated_at"),
-        created_at=raw_row.get("created_at"),
-    )
 
 
 def _normalize_upload_target(value: Any) -> str | None:
@@ -780,52 +677,49 @@ def _format_exception_details(exc: BaseException) -> str:
     return " <- ".join(messages)
 
 
-def _default_db_connection() -> Any:
+def _default_db_connection() -> ShotGrid:
+    # `env_sg` holds the gitignored production credentials; keep the import
+    # lazy so importing this module on a host without credentials does not
+    # raise at module-load time.
     from env_sg import DB_Config
 
-    from pipe.db import DB
-
-    return DB.Get(DB_Config)
+    return ShotGrid.connect(DB_Config)
 
 
-def _resolve_user_id(
-    connection: Any,
+def _resolve_user(
+    connection: ShotGrid,
     artist_display_name: str | None,
     warnings: list[str],
-) -> int | None:
+) -> User | None:
+    """Resolve an artist display name to a ``User`` entity, or warn and return None."""
     if not artist_display_name:
         return None
-
     try:
-        user = connection.get_user_by_name(artist_display_name)
-    except Exception:
+        return connection.get_user(name=artist_display_name)
+    except ShotGridError:
         warnings.append(
-            f"Could not resolve ShotGrid user '{artist_display_name}'. Continuing without user link."
+            f"Could not resolve ShotGrid user '{artist_display_name}'. "
+            "Continuing without user link."
         )
         return None
 
-    user_id = _extract_entity_id(user)
-    if user_id is None:
+
+def _resolve_task(
+    connection: ShotGrid,
+    task_id: int | None,
+    warnings: list[str],
+) -> Task | None:
+    """Resolve a task id to a ``Task`` entity, or warn and return None."""
+    if task_id is None:
+        return None
+    try:
+        return connection.get_task(id=task_id)
+    except ShotGridError:
         warnings.append(
-            f"Resolved user for '{artist_display_name}' is missing a valid id. Continuing without user link."
+            f"Could not resolve ShotGrid task id={task_id}. "
+            "Continuing without task link."
         )
         return None
-    return user_id
-
-
-def _extract_entity_id(entity: Any) -> int | None:
-    if isinstance(entity, int) and entity > 0:
-        return entity
-    if isinstance(entity, Mapping):
-        entity_id = entity.get("id")
-        if isinstance(entity_id, int) and entity_id > 0:
-            return entity_id
-        return None
-
-    entity_id = getattr(entity, "id", None)
-    if isinstance(entity_id, int) and entity_id > 0:
-        return entity_id
-    return None
 
 
 def _failed_result(

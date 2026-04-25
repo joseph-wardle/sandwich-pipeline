@@ -4,8 +4,7 @@ from env_sg import DB_Config
 
 from pipe.asset import paths_for_asset
 from pipe.b.register import blender_class, blender_operator
-from pipe.db import DB, DBInterface
-from pipe.struct.db import Asset
+from pipe.shotgrid import Asset, ShotGrid
 
 
 @blender_class
@@ -15,13 +14,8 @@ class PipelineAssetProps(bpy.types.PropertyGroup):
 
 
 def get_asset_names():
-    conn = DB.Get(DB_Config)
-    asset_names = conn.get_entity_code_list(
-        Asset,
-        sorted=True,
-        child_mode=DBInterface.ChildQueryMode.ROOTS,
-    )
-    return asset_names
+    conn = ShotGrid.connect(DB_Config)
+    return sorted(a.display_name for a in conn.find_assets(roots_only=True))
 
 
 @blender_operator()
@@ -32,8 +26,8 @@ class PIPELINE_OT_open_asset(bpy.types.Operator):
     asset_name: bpy.props.StringProperty()  # type: ignore
 
     def invoke(self, context: Context, event):
-        conn = DB.Get(DB_Config)
-        self.asset = conn.get_asset_by_display_name(self.asset_name)
+        conn = ShotGrid.connect(DB_Config)
+        self.asset = conn.get_asset(display_name=self.asset_name)
         paths = paths_for_asset(self.asset)
 
         self._target_path = paths.blender_model_path.resolve()
