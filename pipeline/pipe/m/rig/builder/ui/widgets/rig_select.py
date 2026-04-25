@@ -30,7 +30,7 @@ class RigItemDelegate(QStyledItemDelegate):
         painter.setPen(Qt.NoPen)
 
         d = self.DOT_SIZE
-        x = option.rect.right() - d - 5
+        x = option.rect.right() - d - 3
         y = option.rect.center().y() - d // 2
         painter.drawEllipse(x, y, d, d)
 

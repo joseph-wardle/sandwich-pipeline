@@ -34,13 +34,13 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
         self.setObjectName(self.window_object_name)
         self.setWindowTitle("The Rig-Build-inator")
         # ---------- MAIN LAYOUT ----------
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(4, 4, 4, 4)
-        self.setLayout(main_layout)
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(4, 4, 4, 4)
+        self.setLayout(self.main_layout)
 
         self.main_splitter = QSplitter()
         self.main_splitter.setOrientation(Qt.QtCore.Qt.Vertical)  # type: ignore
-        main_layout.addWidget(self.main_splitter)
+        self.main_layout.addWidget(self.main_splitter)
 
         # Build Section
         self.top_container = QWidget()
