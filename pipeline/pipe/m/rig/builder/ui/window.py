@@ -78,6 +78,7 @@ class RigBuilderWindow(RigBuilderWindowUI):
         self.threads: list[QtCore.QThread] = []
         self._load_settings()
         self.connect_ui()
+        self._set_chips()
         self.load_data_async()  # Start loading after UI is initialized
 
     def connect_ui(self):
@@ -106,9 +107,14 @@ class RigBuilderWindow(RigBuilderWindowUI):
                 RigBuilderSettings.LAST_PROP_VARIANT, "value", variant_name
             )
         )
-        self.rig_build_scope_select.selection_changed.connect(
+        self.character_scope.selection_changed.connect(
             lambda chip_label: setattr(
-                RigBuilderSettings.LAST_BUILD_SCOPE, "value", chip_label
+                RigBuilderSettings.LAST_CHARACTER_SCOPE, "value", chip_label
+            )
+        )
+        self.prop_scope.selection_changed.connect(
+            lambda chip_label: setattr(
+                RigBuilderSettings.LAST_PROP_SCOPE, "value", chip_label
             )
         )
         self.dev_build_switch.toggled.connect(
@@ -159,6 +165,8 @@ class RigBuilderWindow(RigBuilderWindowUI):
 
     def _load_settings(self):
         self.build_tabs.set_current_tab(RigBuilderSettings.LAST_TAB.value)
+        self.character_scope.select_chip(RigBuilderSettings.LAST_CHARACTER_SCOPE.value)
+        self.prop_scope.select_chip(RigBuilderSettings.LAST_PROP_SCOPE.value)
         self.dev_build_switch.setChecked(RigBuilderSettings.DEV_BUILD.value)
         self.local_override_options.set_override(
             RigBuilderSettings.LOCAL_OVERRIDE.value
@@ -170,7 +178,29 @@ class RigBuilderWindow(RigBuilderWindowUI):
     def _on_dev_build_changed(self, checked: bool):
         RigBuilderSettings.DEV_BUILD.value = checked
 
+    def _set_chips(self):
+        current = self.build_tabs.get_current_tab().get_rig_type()
+
+        widgets = {
+            "character": self.character_scope,
+            "prop": self.prop_scope,
+        }
+
+        for key, widget in widgets.items():
+            widget.setVisible(key == current)
+
+    def get_active_scope(self) -> str:
+        current = self.build_tabs.get_current_tab().get_rig_type()
+
+        if current == "character":
+            return self.character_scope.selected()
+        elif current == "prop":
+            return self.prop_scope.selected()
+
+        return "Full"
+
     def _on_tab_changed(self, index: int):
+        self._set_chips()
         RigBuilderSettings.LAST_TAB.value = index
 
     def _on_rig_data_received(
@@ -189,9 +219,6 @@ class RigBuilderWindow(RigBuilderWindowUI):
         )
         self.prop_select.populate_variants(["default"])
         self.prop_select.select_variant(RigBuilderSettings.LAST_PROP_VARIANT.value)
-        self.rig_build_scope_select.select_chip(
-            RigBuilderSettings.LAST_BUILD_SCOPE.value
-        )
         self._refresh_override_indicators()
 
     def _override_enabled(self) -> bool:
@@ -252,11 +279,16 @@ class RigBuilderWindow(RigBuilderWindowUI):
         override_directory = self._active_override_dir()
         rig_builder = build.RigBuilder()
         dev_build = self.dev_build_switch.isChecked()
+        build_scope = self.get_active_scope().lower()
         rig_to_build = self._get_rig_to_build()
         rig_builder.connect_progress(self.rig_build_progress_bar.update_progress)
+
         if rig_to_build is not None:
             rig_builder.build_rig(
-                rig_to_build, dev_build=dev_build, override_directory=override_directory
+                rig_to_build,
+                dev_build=dev_build,
+                build_scope=build_scope,
+                override_directory=override_directory,
             )
 
     def _build_test_publish(self):

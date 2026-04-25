@@ -61,8 +61,10 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
         # Build Options
         self.build_options_expander = Expander("Build Options", expanded=True)
         self.top_layout.addWidget(self.build_options_expander)
-        self.rig_build_scope_select = ChipBar(["Full", "Body", "Face"])
-        self.build_options_expander.addWidget(self.rig_build_scope_select)
+        self.character_scope = ChipBar(["Full", "Body", "Face"])
+        self.prop_scope = ChipBar(["Full"])
+        self.build_options_expander.addWidget(self.character_scope)
+        self.build_options_expander.addWidget(self.prop_scope)
         self.dev_build_switch = SwitchWithLabel("Dev Build")
         self.build_options_expander.addWidget(self.dev_build_switch)
         self.local_override_options = LocalOverrideOptions()

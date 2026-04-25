@@ -75,6 +75,7 @@ class RigBuilder:
         self,
         rig: RigDefinition,
         dev_build: bool = False,
+        build_scope: str | None = None,
         override_directory: Path | None = None,
     ) -> bool:
         """
@@ -104,9 +105,10 @@ class RigBuilder:
         with redirect_external_logger(build_logger, log):
             cmds.file(newFile=True, force=True)
             build_result = build_from_path(
-                rig_build_path,
-                dev_build,
-                progress_manager.update_progress_with_step,
+                rig_root_path=rig_build_path,
+                dev_build=dev_build,
+                build_scope=build_scope,
+                progress_callback=progress_manager.update_progress_with_step,
             )
         if build_result is False:
             return False  # Early return to avoid finishing the progress bar
