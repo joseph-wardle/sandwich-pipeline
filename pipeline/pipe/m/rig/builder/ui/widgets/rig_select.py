@@ -7,12 +7,12 @@ from Qt.QtCore import Qt
 from Qt.QtGui import QPainter, QStandardItem, QStandardItemModel
 from Qt.QtWidgets import QHBoxLayout, QListView, QStyledItemDelegate, QWidget
 
-from ..styling import local_override_color
+from ..styling import LOCAL_OVERRIDE_COLOR
 
 
 class RigItemDelegate(QStyledItemDelegate):
     DOT_SIZE = 6
-    DOT_COLOR = local_override_color
+    DOT_COLOR = LOCAL_OVERRIDE_COLOR
 
     def __init__(self, list_view: RigSelectList):
         super().__init__(list_view)

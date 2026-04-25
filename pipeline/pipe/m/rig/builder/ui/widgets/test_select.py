@@ -7,9 +7,7 @@ from Qt.QtWidgets import QApplication, QHBoxLayout, QListView, QPushButton, QWid
 
 from ...progress import TestProgressManager
 from ...test import RIG_BUILD_TESTS, RigBuildTest, TestRunner
-
-PASSED_COLOR = QColor(0, 94, 75)
-FAILED_COLOR = QColor(130, 42, 50)
+from ..styling import FAILED_COLOR, PASSED_COLOR
 
 
 class TestSelectListModel(QStandardItemModel):

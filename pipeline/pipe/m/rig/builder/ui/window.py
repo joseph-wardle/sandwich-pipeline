@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from maya.OpenMayaUI import MQtUtil
 from Qt import QtCore
@@ -83,6 +84,7 @@ class RigBuilderWindow(RigBuilderWindowUI):
         builder_log.setLevel(logging.DEBUG)
         self.rig_build_log_box.connect_logger(builder_log)
 
+        self.build_tabs.currentChanged.connect(self._on_tab_changed)
         self.character_select.rig_changed.connect(
             lambda rig_name: setattr(
                 RigBuilderSettings.LAST_CHARACTER_RIG, "value", rig_name
@@ -109,11 +111,17 @@ class RigBuilderWindow(RigBuilderWindowUI):
                 RigBuilderSettings.LAST_BUILD_SCOPE, "value", chip_label
             )
         )
-
         self.dev_build_switch.toggled.connect(
             lambda checked: setattr(RigBuilderSettings.DEV_BUILD, "value", checked)
         )
-        self.build_tabs.currentChanged.connect(self._on_tab_changed)
+        self.local_override_options.override_changed.connect(
+            lambda checked: setattr(RigBuilderSettings.LOCAL_OVERRIDE, "value", checked)
+        )
+        self.local_override_options.override_directory_changed.connect(
+            lambda path: setattr(
+                RigBuilderSettings.LAST_OVERRIDE_DIR, "value", str(path)
+            )
+        )
 
         self.build_rig_button.clicked.connect(self.rig_build_log_box.clear_log)
         self.build_rig_button.clicked.connect(self._build_rig)
@@ -143,8 +151,14 @@ class RigBuilderWindow(RigBuilderWindowUI):
         self.db_thread.start()
 
     def _load_settings(self):
-        self.dev_build_switch.setChecked(RigBuilderSettings.DEV_BUILD.value)
         self.build_tabs.set_current_tab(RigBuilderSettings.LAST_TAB.value)
+        self.dev_build_switch.setChecked(RigBuilderSettings.DEV_BUILD.value)
+        self.local_override_options.set_override(
+            RigBuilderSettings.LOCAL_OVERRIDE.value
+        )
+        self.local_override_options.set_override_directory(
+            Path(RigBuilderSettings.LAST_OVERRIDE_DIR.value)
+        )
 
     def _on_dev_build_changed(self, checked: bool):
         RigBuilderSettings.DEV_BUILD.value = checked

@@ -1,6 +1,7 @@
 from .chip_bar import ChipBar
 from .directory_select import DirectorySelect
 from .expander import Expander
+from .local_override import LocalOverrideOptions
 from .logbox import RigBuildLogBox
 from .progress_bar import RigBuildProgressBar
 from .rig_select import RigSelect
@@ -12,6 +13,7 @@ __all__ = [
     "ChipBar",
     "DirectorySelect",
     "Expander",
+    "LocalOverrideOptions",
     "RigBuildLogBox",
     "RigBuildProgressBar",
     "RigSelect",

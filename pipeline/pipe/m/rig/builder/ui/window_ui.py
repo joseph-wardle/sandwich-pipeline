@@ -12,11 +12,10 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from .styling import local_override_color
 from .widgets import (
     ChipBar,
-    DirectorySelect,
     Expander,
+    LocalOverrideOptions,
     RigBuildLogBox,
     RigBuildProgressBar,
     RigTypeTabWidget,
@@ -64,14 +63,10 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
         self.top_layout.addWidget(self.build_options_expander)
         self.rig_build_scope_select = ChipBar(["Full", "Body", "Face"])
         self.build_options_expander.addWidget(self.rig_build_scope_select)
-        self.local_override_switch = SwitchWithLabel(
-            "Local Override", color_on=local_override_color
-        )
-        self.build_options_expander.addWidget(self.local_override_switch)
-        self.local_override_dir = DirectorySelect(self)
-        self.build_options_expander.addWidget(self.local_override_dir)
         self.dev_build_switch = SwitchWithLabel("Dev Build")
         self.build_options_expander.addWidget(self.dev_build_switch)
+        self.local_override_options = LocalOverrideOptions()
+        self.build_options_expander.addWidget(self.local_override_options)
 
         self.build_horizontal_layout = QHBoxLayout()
         self.build_horizontal_layout.setContentsMargins(0, 0, 0, 0)

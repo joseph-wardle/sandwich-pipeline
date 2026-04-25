@@ -6,6 +6,8 @@ from ..core import blend_color
 
 
 class SwitchWithLabel(QWidget):
+    toggled = Signal(bool)
+
     def __init__(
         self,
         text: str = "",
@@ -43,8 +45,6 @@ class SwitchWithLabel(QWidget):
 
     def setText(self, text: str):
         self.label.setText(text)
-
-    toggled = Signal(bool)
 
 
 class Switch(QWidget):
