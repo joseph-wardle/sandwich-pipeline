@@ -194,6 +194,20 @@ class RigBuilderWindow(RigBuilderWindowUI):
         )
         self._refresh_override_indicators()
 
+    def _override_enabled(self) -> bool:
+        return self.local_override_options.override_enabled
+
+    def _override_dir(self) -> Path:
+        return self.local_override_options.override_directory
+
+    def _active_override_dir(self) -> Path | None:
+        if not self._override_enabled():
+            return None
+        return self._override_dir()
+
+    def _is_override_build(self, rig: RigDefinition) -> bool:
+        return has_local_override_directory(rig, self._active_override_dir())
+
     def _compute_override_rigs(self, rig_names: list[str], rig_type: str) -> list[str]:
         override_dir = self.local_override_options.override_directory
         use_override = self.local_override_options.override_enabled
@@ -235,11 +249,7 @@ class RigBuilderWindow(RigBuilderWindowUI):
             return None
 
     def _build_rig(self):
-        override_directory = (
-            self.local_override_options.override_directory
-            if self.local_override_options.override_enabled
-            else None
-        )
+        override_directory = self._active_override_dir()
         rig_builder = build.RigBuilder()
         dev_build = self.dev_build_switch.isChecked()
         rig_to_build = self._get_rig_to_build()
@@ -250,15 +260,19 @@ class RigBuilderWindow(RigBuilderWindowUI):
             )
 
     def _build_test_publish(self):
-        if self.local_override_options.override_enabled:
-            log.error(
-                "Published rigs must be built from the production directory. Merge your local changes and disable local override to publish."
-            )
-        rig_publisher = publish.RigPublisher()
-        rig_publisher.connect_progress(self.rig_build_progress_bar.update_progress)
-        rig_publisher.connect_test_view(self.test_list.on_test_finished)
         rig_to_build = self._get_rig_to_build()
         if rig_to_build is None:
             log.error("Failed to build rig: no rig is selected.")
             return
+        if self._is_override_build(
+            rig_to_build,
+        ):
+            log.error(
+                "Published rigs must be built from the production directory. Merge your local changes and disable local override to publish."
+            )
+            return
+        rig_publisher = publish.RigPublisher()
+        rig_publisher.connect_progress(self.rig_build_progress_bar.update_progress)
+        rig_publisher.connect_test_view(self.test_list.on_test_finished)
+
         rig_publisher.build_test_and_publish(rig_to_build)
