@@ -235,14 +235,25 @@ class RigBuilderWindow(RigBuilderWindowUI):
             return None
 
     def _build_rig(self):
+        override_directory = (
+            self.local_override_options.override_directory
+            if self.local_override_options.override_enabled
+            else None
+        )
         rig_builder = build.RigBuilder()
         dev_build = self.dev_build_switch.isChecked()
         rig_to_build = self._get_rig_to_build()
         rig_builder.connect_progress(self.rig_build_progress_bar.update_progress)
         if rig_to_build is not None:
-            rig_builder.build_rig(rig_to_build, dev_build=dev_build)
+            rig_builder.build_rig(
+                rig_to_build, dev_build=dev_build, override_directory=override_directory
+            )
 
     def _build_test_publish(self):
+        if self.local_override_options.override_enabled:
+            log.error(
+                "Published rigs must be built from the production directory. Merge your local changes and disable local override to publish."
+            )
         rig_publisher = publish.RigPublisher()
         rig_publisher.connect_progress(self.rig_build_progress_bar.update_progress)
         rig_publisher.connect_test_view(self.test_list.on_test_finished)

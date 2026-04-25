@@ -63,9 +63,8 @@ def redirect_external_logger(
 
 
 class RigBuilder:
-    def __init__(self, override_directory: Path | None = None) -> None:
+    def __init__(self) -> None:
         self._progress_slot: Callable[[float], None] | None = None
-        self.override_directory = override_directory
         pass
 
     def connect_progress(self, progress_slot: Callable[[float], None]):
@@ -76,6 +75,7 @@ class RigBuilder:
         self,
         rig: RigDefinition,
         dev_build: bool = False,
+        override_directory: Path | None = None,
     ) -> bool:
         """
         This function is meant to call the rig build of an external rigging library (currently y-rig).
@@ -90,7 +90,7 @@ class RigBuilder:
         build_logger = logging.getLogger("yrig")
 
         # Get paths.
-        rig_build_path = resolve_rig_build_asset_root(rig, self.override_directory)
+        rig_build_path = resolve_rig_build_asset_root(rig, override_directory)
         guide_path = rig_build_path / "data/guide.sgt"
 
         if not guide_path.exists():
