@@ -36,8 +36,16 @@ class LocalOverrideOptions(QWidget):
     def _on_toggle(self, checked: bool):
         self.local_override_dir.setVisible(checked)
 
+    @property
+    def override_enabled(self) -> bool:
+        return self.local_override_switch.isChecked()
+
     def set_override(self, enabled: bool):
         self.local_override_switch.setChecked(enabled)
+
+    @property
+    def override_directory(self) -> Path | None:
+        return self.local_override_dir.get_path()
 
     def set_override_directory(self, directory: Path):
         self.local_override_dir.set_path(directory)

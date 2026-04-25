@@ -9,20 +9,19 @@ from Qt.QtWidgets import QHBoxLayout, QListView, QStyledItemDelegate, QWidget
 
 from ..styling import LOCAL_OVERRIDE_COLOR
 
+OVERRIDE_ROLE = QtCore.Qt.UserRole + 1
+
 
 class RigItemDelegate(QStyledItemDelegate):
     DOT_SIZE = 6
     DOT_COLOR = LOCAL_OVERRIDE_COLOR
 
-    def __init__(self, list_view: RigSelectList):
-        super().__init__(list_view)
-        self._list_view = list_view
+    def __init__(self, parent=None):
+        super().__init__(parent)
 
     def paint(self, painter: QPainter, option, index):
         super().paint(painter, option, index)
-
-        rig_name = index.data(Qt.UserRole)
-        if rig_name not in self._list_view.local_override_rigs:
+        if not index.data(OVERRIDE_ROLE):
             return
 
         painter.save()
@@ -49,6 +48,9 @@ class RigItem(QStandardItem):
         self.setSelectable(True)
         self.setData(name, QtCore.Qt.UserRole)
 
+    def set_override(self, state: bool):
+        self.setData(state, OVERRIDE_ROLE)
+
 
 class RigSelectList(QListView):
     def __init__(self):
@@ -64,7 +66,14 @@ class RigSelectList(QListView):
 
     def add_item(self, name: str, display_name: str | None = None):
         item = RigItem(name, display_name)
+        item.set_override(name in self._local_override_rigs)
         self.item_model.appendRow(item)
+
+    def get_all_rig_names(self) -> list[str]:
+        model = self.item_model
+        return [
+            model.item(row).data(QtCore.Qt.UserRole) for row in range(model.rowCount())
+        ]
 
     @property
     def local_override_rigs(self) -> set[str]:
@@ -72,7 +81,11 @@ class RigSelectList(QListView):
 
     def set_override_rigs(self, rigs: Iterable[str]):
         self._local_override_rigs = set(rigs)
-        self.viewport().update()
+        model = self.item_model
+        for row in range(model.rowCount()):
+            item = model.item(row)
+            name = item.data(QtCore.Qt.UserRole)
+            item.setData(name in self._local_override_rigs, OVERRIDE_ROLE)
 
 
 class RigSelect(QWidget):
@@ -160,6 +173,9 @@ class RigSelect(QWidget):
             self._suppress_signals = False
             panel.scrollTo(first_index, QListView.PositionAtCenter)
 
+    def set_override_rigs(self, rigs: Iterable[str]):
+        self.rig_panel.set_override_rigs(rigs)
+
     def get_selected_rig(self) -> str | None:
         index = self.rig_panel.currentIndex()
         if not index.isValid():
@@ -168,3 +184,6 @@ class RigSelect(QWidget):
 
     def get_rig_type(self) -> str:
         return self.name
+
+    def get_all_rig_names(self) -> list[str]:
+        return self.rig_panel.get_all_rig_names()

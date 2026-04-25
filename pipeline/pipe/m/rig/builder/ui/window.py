@@ -10,6 +10,7 @@ from Qt.QtWidgets import QWidget
 from pipe.m.local import get_main_qt_window
 
 from .. import build, publish
+from ..build import RigDefinition, has_local_override_directory
 from ..database import DBWorker
 from .core import (
     delete_workspace_control,
@@ -90,7 +91,6 @@ class RigBuilderWindow(RigBuilderWindowUI):
                 RigBuilderSettings.LAST_CHARACTER_RIG, "value", rig_name
             )
         )
-        self.character_select.rig_panel.set_override_rigs(["mr_yoon"])
         self.character_select.variant_changed.connect(
             lambda variant_name: setattr(
                 RigBuilderSettings.LAST_CHARACTER_VARIANT, "value", variant_name
@@ -121,6 +121,13 @@ class RigBuilderWindow(RigBuilderWindowUI):
             lambda path: setattr(
                 RigBuilderSettings.LAST_OVERRIDE_DIR, "value", str(path)
             )
+        )
+        self.local_override_options.override_changed.connect(
+            lambda _: self._refresh_override_indicators()
+        )
+
+        self.local_override_options.override_directory_changed.connect(
+            lambda _: self._refresh_override_indicators()
         )
 
         self.build_rig_button.clicked.connect(self.rig_build_log_box.clear_log)
@@ -170,9 +177,10 @@ class RigBuilderWindow(RigBuilderWindowUI):
         self, characters: list[tuple[str, str]], props: list[tuple[str, str]]
     ):
         """Update the UI widgets once the DB query returns."""
-        self.character_select.populate_rigs(characters)  # Update your widget method
-        self.character_select.select_rig(RigBuilderSettings.LAST_CHARACTER_RIG.value)
+        self.character_select.populate_rigs(characters)
         self.prop_select.populate_rigs(props)
+
+        self.character_select.select_rig(RigBuilderSettings.LAST_CHARACTER_RIG.value)
         self.prop_select.select_rig(RigBuilderSettings.LAST_PROP_RIG.value)
         # TODO: Actually handle variants here, when changing the selected rig, and in the build.
         self.character_select.populate_variants(["default"])
@@ -184,25 +192,55 @@ class RigBuilderWindow(RigBuilderWindowUI):
         self.rig_build_scope_select.select_chip(
             RigBuilderSettings.LAST_BUILD_SCOPE.value
         )
+        self._refresh_override_indicators()
 
-    def _get_rig_to_build(self) -> tuple[str, str] | None:
+    def _compute_override_rigs(self, rig_names: list[str], rig_type: str) -> list[str]:
+        override_dir = self.local_override_options.override_directory
+        use_override = self.local_override_options.override_enabled
+
+        if not use_override:
+            return []
+
+        return [
+            name
+            for name in rig_names
+            if has_local_override_directory(
+                RigDefinition(name=name, type=rig_type),
+                override_dir,
+            )
+        ]
+
+    def _refresh_override_indicators(self):
+        self.character_select.set_override_rigs(
+            self._compute_override_rigs(
+                self.character_select.get_all_rig_names(),
+                rig_type=self.character_select.name,
+            )
+        )
+
+        self.prop_select.set_override_rigs(
+            self._compute_override_rigs(
+                self.prop_select.get_all_rig_names(),
+                rig_type=self.prop_select.name,
+            )
+        )
+
+    def _get_rig_to_build(self) -> RigDefinition | None:
         current_tab = self.build_tabs.get_current_tab()
         rig_type = current_tab.get_rig_type()
         selected_rig = current_tab.get_selected_rig()
         if selected_rig is not None:
-            return (selected_rig, rig_type)
+            return RigDefinition(selected_rig, rig_type)
         else:
             return None
 
     def _build_rig(self):
         rig_builder = build.RigBuilder()
         dev_build = self.dev_build_switch.isChecked()
-        current_tab = self.build_tabs.get_current_tab()
-        rig_type = current_tab.get_rig_type()
-        selected_rig = current_tab.get_selected_rig()
+        rig_to_build = self._get_rig_to_build()
         rig_builder.connect_progress(self.rig_build_progress_bar.update_progress)
-        if selected_rig is not None:
-            rig_builder.build_rig(selected_rig, rig_type=rig_type, dev_build=dev_build)
+        if rig_to_build is not None:
+            rig_builder.build_rig(rig_to_build, dev_build=dev_build)
 
     def _build_test_publish(self):
         rig_publisher = publish.RigPublisher()
@@ -212,4 +250,4 @@ class RigBuilderWindow(RigBuilderWindowUI):
         if rig_to_build is None:
             log.error("Failed to build rig: no rig is selected.")
             return
-        rig_publisher.build_test_and_publish(rig_to_build[0], rig_to_build[1])
+        rig_publisher.build_test_and_publish(rig_to_build)

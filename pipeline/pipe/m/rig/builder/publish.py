@@ -10,7 +10,7 @@ from pipe.asset.paths import paths_for_asset
 from pipe.db import DB
 from pipe.versioning.store import next_version, versioned_filename
 
-from .build import RigBuilder
+from .build import RigBuilder, RigDefinition
 from .progress import ProgressStep, TestProgressManager
 from .test import RIG_BUILD_TESTS, RigBuildTest, TestRunner
 
@@ -48,10 +48,10 @@ class RigPublisher:
         if self._test_view_update_callback is not None:
             self._test_view_update_callback(test, passed)
 
-    def _build_rig(self, rig_name: str, rig_type: str) -> bool:
+    def _build_rig(self, rig: RigDefinition) -> bool:
         rig_builder = RigBuilder()
         rig_builder.connect_progress(self.build_progress.update_progress)
-        rig_build_result = rig_builder.build_rig(rig_name, rig_type)
+        rig_build_result = rig_builder.build_rig(rig)
         return rig_build_result
 
     def _run_tests(self, tests: Iterable[type[RigBuildTest]]) -> bool:
@@ -66,10 +66,10 @@ class RigPublisher:
         test_runner = TestRunner(test_objects, self._on_test_run)
         return test_runner.run_tests()
 
-    def _publish_rig_model(self, rig_name: str):
+    def _publish_rig_model(self, rig: RigDefinition):
         from pipe.m.publish.usdchaser.export import ExportChaser, ExportChaserMode
 
-        publish_asset = self._conn.get_asset_by_name(rig_name)
+        publish_asset = self._conn.get_asset_by_name(rig.name)
         publish_asset_paths = paths_for_asset(publish_asset)
         rig_model_publish_path = publish_asset_paths.rig_path / "usd/geo.usd"
         cmds.mayaUSDExport(  # type: ignore
@@ -83,28 +83,28 @@ class RigPublisher:
             shadingMode="useRegistry",
         )
         log.info(
-            f"PUBLISH: {rig_name} rig model USD published to {rig_model_publish_path}"
+            f"PUBLISH: {rig.name} rig model USD published to {rig_model_publish_path}"
         )
 
-    def _publish_rig(self, rig_name: str) -> bool:
-        publish_asset = self._conn.get_asset_by_name(rig_name)
+    def _publish_rig(self, rig: RigDefinition) -> bool:
+        publish_asset = self._conn.get_asset_by_name(rig.name)
         publish_asset_paths = paths_for_asset(publish_asset)
         rig_publish_path = publish_asset_paths.rig_path
         rig_versions_path = publish_asset_paths.rig_versions_path
 
         next_version_number = next_version(
-            publish_asset_paths.rig_versions_path, stem=rig_name, ext="mb"
+            publish_asset_paths.rig_versions_path, stem=rig.name, ext="mb"
         )
         rig_version_filepath = rig_versions_path / versioned_filename(
-            stem=rig_name, ext="mb", version=next_version_number
+            stem=rig.name, ext="mb", version=next_version_number
         )
 
         cmds.select("rig")
         cmds.file(str(rig_version_filepath), exportSelected=True, type="mayaBinary")
         log.info(
-            f"PUBLISH: {rig_name} was successfully built and published to {rig_version_filepath}"
+            f"PUBLISH: {rig.name} was successfully built and published to {rig_version_filepath}"
         )
-        rig_publish_filepath = (rig_publish_path / rig_name).with_suffix(".mb")
+        rig_publish_filepath = (rig_publish_path / rig.name).with_suffix(".mb")
         if rig_publish_filepath.is_symlink():
             rig_publish_filepath.unlink()
         elif rig_publish_filepath.exists():
@@ -116,21 +116,21 @@ class RigPublisher:
             os.path.relpath(rig_version_filepath, rig_publish_filepath.parent)
         )
         rig_publish_filepath.symlink_to(symlink_relative_path)
-        log.info(f"PUBLISH: {rig_name} rig symlink updated to {rig_version_filepath}")
+        log.info(f"PUBLISH: {rig.name} rig symlink updated to {rig_version_filepath}")
         self.publish_progress.finish_step()
         return True
 
-    def build_test_and_publish(self, rig_name: str, rig_type: str):
-        build_complete = self._build_rig(rig_name, rig_type)
+    def build_test_and_publish(self, rig: RigDefinition):
+        build_complete = self._build_rig(rig)
         if not build_complete:
-            log.error(f"{rig_name} failed to build properly and wasn't published!")
+            log.error(f"{rig.name} failed to build properly and wasn't published!")
             return
         tests_passed = self._run_tests(RIG_BUILD_TESTS)
         if not tests_passed:
             log.error(
-                f"{rig_name} failed one or more required tests and wasn't published!"
+                f"{rig.name} failed one or more required tests and wasn't published!"
             )
             return
         else:
-            self._publish_rig(rig_name)
-            self._publish_rig_model(rig_name)
+            self._publish_rig(rig)
+            self._publish_rig_model(rig)

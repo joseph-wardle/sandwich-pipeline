@@ -35,6 +35,7 @@ class DirectorySelect(QWidget):
 
         self.browse_button.clicked.connect(self._choose_directory)
         self.path_edit.textChanged.connect(self._on_text_changed)
+        self.path_edit.editingFinished.connect(self._on_editing_finished)
 
     def _choose_directory(self):
         directory = QFileDialog.getExistingDirectory(
@@ -59,8 +60,9 @@ class DirectorySelect(QWidget):
         return Path(text).expanduser().resolve()
 
     def _set_path(self, path: Path | None):
-        self.path = path
-        self.directory_changed.emit(self.path)
+        if self.path != path:
+            self.path = path
+            self.directory_changed.emit(self.path)
 
     def get_path(self) -> Path | None:
         return self.path
@@ -86,3 +88,9 @@ class DirectorySelect(QWidget):
         path = self._expand_path(text) if text else None
         self._set_path(path if path and path.exists() else None)
         self._set_border_color(LOCAL_OVERRIDE_COLOR if self.path else FAILED_COLOR)
+
+    def _on_editing_finished(self):
+        if self.path:
+            shortened = self._shorten_path(self.path)
+            if self.path_edit.text() != shortened:
+                self.path_edit.setText(shortened)
