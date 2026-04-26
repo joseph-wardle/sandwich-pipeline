@@ -1,5 +1,7 @@
 import logging
 from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from maya import cmds
@@ -8,6 +10,36 @@ from shared.util import get_rig_build_path
 from .progress import RigBuildProgressManager
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class RigDefinition:
+    name: str
+    type: str
+    variant: str | None = None
+
+
+def has_local_override_directory(
+    rig: RigDefinition,
+    local_override: Path | None = None,
+) -> bool:
+    if local_override is not None:
+        override_asset_root = local_override / rig.type / rig.name
+        if override_asset_root.exists():
+            return True
+    return False
+
+
+def resolve_rig_build_asset_root(
+    rig: RigDefinition,
+    local_override: Path | None = None,
+) -> Path:
+    if local_override is not None:
+        override_asset_root = local_override / rig.type / rig.name
+        if override_asset_root.exists():
+            return override_asset_root
+    asset_root = get_rig_build_path() / rig.type / rig.name
+    return asset_root
 
 
 @contextmanager
@@ -41,10 +73,10 @@ class RigBuilder:
 
     def build_rig(
         self,
-        rig_name: str,
-        rig_type: str,
-        rig_variant: str | None = None,
+        rig: RigDefinition,
         dev_build: bool = False,
+        build_scope: str | None = None,
+        override_directory: Path | None = None,
     ) -> bool:
         """
         This function is meant to call the rig build of an external rigging library (currently y-rig).
@@ -59,11 +91,11 @@ class RigBuilder:
         build_logger = logging.getLogger("yrig")
 
         # Get paths.
-        rig_build_path = get_rig_build_path() / rig_type / rig_name
+        rig_build_path = resolve_rig_build_asset_root(rig, override_directory)
         guide_path = rig_build_path / "data/guide.sgt"
 
         if not guide_path.exists():
-            error_message = f"Couldn't find the build data for {rig_name}. The build file should be located at {guide_path}"
+            error_message = f"Couldn't find the build data for {rig.name}. The build file should be located at {guide_path}"
             log.error(error_message)
             raise FileNotFoundError(error_message)
 
@@ -73,9 +105,10 @@ class RigBuilder:
         with redirect_external_logger(build_logger, log):
             cmds.file(newFile=True, force=True)
             build_result = build_from_path(
-                rig_build_path,
-                dev_build,
-                progress_manager.update_progress_with_step,
+                rig_root_path=rig_build_path,
+                dev_build=dev_build,
+                build_scope=build_scope,
+                progress_callback=progress_manager.update_progress_with_step,
             )
         if build_result is False:
             return False  # Early return to avoid finishing the progress bar
