@@ -3,7 +3,6 @@ from __future__ import annotations
 import Qt
 from maya.app.general.mayaMixin import MayaQWidgetDockableMixin  # type: ignore
 from Qt.QtWidgets import (
-    QCheckBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
@@ -13,10 +12,16 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from .logbox import RigBuildLogBox
-from .progress_bar import RigBuildProgressBar
-from .rig_type_tabs import RigTypeTabWidget
-from .test_select import TestSelectList
+from .widgets import (
+    ChipBar,
+    Expander,
+    LocalOverrideOptions,
+    RigBuildLogBox,
+    RigBuildProgressBar,
+    RigTypeTabWidget,
+    SwitchWithLabel,
+    TestSelectList,
+)
 
 
 class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
@@ -28,15 +33,14 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
     def setup_ui(self) -> None:
         self.setObjectName(self.window_object_name)
         self.setWindowTitle("The Rig-Build-inator")
-
         # ---------- MAIN LAYOUT ----------
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(8, 4, 8, 0)
-        self.setLayout(main_layout)
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(4, 4, 4, 4)
+        self.setLayout(self.main_layout)
 
         self.main_splitter = QSplitter()
         self.main_splitter.setOrientation(Qt.QtCore.Qt.Vertical)  # type: ignore
-        main_layout.addWidget(self.main_splitter)
+        self.main_layout.addWidget(self.main_splitter)
 
         # Build Section
         self.top_container = QWidget()
@@ -45,6 +49,7 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
 
         self.top_layout = QVBoxLayout(self.top_container)
         self.top_layout.setContentsMargins(0, 0, 0, 4)
+        self.top_layout.setSpacing(4)
         self.build_label = QLabel()
         self.build_label.setText("Build")
         self.top_layout.addWidget(self.build_label)
@@ -54,13 +59,20 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
         self.prop_select = self.build_tabs.create_tab("prop", "Prop")
 
         # Build Options
+        self.build_options_expander = Expander("Build Options", expanded=True)
+        self.top_layout.addWidget(self.build_options_expander)
+        self.character_scope = ChipBar(["Full", "Body", "Face"])
+        self.prop_scope = ChipBar(["Full"])
+        self.build_options_expander.addWidget(self.character_scope)
+        self.build_options_expander.addWidget(self.prop_scope)
+        self.dev_build_switch = SwitchWithLabel("Dev Build")
+        self.build_options_expander.addWidget(self.dev_build_switch)
+        self.local_override_options = LocalOverrideOptions()
+        self.build_options_expander.addWidget(self.local_override_options)
+
         self.build_horizontal_layout = QHBoxLayout()
         self.build_horizontal_layout.setContentsMargins(0, 0, 0, 0)
         self.top_layout.addLayout(self.build_horizontal_layout)
-
-        self.dev_build_switch = QCheckBox()
-        self.dev_build_switch.setText("Dev Build")
-        self.build_horizontal_layout.addWidget(self.dev_build_switch, 1)
 
         self.build_rig_button = QPushButton()
         self.build_rig_button.setText("Build Rig")
