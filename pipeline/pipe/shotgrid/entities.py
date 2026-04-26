@@ -1,23 +1,23 @@
 """Entity classes for ShotGrid records.
 
 Every Python object that represents a ShotGrid record lives here:
-:class:`Asset`, :class:`Shot`, :class:`Sequence`, :class:`Environment`,
-:class:`User`, :class:`Task`, :class:`Version`, :class:`Playlist`.  They are
-constructed via ``Entity.from_sg(sg_dict)`` at the ShotGrid boundary and are
+`Asset`, `Shot`, `Sequence`, `Environment`,
+`User`, `Task`, `Version`, `Playlist`.  They are
+constructed via `Entity.from_sg(sg_dict)` at the ShotGrid boundary and are
 the only form ShotGrid data takes inside the pipeline.
 
 Partial entities
 ----------------
 When ShotGrid returns a linked reference — e.g. the sequence linked to a shot
-— the dict carries only ``{"type": "Sequence", "id": 3, "name": "a10"}``.
-Those become *partial* entities: ``id`` and ``code`` are set, every other
-field is ``None``.  Reading any other field on a partial entity that is bound
-to a :class:`pipe.shotgrid.client.ShotGrid` connection lazily fetches the full
-record from ShotGrid; see :meth:`SGEntity.__getattribute__`.
+— the dict carries only `{"type": "Sequence", "id": 3, "name": "a10"}`.
+Those become *partial* entities: `id` and `code` are set, every other
+field is `None`.  Reading any other field on a partial entity that is bound
+to a `pipe.shotgrid.client.ShotGrid` connection lazily fetches the full
+record from ShotGrid; see `SGEntity.__getattribute__`.
 
 Equality and hashing
 --------------------
-Two entities of the same Python type with the same ``id`` are equal — whether
+Two entities of the same Python type with the same `id` are equal — whether
 one is partial and the other fully fetched.  Sets and dicts deduplicate them
 correctly.
 """
@@ -72,7 +72,7 @@ _con.register_structure_hook_factory(
 # Reading them must never trigger lazy hydration — that would recurse.
 _HYDRATE_IDENTITY_FIELDS: frozenset[str] = frozenset({"id", "code"})
 
-# Internal state owned by ``SGEntity`` itself.  Never overwritten when a
+# Internal state owned by `SGEntity` itself.  Never overwritten when a
 # partial entity hydrates and copies fields from its fresh counterpart.
 _HYDRATE_COPY_SKIP: frozenset[str] = frozenset({"id", "_db", "_hydrated"})
 
@@ -81,12 +81,12 @@ _HYDRATE_COPY_SKIP: frozenset[str] = frozenset({"id", "_db", "_hydrated"})
 class SGEntity:
     """Base class for every ShotGrid entity.
 
-    Equality is by ``(type, id)`` only: a partial entity (linked ref with
-    only ``id`` + ``code``) and a fully fetched entity with the same id are
+    Equality is by `(type, id)` only: a partial entity (linked ref with
+    only `id` + `code`) and a fully fetched entity with the same id are
     considered equal.
 
-    When a caller reads any field that is ``None`` on a partial entity bound
-    to a :class:`pipe.shotgrid.client.ShotGrid` connection, the entity calls
+    When a caller reads any field that is `None` on a partial entity bound
+    to a `pipe.shotgrid.client.ShotGrid` connection, the entity calls
     back to its connection, re-fetches itself, and fills in every field in
     place.  Hydration fires at most once per instance.
 
@@ -100,8 +100,8 @@ class SGEntity:
     code: str | None = field(default=None, kw_only=True)
 
     # Private back-reference to the ShotGrid connection that produced this
-    # entity.  Typed ``Any`` to avoid a circular import with
-    # :mod:`pipe.shotgrid.client`.
+    # entity.  Typed `Any` to avoid a circular import with
+    # `pipe.shotgrid.client`.
     _db: Any = field(init=False, default=None, eq=False, repr=False)
     _hydrated: bool = field(init=False, default=False, eq=False, repr=False)
 
@@ -119,7 +119,7 @@ class SGEntity:
     def to_sg(self, exclude: list[str] | None = None) -> dict[str, Any]:
         """Return this entity as a ShotGrid-shaped dict.
 
-        ``exclude`` lists *Python* field names to omit from the output.
+        `exclude` lists *Python* field names to omit from the output.
         """
         excluded = set(exclude or ())
         data = _con.unstructure(self)
@@ -173,8 +173,8 @@ class SGEntity:
         for f in attrs.fields(type(self)):
             if f.name in _HYDRATE_COPY_SKIP:
                 continue
-            # Read the raw slot value on ``fresh`` — ``fresh`` is also
-            # db-attached so ``getattr`` would re-trigger its own lazy-fetch.
+            # Read the raw slot value on `fresh` — `fresh` is also
+            # db-attached so `getattr` would re-trigger its own lazy-fetch.
             object.__setattr__(self, f.name, object.__getattribute__(fresh, f.name))
         return object.__getattribute__(self, name)
 
@@ -199,7 +199,7 @@ class SGEntity:
 class Asset(SGEntity):
     """A ShotGrid Asset — character, prop, set dressing item, etc.
 
-    All fields beyond ``id`` and ``code`` are ``None`` on a partial asset
+    All fields beyond `id` and `code` are `None` on a partial asset
     (one that arrived as a linked reference from another entity).
     """
 
@@ -273,7 +273,7 @@ class Asset(SGEntity):
 
     @property
     def path(self) -> str:
-        """Alias for :attr:`asset_path`. Always derived; never stored."""
+        """Alias for `asset_path`. Always derived; never stored."""
         return self.asset_path
 
     @property
@@ -290,7 +290,7 @@ class Asset(SGEntity):
 
 @attrs.define(eq=False)
 class Environment(SGEntity):
-    """A ShotGrid Environment (an ``Asset`` row with ``sg_asset_type='Environment'``)."""
+    """A ShotGrid Environment (an `Asset` row with `sg_asset_type='Environment'`)."""
 
     subdirectory: str | None = field(
         default=None,
@@ -319,7 +319,7 @@ class Environment(SGEntity):
 
     @property
     def path(self) -> str:
-        """Alias for :attr:`environment_path`. Always derived; never stored."""
+        """Alias for `environment_path`. Always derived; never stored."""
         return self.environment_path
 
     def __attrs_post_init__(self) -> None:
@@ -442,14 +442,14 @@ class Shot(SGEntity):
 
     @property
     def path(self) -> str:
-        """Alias for :attr:`shot_path`. Always derived; never stored."""
+        """Alias for `shot_path`. Always derived; never stored."""
         return self.shot_path
 
     @property
     def frame_range(self) -> tuple[int, int]:
-        """Inclusive ``(cut_in, cut_out)`` for this shot.
+        """Inclusive `(cut_in, cut_out)` for this shot.
 
-        Raises :class:`ShotGridError` when either field is missing in
+        Raises `ShotGridError` when either field is missing in
         ShotGrid — the message names the shot so artists know what to fix.
         """
         if self.cut_in is None or self.cut_out is None:

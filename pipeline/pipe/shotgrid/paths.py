@@ -49,7 +49,7 @@ def normalize_subdirectory(subdirectory: str | None) -> str | None:
 def build_asset_path(display_name: str | None, subdirectory: str | None) -> str:
     """Build the canonical relative asset path.
 
-    Result format: ``asset/<optional-subdirectory>/<normalized-asset-name>``
+    Result format: `asset/<optional-subdirectory>/<normalized-asset-name>`
     """
     asset_name = normalize_display_name(display_name) or "asset"
     path_parts = ["asset"]
@@ -63,7 +63,7 @@ def build_asset_path(display_name: str | None, subdirectory: str | None) -> str:
 def build_environment_path(display_name: str | None, subdirectory: str | None) -> str:
     """Build the canonical relative environment path.
 
-    Result format: ``set/<optional-subdirectory>/<normalized-environment-name>``
+    Result format: `set/<optional-subdirectory>/<normalized-environment-name>`
     """
     env_name = normalize_display_name(display_name) or "set"
     path_parts = ["set"]
@@ -77,7 +77,7 @@ def build_environment_path(display_name: str | None, subdirectory: str | None) -
 def validate_shot_code_token(shot_code: str | None) -> str:
     """Validate a shot code for safe use as a single path token.
 
-    Rules: required, non-empty, not ``.`` or ``..``, no path separators.
+    Rules: required, non-empty, not `.` or `..`, no path separators.
     """
     if shot_code is None:
         raise ValueError("Shot code is required")
@@ -96,15 +96,15 @@ def validate_shot_code_token(shot_code: str | None) -> str:
 
 
 def build_shot_path(shot_code: str | None) -> str:
-    """Build the canonical relative shot path: ``shot/<shot_code>``."""
+    """Build the canonical relative shot path: `shot/<shot_code>`."""
     return "/".join(("shot", validate_shot_code_token(shot_code)))
 
 
 def split_csv_set(value: str | None) -> set[str]:
     """Parse a comma-separated ShotGrid string into normalized variant tokens.
 
-    Used by the entity classes in :mod:`pipe.shotgrid.entities` to convert
-    ShotGrid's CSV string fields (``sg_material_variants``, etc.) into Python
+    Used by the entity classes in `pipe.shotgrid.entities` to convert
+    ShotGrid's CSV string fields (`sg_material_variants`, etc.) into Python
     sets.  Public because it's straightforward and a reader looking for
     "how does the pipeline parse SG variant strings" should find it here.
     """

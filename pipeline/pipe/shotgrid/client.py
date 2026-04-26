@@ -1,15 +1,16 @@
 """ShotGrid client for `sandwich-pipeline`.
 
 This module is the single entry point for every pipeline interaction with
-ShotGrid (a.k.a. ShotGun Studio, a.k.a. Autodesk Flow Production Tracking).
-Raw ``shotgun_api3`` dicts, filters, and ``Fault`` exceptions never leave
+ShotGrid (a.k.a. ShotGun Studio, a.k.a. Autodesk Flow Production Tracking
+a.k.a whatever they changed it to now (please update this comment)).
+Raw `shotgun_api3` dicts, filters, and `Fault` exceptions never leave
 this file.
 
 Read this file top-to-bottom to understand the full ShotGrid surface the
 pipeline uses. Sections, in order:
 
-* Connection and configuration (``SG_Config``, ``ShotGrid``).
-* Read verbs — ``get_*`` (single entity) and ``find_*`` (list of entities).
+* Connection and configuration (`SG_Config`, `ShotGrid`).
+* Read verbs — `get_*` (single entity) and `find_*` (list of entities).
 * Write verbs — first-class, idempotent, return the refreshed entity.
 * Version creation, movie upload, playlist linking.
 * Internals — singleton cache, Houdini SSL workaround, selector validation.
@@ -73,7 +74,7 @@ class SG_Config:
 
     `sg_key` is equivalent to an admin password. Never commit it, never log
     it, never include it in error messages. In production this is loaded from
-    the gitignored `env_sg.py` synced by the ``post-checkout`` git hook.
+    the gitignored `env_sg.py` synced by the `post-checkout` git hook.
     """
 
     project_id: int
@@ -180,15 +181,15 @@ _NETWORK_EXCEPTIONS: tuple[type[BaseException], ...] = (
 
 
 class ShotGrid:
-    """Typed, self-documenting ShotGrid client scoped to a single project.
+    """ShotGrid client
 
-    Obtain an instance with :meth:`connect` — the class caches one connection
-    per :class:`SG_Config` so the same process never opens two sockets to the
-    same project. Direct ``__init__`` usage is possible but bypasses the cache.
+    Obtain an instance with `connect` — the class caches one connection
+    per `SG_Config` so the same process never opens two sockets to the
+    same project. Direct `__init__` usage is possible but bypasses the cache.
 
     Every read method returns a fully-typed entity from
-    :mod:`pipe.shotgrid.entities` or raises a subclass of
-    :class:`ShotGridError`. Every write verb returns the refreshed entity so
+    `pipe.shotgrid.entities` or raises a subclass of
+    `ShotGridError`. Every write verb returns the refreshed entity so
     callers do not have to re-fetch.
     """
 
@@ -197,23 +198,22 @@ class ShotGrid:
 
     _conn_instances: dict[SG_Config, ShotGrid] = {}
 
-    # Backoff *between* failed ``upload_movie`` attempts.  Three attempts total:
-    # initial, then sleep 2s, retry, sleep 4s, retry.  Monkeypatched to zeros
-    # in tests so the suite does not wait 6 seconds for the failure paths.
+    # Backoff *between* failed `upload_movie` attempts.  Three attempts total:
+    # initial, then sleep 2s, retry, sleep 4s, retry.
     _UPLOAD_BACKOFF_SECONDS: tuple[float, ...] = (2.0, 4.0)
 
     # ---- connection --------------------------------------------------------
 
     @classmethod
     def connect(cls, config: SG_Config) -> ShotGrid:
-        """Return the cached ShotGrid connection for ``config`` or open one.
+        """Return the cached ShotGrid connection for `config` or open one.
 
-        Two calls with an equal :class:`SG_Config` return the same instance.
+        Two calls with an equal `SG_Config` return the same instance.
         """
         existing = cls._conn_instances.get(config)
         if existing is not None:
             return existing
-        log.debug("Opening new ShotGrid connection for project %d", config.project_id)
+        log.debug(f"Opening new ShotGrid connection for project {config.project_id}")
         instance = cls(config)
         cls._conn_instances[config] = instance
         return instance
@@ -222,7 +222,7 @@ class ShotGrid:
         self._apply_houdini_shotgrid_upload_runtime_patch()
         ca_certs_path = self._resolve_shotgrid_ca_bundle_for_current_dcc()
         if ca_certs_path:
-            log.info("ShotGrid CA bundle selected: %s", ca_certs_path)
+            log.info(f"ShotGrid CA bundle selected: {ca_certs_path}")
         self._sg = shotgun_api3.Shotgun(
             config.sg_server,
             config.sg_script,
@@ -243,22 +243,22 @@ class ShotGrid:
     ) -> Asset:
         """Fetch one asset by a unique identifier.
 
-        Exactly one of ``id`` / ``name`` / ``display_name`` / ``path`` must be
+        Exactly one of `id` / `name` / `display_name` / `path` must be
         provided.
 
         Args:
             id: ShotGrid asset id.
-            name: Normalized pipeline name (e.g. ``"hero_sandwich"``).
-            display_name: ShotGrid display name (e.g. ``"Hero Sandwich"``).
-            path: Canonical asset path (e.g. ``"asset/char/hero_sandwich"``).
+            name: Normalized pipeline name (e.g. `"hero_sandwich"`).
+            display_name: ShotGrid display name (e.g. `"Hero Sandwich"`).
+            path: Canonical asset path (e.g. `"asset/food/hero_sandwich"`).
 
         Returns:
-            The fully-populated :class:`Asset`.
+            The fully-populated `Asset`.
 
         Raises:
             ShotGridNotFound: No asset matches the selector.
-            ShotGridAmbiguous: Multiple assets match. Only possible on ``name``
-                or ``display_name`` collisions; ``id`` and ``path`` are unique
+            ShotGridAmbiguous: Multiple assets match. Only possible on `name`
+                or `display_name` collisions; `id` and `path` are unique
                 by construction.
             TypeError: Zero or more than one selector was provided.
         """
@@ -273,7 +273,7 @@ class ShotGrid:
             filters.append(("id", "is", value))
         elif selector == "display_name":
             filters.append(("code", "is", value))
-        # ``name`` and ``path`` are derived fields — no SG-side filter exists.
+        # `name` and `path` are derived fields — no SG-side filter exists.
         # Fetch the scoped list and match in Python.
         rows = _read_or_raise(
             lambda: self._sg.find("Asset", filters, list(_SG_FIELDS_ASSET)),
@@ -309,15 +309,15 @@ class ShotGrid:
         """Return every asset matching the given filters.
 
         Args:
-            type: ShotGrid asset type (``"Character"``, ``"Prop"``, ...).
+            type: ShotGrid asset type (`"Character"`, `"Prop"`, ...).
             tags: Restrict to assets carrying these tag strings.
-            require_all_tags: If ``True``, require every tag in ``tags``.
-                If ``False`` (default), match any of them.
-            roots_only: If ``True``, only return top-level assets (no
+            require_all_tags: If `True`, require every tag in `tags`.
+                If `False` (default), match any of them.
+            roots_only: If `True`, only return top-level assets (no
                 parent). Useful for UI dropdowns that hide variant children.
 
         Returns:
-            A list of :class:`Asset`, possibly empty. Never ``None``.
+            A list of `Asset`, possibly empty. Never `None`.
         """
         filters: list[Any] = self._asset_scope_filters()
         if type is not None:
@@ -347,9 +347,9 @@ class ShotGrid:
         id: int | None = None,
         code: str | None = None,
     ) -> Shot:
-        """Fetch one shot by id or code (e.g. ``"a10_20"``).
+        """Fetch one shot by id or code (e.g. `"a_020"`).
 
-        Exactly one of ``id`` or ``code`` must be provided.
+        Exactly one of `id` or `code` must be provided.
 
         Raises:
             ShotGridNotFound: No shot matches.
@@ -514,17 +514,17 @@ class ShotGrid:
         login: str | None = None,
         name: str | None = None,
     ) -> User:
-        """Fetch one ShotGrid ``HumanUser`` by id, login, or display name.
+        """Fetch one ShotGrid `HumanUser` by id, login, or display name.
 
         Args:
             id: ShotGrid user id.
             login: The user's ShotGrid login (usually an email address).
-            name: The user's display name (may not be unique — prefer ``login``).
+            name: The user's display name (may not be unique — prefer `login`).
 
         Raises:
             ShotGridNotFound: No user matches.
             ShotGridAmbiguous: Multiple users share the selector. Common on
-                ``name``; rare on ``login``; impossible on ``id``.
+                `name`; rare on `login`; impossible on `id`.
             TypeError: Zero or more than one selector was provided.
         """
         _require_exactly_one_selector(id=id, login=login, name=name)
@@ -552,7 +552,7 @@ class ShotGrid:
 
     @ttl_cache(seconds=60)
     def find_users(self) -> list[User]:
-        """Return every active ShotGrid ``HumanUser``. Not project-scoped."""
+        """Return every active ShotGrid `HumanUser`. Not project-scoped."""
         rows = _read_or_raise(
             lambda: self._sg.find(
                 "HumanUser",
@@ -571,7 +571,7 @@ class ShotGrid:
         """Fetch one task by id.
 
         Tasks do not carry a unique code in this pipeline, so id is the only
-        stable selector. Use :meth:`find_tasks` to search by shot or user.
+        stable selector. Use `find_tasks` to search by shot or user.
 
         Raises:
             ShotGridNotFound: No task matches.
@@ -675,11 +675,11 @@ class ShotGrid:
         """Return playlists matching the given filters.
 
         Args:
-            code_contains: Restrict to playlists whose ``code`` contains this
-                substring (e.g. ``"Lighting"`` for "Lighting Dailies").
+            code_contains: Restrict to playlists whose `code` contains this
+                substring (e.g. `"Lighting"` for "Lighting Dailies").
 
         Returns:
-            A list of :class:`Playlist`, possibly empty.
+            A list of `Playlist`, possibly empty.
         """
         filters: list[Any] = [self._project_filter()]
         if code_contains:
@@ -695,14 +695,14 @@ class ShotGrid:
     # ---- writes: assets ----------------------------------------------------
 
     def add_material_variant(self, asset: Asset, name: str) -> Asset:
-        """Register ``name`` as a material variant on ``asset``.
+        """Register `name` as a material variant on `asset`.
 
         Idempotent: calling twice with the same name is a no-op on the second
         call and still returns the refreshed asset. Writes are atomic — a
         failure leaves the ShotGrid record unchanged.
 
         Returns:
-            The refreshed :class:`Asset` with ``name`` in ``material_variants``.
+            The refreshed `Asset` with `name` in `material_variants`.
 
         Raises:
             ShotGridWriteError: ShotGrid rejected the update.
@@ -715,7 +715,7 @@ class ShotGrid:
         )
 
     def remove_material_variant(self, asset: Asset, name: str) -> Asset:
-        """Unregister ``name`` as a material variant on ``asset``. Idempotent."""
+        """Unregister `name` as a material variant on `asset`. Idempotent."""
         return self._edit_asset_csv_field(
             asset,
             field="sg_material_variants",
@@ -724,7 +724,7 @@ class ShotGrid:
         )
 
     def add_geometry_variant(self, asset: Asset, name: str) -> Asset:
-        """Register ``name`` as a geometry variant on ``asset``. Idempotent."""
+        """Register `name` as a geometry variant on `asset`. Idempotent."""
         return self._edit_asset_csv_field(
             asset,
             field="sg_geometry_variants",
@@ -733,7 +733,7 @@ class ShotGrid:
         )
 
     def remove_geometry_variant(self, asset: Asset, name: str) -> Asset:
-        """Unregister ``name`` as a geometry variant on ``asset``. Idempotent."""
+        """Unregister `name` as a geometry variant on `asset`. Idempotent."""
         return self._edit_asset_csv_field(
             asset,
             field="sg_geometry_variants",
@@ -742,7 +742,7 @@ class ShotGrid:
         )
 
     def add_material_layer(self, asset: Asset, name: str) -> Asset:
-        """Register ``name`` as a material layer on ``asset``. Idempotent."""
+        """Register `name` as a material layer on `asset`. Idempotent."""
         return self._edit_asset_csv_field(
             asset,
             field="sg_material_layers",
@@ -751,7 +751,7 @@ class ShotGrid:
         )
 
     def remove_material_layer(self, asset: Asset, name: str) -> Asset:
-        """Unregister ``name`` as a material layer on ``asset``. Idempotent."""
+        """Unregister `name` as a material layer on `asset`. Idempotent."""
         return self._edit_asset_csv_field(
             asset,
             field="sg_material_layers",
@@ -760,9 +760,9 @@ class ShotGrid:
         )
 
     def set_asset_subdirectory(self, asset: Asset, subdirectory: str | None) -> Asset:
-        """Set the asset's on-disk subdirectory (e.g. ``"char"``, ``"prop"``).
+        """Set the asset's on-disk subdirectory (e.g. `"char"`, `"prop"`).
 
-        Pass ``None`` to clear. Idempotent.
+        Pass `None` to clear. Idempotent.
 
         Raises:
             ShotGridWriteError: ShotGrid rejected the update.
@@ -787,10 +787,10 @@ class ShotGrid:
         name: str,
         add: bool,
     ) -> Asset:
-        """Add or remove ``name`` from one of the CSV-set fields on ``asset``.
+        """Add or remove `name` from one of the CSV-set fields on `asset`.
 
-        Shared impl for ``add_material_variant`` / ``add_geometry_variant`` /
-        ``add_material_layer`` and their ``remove_*`` counterparts.
+        Shared impl for `add_material_variant` / `add_geometry_variant` /
+        `add_material_layer` and their `remove_*` counterparts.
 
         Note: read-modify-write on a comma-separated string is *not* safe
         against concurrent writers. If concurrent variant writes become a real
@@ -832,7 +832,7 @@ class ShotGrid:
         playlist: Playlist | None = None,
         extra_fields: dict[str, Any] | None = None,
     ) -> Version:
-        """Create a ShotGrid :class:`Version` linked to ``shot``.
+        """Create a ShotGrid `Version` linked to `shot`.
 
         Args:
             shot: The shot this version is for.
@@ -840,11 +840,11 @@ class ShotGrid:
             user: Optional artist who created the version.
             task: Optional task this version belongs to.
             video: Optional path to a movie; if given, uploads it via
-                :meth:`upload_movie` after the Version row is created.
+                `upload_movie` after the Version row is created.
             description: Optional artist-authored description.
             playlist: If given, the created Version is linked to this playlist.
             extra_fields: Escape hatch for one-off SG field writes. Prefer
-                extending :class:`pipe.shotgrid.entities.Version` over using
+                extending `pipe.shotgrid.entities.Version` over using
                 this.
 
         Raises:
@@ -875,9 +875,9 @@ class ShotGrid:
         playlist: Playlist | None = None,
         extra_fields: dict[str, Any] | None = None,
     ) -> Version:
-        """Create a ShotGrid :class:`Version` linked to ``asset``.
+        """Create a ShotGrid `Version` linked to `asset`.
 
-        See :meth:`create_shot_version` for argument semantics — only the
+        See `create_shot_version` for argument semantics — only the
         parent entity type differs.
 
         Raises:
@@ -946,31 +946,31 @@ class ShotGrid:
     # ---- uploads -----------------------------------------------------------
 
     def upload_movie(self, version: Version, path: Path | str) -> Version:
-        """Upload a movie file to an existing :class:`Version` row.
+        """Upload a movie file to an existing `Version` row.
 
         Performs three things atomically from the caller's perspective:
 
-        1. Uploads the file to ``sg_uploaded_movie`` (the SG-hosted attachment).
-        2. Writes the same path to ``sg_path_to_frames`` (the source-on-disk
+        1. Uploads the file to `sg_uploaded_movie` (the SG-hosted attachment).
+        2. Writes the same path to `sg_path_to_frames` (the source-on-disk
            text field) so the two never drift apart.
         3. Reloads the Version and returns the refreshed entity.
 
         The upload call retries on transient network failures.  Three attempts
         total, with 2s and 4s waits between them; the final failure raises
-        :class:`ShotGridWriteError` and preserves the underlying
-        ``shotgun_api3.Fault`` as ``__cause__`` for developer debugging.
+        `ShotGridWriteError` and preserves the underlying
+        `shotgun_api3.Fault` as `__cause__` for developer debugging.
 
         Args:
             version: The Version to upload against.
             path: Path to the movie file on disk.
 
         Returns:
-            The refreshed :class:`Version` with both ``sg_uploaded_movie``
-            and ``sg_path_to_frames`` populated.
+            The refreshed `Version` with both `sg_uploaded_movie`
+            and `sg_path_to_frames` populated.
 
         Raises:
             ShotGridWriteError: Every upload attempt failed, or the
-                ``sg_path_to_frames`` follow-up write failed.
+                `sg_path_to_frames` follow-up write failed.
         """
         path_str = str(path)
         self._upload_movie_with_retry(version, path_str)
@@ -985,7 +985,7 @@ class ShotGrid:
         return self.reload(version)
 
     def _upload_movie_with_retry(self, version: Version, path_str: str) -> None:
-        """Run ``self._sg.upload`` with the configured backoff schedule."""
+        """Run `self._sg.upload` with the configured backoff schedule."""
         backoffs = self._UPLOAD_BACKOFF_SECONDS
         total_attempts = len(backoffs) + 1
         last_exc: BaseException | None = None
@@ -1023,13 +1023,13 @@ class ShotGrid:
     # ---- playlist links ----------------------------------------------------
 
     def link_to_playlist(self, version: Version, playlist: Playlist) -> Playlist:
-        """Add ``version`` to ``playlist`` without replacing existing members.
+        """Add `version` to `playlist` without replacing existing members.
 
-        Uses ShotGrid's ``multi_entity_update_modes={"versions": "add"}``
+        Uses ShotGrid's `multi_entity_update_modes={"versions": "add"}`
         so other versions already on the playlist are preserved.
 
         Returns:
-            The refreshed :class:`Playlist`.
+            The refreshed `Playlist`.
 
         Raises:
             ShotGridWriteError: ShotGrid rejected the link.
@@ -1061,18 +1061,18 @@ class ShotGrid:
         | Version
         | Playlist,
     ) -> Any:
-        """Re-fetch ``entity`` from ShotGrid and return the fresh copy.
+        """Re-fetch `entity` from ShotGrid and return the fresh copy.
 
         Used by write verbs and by partial-entity lazy fetch. Safe for callers
         to use directly after out-of-band writes (e.g. another tool changed
         the asset while this tool held a stale reference).
 
         The return type matches the argument type at runtime. The declared
-        return is ``Any`` because static type narrowing across entity unions
+        return is `Any` because static type narrowing across entity unions
         is noisier than it is worth at the call site.
 
         Raises:
-            ShotGridNotFound: ``entity.id`` no longer exists in ShotGrid.
+            ShotGridNotFound: `entity.id` no longer exists in ShotGrid.
         """
         if isinstance(entity, Asset):
             return self.get_asset(id=entity.id)
@@ -1093,9 +1093,9 @@ class ShotGrid:
         raise TypeError(f"Cannot reload unknown entity type: {type(entity).__name__}")
 
     def _reload_version(self, version: Version) -> Version:
-        """Re-fetch a Version by id. Version has no public ``get_version``
-        because callers hold the Version returned by ``create_*_version`` /
-        ``upload_movie``; this exists for the lazy-fetch + reload paths."""
+        """Re-fetch a Version by id. Version has no public `get_version`
+        because callers hold the Version returned by `create_*_version` /
+        `upload_movie`; this exists for the lazy-fetch + reload paths."""
         rows = _read_or_raise(
             lambda: self._sg.find(
                 "Version",
@@ -1134,9 +1134,9 @@ class ShotGrid:
         ]
 
     def _attach_db(self, value: Any) -> None:
-        """Recursively wire this connection onto every ``SGEntity`` in ``value``.
+        """Recursively wire this connection onto every `SGEntity` in `value`.
 
-        Uses ``object.__getattribute__`` to read fields directly, so walking a
+        Uses `object.__getattribute__` to read fields directly, so walking a
         partial entity does not itself trigger lazy hydration.
         """
         if isinstance(value, SGEntity):
@@ -1178,7 +1178,7 @@ class ShotGrid:
         return entity
 
     def _many(self, rows: list[dict[str, Any]], cls: type[SGEntity]) -> list[Any]:
-        """Structure a ShotGrid result list into entities with ``_db`` attached."""
+        """Structure a ShotGrid result list into entities with `_db` attached."""
         result = [cls.from_sg(r) for r in rows]
         for e in result:
             self._attach_db(e)
@@ -1290,9 +1290,9 @@ class ShotGrid:
 
 
 def _require_exactly_one_selector(**selectors: object) -> None:
-    """Raise ``TypeError`` unless exactly one kwarg is non-``None``.
+    """Raise `TypeError` unless exactly one kwarg is non-`None`.
 
-    Used by every ``get_*`` method so callers see a TypeError at the call
+    Used by every `get_*` method so callers see a TypeError at the call
     site (before any ShotGrid traffic) when they supply zero or multiple
     selectors.
     """
@@ -1308,9 +1308,9 @@ def _require_exactly_one_selector(**selectors: object) -> None:
 
 
 def _selected(**selectors: object) -> tuple[str, object]:
-    """Return ``(selector_name, value)`` for the one non-None selector.
+    """Return `(selector_name, value)` for the one non-None selector.
 
-    Assumes ``_require_exactly_one_selector`` has already run.
+    Assumes `_require_exactly_one_selector` has already run.
     """
     for name, value in selectors.items():
         if value is not None:
@@ -1320,7 +1320,7 @@ def _selected(**selectors: object) -> tuple[str, object]:
 
 
 def _entity_ref(sg_type: str, entity: SGEntity | None) -> dict[str, Any] | None:
-    """Build a ``{'type': ..., 'id': ...}`` link-ref or ``None``."""
+    """Build a `{'type': ..., 'id': ...}` link-ref or `None`."""
     if entity is None:
         return None
     return {"type": sg_type, "id": entity.id}
@@ -1333,7 +1333,7 @@ def _read_or_raise(
     selector: str,
     value: object,
 ) -> _T:
-    """Run a ShotGrid read call; wrap network/Fault errors as ``ShotGridError``."""
+    """Run a ShotGrid read call; wrap network/Fault errors as `ShotGridError`."""
     try:
         return call()
     except _NETWORK_EXCEPTIONS as exc:
@@ -1349,7 +1349,7 @@ def _write_or_raise(
     entity_id: int | None,
     field: str | None,
 ) -> _T:
-    """Run a ShotGrid write call; wrap network/Fault errors as ``ShotGridWriteError``."""
+    """Run a ShotGrid write call; wrap network/Fault errors as `ShotGridWriteError`."""
     try:
         return call()
     except _NETWORK_EXCEPTIONS as exc:

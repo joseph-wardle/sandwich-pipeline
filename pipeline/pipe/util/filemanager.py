@@ -25,9 +25,9 @@ from pipe.shotgrid import (
 def _find_entities_for_type(
     conn: ShotGrid, entity_type: type[SGEntity], *, roots_only: bool
 ) -> list[SGEntity]:
-    """Run the right ``find_*`` for the given entity type.
+    """Run the right `find_*` for the given entity type.
 
-    ``FileManager`` is generic over entity type but the new ``ShotGrid``
+    `FileManager` is generic over entity type but the new `ShotGrid`
     surface has named methods per entity, so we dispatch here.
     """
     if entity_type is Asset:

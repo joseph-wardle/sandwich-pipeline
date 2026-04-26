@@ -1,8 +1,8 @@
-"""Per-instance TTL cache for ShotGrid ``find_*`` list queries.
+"""Per-instance TTL cache for ShotGrid `find_*` list queries.
 
-The ShotGrid client wraps every list query with ``@ttl_cache(seconds=60)`` so
+The ShotGrid client wraps every list query with `@ttl_cache(seconds=60)` so
 that hot UI paths (e.g. filling an asset dropdown) do not hit the live API on
-every keystroke.  Write verbs call :func:`invalidate` to drop the cache so a
+every keystroke.  Write verbs call `invalidate` to drop the cache so a
 read after a write always sees fresh data.
 """
 
@@ -29,7 +29,7 @@ def ttl_cache(seconds: float) -> Callable[[Callable[..., T]], Callable[..., T]]:
             def find_assets(self, *, type: str | None = None) -> list[Asset]:
                 ...
 
-    Calling the method with positional arguments raises ``TypeError`` — all
+    Calling the method with positional arguments raises `TypeError`. All
     cached methods must be invoked with keywords so the cache key is stable.
     """
 
@@ -62,7 +62,7 @@ def ttl_cache(seconds: float) -> Callable[[Callable[..., T]], Callable[..., T]]:
 
 
 def invalidate(instance: object) -> None:
-    """Drop every cached result on ``instance``.  Called by write verbs."""
+    """Drop every cached result on `instance`.  Called by write verbs."""
     state = getattr(instance, _CACHE_ATTR, None)
     if state is None:
         return
@@ -91,7 +91,7 @@ def _get_state(instance: object) -> _CacheState:
 def _freeze(value: Any) -> Any:
     """Convert a kwarg value into a hashable cache-key component.
 
-    ``find_*`` methods legitimately take ``set[str]`` / ``list[str]`` / ``dict``
+    `find_*` methods legitimately take `set[str]` / `list[str]` / `dict`
     filter arguments; those are unhashable by default.  This freezes them
     into hashable equivalents so the cache key can still be constructed.
     """
