@@ -87,7 +87,7 @@ class RigPublisher:
         )
 
     def _publish_rig(self, rig: RigDefinition) -> bool:
-        publish_asset = self._conn.get_asset(name=rig_name)
+        publish_asset = self._conn.get_asset(name=rig.name)
         publish_asset_paths = paths_for_asset(publish_asset)
         rig_publish_path = publish_asset_paths.rig_path
         rig_versions_path = publish_asset_paths.rig_versions_path
