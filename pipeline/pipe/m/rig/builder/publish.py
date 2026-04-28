@@ -7,6 +7,7 @@ from env_sg import DB_Config
 from maya import cmds
 
 from pipe.asset.paths import paths_for_asset
+from pipe.m.util import maintain_selection
 from pipe.shotgrid import ShotGrid
 from pipe.versioning.store import next_version, versioned_filename
 
@@ -15,6 +16,8 @@ from .progress import ProgressStep, TestProgressManager
 from .test import RIG_BUILD_TESTS, RigBuildTest, TestRunner
 
 log = logging.getLogger(__name__)
+
+EXPORTED_GEO_SET = "rig_geo_grp"
 
 
 class RigPublisher:
@@ -72,16 +75,19 @@ class RigPublisher:
         publish_asset = self._conn.get_asset(name=rig.name)
         publish_asset_paths = paths_for_asset(publish_asset)
         rig_model_publish_path = publish_asset_paths.rig_path / "usd/geo.usd"
-        cmds.mayaUSDExport(  # type: ignore
-            chaser=[ExportChaser.ID],
-            file=str(rig_model_publish_path),
-            chaserArgs=[(ExportChaser.ID, "mode", ExportChaserMode.RIG)],
-            exportCollectionBasedBindings=True,
-            exportMaterialCollections=True,
-            legacyMaterialScope=True,
-            materialCollectionsPath="/rig/geo",
-            shadingMode="useRegistry",
-        )
+        with maintain_selection():
+            cache_sets = cmds.ls("::" + EXPORTED_GEO_SET, sets=True)
+            cmds.select(*cache_sets, replace=True)
+            cmds.mayaUSDExport(  # type: ignore
+                selection=True,
+                chaser=[ExportChaser.ID],
+                file=str(rig_model_publish_path),
+                chaserArgs=[(ExportChaser.ID, "mode", ExportChaserMode.RIG)],
+                exportCollectionBasedBindings=True,
+                exportMaterialCollections=True,
+                materialCollectionsPath="/rig/geo",
+                shadingMode="useRegistry",
+            )
         log.info(
             f"PUBLISH: {rig.name} rig model USD published to {rig_model_publish_path}"
         )
