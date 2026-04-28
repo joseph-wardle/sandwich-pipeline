@@ -5,8 +5,9 @@ from typing import Any
 
 import nuke
 from env_sg import DB_Config
-from pipe.db import DB
 from shared.util import get_edit_path, get_production_path
+
+from pipe.shotgrid import Playlist, ShotGrid, ShotGridError, ShotGridNotFound
 
 project_file = nuke.root()["name"].value()
 
@@ -144,31 +145,23 @@ def update_text_messages(
 
 def get_in_out():
     """
-    curr_shot = get_project_name()
-    conn = DB.Get(DB_Config)
-    print(str(curr_shot))
-    shot_info = conn.get_shot_by_code(curr_shot)
-    # print(curr_shot)
-    # print(shot_info.cut_in)
-    # print(shot_info.cut_out)
-    return [shot_info.cut_in, shot_info.cut_out]
-    """
-    """
     Returns the in/out cut frames for the current shot.
-    Falls back to the script's own frame range if the shot cannot be found in the database.
+    Falls back to the script's own frame range if the shot cannot be found in
+    ShotGrid or is missing cut_in / cut_out there.
     """
     curr_shot = get_project_name()
-    conn = DB.Get(DB_Config)
+    conn = ShotGrid.connect(DB_Config)
     try:
-        shot_info = conn.get_shot_by_code(curr_shot)
-    except StopIteration:
+        shot = conn.get_shot(code=curr_shot)
+        return list(shot.frame_range)
+    except ShotGridError as exc:
         nuke.message(
-            f"No shot found for code '{curr_shot}'. Using script's frame range instead."
+            f"Could not get frame range for '{curr_shot}' from ShotGrid: {exc}\n"
+            "Using script's frame range instead."
         )
         first = int(nuke.root()["first_frame"].value())
         last = int(nuke.root()["last_frame"].value())
         return [first, last]
-    return [shot_info.cut_in, shot_info.cut_out]
 
 
 def get_project_name():
@@ -558,10 +551,9 @@ nuke.message("This render will have 5 frames added to beginning and end of shot.
 
     # Populate ShotGrid Task dropdown dynamically
     try:
-        _conn = DB(DB_Config)
-        # shots = _conn.get_shot_code_list()
-        tasks = _conn.get_tasks(getShot(), getShotGridUser())
-        task_labels = [t.content for t in tasks if hasattr(t, "content")]
+        _conn = ShotGrid.connect(DB_Config)
+        tasks = _conn.find_tasks(shot=getShot(), user=getShotGridUser())
+        task_labels = [t.content for t in tasks if t.content]
     except Exception:
         task_labels = []
     task_knob = nuke.Enumeration_Knob("shotgrid_task", "ShotGrid Task", task_labels)
@@ -690,26 +682,31 @@ def getDepartment() -> str:
 
 ### This is where we start sending things back to Shotgrid ###
 def getShot():
-    _conn = DB(DB_Config)
-    shot = _conn.get_shot_by_code(get_shot_code())
-    if shot:
-        return shot
-    else:
+    _conn = ShotGrid.connect(DB_Config)
+    try:
+        return _conn.get_shot(code=get_shot_code())
+    except ShotGridNotFound:
         nuke.message("Invalid shot code")
+        return None
 
 
 def getShotGridUser():
-    _conn = DB(DB_Config)
+    _conn = ShotGrid.connect(DB_Config)
     username = get_users_name()
-    if username:
-        return _conn.get_user_by_name(username)
-    else:
+    if not username:
         nuke.message(
             "Username did not match any users in Shotgrid. Talk to your lead or the pipeline person."
         )
         raise Exception(
             "Username did not match any users in Shotgrid. Talk to your lead or the pipeline person."
         )
+    try:
+        return _conn.get_user(name=username)
+    except ShotGridNotFound:
+        nuke.message(
+            f"No ShotGrid user found for '{username}'. Talk to your lead or the pipeline person."
+        )
+        raise
 
 
 def getUserTask():
@@ -720,15 +717,14 @@ def getUserTask():
     selected_name = group["shotgrid_task"].value()
     shot = getShot()
     user = getShotGridUser()
-    tasks = DB(DB_Config).get_tasks(shot, user)
+    tasks = ShotGrid.connect(DB_Config).find_tasks(shot=shot, user=user)
     for t in tasks:
-        # Task has attributes, not a dict
-        if hasattr(t, "content") and t.content == selected_name:
+        if t.content == selected_name:
             return t
     return None
 
 
-def getMostRecentPlaylist():
+def getMostRecentPlaylist() -> Playlist | None:
     """
     Look at the departmentDropdown on this group,
     find all SG playlists whose code contains that department,
@@ -740,43 +736,29 @@ def getMostRecentPlaylist():
         nuke.message("Please pick a department first.")
         return None
 
-    # Connect to ShotGrid
-    _conn = DB(DB_Config)
-    sg = _conn._sg
-
-    # Find playlists named e.g. "8/07/25 Lighting Dailies"
-    filters = [
-        ["code", "contains", dept],
-    ]
-    fields = ["code"]
     try:
-        playlists = sg.find("Playlist", filters, fields)
-    except Exception as e:
+        playlists = ShotGrid.connect(DB_Config).find_playlists(code_contains=dept)
+    except ShotGridError as e:
         nuke.message(f"ShotGrid lookup failed: {e}")
         return None
 
-    most_recent = None
+    most_recent: Playlist | None = None
     latest_date = None
-
-    for pl in playlists:
-        code = pl.get("code", "")
-        # split off the date portion
-        date_str = code.split(" ", 1)[0]
+    for playlist in playlists:
+        date_str = (playlist.code or "").split(" ", 1)[0]
         try:
             pl_date = datetime.datetime.strptime(date_str, "%m/%d/%y").date()
         except ValueError:
-            # skip any playlists not matching the naming pattern
             continue
-
         if latest_date is None or pl_date > latest_date:
             latest_date = pl_date
-            most_recent = pl
+            most_recent = playlist
 
-    if most_recent:
-        return most_recent
-    else:
+    if most_recent is None:
         nuke.message(f"No playlists found for “{dept}”.")
         return None
+
+    return most_recent
 
 
 # if FX grab FX video file
@@ -788,11 +770,10 @@ def create_new_shot_version():
 
     if playlist:
         nuke.message(
-            f"Using playlist: {playlist['code']}\n"
+            f"Using playlist: {playlist.code}\n"
             "\n"
             "Contact your lead if you need a newer playlist!"
         )
-        playlist_id = playlist["id"]
     else:
         if not nuke.ask(
             "Are you sure you want to continue? You will be creating a version that isn't attached to a dailies review."
@@ -806,7 +787,6 @@ def create_new_shot_version():
         nuke.message("Please select a valid ShotGrid task.")
         return
 
-    # task_id = task_obj.id
     task_name = task.content
     version_name = f"{get_users_name()}_{task_name}_{get_version_num()}"
     if group.knob("mov_export_path"):
@@ -822,30 +802,24 @@ def create_new_shot_version():
         else ""
     )
 
-    _conn = DB(DB_Config)
-    if playlist_id:
-        new_version = _conn.create_version_for_shot(
-            shot, version_name, user, task, video_path, description, playlist_id
-        )
-    else:
-        new_version = _conn.create_version_for_shot(
-            shot, version_name, user, task, video_path, description
-        )
+    # Create the Version row first, then upload the movie as a separate step so
+    # an upload failure can be reported distinctly from a create failure.
+    _conn = ShotGrid.connect(DB_Config)
     try:
-        version_id = (
-            new_version["id"] if isinstance(new_version, dict) else new_version.id
+        new_version = _conn.create_shot_version(
+            shot,
+            code=version_name,
+            user=user,
+            task=task,
+            description=description,
+            playlist=playlist,
         )
-    except Exception:
-        nuke.message(
-            "Created version in ShotGrid, but could not retrieve its ID. "
-            "Please update your DB API wrapper to return the Version record."
-        )
+    except Exception as e:
+        nuke.message(f"ShotGrid version creation failed: {e}")
         return
 
     try:
-        # result, infor = upload_auto_and_wait(_conn, version_id, video_path)
-        _conn.upload_version_movie(version_id, video_path)
-        # if result == "OK":
+        _conn.upload_movie(new_version, video_path)
         nuke.message(
             f"ShotGrid version '{version_name}' created and movie uploaded successfully."
         )

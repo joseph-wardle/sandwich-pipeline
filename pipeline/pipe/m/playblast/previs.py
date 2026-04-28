@@ -116,7 +116,12 @@ class PrevisPlayblastDialog(PlayblastDialog):
 
     def _validate_source_state(self, mode: str) -> str | None:
         if mode == "shot":
-            if self._shot and self._shot.cut_out < self._shot.cut_in:
+            if (
+                self._shot
+                and self._shot.cut_in is not None
+                and self._shot.cut_out is not None
+                and self._shot.cut_out < self._shot.cut_in
+            ):
                 return "Shot cut range is invalid (Cut Out must be >= Cut In)."
             if not str(self._shot_camera.currentText()).strip():
                 return "Choose a camera for Shot Playblast."
@@ -273,7 +278,7 @@ class PrevisPlayblastDialog(PlayblastDialog):
         mode = self._selected_source_mode()
 
         if mode == "shot" and self._shot is not None:
-            return self._shot.code
+            return self._shot.code or "Custom"
 
         if mode == "sequencer":
             shot_context = self._resolve_current_sequencer_shot_context()
@@ -281,7 +286,7 @@ class PrevisPlayblastDialog(PlayblastDialog):
                 return shot_context.name
 
         if self._shot is not None:
-            return self._shot.code
+            return self._shot.code or "Custom"
 
         return "Custom"
 
@@ -290,7 +295,7 @@ class PrevisPlayblastDialog(PlayblastDialog):
             raise ValueError("No pipeline shot context was found.")
 
         shot_camera = str(self._shot_camera.currentText()).strip()
-        output_name = self._resolve_output_name(self._shot.code)
+        output_name = self._resolve_output_name(self._shot.code or "")
         return MShotPlayblastConfig(
             camera=shot_camera,
             shot=self._shot,

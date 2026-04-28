@@ -4,7 +4,7 @@ import logging
 import re
 from enum import IntEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import attrs
 import mayaUsd.lib as mayaUsdLib
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 from env_sg import DB_Config
 
-from pipe.db import DB
+from pipe.shotgrid import ShotGrid
 from pipe.struct.timeline import Timeline
 from pipe.util import log_errors
 
@@ -50,7 +50,7 @@ class ExportChaserMode(IntEnum):
 @attrs.define
 class ChaserArgs:
     mode: ExportChaserMode = attrs.field(converter=lambda v: ExportChaserMode(int(v)))
-    timeline: Optional[Timeline] = attrs.field(
+    timeline: Timeline | None = attrs.field(
         default=None,
         kw_only=True,
         converter=lambda t: Timeline.from_json(t) if t else None,
@@ -100,7 +100,7 @@ class ExportChaser(mayaUsdLib.ExportChaser):
         )
         root_layer = self._stage.GetRootLayer()
 
-        conn = DB.Get(DB_Config)
+        conn = ShotGrid.connect(DB_Config)
 
         for namespace, layer in layers.items():
             # Try and get the name of the rig from the namespace (strip trailing digits in case of multiple of the same rig in one scene)
@@ -130,7 +130,7 @@ class ExportChaser(mayaUsdLib.ExportChaser):
             # Attempt to get the path of the published rig USD to reference
             rig_usd_filepath: Path | None = None
             try:
-                asset = conn.get_asset_by_name(rig_name)
+                asset = conn.get_asset(name=rig_name)
                 asset_paths = paths_for_asset(asset)
                 rig_usd_filepath = asset_paths.rig_path / "usd/main.usd"
             except Exception:

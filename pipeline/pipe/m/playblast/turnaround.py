@@ -34,7 +34,7 @@ from pipe.playblast_shotgrid import (
     resolve_preferred_upload_movie_path,
     upload_asset_playblast_version,
 )
-from pipe.struct.db import normalize_display_name
+from pipe.shotgrid import normalize_display_name
 from pipe.util import Playblaster
 
 from .struct import SaveLocation
@@ -731,7 +731,6 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
             movie_path=movie_path,
             version_name=version_name,
             description=self._shotgrid_upload_description() or None,
-            path_to_frames=str(movie_path),
             artist_display_name=resolve_artist_display_name().strip() or None,
             upload_target=upload_target,
             review_playlist_id=review_playlist_id,

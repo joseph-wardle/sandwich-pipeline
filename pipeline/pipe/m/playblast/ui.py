@@ -26,8 +26,8 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.db import DB
 from pipe.glui.dialogs import ButtonPair, MessageDialog
+from pipe.shotgrid import ShotGrid
 from pipe.playblast_artist import resolve_artist_display_name
 from pipe.playblast_naming import (
     resolve_versioned_playblast_basename,
@@ -47,7 +47,7 @@ from .playblaster import MPlayblaster
 from .struct import HudDefinition, MShotPlayblastConfig, SaveLocation, dummy_shot
 
 if TYPE_CHECKING:
-    from pipe.struct.db import Shot
+    from pipe.shotgrid import Shot
 
     from .struct import MPlayblastConfig
 
@@ -571,7 +571,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     @staticmethod
     def _resolve_pipeline_shot_context() -> Shot | None:
         try:
-            conn = DB.Get(DB_Config)
+            conn = ShotGrid.connect(DB_Config)
         except Exception:
             return None
 
@@ -584,7 +584,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             return None
 
         try:
-            return conn.get_shot_by_code(code)
+            return conn.get_shot(code=code)
         except Exception:
             return None
 
@@ -773,7 +773,6 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             movie_path=movie_path,
             version_name=version_name,
             description=self._shotgrid_upload_description() or None,
-            path_to_frames=str(movie_path),
             artist_display_name=artist_name,
             upload_target=upload_target,
             review_playlist_id=review_playlist_id,
@@ -845,7 +844,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             self._shot_range_value.setText("-")
             return
 
-        self._shot_code_value.setText(self._shot.code)
+        self._shot_code_value.setText(self._shot.code or "-")
         self._shot_range_value.setText(f"{self._shot.cut_in} - {self._shot.cut_out}")
 
     def _sync_custom_path_row_visibility(self) -> None:

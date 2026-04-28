@@ -14,10 +14,9 @@ import maya.cmds as mc
 from env_sg import DB_Config
 
 import pipe
-from pipe.db import DB
 from pipe.glui.dialogs import FilteredListDialog, MessageDialog
 from pipe.m.util import maintain_selection
-from pipe.struct.db import SGEntity
+from pipe.shotgrid import SGEntity, ShotGrid
 
 if TYPE_CHECKING:
     from Qt.QtWidgets import QWidget
@@ -28,7 +27,7 @@ log = logging.getLogger(__name__)
 class Publisher:
     """Class for publishing USDs out of Maya"""
 
-    _conn: DB
+    _conn: ShotGrid
     _dialog: FilteredListDialog
     _dialog_T: type[FilteredListDialog]
     _entity: SGEntity
@@ -41,7 +40,7 @@ class Publisher:
     def __init__(
         self, dialog: type[FilteredListDialog] | None = None, use_sg_entity: bool = True
     ) -> None:
-        self._conn = DB.Get(DB_Config)
+        self._conn = ShotGrid.connect(DB_Config)
         self._window = pipe.m.local.get_main_qt_window()
         self._system = platform.system()
         self._dialog_T = dialog or FilteredListDialog

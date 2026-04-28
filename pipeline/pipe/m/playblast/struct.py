@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, cast
 
-from pipe.struct.db import Shot
+from pipe.shotgrid import Shot
 
 if TYPE_CHECKING:
     from typing import Literal

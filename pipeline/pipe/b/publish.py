@@ -4,7 +4,7 @@ from env_sg import DB_Config
 
 from pipe.asset import paths_for_asset
 from pipe.b.register import blender_operator
-from pipe.db import DB
+from pipe.shotgrid import ShotGrid
 
 
 @blender_operator(add_to_menu=True)
@@ -15,10 +15,10 @@ class PIPELINE_OT_publish_asset(Operator):
     bl_label = "Publish Selected"
 
     def invoke(self, context: Context, event):
-        conn = DB.Get(DB_Config)
+        conn = ShotGrid.connect(DB_Config)
         open_asset_name = bpy.context.scene.pipeline_asset.name  # type: ignore
         if open_asset_name:
-            asset = conn.get_asset_by_name(open_asset_name)
+            asset = conn.get_asset(name=open_asset_name)
             paths = paths_for_asset(asset)
             self._target_path = paths.publish_source_model_usd.resolve()
 

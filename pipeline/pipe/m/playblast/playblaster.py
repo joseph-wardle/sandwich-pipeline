@@ -43,6 +43,7 @@ class MPlayblaster(Playblaster):
 
     def _write_images(self, path: str) -> None:
         """Maya implementation of playblasting image frames"""
+        cut_in, cut_out = self._shot.frame_range
         active_editor = self._resolve_active_editor()
         if active_editor:
             self._extra_kwargs["viewport_options"].update(
@@ -78,8 +79,8 @@ class MPlayblaster(Playblaster):
             width=1280,
             height=720,
             filename=path,
-            start_frame=(self._shot.cut_in - 5),
-            end_frame=(self._shot.cut_out + 5),
+            start_frame=(cut_in - 5),
+            end_frame=(cut_out + 5),
             format="image",
             compression="png",
             off_screen=True,

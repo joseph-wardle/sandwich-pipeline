@@ -92,14 +92,14 @@ class AnimPlayblastDialog(PlayblastDialog):
 
     def _hud_shot_label(self) -> str:
         if self._shot is not None:
-            return self._shot.code
+            return self._shot.code or "No shot code found"
         return "No shot code found"
 
     def _build_shot_playblast_config(self) -> MShotPlayblastConfig:
         if self._shot is None:
             raise ValueError("No pipeline shot context is available.")
 
-        shot_output_name = self._resolve_output_name(self._shot.code)
+        shot_output_name = self._resolve_output_name(self._shot.code or "")
         return MShotPlayblastConfig(
             camera=self._get_shot_camera_path(),
             shot=self._shot,

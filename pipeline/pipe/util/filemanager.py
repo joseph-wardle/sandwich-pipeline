@@ -3,20 +3,57 @@ from __future__ import annotations
 import logging
 from abc import ABCMeta, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from Qt import QtWidgets
 from shared.util import get_production_path
 
-from pipe.db import DBInterface
 from pipe.glui.dialogs import (
     FilteredListDialog,
     MessageDialog,
     MessageDialogCustomButtons,
 )
+from pipe.shotgrid import (
+    Asset,
+    Environment,
+    SGEntity,
+    Sequence,
+    Shot,
+    ShotGrid,
+)
 
-if TYPE_CHECKING:
-    from pipe.struct.db import SGEntity
+
+def _find_entities_for_type(
+    conn: ShotGrid, entity_type: type[SGEntity], *, roots_only: bool
+) -> list[SGEntity]:
+    """Run the right `find_*` for the given entity type.
+
+    `FileManager` is generic over entity type but the new `ShotGrid`
+    surface has named methods per entity, so we dispatch here.
+    """
+    if entity_type is Asset:
+        return list(conn.find_assets(roots_only=roots_only))
+    if entity_type is Environment:
+        return list(conn.find_environments())
+    if entity_type is Shot:
+        return list(conn.find_shots())
+    if entity_type is Sequence:
+        return list(conn.find_sequences())
+    raise TypeError(f"FileManager does not support entity type {entity_type.__name__}")
+
+
+def _get_entity_by_display_name(
+    conn: ShotGrid, entity_type: type[SGEntity], display_name: str
+) -> SGEntity:
+    """Resolve a single entity by its display name (a.k.a. ShotGrid ``code``)."""
+    if entity_type is Asset:
+        return conn.get_asset(display_name=display_name)
+    if entity_type is Environment:
+        return conn.get_environment(code=display_name)
+    if entity_type is Shot:
+        return conn.get_shot(code=display_name)
+    if entity_type is Sequence:
+        return conn.get_sequence(code=display_name)
+    raise TypeError(f"FileManager does not support entity type {entity_type.__name__}")
 
 
 log = logging.getLogger(__name__)
@@ -55,7 +92,7 @@ class OpenFileDialog(FilteredListDialog):
 
 
 class FileManager(metaclass=ABCMeta):
-    _conn: DBInterface
+    _conn: ShotGrid
     _entity_type: type[SGEntity]
     _main_window: QtWidgets.QWidget | None
     _versioning: bool
@@ -65,7 +102,7 @@ class FileManager(metaclass=ABCMeta):
 
     def __init__(
         self,
-        conn: DBInterface,
+        conn: ShotGrid,
         entity_type: type[SGEntity],
         main_window: QtWidgets.QWidget | None,
         *,
@@ -253,10 +290,12 @@ class FileManager(metaclass=ABCMeta):
         if not self._check_unsaved_changes():
             return
         if not self._override_entity_code:
-            entity_names = self._conn.get_entity_code_list(
-                self._entity_type,
-                sorted=True,
-                child_mode=DBInterface.ChildQueryMode.ROOTS,
+            entity_names = sorted(
+                e.code or ""
+                for e in _find_entities_for_type(
+                    self._conn, self._entity_type, roots_only=True
+                )
+                if e.code
             )
             open_file_dialog = OpenFileDialog(
                 self._main_window,
@@ -277,7 +316,7 @@ class FileManager(metaclass=ABCMeta):
         if not response:
             return
 
-        entity = self._conn.get_entity_by_code(self._entity_type, response)
+        entity = _get_entity_by_display_name(self._conn, self._entity_type, response)
 
         try:
             assert entity is not None

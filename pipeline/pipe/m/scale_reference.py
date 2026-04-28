@@ -16,8 +16,8 @@ from Qt.QtWidgets import (
 )
 
 from pipe.asset.paths import paths_for_asset
-from pipe.db import DB
 from pipe.glui.dialogs import ButtonPair, MessageDialog
+from pipe.shotgrid import ShotGrid
 from pipe.m.command import maya_command
 from pipe.m.local import get_main_qt_window
 from pipe.m.optionvar import StringOptionVar
@@ -117,21 +117,21 @@ class ScaleReferenceDialog(ButtonPair, QtWidgets.QDialog):
 
     def _load_characters(self) -> None:
         try:
-            conn = DB.Get(DB_Config)
-            # Fetch unsorted and zip together so ordering is guaranteed to match.
-            # See get_asset_name_list_by_type — it derives names from display names
-            # in the same iteration order when sorted=False.
-            raw_display = conn.get_asset_display_name_list_by_type(list(_ASSET_TYPES))
-            raw_names = conn.get_asset_name_list_by_type(list(_ASSET_TYPES))
+            conn = ShotGrid.connect(DB_Config)
+            characters = [
+                a
+                for asset_type in _ASSET_TYPES
+                for a in conn.find_assets(type=asset_type)
+            ]
         except Exception:
             log.exception("Could not load character list from ShotGrid.")
             self._show_status("Could not load characters from ShotGrid.")
             self.buttons.button(QDialogButtonBox.Ok).setEnabled(False)
             return
 
-        pairs = sorted(zip(raw_display, raw_names), key=lambda p: p[0])
-        self._asset_display_names = [p[0] for p in pairs]
-        self._asset_names = [p[1] for p in pairs]
+        characters.sort(key=lambda a: a.display_name)
+        self._asset_display_names = [a.display_name for a in characters]
+        self._asset_names = [a.name for a in characters]
 
         self._combo.clear()
         for display_name in self._asset_display_names:
@@ -160,8 +160,8 @@ class ScaleReferenceDialog(ButtonPair, QtWidgets.QDialog):
             return
 
         try:
-            conn = DB.Get(DB_Config)
-            asset = conn.get_asset_by_name(asset_name)
+            conn = ShotGrid.connect(DB_Config)
+            asset = conn.get_asset(name=asset_name)
         except Exception:
             log.exception("Could not resolve asset '%s' from ShotGrid.", asset_name)
             MessageDialog(self, f"Could not resolve asset '{asset_name}'.").exec_()

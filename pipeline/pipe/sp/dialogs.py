@@ -24,10 +24,9 @@ from shared.util import get_production_path, resolve_mapped_path
 from substance_painter.project import NormalMapFormat, ProjectWorkflow, TangentSpace
 
 from pipe.asset.paths import AssetPaths, paths_for_asset
-from pipe.db import DB
 from pipe.glui.dialogs import DialogFilteredList, FilteredListDialog
+from pipe.shotgrid import Asset, ShotGrid
 from pipe.sp.util import docs_link_html
-from pipe.struct.db import Asset
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -99,7 +98,7 @@ def project_template_path() -> Path:
 
 def _geo_variants_for_asset(asset: Asset) -> list[str]:
     """Return a sorted list of geometry variant names, defaulting to ["main"]."""
-    variants = sorted(v for v in asset.geometry_variants if v)
+    variants = sorted(v for v in (asset.geometry_variants or ()) if v)
     if variants:
         return [str(v) for v in variants]
     return ["main"]
@@ -113,11 +112,11 @@ def _geo_variants_for_asset(asset: Asset) -> list[str]:
 class SubstanceAssetDialog(FilteredListDialog):
     """Simple asset picker that shows the canonical textures path on selection."""
 
-    _conn: DB
+    _conn: ShotGrid
     _info_label: QtWidgets.QLabel
 
     def __init__(
-        self, parent: QtWidgets.QWidget | None, items: list[str], conn: DB
+        self, parent: QtWidgets.QWidget | None, items: list[str], conn: ShotGrid
     ) -> None:
         super().__init__(
             parent,
@@ -146,7 +145,7 @@ class SubstanceAssetDialog(FilteredListDialog):
             self._info_label.setText("Select an asset to see details.")
             return
 
-        asset = self._conn.get_asset_by_name(selected)
+        asset = self._conn.get_asset(name=selected)
         if not asset:
             self._info_label.setText("Could not resolve the selected asset.")
             return
@@ -163,7 +162,7 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
     ACTION_OPEN_EXISTING = "open_existing"
     ACTION_CREATE_PROJECT = "create_project"
 
-    _conn: DB
+    _conn: ShotGrid
     _info_label: QtWidgets.QLabel
     _action: str | None
     _asset: Asset | None
@@ -171,7 +170,7 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
     _geo_variant_dropdown: QtWidgets.QComboBox
 
     def __init__(
-        self, parent: QtWidgets.QWidget | None, items: list[str], conn: DB
+        self, parent: QtWidgets.QWidget | None, items: list[str], conn: ShotGrid
     ) -> None:
         super().__init__(parent)
         self._conn = conn
@@ -292,7 +291,7 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
             self._update_button_state()
             return
 
-        asset = self._conn.get_asset_by_name(selected)
+        asset = self._conn.get_asset(name=selected)
         if not asset:
             self._asset = None
             self._paths = None
@@ -324,8 +323,7 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         variant = self.get_selected_variant()
         status = "exists" if path.exists() else "missing"
         self._info_label.setText(
-            f"Geometry variant: {variant}\n"
-            f"Substance Painter project: {path} ({status})"
+            f"Geometry variant: {variant}\nSubstance Painter project: {path} ({status})"
         )
 
     def _update_button_state(self) -> None:

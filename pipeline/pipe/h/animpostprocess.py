@@ -1,65 +1,46 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
-
 import hou
 from env_sg import DB_Config
 
-from pipe.db import DB
-from pipe.struct.db import EnvironmentStub, SequenceStub
-
-if TYPE_CHECKING:
-    pass
+from pipe.shotgrid import ShotGrid
 
 
 class AnimPostProcessor:
-    _conn: DB
+    _conn: ShotGrid
 
     def __init__(self):
-        self._conn = DB(DB_Config)
+        self._conn = ShotGrid.connect(DB_Config)
 
     def run(self, shot_code: str) -> None:
         # Set up
-        shot = self._conn.get_shot_by_code(shot_code)
+        shot = self._conn.get_shot(code=shot_code)
         shot_path = shot.shot_path
-        hou.playbar.setFrameRange(shot.cut_in - 5, shot.cut_out + 5)
-        hou.playbar.setPlaybackRange(shot.cut_in - 5, shot.cut_out + 5)
+        cut_in, cut_out = shot.frame_range
+        hou.playbar.setFrameRange(cut_in - 5, cut_out + 5)
+        hou.playbar.setPlaybackRange(cut_in - 5, cut_out + 5)
 
         stage_ctx: hou.Node = hou.node("/stage")  # type: ignore
 
+        # Linked Environment refs from `shot.sets` / `shot.set` arrive partial;
+        # accessing `.environment_path` triggers the connection's lazy-fetch.
+        # If the shot has no env at all, fall through with [None] so we always
+        # build a single load-layer node — the post-process graph downstream
+        # expects exactly one input.
+        envs = shot.sets
+        if not envs:
+            sequence = shot.sequence
+            envs = [shot.set or (sequence.set if sequence else None)]
+
         load_layers = []
-        sets = shot.sets
-        if sets:
-            for env_stub in sets:
-                layout = self._conn.get_env_by_stub(env_stub)
-                load_layer = stage_ctx.createNode(
-                    "dbclark::main::Bobo_Load_Layers::1.0"
-                )
-                load_layer.parm("shot").set(f"$JOB/{shot_path}")  # type: ignore
-                for dep in ["cfx", "fx", "envfx", "flo", "lighting", "render"]:
-                    load_layer.parm(f"{dep}_enable").set(0)  # type: ignore
-                if layout and layout.environment_path:
-                    load_layer.parm("layout_path").set(  # type: ignore
-                        f"$JOB/{layout.environment_path}/main.usd"
-                    )
-                load_layers.append(load_layer)
-        else:
-            # Fallback to single set logic
-            env_stub = cast(
-                EnvironmentStub,
-                shot.set
-                or self._conn.get_sequence_by_stub(
-                    cast(SequenceStub, shot.sequence)
-                ).set,
-            )
-            layout = self._conn.get_env_by_stub(env_stub)
+        for env in envs:
             load_layer = stage_ctx.createNode("dbclark::main::Bobo_Load_Layers::1.0")
             load_layer.parm("shot").set(f"$JOB/{shot_path}")  # type: ignore
-            for dep in ["cfx", "fx", "envfx", "flo" "lighting", "render"]:
+            for dep in ["cfx", "fx", "envfx", "flo", "lighting", "render"]:
                 load_layer.parm(f"{dep}_enable").set(0)  # type: ignore
-            if layout and layout.environment_path:
+            if env and env.environment_path:
                 load_layer.parm("layout_path").set(  # type: ignore
-                    f"$JOB/{layout.environment_path}/main.usd"
+                    f"$JOB/{env.environment_path}/main.usd"
                 )
             load_layers.append(load_layer)
 

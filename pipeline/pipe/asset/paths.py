@@ -10,11 +10,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from shared.util import get_production_path
 
-from pipe.struct.db import Asset
+from pipe.shotgrid import Asset
 from pipe.versioning.model import DCC_HOUDINI, DCC_MAYA, DCC_SUBSTANCE
 from pipe.versioning.store import VERSION_MANIFEST_FILENAME
 
@@ -50,7 +49,7 @@ TEXTURE_NAME_TEMPLATE = "{material}.{variant}.{map}.{udim}"
 
 
 def asset_root_from_path(
-    asset_path: str | Path, production_root: Optional[Path] = None
+    asset_path: str | Path, production_root: Path | None = None
 ) -> Path:
     """Resolve a ShotGrid asset path to an absolute root."""
     root = Path(asset_path)
@@ -62,8 +61,8 @@ def asset_root_from_path(
 
 def asset_root(
     asset: Asset,
-    production_root: Optional[Path] = None,
-    fallback_name: Optional[str] = None,
+    production_root: Path | None = None,
+    fallback_name: str | None = None,
 ) -> Path:
     """Resolve an asset root from the canonical asset-relative path."""
     asset_path = getattr(asset, "asset_path", None)
@@ -195,7 +194,7 @@ class AssetPaths:
         )
 
 
-def paths_for_asset(asset: Asset, production_root: Optional[Path] = None) -> AssetPaths:
+def paths_for_asset(asset: Asset, production_root: Path | None = None) -> AssetPaths:
     return AssetPaths(asset_root(asset, production_root=production_root))
 
 

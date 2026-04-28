@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import attrs
 
 if TYPE_CHECKING:
-    from .db import Shot
+    from pipe.shotgrid import Shot
 
 from .util import JsonSerializable
 
@@ -36,9 +36,10 @@ class Timeline(JsonSerializable):  # ty: ignore[invalid-frozen-dataclass-subclas
     def from_shot(
         cls: type[Timeline], shot: Shot, preroll_duration: int = PREROLL_DURATION
     ) -> Timeline:
+        cut_in, cut_out = shot.frame_range
         return cls(
-            start=shot.cut_in - 5,
-            end=shot.cut_out + 5,
+            start=cut_in - 5,
+            end=cut_out + 5,
             preroll_duration=preroll_duration,
             head_duration=5,
             tail_duration=5,

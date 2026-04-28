@@ -12,9 +12,8 @@ from pipe.asset.version_adapter import (
     asset_owner_for,
     houdini_asset_builder_stream,
 )
-from pipe.db import DBInterface
 from pipe.glui.dialogs import FilteredListDialog, MessageDialog
-from pipe.struct.db import Asset, SGEntity
+from pipe.shotgrid import Asset, SGEntity
 from pipe.versioning import VersionStreamSpec
 
 from .. import nodelayouts
@@ -52,10 +51,8 @@ class HAssetFileManager(HFileManager):
             log.exception("Failed to ensure SKD Component Builder for %s", asset_name)
 
     def _prompt_asset_selection(self) -> Asset | None:
-        asset_codes = self._conn.get_entity_code_list(
-            Asset,
-            sorted=True,
-            child_mode=DBInterface.ChildQueryMode.ROOTS,
+        asset_codes = sorted(
+            a.display_name for a in self._conn.find_assets(roots_only=True)
         )
         dialog = FilteredListDialog(
             self._main_window,
@@ -72,13 +69,9 @@ class HAssetFileManager(HFileManager):
             return None
 
         try:
-            entity = self._conn.get_entity_by_code(Asset, selection)
+            return self._conn.get_asset(display_name=selection)
         except Exception:
             log.exception("Failed to resolve selected asset: %s", selection)
-            entity = None
-
-        if isinstance(entity, Asset):
-            return entity
 
         MessageDialog(
             self._main_window,
@@ -95,16 +88,13 @@ class HAssetFileManager(HFileManager):
 
         if context_asset:
             for resolver in (
-                lambda: self._conn.get_entity_by_code(Asset, context_asset),
-                lambda: self._conn.get_asset_by_display_name(context_asset),
-                lambda: self._conn.get_asset_by_name(context_asset),
+                lambda: self._conn.get_asset(display_name=context_asset),
+                lambda: self._conn.get_asset(name=context_asset),
             ):
                 try:
-                    resolved = resolver()
+                    return resolver()
                 except Exception:
                     continue
-                if isinstance(resolved, Asset):
-                    return resolved
 
         asset_root = hip_path.parent
         if asset_root.name == BACKUP_DIRNAME:
@@ -116,7 +106,7 @@ class HAssetFileManager(HFileManager):
             return None
 
         try:
-            return self._conn.get_asset_by_attr("path", rel_asset_path.as_posix())
+            return self._conn.get_asset(path=rel_asset_path.as_posix())
         except Exception:
             return None
 

@@ -9,8 +9,7 @@ from typing import Any, cast
 import hou
 from env_sg import DB_Config
 
-from pipe.db import DB
-from pipe.struct.db import Asset
+from pipe.shotgrid import Asset, ShotGrid
 from pipe.struct.material import MaterialInfo
 
 from . import variants
@@ -955,13 +954,13 @@ class MatlibNodeBuilder:
 
 
 class MatlibManager:
-    _conn: DB
+    _conn: ShotGrid
     _bound_node: hou.LopNode | None
 
     def __init__(
         self, node: hou.LopNode | None = None, *, init_defaults: bool = False
     ) -> None:
-        self._conn = DB.Get(DB_Config)
+        self._conn = ShotGrid.connect(DB_Config)
         self._bound_node = node
         if node and init_defaults:
             try:
@@ -980,7 +979,7 @@ class MatlibManager:
     @property
     def _asset(self) -> Asset:
         asset_name = str(hou.contextOption("ASSET"))
-        return self._conn.get_asset_by_name(asset_name)
+        return self._conn.get_asset(name=asset_name)
 
     def _get_asset_or_none(self) -> Asset | None:
         try:
@@ -1019,7 +1018,7 @@ class MatlibManager:
 
         asset = self._get_asset_or_none()
         variants = (
-            sorted((v for v in asset.geometry_variants if v), key=str.casefold)
+            sorted((v for v in (asset.geometry_variants or ()) if v), key=str.casefold)
             if asset
             else []
         )
@@ -1033,7 +1032,7 @@ class MatlibManager:
 
         asset = self._get_asset_or_none()
         variants = (
-            sorted((v for v in asset.material_variants if v), key=str.casefold)
+            sorted((v for v in (asset.material_variants or ()) if v), key=str.casefold)
             if asset
             else []
         )
@@ -1085,7 +1084,7 @@ class MatlibManager:
     def get_geo_variant_list(self) -> list[str]:
         asset = self._get_asset_or_none()
         variants = (
-            sorted((v for v in asset.geometry_variants if v), key=str.casefold)
+            sorted((v for v in (asset.geometry_variants or ()) if v), key=str.casefold)
             if asset
             else []
         )
@@ -1096,7 +1095,7 @@ class MatlibManager:
     def get_mat_variant_list(self) -> list[str]:
         asset = self._get_asset_or_none()
         variants = (
-            sorted((v for v in asset.material_variants if v), key=str.casefold)
+            sorted((v for v in (asset.material_variants or ()) if v), key=str.casefold)
             if asset
             else []
         )

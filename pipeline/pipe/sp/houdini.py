@@ -23,7 +23,7 @@ from env import Executables
 from software.houdini.dcc import HoudiniDCC
 
 from pipe.asset.paths import paths_for_asset
-from pipe.struct.db import Asset
+from pipe.shotgrid import Asset
 
 log = logging.getLogger(__name__)
 

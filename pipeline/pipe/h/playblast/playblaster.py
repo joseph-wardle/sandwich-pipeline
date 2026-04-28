@@ -12,7 +12,7 @@ from pipe.util import Playblaster
 from .constants import DEFAULT_RESOLUTION
 
 if TYPE_CHECKING:
-    from pipe.struct.db import Shot
+    from pipe.shotgrid import Shot
 
 log = logging.getLogger(__name__)
 
@@ -76,8 +76,9 @@ class HPlayblaster(Playblaster):
         return
 
     def _write_images(self, path: str) -> None:
-        start_frame = int(self._shot.cut_in) - self._tails[0]
-        end_frame = int(self._shot.cut_out) + self._tails[1]
+        cut_in, cut_out = self._shot.frame_range
+        start_frame = cut_in - self._tails[0]
+        end_frame = cut_out + self._tails[1]
 
         scene_viewer, viewport = _scene_viewer_and_viewport()
         flip = scene_viewer.flipbookSettings().stash()

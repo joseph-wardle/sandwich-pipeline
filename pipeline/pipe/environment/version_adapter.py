@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pipe.struct.db import Environment
+from pipe.shotgrid import Environment
 from pipe.versioning import (
     VersionOwner,
     VersionStreamSpec,

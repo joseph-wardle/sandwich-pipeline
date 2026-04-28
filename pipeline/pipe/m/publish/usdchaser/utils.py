@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 from shared.util import get_production_path
 
-from pipe.struct.db import Asset
+from pipe.shotgrid import Asset
 from pipe.struct.timeline import Timeline
 
 

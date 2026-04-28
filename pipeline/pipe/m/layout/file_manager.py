@@ -11,9 +11,8 @@ from mayaUsd.lib import proxyAccessor as pa
 from pxr import Gf, Usd, UsdGeom
 from shared.util import get_production_path
 
-from pipe.db import DB
 from pipe.m.local import get_main_qt_window
-from pipe.struct.db import Environment, SGEntity
+from pipe.shotgrid import Environment, SGEntity, ShotGrid
 from pipe.util import FileManager, log_errors
 
 from .publish import MLayoutPublisher
@@ -27,7 +26,7 @@ class MLayoutFileManager(FileManager):
     set: Environment
 
     def __init__(self, **kwargs) -> None:
-        conn = DB.Get(DB_Config)
+        conn = ShotGrid.connect(DB_Config)
         window = get_main_qt_window()
         super().__init__(conn, Environment, window, versioning=True, **kwargs)
 

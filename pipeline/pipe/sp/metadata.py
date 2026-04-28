@@ -29,16 +29,15 @@ from __future__ import annotations
 import datetime
 import logging
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import substance_painter as sp
 from shared.util import get_production_path
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
 from pipe.asset.paths import DCC_SUBSTANCE
-from pipe.db import DB
+from pipe.shotgrid import Asset, ShotGrid, build_asset_path
 from pipe.sp.util import texture_set_name
-from pipe.struct.db import Asset, build_asset_path
 
 log = logging.getLogger(__name__)
 
@@ -174,11 +173,11 @@ def _utc_now_iso() -> str:
 
 def _build_asset_selection_payload(
     asset_map: dict[str, str],
-    last_asset: Optional[str] = None,
-    asset_id: Optional[int] = None,
-    asset_path: Optional[str] = None,
-    asset_subdirectory: Optional[str] = None,
-    geo_variant: Optional[str] = None,
+    last_asset: str | None = None,
+    asset_id: int | None = None,
+    asset_path: str | None = None,
+    asset_subdirectory: str | None = None,
+    geo_variant: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the metadata payload dict from the given fields."""
     payload: dict[str, Any] = {
@@ -203,11 +202,11 @@ def _build_asset_selection_payload(
 def store_asset_selection_metadata(
     asset_map: dict[str, str],
     *,
-    last_asset: Optional[str] = None,
-    asset_id: Optional[int] = None,
-    asset_path: Optional[str] = None,
-    asset_subdirectory: Optional[str] = None,
-    geo_variant: Optional[str] = None,
+    last_asset: str | None = None,
+    asset_id: int | None = None,
+    asset_path: str | None = None,
+    asset_subdirectory: str | None = None,
+    geo_variant: str | None = None,
 ) -> None:
     """Persist a texture-set-to-asset mapping in the project metadata.
 
@@ -268,7 +267,7 @@ def store_asset_selection_metadata(
 # ---------------------------------------------------------------------------
 
 
-def get_active_asset_from_project(conn: DB) -> Asset | None:
+def get_active_asset_from_project(conn: ShotGrid) -> Asset | None:
     """Resolve the pipeline asset associated with the current project.
 
     Tries several strategies in order: asset ID, asset path, display name,
@@ -286,7 +285,7 @@ def get_active_asset_from_project(conn: DB) -> Asset | None:
     asset_id = selection.get("asset_id")
     if asset_id:
         try:
-            return conn.get_asset_by_id(asset_id)
+            return conn.get_asset(id=asset_id)
         except Exception as exc:
             log.warning(f"Failed to resolve asset by id from metadata: {exc}")
 
@@ -294,7 +293,7 @@ def get_active_asset_from_project(conn: DB) -> Asset | None:
     asset_path = selection.get("asset_path")
     if asset_path:
         try:
-            return conn.get_asset_by_attr("path", asset_path)
+            return conn.get_asset(path=asset_path)
         except Exception as exc:
             log.warning(f"Failed to resolve asset by path from metadata: {exc}")
 
@@ -313,26 +312,24 @@ def get_active_asset_from_project(conn: DB) -> Asset | None:
 
     if asset_subdirectory is not None:
         try:
-            return conn.get_asset_by_attr(
-                "path", build_asset_path(asset_name, asset_subdirectory)
-            )
+            return conn.get_asset(path=build_asset_path(asset_name, asset_subdirectory))
         except Exception:
             pass
 
     try:
-        return conn.get_asset_by_display_name(asset_name)
+        return conn.get_asset(display_name=asset_name)
     except Exception:
         pass
 
     try:
-        return conn.get_asset_by_name(asset_name)
+        return conn.get_asset(name=asset_name)
     except Exception as exc:
         log.warning(f"Failed to resolve asset from project metadata: {exc}")
 
     return _asset_from_project_path(conn)
 
 
-def _asset_from_project_path(conn: DB) -> Asset | None:
+def _asset_from_project_path(conn: ShotGrid) -> Asset | None:
     """Last-resort: infer the asset from the project's location on disk."""
     project_path = current_project_path()
     if not project_path:
@@ -350,7 +347,7 @@ def _asset_from_project_path(conn: DB) -> Asset | None:
 
     rel_path_str = rel_asset_path.as_posix()
     try:
-        return conn.get_asset_by_attr("path", rel_path_str)
+        return conn.get_asset(path=rel_path_str)
     except Exception as exc:
         log.warning(f"Failed to resolve asset from project path: {exc}")
         return None
@@ -362,7 +359,7 @@ def _asset_from_project_path(conn: DB) -> Asset | None:
 
 
 def store_asset_metadata_for_project(
-    asset: Asset, *, geo_variant: Optional[str] = None
+    asset: Asset, *, geo_variant: str | None = None
 ) -> None:
     """Map all current texture sets to a single asset and persist to metadata."""
     if not sp.project.is_open():
@@ -388,7 +385,7 @@ def store_asset_metadata_for_project(
 
 
 def store_asset_metadata_when_ready(
-    asset: Asset, *, geo_variant: Optional[str] = None
+    asset: Asset, *, geo_variant: str | None = None
 ) -> None:
     """Defer :func:`store_asset_metadata_for_project` until the project is editable."""
     run_when_project_editable(

@@ -20,8 +20,7 @@ from pipe.playblast_shotgrid import (
 from .paths import build_edit_output_directory
 
 if TYPE_CHECKING:
-    from pipe.db import DB
-    from pipe.struct.db import Shot
+    from pipe.shotgrid import Shot, ShotGrid
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +51,7 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
 
     CURRENT_VIEWPORT_CAMERA_TOKEN = "__current_viewport_camera__"
 
-    _conn: DB
+    _conn: ShotGrid
     _custom_camera: QtWidgets.QComboBox
     _custom_folder_field: QtWidgets.QLineEdit
     _custom_folder_row: QtWidgets.QWidget
@@ -84,7 +83,7 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
     def __init__(
         self,
         parent: QtWidgets.QWidget | None,
-        conn: "DB",
+        conn: "ShotGrid",
         default_shot_code: str | None = None,
     ) -> None:
         super().__init__(parent)
@@ -541,7 +540,7 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         if not shot_code:
             return None
         try:
-            return self._conn.get_shot_by_code(shot_code)
+            return self._conn.get_shot(code=shot_code)
         except Exception:
             return None
 
@@ -583,7 +582,7 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
             self._shot_code_value.setText(self._default_shot_code or "-")
             self._shot_range_value.setText("-")
         else:
-            self._shot_code_value.setText(self._shot.code)
+            self._shot_code_value.setText(self._shot.code or "-")
             self._shot_range_value.setText(
                 f"{self._shot.cut_in} - {self._shot.cut_out}"
             )

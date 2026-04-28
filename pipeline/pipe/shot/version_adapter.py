@@ -11,7 +11,7 @@ from pathlib import Path
 
 from shared.util import get_production_path
 
-from pipe.struct.db import Shot
+from pipe.shotgrid import Shot
 from pipe.versioning import (
     VersionOwner,
     VersionSnapshotMember,
@@ -30,7 +30,7 @@ def shot_root_path(shot: Shot) -> Path:
 def shot_owner_for(shot: Shot) -> VersionOwner:
     return VersionOwner(
         kind="shot",
-        code=shot.code,
+        code=shot.code or "",
         display_name=shot.code,
         path=shot.shot_path,
         id=shot.id,
@@ -52,7 +52,7 @@ def shot_stream(
     resolved_dcc = _normalize_text(dcc) or "unknown"
     resolved_stream_name = _normalize_text(stream_name) or stem
     resolved_subpath = _normalize_text(subpath) or ""
-    resolved_stem = _normalize_text(stem) or shot.code
+    resolved_stem = _normalize_text(stem) or shot.code or ""
     resolved_ext = (_normalize_text(ext) or "").lstrip(".") or "dat"
     root_path = shot_root_path(shot)
     stream_key = stream_key_for(resolved_dcc, resolved_stream_name, resolved_ext)
@@ -85,7 +85,7 @@ def maya_anim_stream(
         DCC_MAYA,
         stream_name="anim",
         subpath="anim",
-        stem=shot.code,
+        stem=shot.code or "",
         ext="mb",
         owner=owner,
         label="Animation Scene",
@@ -103,7 +103,7 @@ def maya_rlo_stream(
         DCC_MAYA,
         stream_name="rlo",
         subpath="rlo",
-        stem=shot.code,
+        stem=shot.code or "",
         ext="mb",
         owner=owner,
         label="RLO Scene",

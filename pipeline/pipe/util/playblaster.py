@@ -16,7 +16,7 @@ import ffmpeg  # type: ignore[import-untyped]
 if TYPE_CHECKING:
     from typing import Any, Self
 
-    from pipe.struct.db import Shot
+    from pipe.shotgrid import Shot
 
 
 log = logging.getLogger(__name__)
@@ -248,14 +248,15 @@ class Playblaster(metaclass=ABCMeta):
 
         tempdir = Path(os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))).resolve()
 
-        FILENAME = "bobo_pb_temp." + self._shot.code
+        FILENAME = "bobo_pb_temp." + (self._shot.code or "")
 
         # remove any old playblasts
         for p in tempdir.glob(FILENAME + "*"):
             p.unlink()
 
-        frame_start = int(self._shot.cut_in) - tails[0]
-        frame_end = int(self._shot.cut_out) + tails[1]
+        cut_in, cut_out = self._shot.frame_range
+        frame_start = cut_in - tails[0]
+        frame_end = cut_out + tails[1]
         playblast_action_id = self._new_playblast_action_id()
 
         # do the playblast
