@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
+from shared.util import get_edit_path
+
 log = logging.getLogger(__name__)
 
 PLAYBLAST_VERSION_PADDING = 3
@@ -82,6 +84,13 @@ def resolve_versioned_playblast_basename(
     )
 
 
+def build_edit_output_directory(
+    department: str, timestamp: datetime | None = None
+) -> Path:
+    """Return the dated edit-bound output directory for a given department."""
+    return get_edit_path() / department / playblast_date_folder(timestamp)
+
+
 def _playblast_version_pattern(prefix: str, day_token: str) -> re.Pattern[str]:
     escaped_prefix = re.escape(prefix)
     escaped_day_token = re.escape(day_token)
@@ -110,9 +119,20 @@ def _versions_in_directory(directory: Path, pattern: re.Pattern[str]) -> list[in
                 continue
             try:
                 versions.append(int(match.group("version")))
-            except Exception:
+            except ValueError:
                 continue
-    except Exception:
+    except OSError:
         log.warning("Could not scan playblast versions in %s", directory, exc_info=True)
 
     return versions
+
+
+__all__ = [
+    "PLAYBLAST_VERSION_PADDING",
+    "build_edit_output_directory",
+    "next_playblast_version",
+    "playblast_date_folder",
+    "playblast_output_basename",
+    "playblast_version_token",
+    "resolve_versioned_playblast_basename",
+]

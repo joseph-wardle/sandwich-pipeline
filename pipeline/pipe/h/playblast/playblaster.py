@@ -7,9 +7,8 @@ from typing import TYPE_CHECKING, Iterator, cast
 
 import hou
 
-from pipe.util import Playblaster
-
-from .constants import DEFAULT_RESOLUTION
+from pipe.h.playblast.config import DEFAULT_RESOLUTION
+from pipe.playblast import FFmpegPreset, Playblaster
 
 if TYPE_CHECKING:
     from pipe.shotgrid import Shot
@@ -46,7 +45,7 @@ _GUIDES_TO_DISABLE = (
 
 class HPlayblaster(Playblaster):
     _camera_path: str | None
-    _out_paths: dict[Playblaster.PRESET, list[Path | str]]
+    _out_paths: dict[FFmpegPreset, list[Path | str]]
     _tails: tuple[int, int]
 
     def __init__(self) -> None:
@@ -62,7 +61,7 @@ class HPlayblaster(Playblaster):
     def configure(
         self,
         shot: Shot,
-        out_paths: dict[Playblaster.PRESET, list[Path | str]],
+        out_paths: dict[FFmpegPreset, list[Path | str]],
         tails: tuple[int, int] = (0, 0),
         camera_path: str | None = None,
     ) -> "HPlayblaster":

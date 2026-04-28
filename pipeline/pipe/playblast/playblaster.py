@@ -2,19 +2,21 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
 from abc import ABCMeta, abstractmethod
-from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import ffmpeg  # type: ignore[import-untyped]
 
+from pipe.playblast.presets import FFmpegPreset
+
 if TYPE_CHECKING:
-    from typing import Any, Self
+    from typing import Self
 
     from pipe.shotgrid import Shot
 
@@ -22,61 +24,18 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class FFMpegPreset:
-    ext: str
-    out_kwargs: dict[str, Any]
-
-    def __hash__(self):
-        return hash(frozenset(self.out_kwargs.items()))
-
-
 class Playblaster(metaclass=ABCMeta):
-    """Parent class for creating playblasters. Uses FFmpeg to encode videos"""
+    """Cross-DCC base for playblasters. Uses FFmpeg to encode videos.
+
+    Subclasses implement `_write_images` to dump a PNG sequence; this base
+    handles encoding via FFmpeg, copying to multiple output paths, post-
+    processing for VLC compatibility, and emitting telemetry.
+    """
 
     _shot: Shot
     _in_context: bool
 
     FR = 24
-
-    class PRESET(FFMpegPreset, Enum):
-        EDIT_SQ = (
-            "mov",
-            {
-                "vcodec": "dnxhd",
-                "pix_fmt": "yuv422p",
-                "vprofile": "dnxhr_sq",
-                # this number comes from Avid's table in the DNxHD whitepaper
-                "video_bitrate": "124M",
-            },
-        )
-        EDIT_HQX = (
-            "mov",
-            {
-                "vcodec": "dnxhd",
-                "pix_fmt": "yuv422p10le",
-                "vprofile": "dnxhr_hqx",
-                "video_bitrate": "188M",
-            },
-        )
-        WEB = (
-            "mp4",
-            {
-                "vcodec": "libx264",
-                "preset": "veryslow",
-                "tune": "animation",
-                "crf": 20,
-            },
-        )
-        H265 = (
-            "mp4",
-            {
-                "vcodec": "libx265",
-                "preset": "slow",
-                "crf": 23,
-                "pix_fmt": "yuv420p",
-            },
-        )
 
     def __init__(self) -> None:
         pass
@@ -144,7 +103,7 @@ class Playblaster(metaclass=ABCMeta):
         try:
             if path.is_file():
                 return int(path.stat().st_size)
-        except Exception:
+        except OSError:
             pass
         return 0
 
@@ -236,7 +195,7 @@ class Playblaster(metaclass=ABCMeta):
 
     def _do_playblast(
         self,
-        out_paths: dict[PRESET, list[Path | str]] | None = None,
+        out_paths: dict[FFmpegPreset, list[Path | str]] | None = None,
         tails: tuple[int, int] = (0, 0),
     ) -> None:
         if not self._in_context:
@@ -280,8 +239,6 @@ class Playblaster(metaclass=ABCMeta):
             raise
 
         # 0 padding on negative numbers
-        import re
-
         pattern = re.compile(rf"{re.escape(FILENAME)}\.(\-?\d+)\.png$")
         for p in tempdir.glob(f"{FILENAME}.*.png"):
             match = pattern.match(p.name)
@@ -341,13 +298,12 @@ class Playblaster(metaclass=ABCMeta):
             # copy video out of tempdir
             final_paths: list[Path] = []
 
-            # copy video out of tempdir
             try:
                 for path in (Path(str(p) + "." + preset.ext) for p in paths):
                     if not path.parent.exists():
                         path.parent.mkdir(mode=0o770, parents=True)
                     shutil.copyfile(out_filename, path)
-                    final_paths.append(path)  # <-- collect final output path
+                    final_paths.append(path)
             except Exception as exc:
                 duration_ms = int((time.perf_counter() - preset_started_at) * 1000)
                 self._emit_playblast_event(
@@ -388,8 +344,6 @@ class Playblaster(metaclass=ABCMeta):
             for p in tempdir.glob(FILENAME + "*"):
                 p.unlink()
 
-        #
-
     @abstractmethod
     def playblast(self) -> None:
         """Function to be called by the user to trigger a playblast.
@@ -401,3 +355,6 @@ class Playblaster(metaclass=ABCMeta):
             >>>         super()._do_playblast([filepath])
         """
         pass
+
+
+__all__ = ["Playblaster"]

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
 from pipe.shotgrid import ShotGrid, ShotGridError, Task, User
 
@@ -47,23 +47,6 @@ class AssetPlayblastVersionUploadRequest:
     upload_target: str = UPLOAD_TARGET_VERSION_ONLY
     review_playlist_id: int | None = None
     extra_version_fields: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class PlayblastReviewPlaylistOption:
-    """Normalized review playlist option for UI selection lists."""
-
-    playlist_id: int
-    code: str
-    updated_at: Any | None = None
-    created_at: Any | None = None
-
-    @property
-    def display_name(self) -> str:
-        code = self.code.strip()
-        if code:
-            return code
-        return f"Playlist {self.playlist_id}"
 
 
 @dataclass(frozen=True)
@@ -124,57 +107,6 @@ class _NormalizedAssetUploadRequest:
     upload_target: str
     review_playlist_id: int | None
     extra_version_fields: dict[str, Any]
-
-
-def default_version_name_from_movie_path(movie_path: Path | str) -> str:
-    """Derive a default Version code from the playblast filename stem."""
-    return Path(str(movie_path)).stem.strip()
-
-
-def resolve_preferred_upload_movie_path(
-    output_paths: Iterable[Path | str],
-    *,
-    preferred_paths: Iterable[Path | str] | None = None,
-) -> Path | None:
-    """Resolve a deterministic movie path for ShotGrid upload.
-
-    Selection order:
-    1) first valid file in `preferred_paths`
-    2) first valid file in `output_paths`
-
-    A valid file exists on disk and is non-empty.
-    """
-
-    normalized_outputs = _normalized_unique_paths(output_paths)
-    normalized_preferred = _normalized_unique_paths(preferred_paths or [])
-
-    for path in normalized_preferred:
-        if _is_valid_movie_file(path):
-            return path
-
-    for path in normalized_outputs:
-        if _is_valid_movie_file(path):
-            return path
-
-    return None
-
-
-def list_recent_review_playlists(
-    *,
-    conn: ShotGrid | None = None,
-    limit: int = 10,
-) -> tuple[PlayblastReviewPlaylistOption, ...]:
-    """Return recent review playlists as UI-friendly options."""
-    connection = conn or _default_db_connection()
-    return tuple(
-        PlayblastReviewPlaylistOption(
-            playlist_id=playlist.id,
-            code=(playlist.code or "").strip(),
-            updated_at=playlist.updated_at,
-            created_at=playlist.created_at,
-        )
-        for playlist in connection.find_recent_playlists(limit=limit)
-    )
 
 
 def upload_playblast_version(
@@ -588,25 +520,6 @@ def _normalize_asset_request(
     )
 
 
-def _normalized_unique_paths(paths: Iterable[Path | str]) -> list[Path]:
-    normalized_paths: list[Path] = []
-    seen_paths: set[Path] = set()
-    for raw_path in paths:
-        path = Path(str(raw_path)).expanduser().resolve()
-        if path in seen_paths:
-            continue
-        seen_paths.add(path)
-        normalized_paths.append(path)
-    return normalized_paths
-
-
-def _is_valid_movie_file(path: Path) -> bool:
-    try:
-        return path.exists() and path.is_file() and path.stat().st_size > 0
-    except Exception:
-        return False
-
-
 def _normalize_upload_target(value: Any) -> str | None:
     normalized = str(value).strip().lower()
     if normalized in _SUPPORTED_UPLOAD_TARGETS:
@@ -626,7 +539,7 @@ def _optional_positive_int(value: Any) -> int | None:
         return None
     try:
         parsed = int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
     if parsed < 1:
         return None
@@ -761,16 +674,12 @@ def _failed_asset_result(
 __all__ = [
     "AssetPlayblastVersionUploadRequest",
     "AssetPlayblastVersionUploadResult",
-    "PlayblastReviewPlaylistOption",
     "PlayblastVersionUploadRequest",
     "PlayblastVersionUploadResult",
     "UPLOAD_STATUS_FAILED",
     "UPLOAD_STATUS_SUCCESS",
     "UPLOAD_TARGET_REVIEW",
     "UPLOAD_TARGET_VERSION_ONLY",
-    "default_version_name_from_movie_path",
-    "list_recent_review_playlists",
-    "resolve_preferred_upload_movie_path",
     "upload_asset_playblast_version",
     "upload_playblast_version",
 ]

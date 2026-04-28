@@ -10,14 +10,15 @@ from Qt import QtCore, QtWidgets
 from shared.util import get_edit_path
 
 from pipe.glui.dialogs import DialogButtons
-from pipe.playblast_naming import resolve_versioned_playblast_basename
-from pipe.playblast_shotgrid import (
+from pipe.playblast.naming import (
+    build_edit_output_directory,
+    resolve_versioned_playblast_basename,
+)
+from pipe.playblast.shotgrid import (
     UPLOAD_TARGET_REVIEW,
     UPLOAD_TARGET_VERSION_ONLY,
     list_recent_review_playlists,
 )
-
-from .paths import build_edit_output_directory
 
 if TYPE_CHECKING:
     from pipe.shotgrid import Shot, ShotGrid

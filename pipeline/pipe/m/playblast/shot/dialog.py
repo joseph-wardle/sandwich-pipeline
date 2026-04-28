@@ -27,12 +27,16 @@ from Qt.QtWidgets import (
 )
 
 from pipe.glui.dialogs import ButtonPair, MessageDialog
-from pipe.shotgrid import ShotGrid
-from pipe.playblast_artist import resolve_artist_display_name
-from pipe.playblast_naming import (
-    resolve_versioned_playblast_basename,
+from pipe.m.playblast.hud import HudDefinition
+from pipe.m.playblast.shot.config import (
+    MShotPlayblastConfig,
+    SaveLocation,
+    dummy_shot,
 )
-from pipe.playblast_shotgrid import (
+from pipe.m.playblast.shot.playblaster import MPlayblaster
+from pipe.playblast import FFmpegPreset
+from pipe.playblast.naming import resolve_versioned_playblast_basename
+from pipe.playblast.shotgrid import (
     UPLOAD_TARGET_REVIEW,
     UPLOAD_TARGET_VERSION_ONLY,
     PlayblastVersionUploadRequest,
@@ -41,15 +45,12 @@ from pipe.playblast_shotgrid import (
     resolve_preferred_upload_movie_path,
     upload_playblast_version,
 )
-from pipe.util import Playblaster
-
-from .playblaster import MPlayblaster
-from .struct import HudDefinition, MShotPlayblastConfig, SaveLocation, dummy_shot
+from pipe.shotgrid import ShotGrid
+from shared.users import resolve_artist_display_name
 
 if TYPE_CHECKING:
+    from pipe.m.playblast.shot.config import MPlayblastConfig
     from pipe.shotgrid import Shot
-
-    from .struct import MPlayblastConfig
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ class ClickableQLabel(QLabel):
         super().mousePressEvent(event)
 
 
-class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
+class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     """Shared Maya playblast dialog using a Tabbed interface.
 
     The dialog is intentionally organized into linear sections so artists can
@@ -112,11 +113,11 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     playblaster = MPlayblaster()
 
     class SAVE_LOCS:
-        CUSTOM = SaveLocation("Custom Folder", "", Playblaster.PRESET.WEB)
+        CUSTOM = SaveLocation("Custom Folder", "", FFmpegPreset.WEB)
         CURRENT = SaveLocation(
             "Current Folder",
             lambda: Path(str(mc.file(query=True, sceneName=True) or ".")).parent,
-            Playblaster.PRESET.WEB,
+            FFmpegPreset.WEB,
         )
 
     class MAYA_HUDS:
@@ -637,8 +638,8 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
 
     def _paths_for_filename(
         self, filename: str
-    ) -> dict[Playblaster.PRESET, list[str | Path]]:
-        paths: dict[Playblaster.PRESET, list[str | Path]] = defaultdict(list)
+    ) -> dict[FFmpegPreset, list[str | Path]]:
+        paths: dict[FFmpegPreset, list[str | Path]] = defaultdict(list)
         for location in self._selected_destination_locations():
             destination_dir = self._resolved_destination_path(location).strip()
             if not destination_dir:
@@ -649,7 +650,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     @staticmethod
     def _final_movie_path_for_base(
         output_base: str | Path,
-        preset: Playblaster.PRESET,
+        preset: FFmpegPreset,
     ) -> Path:
         return Path(str(output_base) + f".{preset.ext}")
 

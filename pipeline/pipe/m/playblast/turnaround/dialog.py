@@ -23,9 +23,16 @@ from Qt.QtWidgets import (
 
 from pipe.glui.dialogs import ButtonPair, MessageDialog
 from pipe.m.assetfile import read_asset_metadata
-from pipe.playblast_artist import resolve_artist_display_name
-from pipe.playblast_naming import resolve_versioned_playblast_basename
-from pipe.playblast_shotgrid import (
+from pipe.m.playblast.shot.config import SaveLocation
+from pipe.m.playblast.turnaround.config import (
+    DEFAULT_FRAMES_PER_PASS,
+    TurnaroundPlayblastConfig,
+    resolve_turnaround_review_roots,
+)
+from pipe.m.playblast.turnaround.playblaster import MTurnaroundPlayblaster
+from pipe.playblast import FFmpegPreset
+from pipe.playblast.naming import resolve_versioned_playblast_basename
+from pipe.playblast.shotgrid import (
     UPLOAD_TARGET_REVIEW,
     UPLOAD_TARGET_VERSION_ONLY,
     AssetPlayblastVersionUploadRequest,
@@ -35,15 +42,7 @@ from pipe.playblast_shotgrid import (
     upload_asset_playblast_version,
 )
 from pipe.shotgrid import normalize_display_name
-from pipe.util import Playblaster
-
-from .struct import SaveLocation
-from .turnaround_playblaster import (
-    DEFAULT_FRAMES_PER_PASS,
-    TurnaroundPlayblastConfig,
-    TurnaroundPlayblaster,
-    resolve_turnaround_review_roots,
-)
+from shared.users import resolve_artist_display_name
 
 log = logging.getLogger(__name__)
 
@@ -65,15 +64,15 @@ def _scene_render_directory() -> str | Path:
 class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
     """Small Maya UI for asset review turnarounds."""
 
-    playblaster = TurnaroundPlayblaster()
+    playblaster = MTurnaroundPlayblaster()
 
     class SAVE_LOCS:
         CURRENT = SaveLocation(
             "Render Folder",
             _scene_render_directory,
-            Playblaster.PRESET.WEB,
+            FFmpegPreset.WEB,
         )
-        CUSTOM = SaveLocation("Custom Folder", "", Playblaster.PRESET.WEB)
+        CUSTOM = SaveLocation("Custom Folder", "", FFmpegPreset.WEB)
 
     def __init__(self, parent: QWidget | None) -> None:
         super().__init__(parent)
@@ -371,8 +370,8 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
 
     def _paths_for_filename(
         self, filename: str
-    ) -> dict[Playblaster.PRESET, list[str | Path]]:
-        paths: dict[Playblaster.PRESET, list[str | Path]] = defaultdict(list)
+    ) -> dict[FFmpegPreset, list[str | Path]]:
+        paths: dict[FFmpegPreset, list[str | Path]] = defaultdict(list)
         for location in self._selected_destination_locations():
             destination_dir = self._resolved_destination_path(location).strip()
             if not destination_dir:

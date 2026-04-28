@@ -2,17 +2,23 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import hou
 from env_sg import DB_Config
 
 from pipe.glui.dialogs import MessageDialog
 from pipe.h import local
-from pipe.playblast_artist import resolve_artist_display_name
-from pipe.playblast_shotgrid import (
+from pipe.h.playblast.config import (
+    HoudiniPlayblastExportConfig,
+    HoudiniPlayblastLaunchContext,
+    ResolvedOutputDestination,
+)
+from pipe.h.playblast.dialog import HPlayblastDialog
+from pipe.h.playblast.playblaster import HPlayblaster
+from pipe.playblast import FFmpegPreset
+from pipe.playblast.shotgrid import (
     UPLOAD_TARGET_REVIEW,
     UPLOAD_TARGET_VERSION_ONLY,
     PlayblastVersionUploadRequest,
@@ -21,10 +27,7 @@ from pipe.playblast_shotgrid import (
     upload_playblast_version,
 )
 from pipe.shotgrid import Shot, ShotGrid
-from pipe.util import Playblaster
-
-from .playblaster import HPlayblaster
-from .ui import HPlayblastDialog
+from shared.users import resolve_artist_display_name
 
 log = logging.getLogger(__name__)
 
@@ -32,41 +35,6 @@ if TYPE_CHECKING:
     from Qt import QtWidgets
 
 SHOT_CODE_FALLBACK_PATTERN = re.compile(r"[A-Za-z]+_\d{3}(?:_[A-Za-z0-9]+)*")
-
-
-@dataclass(frozen=True)
-class HoudiniPlayblastLaunchContext:
-    """Resolved inputs used by the Houdini playblast launch flow."""
-
-    source_mode: Literal["shot", "custom"]
-    shot_code: str | None
-    custom_camera_path: str | None
-    custom_frame_range: tuple[int, int] | None
-    custom_shot_code: str
-    output_destinations: tuple["ResolvedOutputDestination", ...]
-    shotgrid_description: str
-    upload_to_shotgrid: bool
-    shotgrid_upload_target: str
-    shotgrid_review_playlist_id: int | None
-    shotgrid_review_load_error: str | None
-
-
-@dataclass(frozen=True)
-class ResolvedOutputDestination:
-    """Resolved output base path paired with its destination label."""
-
-    destination_name: str
-    output_base: Path
-
-
-@dataclass(frozen=True)
-class HoudiniPlayblastExportConfig:
-    """Fully resolved export configuration used by launch orchestration."""
-
-    context: HoudiniPlayblastLaunchContext
-    shot: Shot
-    out_paths: dict[Playblaster.PRESET, list[Path | str]]
-    final_movies: tuple[Path, ...]
 
 
 def launch_playblast() -> None:
@@ -237,9 +205,9 @@ def _build_custom_mode_shot(context: HoudiniPlayblastLaunchContext) -> Shot | No
 
 def _build_output_paths(
     context: HoudiniPlayblastLaunchContext,
-) -> dict[Playblaster.PRESET, list[Path | str]]:
+) -> dict[FFmpegPreset, list[Path | str]]:
     return {
-        Playblaster.PRESET.EDIT_SQ: [
+        FFmpegPreset.EDIT_SQ: [
             destination.output_base for destination in context.output_destinations
         ]
     }
@@ -281,7 +249,7 @@ def _run_local_playblast_or_report(
     return True
 
 
-def _final_movie_path(output_base: str | Path, preset: Playblaster.PRESET) -> Path:
+def _final_movie_path(output_base: str | Path, preset: FFmpegPreset) -> Path:
     return Path(str(output_base) + f".{preset.ext}")
 
 
@@ -289,7 +257,7 @@ def _ordered_final_movie_paths_for_upload(
     context: HoudiniPlayblastLaunchContext,
 ) -> list[Path]:
     return [
-        _final_movie_path(destination.output_base, Playblaster.PRESET.EDIT_SQ)
+        _final_movie_path(destination.output_base, FFmpegPreset.EDIT_SQ)
         for destination in context.output_destinations
     ]
 
@@ -300,7 +268,7 @@ def _preferred_edit_movie_paths_for_upload(
     for destination in context.output_destinations:
         if destination.destination_name != HPlayblastDialog.DESTINATION_EDIT:
             continue
-        return [_final_movie_path(destination.output_base, Playblaster.PRESET.EDIT_SQ)]
+        return [_final_movie_path(destination.output_base, FFmpegPreset.EDIT_SQ)]
     return []
 
 

@@ -3,15 +3,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, cast
+from typing import Callable, cast
 
+from pipe.m.playblast.hud import HudDefinition
+from pipe.playblast import FFmpegPreset
 from pipe.shotgrid import Shot
-
-if TYPE_CHECKING:
-    from typing import Literal
-
-    from pipe.util import Playblaster
-
 
 log = logging.getLogger(__name__)
 
@@ -30,38 +26,6 @@ def dummy_shot(code: str, cut_in: int, cut_out: int, cut_duration: int) -> Shot:
         set=None,
         sets=[],
     )
-
-
-@dataclass
-class HudDefinition:
-    """
-    Definition for a viewport HUD.
-    Attributes
-        name: str
-            Internal name used by Maya for the HUD
-        command: Callable[[], str]
-            Command for the HUD to call
-        section: int
-            HUD section to occupy (see Maya docs)
-        label: str
-            String that precedes the return value of `command`
-        event: str
-            Event string that triggers a refresh (see Maya docs)
-        idle_refresh: bool
-            Alternative to `event`, will refresh every frame
-        blockSize: Literal["small", "large"]
-            Amount of HUD space to occupy
-        labelFontSize: Literal["small", "large"]
-    """
-
-    name: str
-    command: Callable[[], str]
-    section: int
-    label: str = ""
-    event: str = ""
-    idle_refresh: bool = False
-    blockSize: Literal["small", "large"] = "small"
-    labelFontSize: Literal["small", "large"] = "small"
 
 
 @dataclass
@@ -88,7 +52,7 @@ class MShotPlayblastConfig:
             Camera to use. Value ignored if `use_sequencer` is set
         shot: Shot
             Shot struct to hold shot code, cut in, cut out, and duration
-        paths: dict[Playblaster.PRESET, list[str | Path]]
+        paths: dict[FFmpegPreset, list[str | Path]]
             Paths to output to
         tails: tuple[int, int]
             How many frames early/late to start playblasting
@@ -99,14 +63,14 @@ class MShotPlayblastConfig:
 
     camera: str | None
     shot: Shot
-    paths: dict[Playblaster.PRESET, list[str | Path]] = field(default_factory=dict)
+    paths: dict[FFmpegPreset, list[str | Path]] = field(default_factory=dict)
     tails: tuple[int, int] = (0, 0)
     use_sequencer: bool = False
 
     def set_enabled(self, enabled: bool) -> None:
         self.enabled = enabled
 
-    def set_paths(self, paths: dict[Playblaster.PRESET, list[str | Path]]) -> None:
+    def set_paths(self, paths: dict[FFmpegPreset, list[str | Path]]) -> None:
         self.paths = paths
 
 
@@ -147,14 +111,14 @@ class SaveLocation:
     `path` it will call that and return the value"""
 
     name: str
-    preset: Playblaster.PRESET
+    preset: FFmpegPreset
     _path: str | Path | Callable[[], str | Path]
 
     def __init__(
         self,
         name: str,
         path: str | Path | Callable[[], str | Path],
-        preset: Playblaster.PRESET,
+        preset: FFmpegPreset,
     ):
         self.name = name
         self._path = path
@@ -165,3 +129,12 @@ class SaveLocation:
         if callable(self._path):
             return cast(Callable[[], str | Path], self._path)()
         return self._path
+
+
+__all__ = [
+    "MPlayblastConfig",
+    "MShotDialogConfig",
+    "MShotPlayblastConfig",
+    "SaveLocation",
+    "dummy_shot",
+]
