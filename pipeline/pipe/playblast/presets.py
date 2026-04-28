@@ -27,33 +27,18 @@ class FFmpegPreset(_FFmpegPresetSpec, Enum):
             "vprofile": "dnxhr_sq",
             # this number comes from Avid's table in the DNxHD whitepaper
             "video_bitrate": "124M",
-        },
-    )
-    EDIT_HQX = (
-        "mov",
-        {
-            "vcodec": "dnxhd",
-            "pix_fmt": "yuv422p10le",
-            "vprofile": "dnxhr_hqx",
-            "video_bitrate": "188M",
+            "movflags": "+faststart",
         },
     )
     WEB = (
         "mp4",
         {
             "vcodec": "libx264",
-            "preset": "veryslow",
+            "preset": "medium",
             "tune": "animation",
             "crf": 20,
-        },
-    )
-    H265 = (
-        "mp4",
-        {
-            "vcodec": "libx265",
-            "preset": "slow",
-            "crf": 23,
             "pix_fmt": "yuv420p",
+            "movflags": "+faststart",
         },
     )
 

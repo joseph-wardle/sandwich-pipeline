@@ -72,6 +72,10 @@ class HPlayblaster(Playblaster):
         return self
 
     def _run_postprocess(self, video_path: Path) -> None:
+        # TODO: burn in shot/artist/frame-range HUD via ffmpeg drawtext.
+        # Houdini's flipbook does not produce HUD overlays the way Maya's
+        # applied_hud context manager does, so we add them here post-encode
+        # to match Maya playblast conventions.
         return
 
     def _write_images(self, path: str) -> None:

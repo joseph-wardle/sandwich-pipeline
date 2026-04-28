@@ -4,7 +4,6 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 import time
 from abc import ABCMeta, abstractmethod
 from enum import Enum
@@ -56,36 +55,18 @@ class Playblaster(metaclass=ABCMeta):
         self._in_context = False
 
     def _run_postprocess(self, video_path: Path) -> None:
-        temp_output = video_path.with_suffix(".post.mov")
+        """Optional post-encode pass on each final output path.
 
-        cmd = [
-            "ffmpeg",
-            "-y",  # overwrite without asking
-            "-i",
-            str(video_path),
-            "-vf",
-            "format=yuv420p",
-            "-c:v",
-            "dnxhd",
-            "-profile:v",
-            "dnxhr_hq",
-            "-crf",
-            "18",
-            "-preset",
-            "slow",
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-            str(temp_output),
-        ]
+        Default is a no-op. DCC-specific subclasses may override to add
+        steps that need runtime DCC state — HUD burn-in via FFmpeg
+        `drawtext`, slate-frame insertion, LUT application, etc. — by
+        mutating the file at `video_path` in place.
 
-        log.info(f"Running FFmpeg post-process: {' '.join(cmd)}")
-        subprocess.run(cmd, check=True)
-
-        # Replace original with post-processed file
-        video_path.unlink()
-        temp_output.rename(video_path)
+        Encoding format choices belong on `FFmpegPreset.out_kwargs`,
+        not here: this hook runs *after* the desired codec is already on
+        disk, so don't re-encode it.
+        """
+        return
 
     @staticmethod
     def _telemetry_preset_name(preset: object | None) -> str:
