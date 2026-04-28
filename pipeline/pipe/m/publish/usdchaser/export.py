@@ -16,10 +16,10 @@ from .utils import (
     find_and_move_prim,
     make_topo_attrs_default,
     path_to_maya_dag_map,
+    prefix_material_bindings,
     scale_down_geo,
     split_by_namespace,
     split_preroll,
-    update_material_bindings,
 )
 
 if TYPE_CHECKING:
@@ -38,6 +38,11 @@ from pipe.struct.timeline import Timeline
 from pipe.util import log_errors
 
 log = logging.getLogger(__name__)
+
+ANIM_CLASS_PATH = Sdf.Path("/__class__/anim")
+RIG_SCOPE_PATH = Sdf.Path("/rig")
+RIG_ROOT_PATH = Sdf.Path("/rig")
+RIG_GEO_PATH = Sdf.Path("/rig/geo")
 
 
 class ExportChaserMode(IntEnum):
@@ -58,7 +63,7 @@ class ChaserArgs:
 
 
 class ExportChaser(mayaUsdLib.ExportChaser):
-    ID: str = "lnd"
+    ID: str = "SKD"
 
     _chaser_args: ChaserArgs
     _dag_to_usd: mayaUsdLib.DagToUsdMap
@@ -84,7 +89,7 @@ class ExportChaser(mayaUsdLib.ExportChaser):
             self._post_export_cam()
         else:
             raise ValueError(
-                f"{self._chaser_args.mode} is not a valid LnD chaser mode."
+                f"{self._chaser_args.mode} is not a valid SKD chaser mode."
             )
         return True
 
@@ -108,22 +113,22 @@ class ExportChaser(mayaUsdLib.ExportChaser):
             rig_name = re.sub(r"\d+$", "", namespace)
 
             # The path to the root of the animated geometry.
-            rig_geo_prim_path = Sdf.Path("/rig/geo")
             preroll_name = namespace if not suffix else f"{namespace}.{suffix}"
             stitched_layer = split_preroll(
-                layer, preroll_name, rig_geo_prim_path, self._chaser_args.timeline
+                layer, preroll_name, RIG_GEO_PATH, self._chaser_args.timeline
             )
 
             # Create prim that will hold the animation and be inherited by the rig in shots.
-            anim_class_path = Sdf.Path(f"__class__/anim/{namespace}")
-            anim_prim_spec = Sdf.CreatePrimInLayer(root_layer, anim_class_path)
+            # Eg. /__class__/anim/rig_namespace
+            namespace_anim_path = ANIM_CLASS_PATH.AppendChild(namespace)
+            anim_prim_spec = Sdf.CreatePrimInLayer(root_layer, namespace_anim_path)
             anim_prim_spec.specifier = Sdf.SpecifierClass
 
             anim_reference = Sdf.Reference(
                 Sdf.ComputeAssetPathRelativeToLayer(
                     root_layer, stitched_layer.realPath
                 ),
-                rig_geo_prim_path,
+                RIG_ROOT_PATH,
             )
             anim_prim_spec.referenceList.Append(anim_reference)
 
@@ -141,21 +146,20 @@ class ExportChaser(mayaUsdLib.ExportChaser):
                 )
 
             # The rig scope needs to be defined not just an "over"
-            rig_prim_path = Sdf.Path("/rig")
-            rig_prim_spec = Sdf.CreatePrimInLayer(root_layer, rig_prim_path)
+            rig_prim_spec = Sdf.CreatePrimInLayer(root_layer, RIG_SCOPE_PATH)
             rig_prim_spec.specifier = Sdf.SpecifierDef
             rig_prim_spec.typeName = "Scope"
 
             # Define the rig and have it inherit the animation
-            instance_prim_path = Sdf.Path(f"/rig/{namespace}")
+            instance_prim_path = RIG_SCOPE_PATH.AppendChild(namespace)
             instance_prim_spec = Sdf.CreatePrimInLayer(root_layer, instance_prim_path)
             instance_prim_spec.specifier = Sdf.SpecifierDef
             instance_prim_spec.inheritPathList.Prepend(
-                Sdf.Path(f"/__class__/anim/{namespace}")
+                ANIM_CLASS_PATH.AppendChild(namespace)
             )
 
             # Reference the rig USD so we have materials, CFX, etc
-            rig_prim_path = Sdf.Path(f"/rig/{rig_name}")
+            rig_prim_path = RIG_SCOPE_PATH.AppendChild(rig_name)
             if rig_usd_filepath:
                 rig_relative_usd_filepath = Sdf.ComputeAssetPathRelativeToLayer(
                     root_layer, rig_usd_filepath.as_posix()
@@ -173,7 +177,10 @@ class ExportChaser(mayaUsdLib.ExportChaser):
 
     def _post_export_rig(self):
         scale_down_geo(self._stage)
-        update_material_bindings(self._stage, "/rig", "/rig/geo", "MAT_")
+        prefix_material_bindings(self._stage, RIG_GEO_PATH, "MAT_")
+        # We want the bindings for later in the pipeline when we assemble the rig USD,
+        # but we'll remove the materials authored in Maya since we only want the bindings
+        self._stage.RemovePrim(RIG_ROOT_PATH.AppendChild("mtl"))
 
     def _post_export_cam(self):
         # We don't scale down the camera here because we need to import it
