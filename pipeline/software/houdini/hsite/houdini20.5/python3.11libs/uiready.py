@@ -1,6 +1,6 @@
 import hou
 
-# Open Bobaris on startup
+# Open Solami on startup
 desks = {d.name(): d for d in hou.ui.desktops()}
-if "Bobaris" in desks:
-    desks["Bobaris"].setAsCurrent()
+if "Solami" in desks:
+    desks["Solami"].setAsCurrent()

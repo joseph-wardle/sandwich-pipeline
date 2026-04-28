@@ -5,6 +5,27 @@
  Note, that two definitions of the same element are not allowed in
  a single file. -->
 
+  <toolshelf name="skd_assets" label="SKD Assets">
+    <memberTool name="open_asset"/>
+    <memberTool name="save_asset_version"/>
+    <memberTool name="asset_version_history"/>
+    <memberTool name="skd_playblast"/>
+  </toolshelf>
+
+  <toolshelf name="skd_sets" label="SKD Sets">
+    <memberTool name="open_set"/>
+    <memberTool name="save_set_version"/>
+    <memberTool name="set_version_history"/>
+    <memberTool name="skd_playblast"/>
+  </toolshelf>
+
+  <toolshelf name="skd_shots" label="SKD Shots">
+    <memberTool name="open_shot"/>
+    <memberTool name="save_shot_version"/>
+    <memberTool name="shot_version_history"/>
+    <memberTool name="skd_playblast"/>
+  </toolshelf>
+
   <toolshelf name="test_geometry" label="Test Geometry">
     <memberTool name="lop_testgeometry_crag"/>
     <memberTool name="lop_testgeometry_pighead"/>
@@ -69,9 +90,25 @@ fm = HShotFileManager(prompt_for_department=False)
 fm.open_version_browser()]]></script>
   </tool>
 
-  <tool name="bobo_playblast" label="Playblast" icon="TOOLS_view">
-    <script scriptType="python"><![CDATA[from pipe.h.playblast.tool import launch_playblast
+  <tool name="skd_playblast" label="Playblast" icon="TOOLS_view">
+    <script scriptType="python"><![CDATA[from pipe.h.playblast import launch_playblast
 launch_playblast()]]></script>
+  </tool>
+
+  <tool name="reload_pipe_houdini" label="Reload Pipe" icon="BUTTONS_reload">
+    <script scriptType="python"><![CDATA[from pipe.h.reload import reload_pipe
+
+reload_pipe()
+
+try:
+    import hou
+
+    hou.ui.setStatusMessage(
+        "Pipeline reloaded (Python modules + HDA libraries)",
+        severity=hou.severityType.Message,
+    )
+except Exception:
+    pass]]></script>
   </tool>
 
   <tool name="lop_testgeometry_crag" label="Test Geometry: Crag" icon="SOP_testgeometry_crag">
@@ -186,19 +223,18 @@ node = loptoolutils.genericTool(kwargs, "assetreference", asset_name)
 loptoolutils.referenceTestAsset(node, asset_name)]]></script>
   </tool>
 
-  <shelfSet name="solaris_lnd0" label="Solaris Geometry">
+  <shelfSet name="skd_solaris0" label="Solaris Geometry">
     <memberToolshelf name="skd_assets"/>
     <memberToolshelf name="skd_sets"/>
     <memberToolshelf name="skd_shots"/>
     <memberToolshelf name="test_geometry"/>
   </shelfSet>
 
-  <shelfSet name="solaris_lnd" label="Solaris Geometry">
+  <shelfSet name="skd_solaris" label="Solaris Geometry">
     <memberToolshelf name="skd_shots"/>
     <memberToolshelf name="skd_assets"/>
     <memberToolshelf name="skd_sets"/>
     <memberToolshelf name="test_geometry"/>
-    <memberToolshelf name="shelf_1"/>
     <memberToolshelf name="shelf_1"/>
     <memberToolshelf name="shelf_2"/>
     <memberToolshelf name="create"/>
