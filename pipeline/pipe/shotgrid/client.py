@@ -29,7 +29,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, cast, overload, TypeVar
 
 import attrs
 import shotgun_api3
@@ -61,6 +61,7 @@ from pipe.shotgrid.paths import (
 log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
+_E = TypeVar("_E", bound=SGEntity)
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +234,15 @@ class ShotGrid:
 
     # ---- reads: assets -----------------------------------------------------
 
+    @overload
+    def get_asset(self, *, id: int) -> Asset: ...
+    @overload
+    def get_asset(self, *, name: str) -> Asset: ...
+    @overload
+    def get_asset(self, *, display_name: str) -> Asset: ...
+    @overload
+    def get_asset(self, *, path: str) -> Asset: ...
+
     def get_asset(
         self,
         *,
@@ -341,6 +351,11 @@ class ShotGrid:
 
     # ---- reads: shots ------------------------------------------------------
 
+    @overload
+    def get_shot(self, *, id: int) -> Shot: ...
+    @overload
+    def get_shot(self, *, code: str) -> Shot: ...
+
     def get_shot(
         self,
         *,
@@ -443,6 +458,13 @@ class ShotGrid:
 
     # ---- reads: environments -----------------------------------------------
 
+    @overload
+    def get_environment(self, *, id: int) -> Environment: ...
+    @overload
+    def get_environment(self, *, code: str) -> Environment: ...
+    @overload
+    def get_environment(self, *, path: str) -> Environment: ...
+
     def get_environment(
         self,
         *,
@@ -506,6 +528,13 @@ class ShotGrid:
         return self._many(rows, Environment)
 
     # ---- reads: users ------------------------------------------------------
+
+    @overload
+    def get_user(self, *, id: int) -> User: ...
+    @overload
+    def get_user(self, *, login: str) -> User: ...
+    @overload
+    def get_user(self, *, name: str) -> User: ...
 
     def get_user(
         self,
@@ -1050,46 +1079,32 @@ class ShotGrid:
 
     # ---- refresh -----------------------------------------------------------
 
-    def reload(
-        self,
-        entity: Asset
-        | Shot
-        | Sequence
-        | Environment
-        | User
-        | Task
-        | Version
-        | Playlist,
-    ) -> Any:
+    def reload(self, entity: _E) -> _E:
         """Re-fetch `entity` from ShotGrid and return the fresh copy.
 
         Used by write verbs and by partial-entity lazy fetch. Safe for callers
         to use directly after out-of-band writes (e.g. another tool changed
         the asset while this tool held a stale reference).
 
-        The return type matches the argument type at runtime. The declared
-        return is `Any` because static type narrowing across entity unions
-        is noisier than it is worth at the call site.
-
         Raises:
             ShotGridNotFound: `entity.id` no longer exists in ShotGrid.
         """
         if isinstance(entity, Asset):
-            return self.get_asset(id=entity.id)
+            return cast(_E, self.get_asset(id=entity.id))
         if isinstance(entity, Environment):
-            return self.get_environment(id=entity.id)
+            return cast(_E, self.get_environment(id=entity.id))
         if isinstance(entity, Shot):
-            return self.get_shot(id=entity.id)
+            return cast(_E, self.get_shot(id=entity.id))
         if isinstance(entity, Sequence):
-            return self.get_sequence(id=entity.id)
+            return cast(_E, self.get_sequence(id=entity.id))
         if isinstance(entity, User):
-            return self.get_user(id=entity.id)
+            return cast(_E, self.get_user(id=entity.id))
         if isinstance(entity, Task):
-            return self.get_task(id=entity.id)
+            return cast(_E, self.get_task(id=entity.id))
         if isinstance(entity, Playlist):
-            return self.get_playlist(id=entity.id)
+            return cast(_E, self.get_playlist(id=entity.id))
         if isinstance(entity, Version):
-            return self._reload_version(entity)
+            return cast(_E, self._reload_version(entity))
         raise TypeError(f"Cannot reload unknown entity type: {type(entity).__name__}")
 
     def _reload_version(self, version: Version) -> Version:
@@ -1156,8 +1171,8 @@ class ShotGrid:
         selector: str,
         value: object,
         rows: list[dict[str, Any]],
-        cls: type[SGEntity],
-    ) -> Any:
+        cls: type[_E],
+    ) -> _E:
         """Convert a SG result list into exactly one hydrated entity, or raise."""
         if not rows:
             raise ShotGridNotFound(
@@ -1177,7 +1192,7 @@ class ShotGrid:
         object.__setattr__(entity, "_hydrated", True)
         return entity
 
-    def _many(self, rows: list[dict[str, Any]], cls: type[SGEntity]) -> list[Any]:
+    def _many(self, rows: list[dict[str, Any]], cls: type[_E]) -> list[_E]:
         """Structure a ShotGrid result list into entities with `_db` attached."""
         result = [cls.from_sg(r) for r in rows]
         for e in result:
