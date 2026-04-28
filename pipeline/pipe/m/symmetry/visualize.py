@@ -109,7 +109,7 @@ def color_from_symmetry_error(
 
     viz_errors: list[float] = []
     point: MPoint
-    for i, point in enumerate(mesh_points):
+    for i, point in enumerate(mesh_points):  # type: ignore
         mirrored_point: MPoint = point * mirror_matrix
         mirrored_position: MPoint = MPoint(
             mesh_intersector.getClosestPoint(mirrored_point).point
@@ -170,7 +170,7 @@ def color_by_gradient(shape: str, gradient: Gradient = OKLCH_HEATMAP_GRADIENT):
     vertex_indices: list[int] = []
     vertex_colors: list[MColor] = []
     point: MPoint
-    for i, point in enumerate(mesh_points):
+    for i, point in enumerate(mesh_points):  # type: ignore
         heatmap_color_oklch = sample_spline_gradient(
             gradient=gradient,
             position=point.x,
