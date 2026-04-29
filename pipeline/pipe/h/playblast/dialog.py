@@ -18,6 +18,7 @@ from pipe.playblast.shotgrid import (
     UploadTarget,
     list_recent_review_playlists,
 )
+from pipe.shotgrid import ShotGridError
 
 if TYPE_CHECKING:
     from pipe.shotgrid import Shot, ShotGrid
@@ -541,7 +542,13 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
             return None
         try:
             return self._conn.get_shot(code=shot_code)
-        except Exception:
+        except ShotGridError:
+            log.warning(
+                "Could not resolve ShotGrid shot for code '%s'; "
+                "playblast dialog will start in Custom mode.",
+                shot_code,
+                exc_info=True,
+            )
             return None
 
     def _set_default_source_tab(self) -> None:

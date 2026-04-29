@@ -67,9 +67,6 @@ class MShotPlayblastConfig:
     tails: tuple[int, int] = (0, 0)
     use_sequencer: bool = False
 
-    def set_enabled(self, enabled: bool) -> None:
-        self.enabled = enabled
-
     def set_paths(self, paths: dict[FFmpegPreset, list[str | Path]]) -> None:
         self.paths = paths
 

@@ -45,7 +45,7 @@ from pipe.playblast.shotgrid import (
     resolve_preferred_upload_movie_path,
     upload_playblast_version,
 )
-from pipe.shotgrid import ShotGrid
+from pipe.shotgrid import ShotGrid, ShotGridError
 from shared.users import resolve_artist_display_name
 
 if TYPE_CHECKING:
@@ -573,20 +573,30 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     def _resolve_pipeline_shot_context() -> Shot | None:
         try:
             conn = ShotGrid.connect(DB_Config)
-        except Exception:
+        except ShotGridError:
+            log.warning(
+                "Could not connect to ShotGrid; playblast dialog will start in Custom mode.",
+                exc_info=True,
+            )
             return None
 
-        try:
-            code = str(mc.fileInfo("code", query=True)[0]).strip()
-        except Exception:
+        # Non-pipeline scenes have no `code` fileInfo entry; treat as Custom.
+        code_values = mc.fileInfo("code", query=True) or []
+        if not code_values:
             return None
-
+        code = str(code_values[0]).strip()
         if not code:
             return None
 
         try:
             return conn.get_shot(code=code)
-        except Exception:
+        except ShotGridError:
+            log.warning(
+                "Could not resolve ShotGrid shot for fileInfo code '%s'; "
+                "playblast dialog will start in Custom mode.",
+                code,
+                exc_info=True,
+            )
             return None
 
     @staticmethod
@@ -934,6 +944,8 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         self._load_shotgrid_reviews(force_refresh=False)
 
     def _load_shotgrid_reviews(self, *, force_refresh: bool) -> None:
+        if self._shotgrid_review_lazy_load_attempted and not force_refresh:
+            return
         self._shotgrid_review_lazy_load_attempted = True
         previous_playlist_id = self._selected_shotgrid_review_playlist_id()
 

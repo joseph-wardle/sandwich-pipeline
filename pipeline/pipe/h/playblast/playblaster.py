@@ -71,7 +71,7 @@ class HPlayblaster(Playblaster):
         self._shot = shot
         self._out_paths = out_paths
         self._tails = tails
-        self._camera_path = str(camera_path).strip() or None
+        self._camera_path = camera_path.strip() or None if camera_path else None
         return self
 
     def _build_ffmpeg_input(

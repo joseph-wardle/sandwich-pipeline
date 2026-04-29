@@ -508,7 +508,8 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         self._load_shotgrid_reviews(force_refresh=False)
 
     def _load_shotgrid_reviews(self, *, force_refresh: bool) -> None:
-        del force_refresh
+        if self._shotgrid_review_lazy_load_attempted and not force_refresh:
+            return
         self._shotgrid_review_lazy_load_attempted = True
         previous_playlist_id = self._selected_shotgrid_review_playlist_id()
 
