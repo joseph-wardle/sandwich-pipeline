@@ -6,9 +6,11 @@ import re
 import shutil
 import time
 from abc import ABCMeta, abstractmethod
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Iterator
 
 import ffmpeg  # type: ignore[import-untyped]
 
@@ -21,6 +23,14 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class _TelemetryPhase:
+    """Mutable record passed out of `_telemetry_phase` so the body can attach
+    what it produced before the context manager emits the success event."""
+
+    final_paths: list[Path] = field(default_factory=list)
 
 
 class Playblaster(metaclass=ABCMeta):
@@ -67,6 +77,207 @@ class Playblaster(metaclass=ABCMeta):
         disk, so don't re-encode it.
         """
         return
+
+    def _do_playblast(
+        self,
+        out_paths: dict[FFmpegPreset, list[Path | str]] | None = None,
+        tails: tuple[int, int] = (0, 0),
+    ) -> None:
+        if not self._in_context:
+            raise RuntimeError("_do_playblast not called from within context self")
+        out_paths = out_paths or {}
+
+        tempdir = self._resolve_tempdir()
+        image_basename = self._image_basename()
+        self._cleanup_temp_files(tempdir, image_basename)
+
+        cut_in, cut_out = self._shot.frame_range
+        frame_start = cut_in - tails[0]
+        frame_end = cut_out + tails[1]
+        action_id = self._new_playblast_action_id()
+        expected_total_outputs = sum(len(paths) for paths in out_paths.values())
+
+        with self._telemetry_phase(
+            preset="unknown",
+            expected_outputs=expected_total_outputs,
+            frame_start=frame_start,
+            frame_end=frame_end,
+            action_id=action_id,
+        ):
+            self._write_images(str(tempdir / image_basename))
+
+        self._normalize_frame_filenames(tempdir, image_basename)
+
+        encoded_input = self._build_ffmpeg_input(tempdir, image_basename, frame_start)
+
+        for preset, paths in out_paths.items():
+            with self._telemetry_phase(
+                preset=self._telemetry_preset_name(preset),
+                expected_outputs=len(paths),
+                frame_start=frame_start,
+                frame_end=frame_end,
+                action_id=action_id,
+            ) as phase:
+                preset_temp = self._encode_preset(
+                    encoded_input, preset, tempdir, image_basename, frame_start
+                )
+                phase.final_paths = self._copy_outputs(preset_temp, paths, preset.ext)
+                for final_path in phase.final_paths:
+                    self._safe_run_postprocess(final_path)
+
+        if not log.isEnabledFor(logging.DEBUG):
+            self._cleanup_temp_files(tempdir, image_basename)
+
+    @abstractmethod
+    def playblast(self) -> None:
+        """Function to be called by the user to trigger a playblast.
+        This should call `_do_playblast` from within a `with self(...)`
+        block.
+        Looks something like:
+            >>> def playblast(self) -> None:
+            >>>     with self(shot):
+            >>>         super()._do_playblast([filepath])
+        """
+        pass
+
+    # ------------------------------------------------------------------
+    # Pipeline steps (small, single-responsibility helpers).
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_tempdir() -> Path:
+        return Path(os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))).resolve()
+
+    def _image_basename(self) -> str:
+        return "playblast_temp." + (self._shot.code or "")
+
+    @staticmethod
+    def _cleanup_temp_files(tempdir: Path, basename: str) -> None:
+        for path in tempdir.glob(basename + "*"):
+            path.unlink()
+
+    @staticmethod
+    def _normalize_frame_filenames(tempdir: Path, basename: str) -> None:
+        # Houdini emits negative frame numbers as `name.-3.png`; ffmpeg's
+        # image2 demuxer needs fixed-width zero-padded numbers
+        # (`name.-0003.png`). Rewrite both signs to a uniform 5-char width.
+        pattern = re.compile(rf"{re.escape(basename)}\.(\-?\d+)\.png$")
+        for path in tempdir.glob(f"{basename}.*.png"):
+            match = pattern.match(path.name)
+            if not match:
+                continue
+            num = int(match.group(1))
+            new_name = f"{basename}.{num:+05d}.png".replace("+", "")
+            path.rename(path.with_name(new_name))
+
+    def _build_ffmpeg_input(
+        self, tempdir: Path, basename: str, start_frame: int
+    ) -> Any:
+        return ffmpeg.input(
+            str(tempdir / basename) + ".%04d.png",
+            start_number=start_frame,
+            r=self.FR,
+            # precisely define input colorspace
+            colorspace="bt709",
+            color_trc="iec61966-2-1",
+        ).filter("format", "yuv422p")
+
+    def _encode_preset(
+        self,
+        input_chain: Any,
+        preset: FFmpegPreset,
+        tempdir: Path,
+        basename: str,
+        start_frame: int,
+    ) -> Path:
+        out_filename = str(tempdir / basename) + "." + preset.ext
+        try:
+            ffmpeg.output(
+                input_chain,
+                out_filename,
+                **preset.out_kwargs,
+                timecode="00:00:{:02}:{:02}".format(
+                    start_frame // self.FR,
+                    start_frame % self.FR,
+                ),
+                r=self.FR,
+            ).overwrite_output().run()
+        except ffmpeg.Error as exc:
+            if exc.stdout:
+                print("stdout:", exc.stdout.decode())
+            if exc.stderr:
+                print("stderr:", exc.stderr.decode())
+            raise
+        return Path(out_filename)
+
+    @staticmethod
+    def _copy_outputs(
+        source: Path,
+        paths: list[Path | str],
+        ext: str,
+    ) -> list[Path]:
+        final_paths: list[Path] = []
+        for raw_path in paths:
+            destination = Path(str(raw_path) + "." + ext)
+            if not destination.parent.exists():
+                destination.parent.mkdir(mode=0o770, parents=True)
+            shutil.copyfile(source, destination)
+            final_paths.append(destination)
+        return final_paths
+
+    def _safe_run_postprocess(self, final_path: Path) -> None:
+        try:
+            self._run_postprocess(final_path)
+        except Exception as exc:
+            log.error("Post-process failed for %s: %s", final_path, exc)
+
+    # ------------------------------------------------------------------
+    # Telemetry. Intentionally a thin wrapper around today's
+    # `_emit_playblast_event`; the telemetry system itself is being
+    # rewritten in the next PR and will replace this scaffolding.
+    # ------------------------------------------------------------------
+
+    @contextmanager
+    def _telemetry_phase(
+        self,
+        *,
+        preset: str,
+        expected_outputs: int,
+        frame_start: int,
+        frame_end: int,
+        action_id: str | None,
+    ) -> Iterator[_TelemetryPhase]:
+        phase = _TelemetryPhase()
+        started_at = time.perf_counter()
+        try:
+            yield phase
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            self._emit_playblast_event(
+                status="error",
+                preset=preset,
+                output_count=expected_outputs,
+                frame_start=frame_start,
+                frame_end=frame_end,
+                duration_ms=duration_ms,
+                output_size_bytes=0,
+                action_id=action_id,
+                error_message=str(exc),
+                exception_type=type(exc).__name__,
+            )
+            raise
+        duration_ms = int((time.perf_counter() - started_at) * 1000)
+        size_bytes = sum(self._safe_file_size(p) for p in phase.final_paths)
+        self._emit_playblast_event(
+            status="success",
+            preset=preset,
+            output_count=len(phase.final_paths) or expected_outputs,
+            frame_start=frame_start,
+            frame_end=frame_end,
+            duration_ms=duration_ms,
+            output_size_bytes=size_bytes,
+            action_id=action_id,
+        )
 
     @staticmethod
     def _telemetry_preset_name(preset: object | None) -> str:
@@ -173,169 +384,6 @@ class Playblaster(metaclass=ABCMeta):
             scope=self._telemetry_scope(),
             error=error,
         )
-
-    def _do_playblast(
-        self,
-        out_paths: dict[FFmpegPreset, list[Path | str]] | None = None,
-        tails: tuple[int, int] = (0, 0),
-    ) -> None:
-        if not self._in_context:
-            raise RuntimeError("_do_playblast not called from within context self")
-
-        if not out_paths:
-            out_paths = {}
-        expected_total_outputs = sum(len(paths) for paths in out_paths.values())
-
-        tempdir = Path(os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))).resolve()
-
-        FILENAME = "bobo_pb_temp." + (self._shot.code or "")
-
-        # remove any old playblasts
-        for p in tempdir.glob(FILENAME + "*"):
-            p.unlink()
-
-        cut_in, cut_out = self._shot.frame_range
-        frame_start = cut_in - tails[0]
-        frame_end = cut_out + tails[1]
-        playblast_action_id = self._new_playblast_action_id()
-
-        # do the playblast
-        image_write_started_at = time.perf_counter()
-        try:
-            self._write_images(str(tempdir / FILENAME))
-        except Exception as exc:
-            duration_ms = int((time.perf_counter() - image_write_started_at) * 1000)
-            self._emit_playblast_event(
-                status="error",
-                preset="unknown",
-                output_count=expected_total_outputs,
-                frame_start=frame_start,
-                frame_end=frame_end,
-                duration_ms=duration_ms,
-                output_size_bytes=0,
-                action_id=playblast_action_id,
-                error_message=str(exc),
-                exception_type=type(exc).__name__,
-            )
-            raise
-
-        # 0 padding on negative numbers
-        pattern = re.compile(rf"{re.escape(FILENAME)}\.(\-?\d+)\.png$")
-        for p in tempdir.glob(f"{FILENAME}.*.png"):
-            match = pattern.match(p.name)
-            if not match:
-                continue
-            num = int(match.group(1))
-            new_name = f"{FILENAME}.{num:+05d}.png".replace("+", "")
-            new_path = p.with_name(new_name)
-            p.rename(new_path)
-
-        # use ffmpeg to encode the video
-        start_frame = frame_start
-        images = ffmpeg.input(
-            str(tempdir / FILENAME) + ".%04d.png",
-            start_number=start_frame,
-            r=self.FR,
-            # precisely define input colorspace
-            colorspace="bt709",
-            color_trc="iec61966-2-1",
-        ).filter("format", "yuv422p")
-        for preset, paths in out_paths.items():
-            preset_started_at = time.perf_counter()
-            preset_name = self._telemetry_preset_name(preset)
-            expected_outputs = len(paths)
-            try:
-                out_filename = str(tempdir / FILENAME) + "." + preset.ext
-                ffmpeg.output(
-                    images,
-                    out_filename,
-                    **preset.out_kwargs,
-                    timecode="00:00:{:02}:{:02}".format(
-                        start_frame // self.FR,
-                        start_frame % self.FR,
-                    ),
-                    r=self.FR,
-                ).overwrite_output().run()
-            except ffmpeg.Error as e:
-                if e.stdout:
-                    print("stdout:", e.stdout.decode())
-                if e.stderr:
-                    print("stderr:", e.stderr.decode())
-                duration_ms = int((time.perf_counter() - preset_started_at) * 1000)
-                self._emit_playblast_event(
-                    status="error",
-                    preset=preset_name,
-                    output_count=expected_outputs,
-                    frame_start=frame_start,
-                    frame_end=frame_end,
-                    duration_ms=duration_ms,
-                    output_size_bytes=0,
-                    action_id=playblast_action_id,
-                    error_message=str(e),
-                    exception_type=type(e).__name__,
-                )
-                raise
-
-            # copy video out of tempdir
-            final_paths: list[Path] = []
-
-            try:
-                for path in (Path(str(p) + "." + preset.ext) for p in paths):
-                    if not path.parent.exists():
-                        path.parent.mkdir(mode=0o770, parents=True)
-                    shutil.copyfile(out_filename, path)
-                    final_paths.append(path)
-            except Exception as exc:
-                duration_ms = int((time.perf_counter() - preset_started_at) * 1000)
-                self._emit_playblast_event(
-                    status="error",
-                    preset=preset_name,
-                    output_count=expected_outputs,
-                    frame_start=frame_start,
-                    frame_end=frame_end,
-                    duration_ms=duration_ms,
-                    output_size_bytes=0,
-                    action_id=playblast_action_id,
-                    error_message=str(exc),
-                    exception_type=type(exc).__name__,
-                )
-                raise
-
-            # run postprocess so video works in vlc
-            for final_path in final_paths:
-                try:
-                    self._run_postprocess(final_path)
-                except Exception as e:
-                    log.error(f"Post-process failed for {final_path}: {e}")
-            output_size_bytes = sum(self._safe_file_size(path) for path in final_paths)
-            duration_ms = int((time.perf_counter() - preset_started_at) * 1000)
-            self._emit_playblast_event(
-                status="success",
-                preset=preset_name,
-                output_count=len(final_paths),
-                frame_start=frame_start,
-                frame_end=frame_end,
-                duration_ms=duration_ms,
-                output_size_bytes=output_size_bytes,
-                action_id=playblast_action_id,
-            )
-
-        # clean up if not in debug mode
-        if not log.isEnabledFor(logging.DEBUG):
-            for p in tempdir.glob(FILENAME + "*"):
-                p.unlink()
-
-    @abstractmethod
-    def playblast(self) -> None:
-        """Function to be called by the user to trigger a playblast.
-        This should call `_do_playblast` from within a `with self(...)`
-        block.
-        Looks something like:
-            >>> def playblast(self) -> None:
-            >>>     with self(shot):
-            >>>         super()._do_playblast([filepath])
-        """
-        pass
 
 
 __all__ = ["Playblaster"]

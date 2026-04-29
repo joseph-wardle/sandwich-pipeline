@@ -12,11 +12,10 @@ from shared.util import get_edit_path
 from pipe.glui.dialogs import DialogButtons
 from pipe.playblast.naming import (
     build_edit_output_directory,
-    resolve_versioned_playblast_basename,
+    next_versioned_basename,
 )
 from pipe.playblast.shotgrid import (
-    UPLOAD_TARGET_REVIEW,
-    UPLOAD_TARGET_VERSION_ONLY,
+    UploadTarget,
     list_recent_review_playlists,
 )
 
@@ -123,14 +122,14 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         return self._shotgrid_upload_checkbox.isChecked()
 
     @property
-    def shotgrid_upload_target(self) -> str:
+    def shotgrid_upload_target(self) -> UploadTarget:
         if self._is_shotgrid_review_upload_enabled():
-            return UPLOAD_TARGET_REVIEW
-        return UPLOAD_TARGET_VERSION_ONLY
+            return UploadTarget.REVIEW
+        return UploadTarget.VERSION_ONLY
 
     @property
     def shotgrid_review_playlist_id(self) -> int | None:
-        if self.shotgrid_upload_target != UPLOAD_TARGET_REVIEW:
+        if self.shotgrid_upload_target != UploadTarget.REVIEW:
             return None
         return self._selected_shotgrid_review_playlist_id()
 
@@ -828,7 +827,7 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
             return None
 
         try:
-            return resolve_versioned_playblast_basename(
+            return next_versioned_basename(
                 output_prefix,
                 destination_dirs.values(),
             )

@@ -31,15 +31,15 @@ from pipe.m.playblast.turnaround.config import (
 )
 from pipe.m.playblast.turnaround.playblaster import MTurnaroundPlayblaster
 from pipe.playblast import FFmpegPreset
-from pipe.playblast.naming import resolve_versioned_playblast_basename
+from pipe.playblast.naming import next_versioned_basename
 from pipe.playblast.shotgrid import (
-    UPLOAD_TARGET_REVIEW,
-    UPLOAD_TARGET_VERSION_ONLY,
-    AssetPlayblastVersionUploadRequest,
+    PlayblastEntity,
+    PlayblastVersionUploadRequest,
+    UploadTarget,
     default_version_name_from_movie_path,
     list_recent_review_playlists,
     resolve_preferred_upload_movie_path,
-    upload_asset_playblast_version,
+    upload_playblast_version,
 )
 from pipe.shotgrid import normalize_display_name
 from shared.users import resolve_artist_display_name
@@ -388,7 +388,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         return directories
 
     def _resolve_output_name(self, prefix: str) -> str:
-        return resolve_versioned_playblast_basename(
+        return next_versioned_basename(
             prefix,
             self._selected_destination_directories(),
         )
@@ -488,10 +488,10 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
             and self._selected_shotgrid_review_playlist_id() is not None
         )
 
-    def _shotgrid_upload_target(self) -> str:
+    def _shotgrid_upload_target(self) -> UploadTarget:
         if self._can_upload_to_selected_review():
-            return UPLOAD_TARGET_REVIEW
-        return UPLOAD_TARGET_VERSION_ONLY
+            return UploadTarget.REVIEW
+        return UploadTarget.VERSION_ONLY
 
     def _set_review_combo_placeholder(self, label: str) -> None:
         previous_signal_state = self._shotgrid_review_combo.blockSignals(True)
@@ -719,14 +719,14 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         selected_review_playlist_id = self._selected_shotgrid_review_playlist_id()
         review_playlist_id = (
             selected_review_playlist_id
-            if upload_target == UPLOAD_TARGET_REVIEW
+            if upload_target == UploadTarget.REVIEW
             else None
         )
         pre_upload_warning = self._shotgrid_review_fallback_warning_for_upload()
         fallback_reason = self._shotgrid_review_fallback_reason_for_upload()
 
-        request = AssetPlayblastVersionUploadRequest(
-            asset_display_name=asset_display_name,
+        request = PlayblastVersionUploadRequest(
+            entity=PlayblastEntity.asset(asset_display_name),
             movie_path=movie_path,
             version_name=version_name,
             description=self._shotgrid_upload_description() or None,
@@ -736,7 +736,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         )
 
         try:
-            upload_result = upload_asset_playblast_version(request)
+            upload_result = upload_playblast_version(request)
         except Exception as exc:
             log.exception("ShotGrid upload failed for asset '%s'", asset_display_name)
             return [f"ShotGrid Upload: Failed - {exc}"]
@@ -745,7 +745,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         if upload_result.ok:
             success_message = (
                 f"ShotGrid Upload: Success - {upload_result.version_name} "
-                f"(asset {upload_result.asset_display_name})."
+                f"({upload_result.entity.kind} {upload_result.entity.value})."
             )
             if upload_result.version_id is not None:
                 success_message = (

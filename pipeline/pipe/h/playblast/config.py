@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 from pipe.playblast import FFmpegPreset
+from pipe.playblast.shotgrid import UploadTarget
 from pipe.shotgrid import Shot
 
 DEFAULT_RESOLUTION = (1280, 720)
@@ -30,7 +31,7 @@ class HoudiniPlayblastLaunchContext:
     output_destinations: tuple[ResolvedOutputDestination, ...]
     shotgrid_description: str
     upload_to_shotgrid: bool
-    shotgrid_upload_target: str
+    shotgrid_upload_target: UploadTarget
     shotgrid_review_playlist_id: int | None
     shotgrid_review_load_error: str | None
 

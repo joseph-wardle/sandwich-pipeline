@@ -29,7 +29,12 @@ def list_recent_review_playlists(
     limit: int = 10,
 ) -> tuple[PlayblastReviewPlaylistOption, ...]:
     """Return recent review playlists as UI-friendly options."""
-    connection = conn or _default_db_connection()
+    if conn is None:
+        from pipe.playblast.shotgrid import _default_db_connection
+
+        connection = _default_db_connection()
+    else:
+        connection = conn
     return tuple(
         PlayblastReviewPlaylistOption(
             playlist_id=playlist.id,
@@ -39,15 +44,6 @@ def list_recent_review_playlists(
         )
         for playlist in connection.find_recent_playlists(limit=limit)
     )
-
-
-def _default_db_connection() -> ShotGrid:
-    # `env_sg` holds the gitignored production credentials; keep the import
-    # lazy so importing this module on a host without credentials does not
-    # raise at module-load time.
-    from env_sg import DB_Config
-
-    return ShotGrid.connect(DB_Config)
 
 
 __all__ = [

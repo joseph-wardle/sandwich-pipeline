@@ -35,11 +35,11 @@ from pipe.m.playblast.shot.config import (
 )
 from pipe.m.playblast.shot.playblaster import MPlayblaster
 from pipe.playblast import FFmpegPreset
-from pipe.playblast.naming import resolve_versioned_playblast_basename
+from pipe.playblast.naming import next_versioned_basename
 from pipe.playblast.shotgrid import (
-    UPLOAD_TARGET_REVIEW,
-    UPLOAD_TARGET_VERSION_ONLY,
+    PlayblastEntity,
     PlayblastVersionUploadRequest,
+    UploadTarget,
     default_version_name_from_movie_path,
     list_recent_review_playlists,
     resolve_preferred_upload_movie_path,
@@ -762,7 +762,7 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         upload_target = self._shotgrid_upload_target()
         review_playlist_id = (
             self._selected_shotgrid_review_playlist_id()
-            if upload_target == UPLOAD_TARGET_REVIEW
+            if upload_target == UploadTarget.REVIEW
             else None
         )
         selected_review_playlist_id = self._selected_shotgrid_review_playlist_id()
@@ -770,7 +770,7 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         pre_upload_warning = self._shotgrid_review_fallback_warning_for_upload()
 
         upload_request = PlayblastVersionUploadRequest(
-            shot_code=shot_code,
+            entity=PlayblastEntity.shot(shot_code),
             movie_path=movie_path,
             version_name=version_name,
             description=self._shotgrid_upload_description() or None,
@@ -789,7 +789,7 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         if upload_result.ok:
             success_message = (
                 f"ShotGrid Upload: Success - {upload_result.version_name}"
-                f" (shot {upload_result.shot_code})."
+                f" ({upload_result.entity.kind} {upload_result.entity.value})."
             )
             if upload_result.version_id is not None:
                 success_message = (
@@ -824,7 +824,7 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         return directories
 
     def _resolve_output_name(self, prefix: str) -> str:
-        return resolve_versioned_playblast_basename(
+        return next_versioned_basename(
             prefix,
             self._selected_destination_directories(),
         )
@@ -876,10 +876,10 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     def _is_shotgrid_upload_requested(self) -> bool:
         return self._shotgrid_upload_checkbox.isChecked()
 
-    def _shotgrid_upload_target(self) -> str:
+    def _shotgrid_upload_target(self) -> UploadTarget:
         if self._can_upload_to_selected_shotgrid_review():
-            return UPLOAD_TARGET_REVIEW
-        return UPLOAD_TARGET_VERSION_ONLY
+            return UploadTarget.REVIEW
+        return UploadTarget.VERSION_ONLY
 
     def _is_shotgrid_version_upload_enabled(self) -> bool:
         return self._shotgrid_upload_version_checkbox.isChecked()

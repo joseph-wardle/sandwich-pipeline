@@ -19,9 +19,9 @@ from pipe.h.playblast.dialog import HPlayblastDialog
 from pipe.h.playblast.playblaster import HPlayblaster
 from pipe.playblast import FFmpegPreset
 from pipe.playblast.shotgrid import (
-    UPLOAD_TARGET_REVIEW,
-    UPLOAD_TARGET_VERSION_ONLY,
+    PlayblastEntity,
     PlayblastVersionUploadRequest,
+    UploadTarget,
     default_version_name_from_movie_path,
     resolve_preferred_upload_movie_path,
     upload_playblast_version,
@@ -320,7 +320,7 @@ def _upload_shot_playblast_to_shotgrid(
         selected_playlist_id,
     ) = _resolve_upload_target_for_request(context)
     upload_request = PlayblastVersionUploadRequest(
-        shot_code=shot_code,
+        entity=PlayblastEntity.shot(shot_code),
         movie_path=movie_path,
         version_name=version_name,
         description=context.shotgrid_description or None,
@@ -339,7 +339,7 @@ def _upload_shot_playblast_to_shotgrid(
     if upload_result.ok:
         success_message = (
             f"ShotGrid Upload: Success - {upload_result.version_name}"
-            f" (shot {upload_result.shot_code})."
+            f" ({upload_result.entity.kind} {upload_result.entity.value})."
         )
         if upload_result.version_id is not None:
             success_message = (
@@ -368,18 +368,17 @@ def _upload_shot_playblast_to_shotgrid(
 
 def _resolve_upload_target_for_request(
     context: HoudiniPlayblastLaunchContext,
-) -> tuple[str, int | None, str | None, str | None, int | None]:
-    normalized_target = str(context.shotgrid_upload_target or "").strip().lower()
-    if normalized_target != UPLOAD_TARGET_REVIEW:
-        return (UPLOAD_TARGET_VERSION_ONLY, None, None, None, None)
+) -> tuple[UploadTarget, int | None, str | None, str | None, int | None]:
+    if context.shotgrid_upload_target != UploadTarget.REVIEW:
+        return (UploadTarget.VERSION_ONLY, None, None, None, None)
 
     playlist_id = context.shotgrid_review_playlist_id
     if isinstance(playlist_id, int) and playlist_id > 0:
-        return (UPLOAD_TARGET_REVIEW, playlist_id, None, None, playlist_id)
+        return (UploadTarget.REVIEW, playlist_id, None, None, playlist_id)
 
     if context.shotgrid_review_load_error:
         return (
-            UPLOAD_TARGET_VERSION_ONLY,
+            UploadTarget.VERSION_ONLY,
             None,
             "Review upload skipped because recent reviews could not be loaded. "
             "Version upload continued.",
@@ -388,7 +387,7 @@ def _resolve_upload_target_for_request(
         )
 
     return (
-        UPLOAD_TARGET_VERSION_ONLY,
+        UploadTarget.VERSION_ONLY,
         None,
         "Review upload skipped because no valid review playlist was selected. "
         "Version upload continued.",
