@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator, cast
+from typing import TYPE_CHECKING, Any, Iterator, cast
 
 import hou
 
 from pipe.h.playblast.config import DEFAULT_RESOLUTION
+from pipe.h.playblast.hud import build_hud_filter_args, resolve_current_hip_version
 from pipe.playblast import FFmpegPreset, Playblaster
+from shared.users import resolve_artist_display_name
 
 if TYPE_CHECKING:
     from pipe.shotgrid import Shot
@@ -71,12 +74,26 @@ class HPlayblaster(Playblaster):
         self._camera_path = str(camera_path).strip() or None
         return self
 
-    def _run_postprocess(self, video_path: Path) -> None:
-        # TODO: burn in shot/artist/frame-range HUD via ffmpeg drawtext.
-        # Houdini's flipbook does not produce HUD overlays the way Maya's
-        # applied_hud context manager does, so we add them here post-encode
-        # to match Maya playblast conventions.
-        return
+    def _build_ffmpeg_input(
+        self, tempdir: Path, basename: str, start_frame: int
+    ) -> Any:
+        # HUD bakes into the input filter chain so it propagates to every
+        # preset's encode in a single pass. Postprocessing would force a
+        # re-encode of every output and was the cause of the silent
+        # codec-rewrite bug fixed in the prior PR.
+        chain = super()._build_ffmpeg_input(tempdir, basename, start_frame)
+        version_label, title = resolve_current_hip_version(self._shot)
+        for filter_kwargs in build_hud_filter_args(
+            shot_code=self._shot.code or "",
+            artist_display_name=resolve_artist_display_name(),
+            start_frame=start_frame,
+            resolution=DEFAULT_RESOLUTION,
+            now=datetime.now(),
+            version_label=version_label,
+            title=title,
+        ):
+            chain = chain.filter("drawtext", **filter_kwargs)
+        return chain
 
     def _write_images(self, path: str) -> None:
         cut_in, cut_out = self._shot.frame_range

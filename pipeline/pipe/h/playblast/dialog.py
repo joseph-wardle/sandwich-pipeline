@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 SOURCE_MODE = Literal["shot", "custom"]
 
-DEPARTMENTS = ("anim", "comp", "fx", "lighting", "previs")
+DEPARTMENTS = ("fx", "cfx", "lighting")
 
 
 @dataclass(frozen=True)
