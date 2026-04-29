@@ -20,11 +20,9 @@ from pipe.h.playblast.playblaster import HPlayblaster
 from pipe.playblast import FFmpegPreset
 from pipe.playblast.shotgrid import (
     PlayblastEntity,
-    PlayblastVersionUploadRequest,
+    PlayblastUploadIntent,
     UploadTarget,
-    default_version_name_from_movie_path,
-    resolve_preferred_upload_movie_path,
-    upload_playblast_version,
+    run_playblast_upload,
 )
 from pipe.shotgrid import Shot, ShotGrid
 from shared.users import resolve_artist_display_name
@@ -272,128 +270,28 @@ def _preferred_edit_movie_paths_for_upload(
     return []
 
 
-def _resolve_shotgrid_upload_movie_path(
-    context: HoudiniPlayblastLaunchContext,
-) -> Path | None:
-    """Resolve upload path deterministically: prefer Edit, then destination order."""
-    ordered_paths = _ordered_final_movie_paths_for_upload(context)
-    preferred_paths = _preferred_edit_movie_paths_for_upload(context)
-    return resolve_preferred_upload_movie_path(
-        ordered_paths,
-        preferred_paths=preferred_paths,
-    )
-
-
 def _run_post_export_actions(config: HoudiniPlayblastExportConfig) -> list[str]:
     context = config.context
     if context.source_mode != "shot" or not context.upload_to_shotgrid:
         return []
 
-    upload_movie = _resolve_shotgrid_upload_movie_path(context)
-    if upload_movie is None:
-        log.warning(
-            "ShotGrid upload requested but no valid movie output was found in selected destinations."
-        )
-        return ["ShotGrid Upload: Skipped - no valid playblast movie file was found."]
-
-    return _upload_shot_playblast_to_shotgrid(context, upload_movie)
-
-
-def _upload_shot_playblast_to_shotgrid(
-    context: HoudiniPlayblastLaunchContext,
-    movie_path: Path,
-) -> list[str]:
     shot_code = str(context.shot_code or "").strip()
     if not shot_code:
         return ["ShotGrid Upload: Skipped - shot code is missing."]
 
-    version_name = default_version_name_from_movie_path(movie_path)
-    if not version_name:
-        version_name = f"{shot_code}_playblast"
-
-    artist_name = resolve_artist_display_name().strip() or None
-    (
-        upload_target,
-        review_playlist_id,
-        pre_upload_warning,
-        fallback_reason,
-        selected_playlist_id,
-    ) = _resolve_upload_target_for_request(context)
-    upload_request = PlayblastVersionUploadRequest(
+    intent = PlayblastUploadIntent(
         entity=PlayblastEntity.shot(shot_code),
-        movie_path=movie_path,
-        version_name=version_name,
+        output_paths=tuple(_ordered_final_movie_paths_for_upload(context)),
+        preferred_paths=tuple(_preferred_edit_movie_paths_for_upload(context)),
         description=context.shotgrid_description or None,
-        artist_display_name=artist_name,
-        upload_target=upload_target,
-        review_playlist_id=review_playlist_id,
+        artist_display_name=resolve_artist_display_name().strip() or None,
+        upload_version=True,
+        upload_to_review=context.shotgrid_upload_target == UploadTarget.REVIEW,
+        review_playlist_id=context.shotgrid_review_playlist_id,
+        review_load_error=context.shotgrid_review_load_error,
+        fallback_version_name=f"{shot_code}_playblast",
     )
-
-    try:
-        upload_result = upload_playblast_version(upload_request)
-    except Exception as exc:
-        log.exception("ShotGrid upload failed for shot '%s'", shot_code)
-        return [f"ShotGrid Upload: Failed - {exc}"]
-
-    message_lines: list[str] = []
-    if upload_result.ok:
-        success_message = (
-            f"ShotGrid Upload: Success - {upload_result.version_name}"
-            f" ({upload_result.entity.kind} {upload_result.entity.value})."
-        )
-        if upload_result.version_id is not None:
-            success_message = (
-                f"{success_message} Version ID: {upload_result.version_id}."
-            )
-        message_lines.append(success_message)
-    else:
-        message_lines.append(f"ShotGrid Upload: Failed - {upload_result.message}")
-
-    if pre_upload_warning and upload_result.ok:
-        message_lines.append(f"ShotGrid Warning: {pre_upload_warning}")
-    if pre_upload_warning:
-        log.warning(
-            "ShotGrid review upload fallback to version upload "
-            "(shot_code=%s, version_id=%s, playlist_id=%s, reason=%s)",
-            shot_code,
-            upload_result.version_id,
-            selected_playlist_id,
-            fallback_reason or "review playlist unavailable",
-        )
-    for warning in upload_result.warnings:
-        message_lines.append(f"ShotGrid Warning: {warning}")
-
-    return message_lines
-
-
-def _resolve_upload_target_for_request(
-    context: HoudiniPlayblastLaunchContext,
-) -> tuple[UploadTarget, int | None, str | None, str | None, int | None]:
-    if context.shotgrid_upload_target != UploadTarget.REVIEW:
-        return (UploadTarget.VERSION_ONLY, None, None, None, None)
-
-    playlist_id = context.shotgrid_review_playlist_id
-    if isinstance(playlist_id, int) and playlist_id > 0:
-        return (UploadTarget.REVIEW, playlist_id, None, None, playlist_id)
-
-    if context.shotgrid_review_load_error:
-        return (
-            UploadTarget.VERSION_ONLY,
-            None,
-            "Review upload skipped because recent reviews could not be loaded. "
-            "Version upload continued.",
-            context.shotgrid_review_load_error,
-            playlist_id,
-        )
-
-    return (
-        UploadTarget.VERSION_ONLY,
-        None,
-        "Review upload skipped because no valid review playlist was selected. "
-        "Version upload continued.",
-        "missing review playlist id",
-        playlist_id,
-    )
+    return run_playblast_upload(intent)
 
 
 def _build_success_message(

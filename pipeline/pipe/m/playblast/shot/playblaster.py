@@ -15,6 +15,8 @@ from pipe.playblast import Playblaster
 if TYPE_CHECKING:
     from typing import Any
 
+    from pipe.shotgrid import Shot
+
 log = logging.getLogger(__name__)
 
 
@@ -23,7 +25,7 @@ class MPlayblaster(Playblaster):
     _extra_kwargs: dict[str, Any]
 
     def __init__(self) -> None:
-        super().__init__()
+        self._extra_kwargs = {}
 
     def configure(self, config: MPlayblastConfig) -> MPlayblaster:
         self._config = config
@@ -40,9 +42,9 @@ class MPlayblaster(Playblaster):
             return str(model_panels[0])
         return ""
 
-    def _write_images(self, path: str) -> None:
+    def _write_images(self, shot: Shot, path: str) -> None:
         """Maya implementation of playblasting image frames"""
-        cut_in, cut_out = self._shot.frame_range
+        cut_in, cut_out = shot.frame_range
         active_editor = self._resolve_active_editor()
         if active_editor:
             self._extra_kwargs["viewport_options"].update(
@@ -129,11 +131,11 @@ class MPlayblaster(Playblaster):
                 else:
                     self._extra_kwargs["camera"] = shot_config.camera
 
-                with self(shot_config.shot):
-                    super()._do_playblast(
-                        shot_config.paths,
-                        shot_config.tails,
-                    )
+                super()._do_playblast(
+                    shot_config.shot,
+                    shot_config.paths,
+                    shot_config.tails,
+                )
 
 
 __all__ = ["MPlayblaster"]

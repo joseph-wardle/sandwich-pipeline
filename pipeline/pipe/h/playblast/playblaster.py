@@ -49,15 +49,15 @@ _GUIDES_TO_DISABLE = (
 class HPlayblaster(Playblaster):
     _camera_path: str | None
     _out_paths: dict[FFmpegPreset, list[Path | str]]
+    _shot: Shot
     _tails: tuple[int, int]
 
     def __init__(self) -> None:
-        super().__init__()
         self._camera_path = None
         self._out_paths = {}
         self._tails = (0, 0)
         try:
-            self.FR = int(round(hou.fps()))
+            self.fps = int(round(hou.fps()))
         except Exception:
             pass
 
@@ -75,16 +75,16 @@ class HPlayblaster(Playblaster):
         return self
 
     def _build_ffmpeg_input(
-        self, tempdir: Path, basename: str, start_frame: int
+        self, shot: Shot, tempdir: Path, basename: str, start_frame: int
     ) -> Any:
         # HUD bakes into the input filter chain so it propagates to every
         # preset's encode in a single pass. Postprocessing would force a
         # re-encode of every output and was the cause of the silent
         # codec-rewrite bug fixed in the prior PR.
-        chain = super()._build_ffmpeg_input(tempdir, basename, start_frame)
-        version_label, title = resolve_current_hip_version(self._shot)
+        chain = super()._build_ffmpeg_input(shot, tempdir, basename, start_frame)
+        version_label, title = resolve_current_hip_version(shot)
         for filter_kwargs in build_hud_filter_args(
-            shot_code=self._shot.code or "",
+            shot_code=shot.code or "",
             artist_display_name=resolve_artist_display_name(),
             start_frame=start_frame,
             resolution=DEFAULT_RESOLUTION,
@@ -95,8 +95,8 @@ class HPlayblaster(Playblaster):
             chain = chain.filter("drawtext", **filter_kwargs)
         return chain
 
-    def _write_images(self, path: str) -> None:
-        cut_in, cut_out = self._shot.frame_range
+    def _write_images(self, shot: Shot, path: str) -> None:
+        cut_in, cut_out = shot.frame_range
         start_frame = cut_in - self._tails[0]
         end_frame = cut_out + self._tails[1]
 
@@ -111,8 +111,7 @@ class HPlayblaster(Playblaster):
             _run_flipbook(scene_viewer, viewport, flip)
 
     def playblast(self) -> None:
-        with self(self._shot):
-            super()._do_playblast(self._out_paths, self._tails)
+        super()._do_playblast(self._shot, self._out_paths, self._tails)
 
 
 def _scene_viewer_and_viewport() -> tuple[hou.SceneViewer, hou.GeometryViewport]:
@@ -382,11 +381,10 @@ def _run_flipbook(
     viewport: hou.GeometryViewport,
     settings: hou.FlipbookSettings,
 ) -> None:
+    # Older Houdini builds don't accept the `interactive` (3rd) argument; if
+    # the call rejects it with a TypeError, retry with the 2-arg signature.
+    # Any other exception (e.g. flipbook write failure) is genuine.
     try:
         scene_viewer.flipbook(viewport, settings, False)
-    except Exception as exc:
-        try:
-            scene_viewer.flipbook(viewport, settings)
-        except Exception:
-            log.error("Flipbook failed: %s", exc, exc_info=True)
-            raise
+    except TypeError:
+        scene_viewer.flipbook(viewport, settings)

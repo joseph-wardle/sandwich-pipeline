@@ -16,7 +16,6 @@ DEFAULT_HEIGHT = 1080
 DEFAULT_FRAMES_PER_PASS = 96
 DEFAULT_FOCAL_LENGTH = 50.0
 DEFAULT_CAMERA_PADDING = 1.25
-DEFAULT_AIM_HEIGHT_BIAS = 0.0
 
 
 @dataclass(frozen=True)
@@ -48,10 +47,9 @@ class TurnaroundPlayblastConfig:
     width: int = DEFAULT_WIDTH
     height: int = DEFAULT_HEIGHT
     frames_per_pass: int = DEFAULT_FRAMES_PER_PASS
-    frame_rate: int = Playblaster.FR
+    frame_rate: int = Playblaster.fps
     focal_length: float = DEFAULT_FOCAL_LENGTH
     camera_padding: float = DEFAULT_CAMERA_PADDING
-    aim_height_bias: float = DEFAULT_AIM_HEIGHT_BIAS
     use_default_material: bool = True
     use_shadows: bool = True
     use_anti_aliasing: bool = True
@@ -172,7 +170,6 @@ def _node_uuid(node: str) -> str:
 
 
 __all__ = [
-    "DEFAULT_AIM_HEIGHT_BIAS",
     "DEFAULT_CAMERA_PADDING",
     "DEFAULT_FOCAL_LENGTH",
     "DEFAULT_FRAMES_PER_PASS",

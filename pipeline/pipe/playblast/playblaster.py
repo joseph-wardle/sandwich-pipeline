@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 import shutil
 import time
@@ -12,13 +11,11 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
 
-import ffmpeg  # type: ignore[import-untyped]
-
+from pipe.playblast.encoding import build_image_input_chain, encode_movie
 from pipe.playblast.presets import FFmpegPreset
+from pipe.playblast.tempdir import resolve_playblast_tempdir
 
 if TYPE_CHECKING:
-    from typing import Self
-
     from pipe.shotgrid import Shot
 
 
@@ -41,28 +38,11 @@ class Playblaster(metaclass=ABCMeta):
     processing for VLC compatibility, and emitting telemetry.
     """
 
-    _shot: Shot
-    _in_context: bool
-
-    FR = 24
-
-    def __init__(self) -> None:
-        pass
+    fps: int = 24
 
     @abstractmethod
-    def _write_images(self, path: str) -> None:
+    def _write_images(self, shot: Shot, path: str) -> None:
         pass
-
-    def __enter__(self) -> Self:
-        self._in_context = True
-        return self
-
-    def __call__(self, shot: Shot, *args):
-        self._shot = shot
-        return self
-
-    def __exit__(self, *args) -> None:
-        self._in_context = False
 
     def _run_postprocess(self, video_path: Path) -> None:
         """Optional post-encode pass on each final output path.
@@ -80,38 +60,41 @@ class Playblaster(metaclass=ABCMeta):
 
     def _do_playblast(
         self,
+        shot: Shot,
         out_paths: dict[FFmpegPreset, list[Path | str]] | None = None,
         tails: tuple[int, int] = (0, 0),
     ) -> None:
-        if not self._in_context:
-            raise RuntimeError("_do_playblast not called from within context self")
         out_paths = out_paths or {}
 
         tempdir = self._resolve_tempdir()
-        image_basename = self._image_basename()
+        image_basename = self._image_basename(shot)
         self._cleanup_temp_files(tempdir, image_basename)
 
-        cut_in, cut_out = self._shot.frame_range
+        cut_in, cut_out = shot.frame_range
         frame_start = cut_in - tails[0]
         frame_end = cut_out + tails[1]
         action_id = self._new_playblast_action_id()
         expected_total_outputs = sum(len(paths) for paths in out_paths.values())
 
         with self._telemetry_phase(
+            shot=shot,
             preset="unknown",
             expected_outputs=expected_total_outputs,
             frame_start=frame_start,
             frame_end=frame_end,
             action_id=action_id,
         ):
-            self._write_images(str(tempdir / image_basename))
+            self._write_images(shot, str(tempdir / image_basename))
 
         self._normalize_frame_filenames(tempdir, image_basename)
 
-        encoded_input = self._build_ffmpeg_input(tempdir, image_basename, frame_start)
+        encoded_input = self._build_ffmpeg_input(
+            shot, tempdir, image_basename, frame_start
+        )
 
         for preset, paths in out_paths.items():
             with self._telemetry_phase(
+                shot=shot,
                 preset=self._telemetry_preset_name(preset),
                 expected_outputs=len(paths),
                 frame_start=frame_start,
@@ -130,14 +113,8 @@ class Playblaster(metaclass=ABCMeta):
 
     @abstractmethod
     def playblast(self) -> None:
-        """Function to be called by the user to trigger a playblast.
-        This should call `_do_playblast` from within a `with self(...)`
-        block.
-        Looks something like:
-            >>> def playblast(self) -> None:
-            >>>     with self(shot):
-            >>>         super()._do_playblast([filepath])
-        """
+        """Trigger a playblast. Concrete implementations build inputs from
+        configured state and call `super()._do_playblast(shot, out_paths, tails)`."""
         pass
 
     # ------------------------------------------------------------------
@@ -146,10 +123,11 @@ class Playblaster(metaclass=ABCMeta):
 
     @staticmethod
     def _resolve_tempdir() -> Path:
-        return Path(os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))).resolve()
+        return resolve_playblast_tempdir()
 
-    def _image_basename(self) -> str:
-        return "playblast_temp." + (self._shot.code or "")
+    @staticmethod
+    def _image_basename(shot: Shot) -> str:
+        return "playblast_temp." + (shot.code or "")
 
     @staticmethod
     def _cleanup_temp_files(tempdir: Path, basename: str) -> None:
@@ -160,27 +138,24 @@ class Playblaster(metaclass=ABCMeta):
     def _normalize_frame_filenames(tempdir: Path, basename: str) -> None:
         # Houdini emits negative frame numbers as `name.-3.png`; ffmpeg's
         # image2 demuxer needs fixed-width zero-padded numbers
-        # (`name.-0003.png`). Rewrite both signs to a uniform 5-char width.
+        # (`name.-0003.png`). Rewrite both signs to a uniform width.
         pattern = re.compile(rf"{re.escape(basename)}\.(\-?\d+)\.png$")
         for path in tempdir.glob(f"{basename}.*.png"):
             match = pattern.match(path.name)
             if not match:
                 continue
-            num = int(match.group(1))
-            new_name = f"{basename}.{num:+05d}.png".replace("+", "")
+            new_name = f"{basename}.{_padded_signed_int(int(match.group(1)))}.png"
             path.rename(path.with_name(new_name))
 
     def _build_ffmpeg_input(
-        self, tempdir: Path, basename: str, start_frame: int
+        self, shot: Shot, tempdir: Path, basename: str, start_frame: int
     ) -> Any:
-        return ffmpeg.input(
+        del shot  # base impl ignores shot context; HPlayblaster's HUD uses it
+        return build_image_input_chain(
             str(tempdir / basename) + ".%04d.png",
-            start_number=start_frame,
-            r=self.FR,
-            # precisely define input colorspace
-            colorspace="bt709",
-            color_trc="iec61966-2-1",
-        ).filter("format", "yuv422p")
+            start_frame=start_frame,
+            frame_rate=self.fps,
+        )
 
     def _encode_preset(
         self,
@@ -190,25 +165,13 @@ class Playblaster(metaclass=ABCMeta):
         basename: str,
         start_frame: int,
     ) -> Path:
-        out_filename = str(tempdir / basename) + "." + preset.ext
-        try:
-            ffmpeg.output(
-                input_chain,
-                out_filename,
-                **preset.out_kwargs,
-                timecode="00:00:{:02}:{:02}".format(
-                    start_frame // self.FR,
-                    start_frame % self.FR,
-                ),
-                r=self.FR,
-            ).overwrite_output().run()
-        except ffmpeg.Error as exc:
-            if exc.stdout:
-                print("stdout:", exc.stdout.decode())
-            if exc.stderr:
-                print("stderr:", exc.stderr.decode())
-            raise
-        return Path(out_filename)
+        return encode_movie(
+            input_chain,
+            output_path=Path(str(tempdir / basename) + "." + preset.ext),
+            preset=preset,
+            frame_rate=self.fps,
+            start_frame=start_frame,
+        )
 
     @staticmethod
     def _copy_outputs(
@@ -232,15 +195,19 @@ class Playblaster(metaclass=ABCMeta):
             log.error("Post-process failed for %s: %s", final_path, exc)
 
     # ------------------------------------------------------------------
-    # Telemetry. Intentionally a thin wrapper around today's
-    # `_emit_playblast_event`; the telemetry system itself is being
-    # rewritten in the next PR and will replace this scaffolding.
+    # TODO(telemetry-rewrite): The telemetry hooks below are scaffolding
+    # around today's `pipe.telemetry.emit`. The telemetry system is being
+    # rewritten in a follow-up PR; when that rewrite lands, the module-
+    # level `_safe_import_telemetry` helper plus the three methods that
+    # call it (`_telemetry_scope`, `_new_playblast_action_id`,
+    # `_emit_playblast_event`) collapse into the new telemetry adapter.
     # ------------------------------------------------------------------
 
     @contextmanager
     def _telemetry_phase(
         self,
         *,
+        shot: Shot,
         preset: str,
         expected_outputs: int,
         frame_start: int,
@@ -254,6 +221,7 @@ class Playblaster(metaclass=ABCMeta):
         except Exception as exc:
             duration_ms = int((time.perf_counter() - started_at) * 1000)
             self._emit_playblast_event(
+                shot=shot,
                 status="error",
                 preset=preset,
                 output_count=expected_outputs,
@@ -269,6 +237,7 @@ class Playblaster(metaclass=ABCMeta):
         duration_ms = int((time.perf_counter() - started_at) * 1000)
         size_bytes = sum(self._safe_file_size(p) for p in phase.final_paths)
         self._emit_playblast_event(
+            shot=shot,
             status="success",
             preset=preset,
             output_count=len(phase.final_paths) or expected_outputs,
@@ -299,29 +268,28 @@ class Playblaster(metaclass=ABCMeta):
             pass
         return 0
 
-    def _telemetry_scope(self) -> dict[str, str] | None:
-        try:
-            from pipe.telemetry import extract_scope
-        except Exception:
+    @staticmethod
+    def _telemetry_scope(shot: Shot) -> dict[str, str] | None:
+        telemetry = _safe_import_telemetry()
+        if telemetry is None:
             return None
-
-        scope = extract_scope(self._shot)
-        shot_code = str(getattr(self._shot, "code", "")).strip()
+        scope = telemetry.extract_scope(shot)
+        shot_code = str(getattr(shot, "code", "")).strip()
         if shot_code:
             scope.setdefault("shot", shot_code)
         return scope or None
 
     @staticmethod
     def _new_playblast_action_id() -> str | None:
-        try:
-            from pipe.telemetry import new_action_id
-        except Exception:
+        telemetry = _safe_import_telemetry()
+        if telemetry is None:
             return None
-        return new_action_id()
+        return telemetry.new_action_id()
 
     def _emit_playblast_event(
         self,
         *,
+        shot: Shot,
         status: str,
         preset: str,
         output_count: int,
@@ -333,27 +301,20 @@ class Playblaster(metaclass=ABCMeta):
         error_message: str | None = None,
         exception_type: str | None = None,
     ) -> None:
-        try:
-            from pipe.telemetry import (
-                STATUS_ERROR,
-                STATUS_SUCCESS,
-                emit,
-                events,
-                get_event_definition,
-            )
-        except Exception:
-            log.debug(
-                "Telemetry import unavailable for playblast.create", exc_info=True
-            )
+        telemetry = _safe_import_telemetry()
+        if telemetry is None:
+            log.debug("Telemetry import unavailable for playblast.create")
             return
 
-        status_value = STATUS_SUCCESS if status == "success" else STATUS_ERROR
+        status_value = (
+            telemetry.STATUS_SUCCESS if status == "success" else telemetry.STATUS_ERROR
+        )
         payload = {
             "preset": str(preset),
             "output_count": max(0, int(output_count)),
             "frame_start": int(frame_start),
             "frame_end": int(frame_end),
-            "fps": max(1, int(self.FR)),
+            "fps": max(1, int(self.fps)),
         }
         metrics = {
             "duration_ms": max(0, int(duration_ms)),
@@ -364,7 +325,9 @@ class Playblaster(metaclass=ABCMeta):
         if status == "error":
             error_code = "PLAYBLAST_FAILED"
             try:
-                definition = get_event_definition(events.EVENT_PLAYBLAST_CREATE)
+                definition = telemetry.get_event_definition(
+                    telemetry.events.EVENT_PLAYBLAST_CREATE
+                )
                 if definition.error_codes:
                     error_code = definition.error_codes[0]
             except Exception:
@@ -375,15 +338,37 @@ class Playblaster(metaclass=ABCMeta):
                 "exception_type": exception_type or "RuntimeError",
             }
 
-        emit(
-            events.EVENT_PLAYBLAST_CREATE,
+        telemetry.emit(
+            telemetry.events.EVENT_PLAYBLAST_CREATE,
             status=status_value,
             action_id=action_id,
             payload=payload,
             metrics=metrics,
-            scope=self._telemetry_scope(),
+            scope=self._telemetry_scope(shot),
             error=error,
         )
+
+
+def _padded_signed_int(num: int, width: int = 4) -> str:
+    """Render `num` as a fixed-width zero-padded integer, preserving a leading
+    `-` for negatives but emitting no sign for positives.
+
+    `f"{num:+05d}"` gives `+0003`/`-0003`; we strip the `+` so positives
+    render as `0003`. Width is the *digit* width, so the rendered string is
+    `width` chars for positives and `width + 1` for negatives.
+    """
+    return f"{num:+0{width + 1}d}".replace("+", "")
+
+
+def _safe_import_telemetry() -> Any:
+    """Return `pipe.telemetry` if importable, else `None`. Treats import-
+    time failures as "telemetry is optional" so playblasts keep working on
+    hosts without telemetry credentials."""
+    try:
+        import pipe.telemetry as telemetry
+    except Exception:
+        return None
+    return telemetry
 
 
 __all__ = ["Playblaster"]

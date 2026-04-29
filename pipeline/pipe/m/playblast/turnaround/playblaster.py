@@ -8,7 +8,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable
 
-import ffmpeg  # type: ignore[import-untyped]
 import maya.cmds as mc
 from mayacapture.capture import capture  # type: ignore[import-not-found]
 from Qt import QtWidgets
@@ -21,6 +20,7 @@ from pipe.m.playblast.turnaround.config import (
     _node_uuid,
 )
 from pipe.m.util import maintain_selection
+from pipe.playblast.encoding import build_image_input_chain, encode_movie
 from shared.users import resolve_artist_display_name
 
 log = logging.getLogger(__name__)
@@ -74,7 +74,6 @@ class MTurnaroundPlayblaster:
                         staged_roots,
                         focal_length=config.focal_length,
                         camera_padding=config.camera_padding,
-                        aim_height_bias=config.aim_height_bias,
                     ) as camera_shape,
                 ):
                     progress.begin_step(
@@ -230,34 +229,18 @@ class MTurnaroundPlayblaster:
                 continue
 
             temp_movie_path = combined_base.with_suffix(f".{preset.ext}")
-            encode_kwargs = dict(preset.out_kwargs)
-            if preset.ext == "mp4":
-                encode_kwargs.setdefault("pix_fmt", "yuv420p")
-                encode_kwargs.setdefault("movflags", "+faststart")
-            try:
-                (
-                    ffmpeg.output(
-                        ffmpeg.input(
-                            image_pattern,
-                            start_number=1,
-                            r=self._config.frame_rate,
-                            colorspace="bt709",
-                            color_trc="iec61966-2-1",
-                        ).filter("format", "yuv422p"),
-                        str(temp_movie_path),
-                        **encode_kwargs,
-                        r=self._config.frame_rate,
-                    )
-                    .overwrite_output()
-                    .run()
-                )
-            except ffmpeg.Error as exc:
-                stdout = exc.stdout.decode() if exc.stdout else ""
-                stderr = exc.stderr.decode() if exc.stderr else ""
-                log.error(
-                    "Turnaround encode failed.\nstdout:%s\nstderr:%s", stdout, stderr
-                )
-                raise RuntimeError("Turnaround movie encoding failed.") from exc
+            input_chain = build_image_input_chain(
+                image_pattern,
+                start_frame=1,
+                frame_rate=self._config.frame_rate,
+            )
+            encode_movie(
+                input_chain,
+                output_path=temp_movie_path,
+                preset=preset,
+                frame_rate=self._config.frame_rate,
+                start_frame=1,
+            )
 
             for output_base in output_bases:
                 output_path = Path(str(output_base) + f".{preset.ext}")
@@ -348,14 +331,12 @@ def _temporary_turnaround_camera(
     *,
     focal_length: float,
     camera_padding: float,
-    aim_height_bias: float,
 ):
     bbox = _exact_bounding_box(review_roots)
     center = _bounding_box_center_from_bbox(bbox)
     size_x, size_y, size_z = _bounding_box_size_from_bbox(bbox)
     radius = max(0.5 * math.sqrt(size_x**2 + size_y**2 + size_z**2), 1.0)
     del size_y
-    del aim_height_bias
 
     camera_transform, camera_shape = mc.camera(name=_unique_name("assetTurnaround_cam"))  # type: ignore
     aim_locator: str = mc.spaceLocator(name=_unique_name("assetTurnaroundAim_LOC"))[0]  # type: ignore
@@ -399,7 +380,7 @@ def _turnaround_huds(
     asset_label: str,
     review_roots: tuple[str, ...],
 ) -> tuple[list[str], list[HudDefinition]]:
-    point_count_label = _polygon_point_count_label(review_roots)
+    point_count_label = str(_polygon_point_count(review_roots))
     return (
         [],
         [
@@ -426,10 +407,6 @@ def _turnaround_huds(
             ),
         ],
     )
-
-
-def _polygon_point_count_label(review_roots: tuple[str, ...]) -> str:
-    return str(_polygon_point_count(review_roots))
 
 
 def _polygon_point_count(review_roots: tuple[str, ...]) -> int:

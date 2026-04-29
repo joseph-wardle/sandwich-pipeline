@@ -13,18 +13,20 @@ from pipe.versioning import (
     version_label as _format_version_label,
 )
 
+import pipe.playblast as _playblast_pkg
+
+from pipe.h.hipfile.departments import DEPARTMENT_OPTIONS
+
 if TYPE_CHECKING:
     from pipe.shotgrid import Shot
 
-# Vendored TTF lives under `pipe/playblast/resources/fonts/`. From this
-# module's location (`pipe/h/playblast/hud.py`), `parents[2]` is `pipe/`.
-_RESOURCES_ROOT = Path(__file__).resolve().parents[2] / "playblast" / "resources"
-HUD_FONT_PATH = _RESOURCES_ROOT / "fonts" / "LondrinaSolid-Regular.ttf"
-
-# Departments recognized as save-stream parents in shot HIP layouts. Mirrors
-# `HShotFileManager._department_options()` — we duplicate the small constant
-# here to avoid importing the heavy file-manager module just for a path lookup.
-_HIP_DEPARTMENTS = ("cfx", "fx", "envfx", "flo", "lighting", "render")
+# Vendored TTF lives under `pipe/playblast/resources/fonts/`. Anchor on the
+# `pipe.playblast` package itself so future moves of either module don't
+# silently desync the relative jump.
+_PLAYBLAST_PACKAGE_DIR = Path(_playblast_pkg.__file__).resolve().parent
+HUD_FONT_PATH = (
+    _PLAYBLAST_PACKAGE_DIR / "resources" / "fonts" / "LondrinaSolid-Regular.ttf"
+)
 
 
 def build_hud_filter_args(
@@ -176,14 +178,14 @@ def _department_from_hip_path(hip_path: Path) -> str | None:
     # Mirror of HShotFileManager._department_from_path. Duplicated for the
     # same reason — avoid pulling the file-manager module's heavy deps.
     parent_name = hip_path.parent.name.strip().lower()
-    if parent_name in _HIP_DEPARTMENTS:
+    if parent_name in DEPARTMENT_OPTIONS:
         return parent_name
     if hip_path.suffix.lower() != ".hipnc":
         return None
     stem = hip_path.stem.strip().lower()
     if ".v" in stem:
         stem = stem.rsplit(".v", 1)[0]
-    if stem in _HIP_DEPARTMENTS:
+    if stem in DEPARTMENT_OPTIONS:
         return stem
     return None
 

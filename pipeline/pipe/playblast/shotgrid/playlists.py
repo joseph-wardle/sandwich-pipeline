@@ -30,9 +30,9 @@ def list_recent_review_playlists(
 ) -> tuple[PlayblastReviewPlaylistOption, ...]:
     """Return recent review playlists as UI-friendly options."""
     if conn is None:
-        from pipe.playblast.shotgrid import _default_db_connection
+        from pipe.playblast.shotgrid._connection import default_db_connection
 
-        connection = _default_db_connection()
+        connection = default_db_connection()
     else:
         connection = conn
     return tuple(

@@ -295,11 +295,9 @@ def _validate(request: PlayblastVersionUploadRequest) -> _NormalizedUploadReques
 def _resolve_connection(conn: ShotGrid | None) -> ShotGrid:
     if conn is not None:
         return conn
-    # Lazy: `__init__.py` imports from this module, so a module-level
-    # reverse import would be circular.
-    from pipe.playblast.shotgrid import _default_db_connection
+    from pipe.playblast.shotgrid._connection import default_db_connection
 
-    return _default_db_connection()
+    return default_db_connection()
 
 
 def _normalize_extra_fields(extras: Mapping[str, Any]) -> dict[str, Any]:
