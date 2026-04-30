@@ -5,95 +5,37 @@ import math
 import shutil
 import tempfile
 from contextlib import contextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-import ffmpeg  # type: ignore[import-untyped]
 import maya.cmds as mc
 from mayacapture.capture import capture  # type: ignore[import-not-found]
 from Qt import QtWidgets
 
 from pipe.glui.progress import progress_scope
+from pipe.m.playblast.hud import HudDefinition, applied_hud
+from pipe.m.playblast.turnaround.config import (
+    TurnaroundPlayblastConfig,
+    _first_parent,
+    _node_uuid,
+)
 from pipe.m.util import maintain_selection
-from pipe.playblast_artist import resolve_artist_display_name
-from pipe.util import Playblaster
-
-from .playblaster import applied_hud
-from .struct import HudDefinition
+from pipe.playblast.encoding import build_image_input_chain, encode_movie
+from shared.users import resolve_artist_display_name
 
 log = logging.getLogger(__name__)
-
-DEFAULT_WIDTH = 1920
-DEFAULT_HEIGHT = 1080
-DEFAULT_FRAMES_PER_PASS = 96
-DEFAULT_FOCAL_LENGTH = 50.0
-DEFAULT_CAMERA_PADDING = 1.25
-DEFAULT_AIM_HEIGHT_BIAS = 0.0
 
 BACKGROUND_COLOR = (0.33, 0.33, 0.33)
 BACKGROUND_TOP = (0.42, 0.44, 0.47)
 BACKGROUND_BOTTOM = (0.17, 0.17, 0.18)
 
 
-@dataclass(frozen=True)
-class TurnaroundReviewRoots:
-    """Resolved roots to display in the turnaround capture."""
-
-    roots: tuple[str, ...]
-    source_label: str
-
-    @property
-    def summary(self) -> str:
-        if not self.roots:
-            return "No review roots found."
-
-        if len(self.roots) == 1:
-            return _short_name(self.roots[0])
-
-        first_name = _short_name(self.roots[0])
-        return f"{first_name} + {len(self.roots) - 1} more"
-
-
-@dataclass(frozen=True)
-class TurnaroundPlayblastConfig:
-    """All settings required to export an asset turnaround movie."""
-
-    asset_label: str
-    output_paths: dict[Playblaster.PRESET, list[str | Path]]
-    review_roots: tuple[str, ...]
-    width: int = DEFAULT_WIDTH
-    height: int = DEFAULT_HEIGHT
-    frames_per_pass: int = DEFAULT_FRAMES_PER_PASS
-    frame_rate: int = Playblaster.FR
-    focal_length: float = DEFAULT_FOCAL_LENGTH
-    camera_padding: float = DEFAULT_CAMERA_PADDING
-    aim_height_bias: float = DEFAULT_AIM_HEIGHT_BIAS
-    use_default_material: bool = True
-    use_shadows: bool = True
-    use_anti_aliasing: bool = True
-    include_wireframe_pass: bool = True
-
-
-def resolve_turnaround_review_roots() -> TurnaroundReviewRoots:
-    """Resolve review roots from the current Maya selection or visible meshes."""
-
-    selected_transforms = _collapse_to_root_transforms(
-        _selected_root_candidates(),
-    )
-    if selected_transforms:
-        return TurnaroundReviewRoots(selected_transforms, "Selection")
-
-    scene_transforms = _collapse_to_root_transforms(_visible_scene_mesh_roots())
-    return TurnaroundReviewRoots(scene_transforms, "Visible Geometry")
-
-
-class TurnaroundPlayblaster:
+class MTurnaroundPlayblaster:
     """Capture a shaded and wireframe asset turnaround into one movie."""
 
     _config: TurnaroundPlayblastConfig
 
-    def configure(self, config: TurnaroundPlayblastConfig) -> TurnaroundPlayblaster:
+    def configure(self, config: TurnaroundPlayblastConfig) -> MTurnaroundPlayblaster:
         self._config = config
         return self
 
@@ -132,7 +74,6 @@ class TurnaroundPlayblaster:
                         staged_roots,
                         focal_length=config.focal_length,
                         camera_padding=config.camera_padding,
-                        aim_height_bias=config.aim_height_bias,
                     ) as camera_shape,
                 ):
                     progress.begin_step(
@@ -288,34 +229,18 @@ class TurnaroundPlayblaster:
                 continue
 
             temp_movie_path = combined_base.with_suffix(f".{preset.ext}")
-            encode_kwargs = dict(preset.out_kwargs)
-            if preset.ext == "mp4":
-                encode_kwargs.setdefault("pix_fmt", "yuv420p")
-                encode_kwargs.setdefault("movflags", "+faststart")
-            try:
-                (
-                    ffmpeg.output(
-                        ffmpeg.input(
-                            image_pattern,
-                            start_number=1,
-                            r=self._config.frame_rate,
-                            colorspace="bt709",
-                            color_trc="iec61966-2-1",
-                        ).filter("format", "yuv422p"),
-                        str(temp_movie_path),
-                        **encode_kwargs,
-                        r=self._config.frame_rate,
-                    )
-                    .overwrite_output()
-                    .run()
-                )
-            except ffmpeg.Error as exc:
-                stdout = exc.stdout.decode() if exc.stdout else ""
-                stderr = exc.stderr.decode() if exc.stderr else ""
-                log.error(
-                    "Turnaround encode failed.\nstdout:%s\nstderr:%s", stdout, stderr
-                )
-                raise RuntimeError("Turnaround movie encoding failed.") from exc
+            input_chain = build_image_input_chain(
+                image_pattern,
+                start_frame=1,
+                frame_rate=self._config.frame_rate,
+            )
+            encode_movie(
+                input_chain,
+                output_path=temp_movie_path,
+                preset=preset,
+                frame_rate=self._config.frame_rate,
+                start_frame=1,
+            )
 
             for output_base in output_bases:
                 output_path = Path(str(output_base) + f".{preset.ext}")
@@ -406,14 +331,12 @@ def _temporary_turnaround_camera(
     *,
     focal_length: float,
     camera_padding: float,
-    aim_height_bias: float,
 ):
     bbox = _exact_bounding_box(review_roots)
     center = _bounding_box_center_from_bbox(bbox)
     size_x, size_y, size_z = _bounding_box_size_from_bbox(bbox)
     radius = max(0.5 * math.sqrt(size_x**2 + size_y**2 + size_z**2), 1.0)
     del size_y
-    del aim_height_bias
 
     camera_transform, camera_shape = mc.camera(name=_unique_name("assetTurnaround_cam"))  # type: ignore
     aim_locator: str = mc.spaceLocator(name=_unique_name("assetTurnaroundAim_LOC"))[0]  # type: ignore
@@ -453,33 +376,11 @@ def _temporary_turnaround_camera(
             mc.delete(camera_transform)
 
 
-def _selected_root_candidates() -> tuple[str, ...]:
-    selection = mc.ls(selection=True, long=True, objectsOnly=True) or []
-    resolved_roots: list[str] = []
-    for node in selection:
-        transform = _as_transform(node)
-        if transform:
-            resolved_roots.append(transform)
-    return tuple(resolved_roots)
-
-
-def _visible_scene_mesh_roots() -> tuple[str, ...]:
-    scene_roots: list[str] = []
-    for mesh in mc.ls(type="mesh", long=True) or []:
-        if mc.getAttr(f"{mesh}.intermediateObject"):
-            continue
-        parent = _first_parent(mesh)
-        if not parent or not _is_visible_in_hierarchy(parent):
-            continue
-        scene_roots.append(parent)
-    return tuple(scene_roots)
-
-
 def _turnaround_huds(
     asset_label: str,
     review_roots: tuple[str, ...],
 ) -> tuple[list[str], list[HudDefinition]]:
-    point_count_label = _polygon_point_count_label(review_roots)
+    point_count_label = str(_polygon_point_count(review_roots))
     return (
         [],
         [
@@ -508,10 +409,6 @@ def _turnaround_huds(
     )
 
 
-def _polygon_point_count_label(review_roots: tuple[str, ...]) -> str:
-    return str(_polygon_point_count(review_roots))
-
-
 def _polygon_point_count(review_roots: tuple[str, ...]) -> int:
     mesh_shapes: dict[str, str] = {}
     for root in review_roots:
@@ -530,76 +427,9 @@ def _polygon_point_count(review_roots: tuple[str, ...]) -> int:
     for mesh_path in mesh_shapes.values():
         try:
             point_count += int(mc.polyEvaluate(mesh_path, vertex=True) or 0)
-        except Exception:
+        except (RuntimeError, ValueError):
             log.warning("Could not evaluate point count for mesh '%s'.", mesh_path)
     return point_count
-
-
-def _collapse_to_root_transforms(nodes: Iterable[str]) -> tuple[str, ...]:
-    candidate_paths_by_uuid: dict[str, str] = {}
-    for node in nodes:
-        normalized = str(node).strip()
-        if not normalized:
-            continue
-
-        transform = _as_transform(normalized)
-        if not transform:
-            continue
-        candidate_paths_by_uuid[_node_uuid(transform)] = transform
-
-    candidate_paths = tuple(candidate_paths_by_uuid.values())
-    candidate_set = set(candidate_paths)
-
-    collapsed_roots: list[str] = []
-    for node in candidate_paths:
-        parent = _first_parent(node)
-        has_selected_ancestor = False
-        while parent:
-            if parent in candidate_set:
-                has_selected_ancestor = True
-                break
-            parent = _first_parent(parent)
-
-        if not has_selected_ancestor:
-            collapsed_roots.append(node)
-
-    return tuple(collapsed_roots)
-
-
-def _as_transform(node: str) -> str | None:
-    if not mc.objExists(node):
-        return None
-
-    if mc.nodeType(node) == "transform":
-        return str(mc.ls(node, long=True)[0])
-
-    parent = _first_parent(node)
-    if parent:
-        return parent
-    return None
-
-
-def _first_parent(node: str) -> str | None:
-    parents = mc.listRelatives(node, parent=True, fullPath=True) or []
-    if not parents:
-        return None
-    return str(parents[0])
-
-
-def _is_visible_in_hierarchy(node: str) -> bool:
-    current = node
-    while current:
-        try:
-            if not mc.getAttr(f"{current}.visibility"):
-                return False
-        except Exception:
-            return False
-
-        parent = _first_parent(current)
-        if parent == current:
-            break
-        current = parent
-    return True
 
 
 def _exact_bounding_box(
@@ -685,17 +515,6 @@ def _set_linear_turntable_animation(
     )
 
 
-def _short_name(node: str) -> str:
-    return str(node).split("|")[-1]
-
-
-def _node_uuid(node: str) -> str:
-    uuids = mc.ls(node, uuid=True) or []
-    if not uuids:
-        raise ValueError(f"Could not resolve UUID for node '{node}'.")
-    return str(uuids[0])
-
-
 def _current_node_path(node_uuid: str) -> str | None:
     matches = mc.ls(node_uuid, long=True) or []
     if not matches:
@@ -719,12 +538,4 @@ def _unique_name(base_name: str) -> str:
         index += 1
 
 
-__all__ = [
-    "DEFAULT_FRAMES_PER_PASS",
-    "DEFAULT_HEIGHT",
-    "DEFAULT_WIDTH",
-    "TurnaroundPlayblastConfig",
-    "TurnaroundPlayblaster",
-    "TurnaroundReviewRoots",
-    "resolve_turnaround_review_roots",
-]
+__all__ = ["MTurnaroundPlayblaster"]

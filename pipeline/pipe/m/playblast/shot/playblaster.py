@@ -2,19 +2,20 @@ from __future__ import annotations
 
 import copy
 import logging
-from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import maya.cmds as mc
 from mayacapture.capture import capture  # type: ignore[import-not-found]
 
+from pipe.m.playblast.hud import applied_hud
+from pipe.m.playblast.shot.config import MPlayblastConfig
 from pipe.m.util import maintain_selection
-from pipe.util import Playblaster
-
-from .struct import HudDefinition, MPlayblastConfig
+from pipe.playblast import Playblaster
 
 if TYPE_CHECKING:
-    from typing import Any, Generator
+    from typing import Any
+
+    from pipe.shotgrid import Shot
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class MPlayblaster(Playblaster):
     _extra_kwargs: dict[str, Any]
 
     def __init__(self) -> None:
-        super().__init__()
+        self._extra_kwargs = {}
 
     def configure(self, config: MPlayblastConfig) -> MPlayblaster:
         self._config = config
@@ -41,9 +42,9 @@ class MPlayblaster(Playblaster):
             return str(model_panels[0])
         return ""
 
-    def _write_images(self, path: str) -> None:
+    def _write_images(self, shot: Shot, path: str) -> None:
         """Maya implementation of playblasting image frames"""
-        cut_in, cut_out = self._shot.frame_range
+        cut_in, cut_out = shot.frame_range
         active_editor = self._resolve_active_editor()
         if active_editor:
             self._extra_kwargs["viewport_options"].update(
@@ -130,58 +131,11 @@ class MPlayblaster(Playblaster):
                 else:
                     self._extra_kwargs["camera"] = shot_config.camera
 
-                with self(shot_config.shot):
-                    super()._do_playblast(
-                        shot_config.paths,
-                        shot_config.tails,
-                    )
+                super()._do_playblast(
+                    shot_config.shot,
+                    shot_config.paths,
+                    shot_config.tails,
+                )
 
 
-@contextmanager
-def applied_hud(
-    builtin_huds: list[str], custom_huds: list[HudDefinition]
-) -> Generator[None, None, None]:
-    # hide current huds and store current state
-    orig_visibility: dict[str, bool] = {}
-    orig_huds: list[str] = mc.headsUpDisplay(query=True, listHeadsUpDisplays=True)  # type: ignore
-    for hud in orig_huds:
-        vis = bool(mc.headsUpDisplay(hud, query=True, visible=True))
-        orig_visibility[hud] = vis
-        if vis:
-            mc.headsUpDisplay(hud, edit=True, visible=False)
-
-    # display requested builtin huds
-    for hud in builtin_huds:
-        mc.headsUpDisplay(hud, edit=True, visible=True)
-
-    # create requested custom huds
-    for chud in custom_huds:
-        if chud.name in orig_huds:
-            mc.headsUpDisplay(chud.name, remove=True)
-
-        kwargs: dict[str, Any] = dict()
-        if chud.idle_refresh:
-            kwargs.update({"attachToRefresh": True})
-        else:
-            kwargs.update({"event": chud.event})
-
-        mc.headsUpDisplay(
-            chud.name,
-            block=mc.headsUpDisplay(nextFreeBlock=chud.section),  # type: ignore
-            blockSize=chud.blockSize,
-            command=chud.command,
-            label=chud.label,
-            labelFontSize=chud.labelFontSize,
-            section=chud.section,
-            **kwargs,
-        )
-
-    try:
-        yield
-    finally:
-        # restore original visibility
-        for hud, state in orig_visibility.items():
-            mc.headsUpDisplay(hud, edit=True, visible=state)
-
-        for chud in custom_huds:
-            mc.headsUpDisplay(chud.name, remove=True)
+__all__ = ["MPlayblaster"]
