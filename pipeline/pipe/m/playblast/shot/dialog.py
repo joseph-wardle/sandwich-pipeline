@@ -27,29 +27,34 @@ from Qt.QtWidgets import (
 )
 
 from pipe.glui.dialogs import ButtonPair, MessageDialog
-from pipe.shotgrid import ShotGrid
-from pipe.playblast_artist import resolve_artist_display_name
-from pipe.playblast_naming import (
-    resolve_versioned_playblast_basename,
+from pipe.m.playblast.hud import HudDefinition
+from pipe.m.playblast.shot.config import (
+    MShotPlayblastConfig,
+    SaveLocation,
+    dummy_shot,
 )
-from pipe.playblast_shotgrid import (
-    UPLOAD_TARGET_REVIEW,
-    UPLOAD_TARGET_VERSION_ONLY,
-    PlayblastVersionUploadRequest,
-    default_version_name_from_movie_path,
-    list_recent_review_playlists,
-    resolve_preferred_upload_movie_path,
-    upload_playblast_version,
+from pipe.m.playblast.shot.launcher import (
+    build_success_message,
+    collect_output_paths,
+    final_movie_paths_for_destination,
+    ordered_final_movie_paths_for_upload,
 )
-from pipe.util import Playblaster
-
-from .playblaster import MPlayblaster
-from .struct import HudDefinition, MShotPlayblastConfig, SaveLocation, dummy_shot
+from pipe.m.playblast.shot.playblaster import MPlayblaster
+from pipe.playblast import FFmpegPreset
+from pipe.playblast.naming import next_versioned_basename
+from pipe.playblast.tempdir import resolve_playblast_tempdir
+from pipe.playblast.shotgrid import (
+    PlayblastEntity,
+    PlayblastUploadIntent,
+    run_playblast_upload,
+)
+from pipe.playblast.ui import ReviewPlaylistCombo
+from pipe.shotgrid import ShotGrid, ShotGridError
+from shared.users import resolve_artist_display_name
 
 if TYPE_CHECKING:
+    from pipe.m.playblast.shot.config import MPlayblastConfig
     from pipe.shotgrid import Shot
-
-    from .struct import MPlayblastConfig
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +67,7 @@ class ClickableQLabel(QLabel):
         super().mousePressEvent(event)
 
 
-class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
+class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     """Shared Maya playblast dialog using a Tabbed interface.
 
     The dialog is intentionally organized into linear sections so artists can
@@ -86,9 +91,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     _shot_code_value: QLabel
     _shotgrid_description_field: QLineEdit
     _shotgrid_description_row: QWidget
-    _shotgrid_review_combo: QComboBox
-    _shotgrid_review_refresh_button: QPushButton
-    _shotgrid_review_row: QWidget
+    _shotgrid_review_combo: ReviewPlaylistCombo
     _shotgrid_upload_checkbox: QCheckBox
     _shotgrid_upload_review_checkbox: QCheckBox
     _shotgrid_upload_version_checkbox: QCheckBox
@@ -103,8 +106,6 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     _use_ssao: QCheckBox
     _shot: Shot | None
     _custom_folder_field: QLineEdit
-    _shotgrid_review_lazy_load_attempted: bool
-    _shotgrid_review_load_error: str | None
 
     SHOT_TAB_INDEX = 0
     CUSTOM_TAB_INDEX: int
@@ -112,11 +113,11 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     playblaster = MPlayblaster()
 
     class SAVE_LOCS:
-        CUSTOM = SaveLocation("Custom Folder", "", Playblaster.PRESET.WEB)
+        CUSTOM = SaveLocation("Custom Folder", "", FFmpegPreset.WEB)
         CURRENT = SaveLocation(
             "Current Folder",
             lambda: Path(str(mc.file(query=True, sceneName=True) or ".")).parent,
-            Playblaster.PRESET.WEB,
+            FFmpegPreset.WEB,
         )
 
     class MAYA_HUDS:
@@ -155,8 +156,6 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         self._save_locations_by_name = {
             location.name: location for location in self._destination_locations()
         }
-        self._shotgrid_review_lazy_load_attempted = False
-        self._shotgrid_review_load_error = None
 
         self._setup_ui()
         self.SAVE_LOCS.CUSTOM._path = lambda: self._custom_folder_field.text()
@@ -301,8 +300,8 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         self._shotgrid_upload_target_row = self._build_shotgrid_upload_target_row()
         shot_layout.addWidget(self._shotgrid_upload_target_row, 5, 0, 1, 2)
 
-        self._shotgrid_review_row = self._build_shotgrid_review_row()
-        shot_layout.addWidget(self._shotgrid_review_row, 6, 0, 1, 2)
+        self._build_shotgrid_review_row()
+        shot_layout.addWidget(self._shotgrid_review_combo, 6, 0, 1, 2)
 
         self._shotgrid_description_row = QWidget()
         shotgrid_description_layout = QHBoxLayout(self._shotgrid_description_row)
@@ -353,32 +352,16 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         row_layout.addStretch()
         return row_widget
 
-    def _build_shotgrid_review_row(self) -> QWidget:
-        row_widget = QWidget()
-        row_layout = QHBoxLayout(row_widget)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.addWidget(QLabel("Review"))
-
-        self._shotgrid_review_combo = QComboBox(self)
-        self._shotgrid_review_combo.setToolTip(
-            "Select the ShotGrid review playlist to link this Version to."
+    def _build_shotgrid_review_row(self) -> None:
+        log_context = (
+            self._shot_code_value.text().strip() or "<unknown>"
+            if hasattr(self, "_shot_code_value")
+            else "<unknown>"
         )
-        row_layout.addWidget(self._shotgrid_review_combo)
-
-        self._shotgrid_review_refresh_button = QPushButton("Refresh")
-        self._shotgrid_review_refresh_button.setToolTip(
-            "Reload the recent ShotGrid review playlist options."
-        )
-        self._shotgrid_review_refresh_button.clicked.connect(
-            self._on_refresh_shotgrid_reviews_clicked
-        )
-        row_layout.addWidget(self._shotgrid_review_refresh_button)
-
-        self._set_review_combo_placeholder("No reviews loaded yet.")
-        self._shotgrid_review_combo.currentIndexChanged.connect(
+        self._shotgrid_review_combo = ReviewPlaylistCombo(self, log_context=log_context)
+        self._shotgrid_review_combo.selection_changed.connect(
             self._on_source_settings_changed
         )
-        return row_widget
 
     def _build_custom_source_tab(self) -> QWidget:
         custom_tab = QWidget()
@@ -521,7 +504,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
 
     @staticmethod
     def _default_custom_folder_path() -> str:
-        return os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))
+        return str(resolve_playblast_tempdir())
 
     def _build_buttons(self) -> None:
         self._init_buttons(has_cancel_button=True, ok_name="Playblast Shot")
@@ -572,20 +555,30 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     def _resolve_pipeline_shot_context() -> Shot | None:
         try:
             conn = ShotGrid.connect(DB_Config)
-        except Exception:
+        except ShotGridError:
+            log.warning(
+                "Could not connect to ShotGrid; playblast dialog will start in Custom mode.",
+                exc_info=True,
+            )
             return None
 
-        try:
-            code = str(mc.fileInfo("code", query=True)[0]).strip()
-        except Exception:
+        # Non-pipeline scenes have no `code` fileInfo entry; treat as Custom.
+        code_values = mc.fileInfo("code", query=True) or []
+        if not code_values:
             return None
-
+        code = str(code_values[0]).strip()
         if not code:
             return None
 
         try:
             return conn.get_shot(code=code)
-        except Exception:
+        except ShotGridError:
+            log.warning(
+                "Could not resolve ShotGrid shot for fileInfo code '%s'; "
+                "playblast dialog will start in Custom mode.",
+                code,
+                exc_info=True,
+            )
             return None
 
     @staticmethod
@@ -637,8 +630,8 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
 
     def _paths_for_filename(
         self, filename: str
-    ) -> dict[Playblaster.PRESET, list[str | Path]]:
-        paths: dict[Playblaster.PRESET, list[str | Path]] = defaultdict(list)
+    ) -> dict[FFmpegPreset, list[str | Path]]:
+        paths: dict[FFmpegPreset, list[str | Path]] = defaultdict(list)
         for location in self._selected_destination_locations():
             destination_dir = self._resolved_destination_path(location).strip()
             if not destination_dir:
@@ -646,59 +639,15 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             paths[location.preset].append(str(Path(destination_dir) / filename))
         return paths
 
-    @staticmethod
-    def _final_movie_path_for_base(
-        output_base: str | Path,
-        preset: Playblaster.PRESET,
-    ) -> Path:
-        return Path(str(output_base) + f".{preset.ext}")
-
-    def _final_movie_paths_for_location(
-        self,
-        shot_config: MShotPlayblastConfig,
-        location: SaveLocation,
-    ) -> list[Path]:
-        destination_dir = Path(self._resolved_destination_path(location)).expanduser()
-        resolved_destination_dir = destination_dir.resolve()
-
-        matching_paths: list[Path] = []
-        for output_base in shot_config.paths.get(location.preset, []):
-            resolved_output_base = Path(str(output_base)).expanduser().resolve()
-            if resolved_output_base.parent != resolved_destination_dir:
-                continue
-            matching_paths.append(
-                self._final_movie_path_for_base(resolved_output_base, location.preset)
-            )
-        return matching_paths
-
     def _ordered_final_movie_paths_for_upload(
         self,
         shot_config: MShotPlayblastConfig,
     ) -> list[Path]:
-        """Return deterministic output path order for upload path resolution."""
-
-        ordered_paths: list[Path] = []
-        seen_paths: set[Path] = set()
-
-        for location in self._destination_locations():
-            for output_path in self._final_movie_paths_for_location(
-                shot_config, location
-            ):
-                if output_path in seen_paths:
-                    continue
-                seen_paths.add(output_path)
-                ordered_paths.append(output_path)
-
-        for preset, output_bases in shot_config.paths.items():
-            for output_base in output_bases:
-                output_path = self._final_movie_path_for_base(output_base, preset)
-                resolved_output_path = output_path.expanduser().resolve()
-                if resolved_output_path in seen_paths:
-                    continue
-                seen_paths.add(resolved_output_path)
-                ordered_paths.append(resolved_output_path)
-
-        return ordered_paths
+        """Return deterministic output path order for upload-path resolution."""
+        return ordered_final_movie_paths_for_upload(
+            shot_config,
+            self._destinations_by_preset(),
+        )
 
     def _preferred_edit_movie_paths_for_upload(
         self,
@@ -707,28 +656,17 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         edit_location = self._save_locations_by_name.get(self.SAVE_LOCS.EDIT.name)  # type: ignore
         if edit_location is None:
             return []
-        return self._final_movie_paths_for_location(shot_config, edit_location)
-
-    def _resolve_shotgrid_upload_movie_path(
-        self,
-        config: MPlayblastConfig,
-    ) -> Path | None:
-        """Resolve upload movie path with stable preference ordering.
-
-        Preference order:
-        1) valid `Send to Edit` output
-        2) first valid output from the deterministic export order
-        """
-        if not config.shots:
-            return None
-
-        shot_config = config.shots[0]
-        preferred_paths = self._preferred_edit_movie_paths_for_upload(shot_config)
-        output_paths = self._ordered_final_movie_paths_for_upload(shot_config)
-        return resolve_preferred_upload_movie_path(
-            output_paths,
-            preferred_paths=preferred_paths,
+        return final_movie_paths_for_destination(
+            shot_config,
+            preset=edit_location.preset,
+            destination_dir=Path(self._resolved_destination_path(edit_location)),
         )
+
+    def _destinations_by_preset(self) -> list[tuple[FFmpegPreset, Path]]:
+        return [
+            (location.preset, Path(self._resolved_destination_path(location)))
+            for location in self._destination_locations()
+        ]
 
     def _should_upload_shot_playblast_to_shotgrid(self) -> bool:
         return (
@@ -747,72 +685,22 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         if not shot_code:
             return ["ShotGrid Upload: Skipped - shot code is missing."]
 
-        movie_path = self._resolve_shotgrid_upload_movie_path(config)
-        if movie_path is None:
-            return [
-                "ShotGrid Upload: Skipped - no valid playblast movie file was found."
-            ]
-
-        version_name = default_version_name_from_movie_path(movie_path)
-        if not version_name:
-            version_name = f"{shot_code}_playblast"
-
-        artist_name = resolve_artist_display_name().strip() or None
-        upload_target = self._shotgrid_upload_target()
-        review_playlist_id = (
-            self._selected_shotgrid_review_playlist_id()
-            if upload_target == UPLOAD_TARGET_REVIEW
-            else None
-        )
-        selected_review_playlist_id = self._selected_shotgrid_review_playlist_id()
-        fallback_reason = self._shotgrid_review_fallback_reason_for_upload()
-        pre_upload_warning = self._shotgrid_review_fallback_warning_for_upload()
-
-        upload_request = PlayblastVersionUploadRequest(
-            shot_code=shot_code,
-            movie_path=movie_path,
-            version_name=version_name,
+        shot_config = config.shots[0]
+        intent = PlayblastUploadIntent(
+            entity=PlayblastEntity.shot(shot_code),
+            output_paths=tuple(self._ordered_final_movie_paths_for_upload(shot_config)),
+            preferred_paths=tuple(
+                self._preferred_edit_movie_paths_for_upload(shot_config)
+            ),
             description=self._shotgrid_upload_description() or None,
-            artist_display_name=artist_name,
-            upload_target=upload_target,
-            review_playlist_id=review_playlist_id,
+            artist_display_name=resolve_artist_display_name().strip() or None,
+            upload_version=self._is_shotgrid_version_upload_enabled(),
+            upload_to_review=self._is_shotgrid_review_upload_enabled(),
+            review_playlist_id=self._shotgrid_review_combo.selected_playlist_id,
+            review_load_error=self._shotgrid_review_combo.load_error,
+            fallback_version_name=f"{shot_code}_playblast",
         )
-
-        try:
-            upload_result = upload_playblast_version(upload_request)
-        except Exception as exc:
-            log.exception("ShotGrid upload failed for shot '%s'", shot_code)
-            return [f"ShotGrid Upload: Failed - {exc}"]
-
-        message_lines: list[str] = []
-        if upload_result.ok:
-            success_message = (
-                f"ShotGrid Upload: Success - {upload_result.version_name}"
-                f" (shot {upload_result.shot_code})."
-            )
-            if upload_result.version_id is not None:
-                success_message = (
-                    f"{success_message} Version ID: {upload_result.version_id}."
-                )
-            message_lines.append(success_message)
-        else:
-            message_lines.append(f"ShotGrid Upload: Failed - {upload_result.message}")
-
-        if pre_upload_warning and upload_result.ok:
-            message_lines.append(f"ShotGrid Warning: {pre_upload_warning}")
-        if pre_upload_warning:
-            log.warning(
-                "ShotGrid review upload fallback to version upload "
-                "(shot_code=%s, version_id=%s, playlist_id=%s, reason=%s)",
-                shot_code,
-                upload_result.version_id,
-                selected_review_playlist_id,
-                fallback_reason or "review list unavailable",
-            )
-        for warning in upload_result.warnings:
-            message_lines.append(f"ShotGrid Warning: {warning}")
-
-        return message_lines
+        return run_playblast_upload(intent)
 
     def _selected_destination_directories(self) -> list[Path]:
         directories: list[Path] = []
@@ -823,7 +711,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         return directories
 
     def _resolve_output_name(self, prefix: str) -> str:
-        return resolve_versioned_playblast_basename(
+        return next_versioned_basename(
             prefix,
             self._selected_destination_directories(),
         )
@@ -868,108 +756,17 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             self._is_shotgrid_upload_requested()
             and self._is_shotgrid_review_upload_enabled()
         )
-        self._shotgrid_review_row.setVisible(show_review)
-        self._shotgrid_review_combo.setEnabled(show_review)
-        self._shotgrid_review_refresh_button.setEnabled(show_review)
+        self._shotgrid_review_combo.setVisible(show_review)
+        self._shotgrid_review_combo.set_combo_enabled(show_review)
 
     def _is_shotgrid_upload_requested(self) -> bool:
         return self._shotgrid_upload_checkbox.isChecked()
-
-    def _shotgrid_upload_target(self) -> str:
-        if self._can_upload_to_selected_shotgrid_review():
-            return UPLOAD_TARGET_REVIEW
-        return UPLOAD_TARGET_VERSION_ONLY
 
     def _is_shotgrid_version_upload_enabled(self) -> bool:
         return self._shotgrid_upload_version_checkbox.isChecked()
 
     def _is_shotgrid_review_upload_enabled(self) -> bool:
         return self._shotgrid_upload_review_checkbox.isChecked()
-
-    def _selected_shotgrid_review_playlist_id(self) -> int | None:
-        selected = self._shotgrid_review_combo.currentData()
-        if isinstance(selected, int) and selected > 0:
-            return selected
-        return None
-
-    def _can_upload_to_selected_shotgrid_review(self) -> bool:
-        return (
-            self._is_shotgrid_review_upload_enabled()
-            and self._selected_shotgrid_review_playlist_id() is not None
-        )
-
-    def _shotgrid_review_fallback_warning_for_upload(self) -> str | None:
-        fallback_reason = self._shotgrid_review_fallback_reason_for_upload()
-        if fallback_reason is None:
-            return None
-        return (
-            "Review upload skipped because recent reviews could not be loaded. "
-            "Version upload continued."
-        )
-
-    def _shotgrid_review_fallback_reason_for_upload(self) -> str | None:
-        if not self._is_shotgrid_upload_requested():
-            return None
-        if not self._is_shotgrid_version_upload_enabled():
-            return None
-        if not self._is_shotgrid_review_upload_enabled():
-            return None
-        if self._selected_shotgrid_review_playlist_id() is not None:
-            return None
-        return self._shotgrid_review_load_error
-
-    def _set_review_combo_placeholder(self, label: str) -> None:
-        previous_signal_state = self._shotgrid_review_combo.blockSignals(True)
-        try:
-            self._shotgrid_review_combo.clear()
-            self._shotgrid_review_combo.addItem(label, None)
-            self._shotgrid_review_combo.setCurrentIndex(0)
-        finally:
-            self._shotgrid_review_combo.blockSignals(previous_signal_state)
-
-    def _ensure_shotgrid_reviews_loaded_lazily(self) -> None:
-        if self._shotgrid_review_lazy_load_attempted:
-            return
-        self._load_shotgrid_reviews(force_refresh=False)
-
-    def _load_shotgrid_reviews(self, *, force_refresh: bool) -> None:
-        self._shotgrid_review_lazy_load_attempted = True
-        previous_playlist_id = self._selected_shotgrid_review_playlist_id()
-
-        try:
-            review_options = list_recent_review_playlists(limit=10)
-        except Exception as exc:
-            self._shotgrid_review_load_error = str(exc).strip() or type(exc).__name__
-            log.exception(
-                "Could not load ShotGrid review playlists for shot '%s'",
-                self._shot_code_value.text().strip() or "<unknown>",
-            )
-            self._set_review_combo_placeholder("Could not load reviews. Click Refresh.")
-            return
-
-        self._shotgrid_review_load_error = None
-        previous_signal_state = self._shotgrid_review_combo.blockSignals(True)
-        try:
-            self._shotgrid_review_combo.clear()
-
-            if not review_options:
-                self._shotgrid_review_combo.addItem("No recent reviews found.", None)
-                self._shotgrid_review_combo.setCurrentIndex(0)
-                return
-
-            selected_index = 0
-            for index, option in enumerate(review_options):
-                label = f"{option.display_name} (#{option.playlist_id})"
-                self._shotgrid_review_combo.addItem(label, option.playlist_id)
-                if (
-                    previous_playlist_id is not None
-                    and option.playlist_id == previous_playlist_id
-                ):
-                    selected_index = index
-
-            self._shotgrid_review_combo.setCurrentIndex(selected_index)
-        finally:
-            self._shotgrid_review_combo.blockSignals(previous_signal_state)
 
     def _shotgrid_upload_description(self) -> str:
         return self._shotgrid_description_field.text().strip()
@@ -1019,9 +816,9 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             mode == "shot"
             and self._is_shotgrid_upload_requested()
             and self._is_shotgrid_review_upload_enabled()
-            and self._selected_shotgrid_review_playlist_id() is None
+            and self._shotgrid_review_combo.selected_playlist_id is None
         ):
-            if self._shotgrid_review_load_error:
+            if self._shotgrid_review_combo.load_error:
                 if self._is_shotgrid_version_upload_enabled():
                     return None
                 return (
@@ -1064,7 +861,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             self._is_shotgrid_upload_requested()
             and self._is_shotgrid_review_upload_enabled()
         ):
-            self._ensure_shotgrid_reviews_loaded_lazily()
+            self._shotgrid_review_combo.ensure_loaded_lazily()
         self._sync_shotgrid_upload_target_visibility()
         self._sync_shotgrid_review_visibility()
         self._sync_shotgrid_description_visibility()
@@ -1095,10 +892,6 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         self._update_ui_state()
 
     def _on_shotgrid_upload_mode_changed(self, _enabled: bool) -> None:
-        self._update_ui_state()
-
-    def _on_refresh_shotgrid_reviews_clicked(self) -> None:
-        self._load_shotgrid_reviews(force_refresh=True)
         self._update_ui_state()
 
     def _set_custom_folder(self) -> None:
@@ -1220,31 +1013,6 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             return []
         return self._upload_shot_playblast_to_shotgrid(config)
 
-    @staticmethod
-    def _collect_output_paths(config: MPlayblastConfig) -> list[str]:
-        output_paths: list[str] = []
-        for shot_cfg in config.shots:
-            for preset, bases in shot_cfg.paths.items():
-                for base in bases:
-                    output_paths.append(str(Path(str(base) + f".{preset.ext}")))
-        return output_paths
-
-    @staticmethod
-    def _build_success_message(
-        output_paths: list[str],
-        post_playblast_messages: list[str],
-    ) -> str:
-        message_lines = ["Local playblast export successful."]
-        if output_paths:
-            message_lines.append("")
-            message_lines.append("Outputs:")
-            message_lines.extend(output_paths)
-        if post_playblast_messages:
-            message_lines.append("")
-            message_lines.append("Post-export:")
-            message_lines.extend(post_playblast_messages)
-        return "\n".join(message_lines)
-
     def do_export(self) -> None:
         try:
             config = self._generate_config()
@@ -1283,8 +1051,8 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
                 f"Reason: {exc}",
             ]
 
-        output_paths = self._collect_output_paths(config)
-        success_msg = self._build_success_message(output_paths, post_playblast_messages)
+        output_paths = collect_output_paths(config)
+        success_msg = build_success_message(output_paths, post_playblast_messages)
         MessageDialog(self, success_msg).exec_()
         self.close()
 
@@ -1293,11 +1061,7 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         custom_out = self._custom_out.value()
         custom_code = self._scene_stem()
         output_name = self._resolve_output_name(
-            f"{custom_code}_custom"
-            if self._selected_source_mode() == "custom" and custom_code != "custom"
-            else f"customPB_{self._shot.code}"
-            if self._shot
-            else "customPB"
+            self._default_custom_output_prefix(custom_code)
         )
 
         return MShotPlayblastConfig(
@@ -1311,6 +1075,14 @@ class PlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             paths=self._paths_for_filename(output_name),
             use_sequencer=False,
         )
+
+    def _default_custom_output_prefix(self, custom_code: str) -> str:
+        """Return the basename prefix used for a Custom-source playblast."""
+        if self._selected_source_mode() == "custom" and custom_code != "custom":
+            return f"{custom_code}_custom"
+        if self._shot is not None:
+            return f"customPB_{self._shot.code}"
+        return "customPB"
 
     @staticmethod
     def _scene_stem() -> str:

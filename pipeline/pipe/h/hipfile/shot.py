@@ -10,6 +10,7 @@ import hou
 
 import pipe.h
 from pipe.glui.dialogs import FilteredListDialog, MessageDialog
+from pipe.h.hipfile.departments import DEPARTMENT_OPTIONS, Department
 from pipe.shot.version_adapter import (
     houdini_department_stream,
     shot_owner_for,
@@ -32,27 +33,17 @@ log = logging.getLogger(__name__)
 class HShotFileManager(HFileManager):
     _department: str | None
 
+    # `Department` is the canonical enum (see `pipe/h/hipfile/departments.py`);
+    # the class alias is kept so call sites that reference `HShotFileManager.DEPARTMENT`
+    # continue to work without touching every site.
+    DEPARTMENT = Department
+
     def _entity_label(self) -> str:
         return "shot"
 
-    class DEPARTMENT(str, Enum):
-        CFX = "cfx"
-        FX = "fx"
-        LIGHTING = "lighting"
-        ENVFX = "envfx"
-        FLO = "flo"
-        RENDER = "render"
-
     @classmethod
     def _department_options(cls) -> list[str]:
-        return [
-            cls.DEPARTMENT.CFX.value,
-            cls.DEPARTMENT.FX.value,
-            cls.DEPARTMENT.ENVFX.value,
-            cls.DEPARTMENT.FLO.value,
-            cls.DEPARTMENT.LIGHTING.value,
-            cls.DEPARTMENT.RENDER.value,
-        ]
+        return list(DEPARTMENT_OPTIONS)
 
     @classmethod
     def _normalize_department(cls, department: object | None) -> str | None:

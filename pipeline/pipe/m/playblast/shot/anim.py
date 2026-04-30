@@ -9,34 +9,32 @@ from Qt.QtWidgets import (
     QLabel,
     QWidget,
 )
-from shared.util import get_edit_path
 
-from pipe.m.shotfile.anim import _find_usd_shotcam
-from pipe.playblast_naming import playblast_date_folder
-from pipe.util import Playblaster
-
-from .struct import (
-    HudDefinition,
+from pipe.m.playblast.hud import HudDefinition
+from pipe.m.playblast.shot.config import (
     MPlayblastConfig,
     MShotPlayblastConfig,
     SaveLocation,
 )
-from .ui import PlayblastDialog
+from pipe.m.playblast.shot.dialog import MPlayblastDialog
+from pipe.m.shotfile.anim import _find_usd_shotcam
+from pipe.playblast import FFmpegPreset
+from pipe.playblast.naming import build_edit_output_directory
 
 log = logging.getLogger(__name__)
 
 
-class AnimPlayblastDialog(PlayblastDialog):
+class AnimPlayblastDialog(MPlayblastDialog):
     _shot_camera_value: QLabel
     _shot_pass: QComboBox
 
     PASS_PATTERN = re.compile(r"^(?:Blocking|Polish) #\d+$")
 
-    class SAVE_LOCS(PlayblastDialog.SAVE_LOCS):
+    class SAVE_LOCS(MPlayblastDialog.SAVE_LOCS):
         EDIT = SaveLocation(
             "Send to Edit",
-            lambda: get_edit_path() / "anim" / playblast_date_folder(),
-            Playblaster.PRESET.EDIT_SQ,
+            lambda: build_edit_output_directory("anim"),
+            FFmpegPreset.EDIT_SQ,
         )
 
     def __init__(self, parent) -> None:
@@ -117,13 +115,13 @@ class AnimPlayblastDialog(PlayblastDialog):
 
         return MPlayblastConfig(
             builtin_huds=[
-                PlayblastDialog.MAYA_HUDS.CAM_NAME,
-                PlayblastDialog.MAYA_HUDS.CUR_FRAME,
-                PlayblastDialog.MAYA_HUDS.FOCAL_LENGTH,
+                MPlayblastDialog.MAYA_HUDS.CAM_NAME,
+                MPlayblastDialog.MAYA_HUDS.CUR_FRAME,
+                MPlayblastDialog.MAYA_HUDS.FOCAL_LENGTH,
             ],
             custom_huds=[
-                PlayblastDialog.CUSTOM_HUDS.FILENAME,
-                PlayblastDialog.CUSTOM_HUDS.ARTIST,
+                MPlayblastDialog.CUSTOM_HUDS.FILENAME,
+                MPlayblastDialog.CUSTOM_HUDS.ARTIST,
                 HudDefinition(
                     "SKD_shot",
                     command=self._hud_shot_label,
