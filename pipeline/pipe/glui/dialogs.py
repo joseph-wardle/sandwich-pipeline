@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 import re
 from typing import TYPE_CHECKING, Any, cast
+from random import randint
 
 from Qt import QtCore, QtGui, QtWidgets
+from shared.util import get_lib_path
 
 if TYPE_CHECKING:
     import typing
@@ -152,6 +154,9 @@ class DialogFilteredList:
         return None
 
 
+FLASHBANG_DIR = get_lib_path() / "flashbang"
+
+
 class MessageDialog(QtWidgets.QDialog, DialogButtons):
     def __init__(
         self,
@@ -160,6 +165,7 @@ class MessageDialog(QtWidgets.QDialog, DialogButtons):
         title: str = "Message",
         /,
         has_cancel_button: bool = False,
+        include_flashbang: bool = False,
     ) -> None:
         super(MessageDialog, self).__init__(parent)
         self._init_buttons(has_cancel_button)
@@ -174,6 +180,22 @@ class MessageDialog(QtWidgets.QDialog, DialogButtons):
         layout.addWidget(label)
 
         layout.addWidget(self.buttons)
+
+        if include_flashbang and FLASHBANG_DIR.exists():
+            # Check the folder for a list of all the images there
+            images = [im for im in FLASHBANG_DIR.iterdir() if im.is_file()]
+
+            # Pick a random image from the folder
+            image = images[randint(0, len(images) - 1)]
+
+            # Add the image to the window
+            image_label = QtWidgets.QLabel()
+            pixmap = QtGui.QPixmap(image.__str__())
+            image_label.setPixmap(pixmap)
+            # From chat: scale image to fit
+            image_label.setScaledContents(True)
+            image_label.setFixedSize(2000, 1500)
+            layout.addWidget(image_label)
 
         self.setLayout(layout)
 

@@ -34,3 +34,6 @@ pipeline/software/maya/scripts/rjg
 
 # Ignore user specific splash screens
 pipeline/lib/splash/users
+
+# Ignore flashbangs
+pipeline/lib/flashbang
