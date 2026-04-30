@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 from Qt import QtWidgets
 
 from .filemanager import FileManager
-from .playblaster import Playblaster
 from .struct import dict_index, dotdict
 
 if TYPE_CHECKING:
@@ -94,5 +93,4 @@ __all__ = [
     "reload_pipe",
     "silent_startupinfo",
     "FileManager",
-    "Playblaster",
 ]

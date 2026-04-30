@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from collections import defaultdict
 from pathlib import Path
 
@@ -9,7 +8,6 @@ import maya.cmds as mc
 from Qt import QtCore, QtWidgets
 from Qt.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialogButtonBox,
     QGridLayout,
     QGroupBox,
@@ -23,27 +21,24 @@ from Qt.QtWidgets import (
 
 from pipe.glui.dialogs import ButtonPair, MessageDialog
 from pipe.m.assetfile import read_asset_metadata
-from pipe.playblast_artist import resolve_artist_display_name
-from pipe.playblast_naming import resolve_versioned_playblast_basename
-from pipe.playblast_shotgrid import (
-    UPLOAD_TARGET_REVIEW,
-    UPLOAD_TARGET_VERSION_ONLY,
-    AssetPlayblastVersionUploadRequest,
-    default_version_name_from_movie_path,
-    list_recent_review_playlists,
-    resolve_preferred_upload_movie_path,
-    upload_asset_playblast_version,
-)
-from pipe.shotgrid import normalize_display_name
-from pipe.util import Playblaster
-
-from .struct import SaveLocation
-from .turnaround_playblaster import (
+from pipe.m.playblast.shot.config import SaveLocation
+from pipe.m.playblast.turnaround.config import (
     DEFAULT_FRAMES_PER_PASS,
     TurnaroundPlayblastConfig,
-    TurnaroundPlayblaster,
     resolve_turnaround_review_roots,
 )
+from pipe.m.playblast.turnaround.playblaster import MTurnaroundPlayblaster
+from pipe.playblast import FFmpegPreset
+from pipe.playblast.naming import next_versioned_basename
+from pipe.playblast.tempdir import resolve_playblast_tempdir
+from pipe.playblast.shotgrid import (
+    PlayblastEntity,
+    PlayblastUploadIntent,
+    run_playblast_upload,
+)
+from pipe.playblast.ui import ReviewPlaylistCombo
+from pipe.shotgrid import normalize_display_name
+from shared.users import resolve_artist_display_name
 
 log = logging.getLogger(__name__)
 
@@ -65,15 +60,15 @@ def _scene_render_directory() -> str | Path:
 class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
     """Small Maya UI for asset review turnarounds."""
 
-    playblaster = TurnaroundPlayblaster()
+    playblaster = MTurnaroundPlayblaster()
 
     class SAVE_LOCS:
         CURRENT = SaveLocation(
             "Render Folder",
             _scene_render_directory,
-            Playblaster.PRESET.WEB,
+            FFmpegPreset.WEB,
         )
-        CUSTOM = SaveLocation("Custom Folder", "", Playblaster.PRESET.WEB)
+        CUSTOM = SaveLocation("Custom Folder", "", FFmpegPreset.WEB)
 
     def __init__(self, parent: QWidget | None) -> None:
         super().__init__(parent)
@@ -85,8 +80,6 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         self._save_locations_by_name = {
             location.name: location for location in self._destination_locations()
         }
-        self._shotgrid_review_lazy_load_attempted = False
-        self._shotgrid_review_load_error: str | None = None
 
         self._setup_ui()
         self.SAVE_LOCS.CUSTOM._path = lambda: self._custom_folder_field.text().strip()
@@ -180,8 +173,8 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         self._shotgrid_upload_target_row = self._build_shotgrid_upload_target_row()
         source_layout.addWidget(self._shotgrid_upload_target_row, 5, 0, 1, 3)
 
-        self._shotgrid_review_row = self._build_shotgrid_review_row()
-        source_layout.addWidget(self._shotgrid_review_row, 6, 0, 1, 3)
+        self._build_shotgrid_review_row()
+        source_layout.addWidget(self._shotgrid_review_combo, 6, 0, 1, 3)
 
         self._shotgrid_description_row = QWidget()
         shotgrid_description_layout = QHBoxLayout(self._shotgrid_description_row)
@@ -222,26 +215,11 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         row_layout.addStretch()
         return row_widget
 
-    def _build_shotgrid_review_row(self) -> QWidget:
-        row_widget = QWidget()
-        row_layout = QHBoxLayout(row_widget)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.addWidget(QLabel("Review"))
-
-        self._shotgrid_review_combo = QComboBox(self)
-        self._shotgrid_review_combo.currentIndexChanged.connect(
-            self._on_settings_changed
+    def _build_shotgrid_review_row(self) -> None:
+        self._shotgrid_review_combo = ReviewPlaylistCombo(
+            self, log_context=self._asset_display_name() or "<unknown>"
         )
-        row_layout.addWidget(self._shotgrid_review_combo)
-
-        self._shotgrid_review_refresh_button = QPushButton("Refresh")
-        self._shotgrid_review_refresh_button.clicked.connect(
-            self._on_refresh_shotgrid_reviews_clicked
-        )
-        row_layout.addWidget(self._shotgrid_review_refresh_button)
-
-        self._set_review_combo_placeholder("No reviews loaded yet.")
-        return row_widget
+        self._shotgrid_review_combo.selection_changed.connect(self._on_settings_changed)
 
     def _build_destination_section(self) -> QGroupBox:
         destination_group = QGroupBox("Save Destinations")
@@ -339,7 +317,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
 
     @staticmethod
     def _default_custom_folder_path() -> str:
-        return os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))
+        return str(resolve_playblast_tempdir())
 
     def _destination_locations(self) -> list[SaveLocation]:
         return [self.SAVE_LOCS.CURRENT, self.SAVE_LOCS.CUSTOM]
@@ -371,8 +349,8 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
 
     def _paths_for_filename(
         self, filename: str
-    ) -> dict[Playblaster.PRESET, list[str | Path]]:
-        paths: dict[Playblaster.PRESET, list[str | Path]] = defaultdict(list)
+    ) -> dict[FFmpegPreset, list[str | Path]]:
+        paths: dict[FFmpegPreset, list[str | Path]] = defaultdict(list)
         for location in self._selected_destination_locations():
             destination_dir = self._resolved_destination_path(location).strip()
             if not destination_dir:
@@ -389,7 +367,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         return directories
 
     def _resolve_output_name(self, prefix: str) -> str:
-        return resolve_versioned_playblast_basename(
+        return next_versioned_basename(
             prefix,
             self._selected_destination_directories(),
         )
@@ -459,9 +437,8 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
             self._is_shotgrid_upload_requested()
             and self._is_shotgrid_review_upload_enabled()
         )
-        self._shotgrid_review_row.setVisible(show_review)
-        self._shotgrid_review_combo.setEnabled(show_review)
-        self._shotgrid_review_refresh_button.setEnabled(show_review)
+        self._shotgrid_review_combo.setVisible(show_review)
+        self._shotgrid_review_combo.set_combo_enabled(show_review)
 
     def _sync_shotgrid_description_visibility(self) -> None:
         show_description = self._is_shotgrid_upload_requested()
@@ -476,97 +453,6 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
 
     def _is_shotgrid_review_upload_enabled(self) -> bool:
         return self._shotgrid_upload_review_checkbox.isChecked()
-
-    def _selected_shotgrid_review_playlist_id(self) -> int | None:
-        selected = self._shotgrid_review_combo.currentData()
-        if isinstance(selected, int) and selected > 0:
-            return selected
-        return None
-
-    def _can_upload_to_selected_review(self) -> bool:
-        return (
-            self._is_shotgrid_review_upload_enabled()
-            and self._selected_shotgrid_review_playlist_id() is not None
-        )
-
-    def _shotgrid_upload_target(self) -> str:
-        if self._can_upload_to_selected_review():
-            return UPLOAD_TARGET_REVIEW
-        return UPLOAD_TARGET_VERSION_ONLY
-
-    def _set_review_combo_placeholder(self, label: str) -> None:
-        previous_signal_state = self._shotgrid_review_combo.blockSignals(True)
-        try:
-            self._shotgrid_review_combo.clear()
-            self._shotgrid_review_combo.addItem(label, None)
-            self._shotgrid_review_combo.setCurrentIndex(0)
-        finally:
-            self._shotgrid_review_combo.blockSignals(previous_signal_state)
-
-    def _ensure_shotgrid_reviews_loaded_lazily(self) -> None:
-        if self._shotgrid_review_lazy_load_attempted:
-            return
-        self._load_shotgrid_reviews(force_refresh=False)
-
-    def _load_shotgrid_reviews(self, *, force_refresh: bool) -> None:
-        del force_refresh
-        self._shotgrid_review_lazy_load_attempted = True
-        previous_playlist_id = self._selected_shotgrid_review_playlist_id()
-
-        try:
-            review_options = list_recent_review_playlists(limit=10)
-        except Exception as exc:
-            self._shotgrid_review_load_error = str(exc).strip() or type(exc).__name__
-            log.exception(
-                "Could not load ShotGrid review playlists for asset turnaround '%s'",
-                self._asset_display_name(),
-            )
-            self._set_review_combo_placeholder("Could not load reviews. Click Refresh.")
-            return
-
-        self._shotgrid_review_load_error = None
-        previous_signal_state = self._shotgrid_review_combo.blockSignals(True)
-        try:
-            self._shotgrid_review_combo.clear()
-
-            if not review_options:
-                self._shotgrid_review_combo.addItem("No recent reviews found.", None)
-                self._shotgrid_review_combo.setCurrentIndex(0)
-                return
-
-            selected_index = 0
-            for index, option in enumerate(review_options):
-                label = f"{option.display_name} (#{option.playlist_id})"
-                self._shotgrid_review_combo.addItem(label, option.playlist_id)
-                if (
-                    previous_playlist_id is not None
-                    and option.playlist_id == previous_playlist_id
-                ):
-                    selected_index = index
-
-            self._shotgrid_review_combo.setCurrentIndex(selected_index)
-        finally:
-            self._shotgrid_review_combo.blockSignals(previous_signal_state)
-
-    def _shotgrid_review_fallback_reason_for_upload(self) -> str | None:
-        if not self._is_shotgrid_upload_requested():
-            return None
-        if not self._is_shotgrid_version_upload_enabled():
-            return None
-        if not self._is_shotgrid_review_upload_enabled():
-            return None
-        if self._selected_shotgrid_review_playlist_id() is not None:
-            return None
-        return self._shotgrid_review_load_error
-
-    def _shotgrid_review_fallback_warning_for_upload(self) -> str | None:
-        fallback_reason = self._shotgrid_review_fallback_reason_for_upload()
-        if fallback_reason is None:
-            return None
-        return (
-            "Review upload skipped because recent reviews could not be loaded. "
-            "Version upload continued."
-        )
 
     def _shotgrid_upload_description(self) -> str:
         return self._shotgrid_description_field.text().strip()
@@ -612,9 +498,9 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         if (
             self._is_shotgrid_upload_requested()
             and self._is_shotgrid_review_upload_enabled()
-            and self._selected_shotgrid_review_playlist_id() is None
+            and self._shotgrid_review_combo.selected_playlist_id is None
         ):
-            if self._shotgrid_review_load_error:
+            if self._shotgrid_review_combo.load_error:
                 if self._is_shotgrid_version_upload_enabled():
                     return None
                 return (
@@ -645,7 +531,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
             self._is_shotgrid_upload_requested()
             and self._is_shotgrid_review_upload_enabled()
         ):
-            self._ensure_shotgrid_reviews_loaded_lazily()
+            self._shotgrid_review_combo.ensure_loaded_lazily()
         self._sync_shotgrid_upload_target_visibility()
         self._sync_shotgrid_review_visibility()
         self._sync_shotgrid_description_visibility()
@@ -659,16 +545,17 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
                 output_paths.append(str(Path(str(base) + f".{preset.ext}")))
         return output_paths
 
-    def _resolve_upload_movie_path(
-        self, config: TurnaroundPlayblastConfig
-    ) -> Path | None:
+    @staticmethod
+    def _ordered_final_movie_paths(
+        config: TurnaroundPlayblastConfig,
+    ) -> list[Path]:
         ordered_paths: list[Path] = []
         for preset, bases in config.output_paths.items():
             for base in bases:
                 ordered_paths.append(
                     Path(str(base) + f".{preset.ext}").expanduser().resolve()
                 )
-        return resolve_preferred_upload_movie_path(ordered_paths)
+        return ordered_paths
 
     def _build_success_message(
         self,
@@ -704,73 +591,23 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         if not self._is_shotgrid_upload_requested():
             return []
 
-        movie_path = self._resolve_upload_movie_path(config)
-        if movie_path is None:
-            return ["ShotGrid Upload: Skipped - no valid turnaround movie was found."]
-
         asset_display_name = self._shotgrid_asset_display_name()
         if not asset_display_name:
             return ["ShotGrid Upload: Skipped - asset metadata could not be resolved."]
 
-        version_name = default_version_name_from_movie_path(movie_path)
-        if not version_name:
-            version_name = f"{self._asset_filename_token()}_turnaround"
-
-        upload_target = self._shotgrid_upload_target()
-        selected_review_playlist_id = self._selected_shotgrid_review_playlist_id()
-        review_playlist_id = (
-            selected_review_playlist_id
-            if upload_target == UPLOAD_TARGET_REVIEW
-            else None
-        )
-        pre_upload_warning = self._shotgrid_review_fallback_warning_for_upload()
-        fallback_reason = self._shotgrid_review_fallback_reason_for_upload()
-
-        request = AssetPlayblastVersionUploadRequest(
-            asset_display_name=asset_display_name,
-            movie_path=movie_path,
-            version_name=version_name,
+        intent = PlayblastUploadIntent(
+            entity=PlayblastEntity.asset(asset_display_name),
+            output_paths=tuple(self._ordered_final_movie_paths(config)),
+            preferred_paths=(),
             description=self._shotgrid_upload_description() or None,
             artist_display_name=resolve_artist_display_name().strip() or None,
-            upload_target=upload_target,
-            review_playlist_id=review_playlist_id,
+            upload_version=self._is_shotgrid_version_upload_enabled(),
+            upload_to_review=self._is_shotgrid_review_upload_enabled(),
+            review_playlist_id=self._shotgrid_review_combo.selected_playlist_id,
+            review_load_error=self._shotgrid_review_combo.load_error,
+            fallback_version_name=f"{self._asset_filename_token()}_turnaround",
         )
-
-        try:
-            upload_result = upload_asset_playblast_version(request)
-        except Exception as exc:
-            log.exception("ShotGrid upload failed for asset '%s'", asset_display_name)
-            return [f"ShotGrid Upload: Failed - {exc}"]
-
-        message_lines: list[str] = []
-        if upload_result.ok:
-            success_message = (
-                f"ShotGrid Upload: Success - {upload_result.version_name} "
-                f"(asset {upload_result.asset_display_name})."
-            )
-            if upload_result.version_id is not None:
-                success_message = (
-                    f"{success_message} Version ID: {upload_result.version_id}."
-                )
-            message_lines.append(success_message)
-        else:
-            message_lines.append(f"ShotGrid Upload: Failed - {upload_result.message}")
-
-        if pre_upload_warning and upload_result.ok:
-            message_lines.append(f"ShotGrid Warning: {pre_upload_warning}")
-        if pre_upload_warning:
-            log.warning(
-                "ShotGrid review upload fallback to version upload "
-                "(asset=%s, version_id=%s, playlist_id=%s, reason=%s)",
-                asset_display_name,
-                upload_result.version_id,
-                selected_review_playlist_id,
-                fallback_reason or "review list unavailable",
-            )
-        for warning in upload_result.warnings:
-            message_lines.append(f"ShotGrid Warning: {warning}")
-
-        return message_lines
+        return run_playblast_upload(intent)
 
     def do_export(self) -> None:
         self._refresh_context()
@@ -833,10 +670,6 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
 
     def _on_refresh_selection_clicked(self) -> None:
         self._refresh_context()
-        self._update_ui_state()
-
-    def _on_refresh_shotgrid_reviews_clicked(self) -> None:
-        self._load_shotgrid_reviews(force_refresh=True)
         self._update_ui_state()
 
     def _on_settings_changed(self, *_args) -> None:
