@@ -11,19 +11,17 @@ from Qt.QtWidgets import (
     QTabWidget,
     QWidget,
 )
-from shared.util import get_edit_path
 
-from pipe.playblast_naming import playblast_date_folder
-from pipe.util import Playblaster
-
-from .struct import (
-    HudDefinition,
+from pipe.m.playblast.hud import HudDefinition
+from pipe.m.playblast.shot.config import (
     MPlayblastConfig,
     MShotPlayblastConfig,
     SaveLocation,
     dummy_shot,
 )
-from .ui import PlayblastDialog
+from pipe.m.playblast.shot.dialog import MPlayblastDialog
+from pipe.playblast import FFmpegPreset
+from pipe.playblast.naming import build_edit_output_directory
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +36,7 @@ class SequencerShotContext:
     cut_duration: int
 
 
-class PrevisPlayblastDialog(PlayblastDialog):
+class PrevisPlayblastDialog(MPlayblastDialog):
     _sequencer_camera_value: QLabel
     _sequencer_name_value: QLabel
     _sequencer_range_value: QLabel
@@ -46,11 +44,11 @@ class PrevisPlayblastDialog(PlayblastDialog):
 
     SEQUENCER_TAB_INDEX: int
 
-    class SAVE_LOCS(PlayblastDialog.SAVE_LOCS):
+    class SAVE_LOCS(MPlayblastDialog.SAVE_LOCS):
         EDIT = SaveLocation(
             "Send to Edit",
-            lambda: get_edit_path() / "previs" / playblast_date_folder(),
-            Playblaster.PRESET.EDIT_SQ,
+            lambda: build_edit_output_directory("previs"),
+            FFmpegPreset.EDIT_SQ,
         )
 
     def __init__(self, parent) -> None:
@@ -160,7 +158,7 @@ class PrevisPlayblastDialog(PlayblastDialog):
 
     @staticmethod
     def _active_camera_name() -> str:
-        panel = PlayblastDialog._resolve_active_model_panel()
+        panel = MPlayblastDialog._resolve_active_model_panel()
         if not panel:
             return ""
         try:
@@ -332,13 +330,13 @@ class PrevisPlayblastDialog(PlayblastDialog):
 
         return MPlayblastConfig(
             builtin_huds=[
-                PlayblastDialog.MAYA_HUDS.CAM_NAME,
-                PlayblastDialog.MAYA_HUDS.CUR_FRAME,
-                PlayblastDialog.MAYA_HUDS.FOCAL_LENGTH,
+                MPlayblastDialog.MAYA_HUDS.CAM_NAME,
+                MPlayblastDialog.MAYA_HUDS.CUR_FRAME,
+                MPlayblastDialog.MAYA_HUDS.FOCAL_LENGTH,
             ],
             custom_huds=[
-                PlayblastDialog.CUSTOM_HUDS.FILENAME,
-                PlayblastDialog.CUSTOM_HUDS.ARTIST,
+                MPlayblastDialog.CUSTOM_HUDS.FILENAME,
+                MPlayblastDialog.CUSTOM_HUDS.ARTIST,
                 HudDefinition(
                     "SKD_shot",
                     command=self._hud_shot_label,

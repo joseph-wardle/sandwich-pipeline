@@ -8,6 +8,7 @@ from . import (
     rig,
     space_switch,
     symmetry,
+    turnaround,
 )
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "rig",
     "space_switch",
     "symmetry",
+    "turnaround",
 ]
