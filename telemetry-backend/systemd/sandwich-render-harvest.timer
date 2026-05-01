@@ -1,0 +1,13 @@
+# Fire `sandwich-render-harvest.service` every 15 minutes.
+
+[Unit]
+Description=Sandwich pipeline render statistics harvester (every 15 min)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

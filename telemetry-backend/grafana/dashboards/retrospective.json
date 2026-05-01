@@ -1,0 +1,75 @@
+{
+  "title": "Sandwich Pipeline — Retrospective",
+  "uid": "sandwich-retrospective",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "graphTooltip": 1,
+  "tags": ["sandwich", "telemetry", "retrospective"],
+  "timezone": "browser",
+  "refresh": "1h",
+  "time": { "from": "now-90d", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Iteration count per asset (top 50)",
+      "type": "barchart",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "description": "Number of (re)publishes per asset over the time range. The retrospective answer to 'which asset took the most iteration?'",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT scope_asset AS asset, count(*) AS publishes FROM events WHERE event_type = 'publish.usd' AND status = 'success' AND scope_asset IS NOT NULL AND $__timeFilter(occurred_at) GROUP BY 1 ORDER BY 2 DESC LIMIT 50"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Crunch fingerprint — publishes per hour, by department",
+      "type": "heatmap",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 10 },
+      "description": "Hourly publish count by department. Where the heatmap is hot, that department was crunching at that hour.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', occurred_at) AS time, COALESCE(scope_department, '<no-dept>') AS metric, count(*) AS value FROM events WHERE event_type = 'publish.usd' AND status = 'success' AND $__timeFilter(occurred_at) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Frame retry rate (per render job)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "description": "Failed frames / total frames per render.stats.summary event. Lower is better.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT occurred_at AS time, payload->>'renderer' AS metric, CASE WHEN (payload->>'total_frames')::int = 0 THEN 0 ELSE (payload->>'failed_frames')::float / (payload->>'total_frames')::int END AS value FROM events WHERE event_type = 'render.stats.summary' AND $__timeFilter(occurred_at) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Publish duration p50 / p90, by event type",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "description": "Daily p50 and p90 of duration_ms across success events. Spikes suggest tooling or scene-state regressions.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('day', occurred_at) AS time, event_type || ' p50' AS metric, percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms)::int AS value FROM events WHERE status = 'success' AND duration_ms IS NOT NULL AND $__timeFilter(occurred_at) GROUP BY 1, event_type UNION ALL SELECT date_trunc('day', occurred_at) AS time, event_type || ' p90' AS metric, percentile_cont(0.9) WITHIN GROUP (ORDER BY duration_ms)::int AS value FROM events WHERE status = 'success' AND duration_ms IS NOT NULL AND $__timeFilter(occurred_at) GROUP BY 1, event_type ORDER BY 1"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] }
+    }
+  ]
+}

@@ -1,37 +1,47 @@
 {
+  "_doc": "Storage classification rules. The scanner is a path-pattern matcher; each rule maps a path regex to a category and a retention strategy. Files in unrecognized paths fall through to the 'uncategorized' bucket, which surfaces on the Grafana dashboard so upstream tools that write to non-canonical paths can be fixed.",
   "rules": [
     {
-      "category": "render",
-      "path_regexes": ["(^|/)renders?(/|$)"]
-    },
-    {
-      "category": "fx_cache",
-      "path_regexes": ["(^|/)fx(/|$)"],
-      "suffixes": [".vdb", ".bgeo", ".bgeo.sc", ".sim"]
-    },
-    {
-      "category": "texture",
-      "path_regexes": ["(^|/)tex(?:ture)?s?(/|$)"],
-      "suffixes": [
-        ".tex",
-        ".tx",
-        ".rat",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".tif",
-        ".tiff",
-        ".exr"
-      ]
-    },
-    {
       "category": "publish",
-      "path_regexes": ["(^|/)publish(/|$)"]
+      "match": ["(^|/)publish(/|$)"],
+      "retention": "keep",
+      "_doc": "Published files are the show's contract output. Never reclaim."
+    },
+    {
+      "category": "render",
+      "match": ["(^|/)renders?(/|$)"],
+      "retention": "newer_version_exists",
+      "version_key": ["shot", "pass"],
+      "version_field": "version",
+      "_doc": "Renders are reclaimable when a higher version of the same (shot, pass) exists. Requires upstream tooling to write canonical render paths."
     },
     {
       "category": "playblast",
-      "path_regexes": ["(^|/)playblasts?(/|$)"],
-      "suffixes": [".mov", ".mp4"]
+      "match": ["(^|/)playblasts?(/|$)"],
+      "retention": "newer_version_exists",
+      "version_key": ["shot", "department"],
+      "version_field": "version",
+      "_doc": "Playblasts older than the latest version per (shot, department) are reclaimable."
+    },
+    {
+      "category": "cache",
+      "match": [
+        "(^|/)fx(/|$)",
+        "(^|/)caches?(/|$)",
+        "(^|/)sim(/|$)"
+      ],
+      "retention": "older_than_days:14",
+      "_doc": "Sim and geo caches older than 14 days are reclaimable. Caches usually have no version structure, so we fall back to mtime."
+    },
+    {
+      "category": "user_scratch",
+      "match": ["(^|/)scratch(/|$)", "(^|/)wip(/|$)"],
+      "retention": "older_than_days:30",
+      "_doc": "User work-in-progress directories. 30-day retention gives artists time to come back to abandoned experiments without filling the share forever."
     }
-  ]
+  ],
+  "uncategorized": {
+    "retention": "keep",
+    "_doc": "Anything that doesn't match a rule lands here. The Grafana panel for 'uncategorized' is the editing surface for this rule file."
+  }
 }

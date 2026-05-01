@@ -1,0 +1,12 @@
+# Fire `sandwich-storage-scan.service` once per day at 03:30.
+
+[Unit]
+Description=Sandwich pipeline storage scan (daily at 03:30)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+AccuracySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

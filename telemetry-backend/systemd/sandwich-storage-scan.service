@@ -1,0 +1,23 @@
+# Daily storage scan. Walks canonical roots, classifies by path pattern, and
+# emits one `storage.scan.summary` plus N `storage.scan.bucket` events.
+
+[Unit]
+Description=Sandwich pipeline storage scan (daily)
+Documentation=https://github.com/joseph-wardle/sandwich-pipeline
+
+[Service]
+Type=oneshot
+User=sandwich-telemetry
+Group=sandwich-telemetry
+Environment=PYTHONPATH=/opt/sandwich-pipeline/pipeline
+# Edit to list the show's canonical roots that the scanner should walk.
+Environment=STORAGE_SCAN_ROOTS=/mnt/show
+
+ExecStart=/opt/sandwich-pipeline/.venv/bin/python -m pipe.telemetry.storage_scan \
+    --once ${STORAGE_SCAN_ROOTS}
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/mnt/show

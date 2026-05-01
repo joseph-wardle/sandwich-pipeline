@@ -1,0 +1,27 @@
+# One-shot render statistics harvester. Invoked by the matching .timer.
+#
+# Scans Tractor render submission artifacts and emits one
+# `render.stats.summary` event per completed render job.
+
+[Unit]
+Description=Sandwich pipeline render statistics harvester (one-shot)
+Documentation=https://github.com/joseph-wardle/sandwich-pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=sandwich-telemetry
+Group=sandwich-telemetry
+Environment=PYTHONPATH=/opt/sandwich-pipeline/pipeline
+# Edit to point at the show's render artifact roots.
+Environment=RENDER_ARTIFACT_ROOTS=/mnt/show/render
+
+ExecStart=/opt/sandwich-pipeline/.venv/bin/python -m pipe.telemetry.render_harvest \
+    --once ${RENDER_ARTIFACT_ROOTS}
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/mnt/show/render

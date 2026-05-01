@@ -1,0 +1,24 @@
+# Provision the Postgres datasource for the sandwich-pipeline telemetry DB.
+#
+# Grafana reads this on startup. Edit `url`, `database`, and `user` for the
+# local environment; the password lives in the GF_DATASOURCES_TELEMETRY_PASSWORD
+# env var (set in the systemd unit) so it never lands in git.
+
+apiVersion: 1
+
+datasources:
+  - name: telemetry
+    type: postgres
+    uid: telemetry
+    access: proxy
+    url: localhost:5432
+    user: sandwich-telemetry
+    database: sandwich_telemetry
+    isDefault: true
+    editable: false
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1500
+      timescaledb: false
+    secureJsonData:
+      password: ${GF_DATASOURCES_TELEMETRY_PASSWORD}

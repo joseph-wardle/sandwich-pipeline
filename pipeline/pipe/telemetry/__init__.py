@@ -1,202 +1,112 @@
-"""Telemetry package public exports.
+"""Pipeline telemetry — record what tools did, how long it took, and what failed.
 
-Step 4 exposes a thin public API for telemetry configuration, context,
-emission, and contract inspection.
+Two surfaces, used in obviously-different situations:
+
+    # Workflow-shaped (publishes, builds, exports, renders, playblasts):
+    from pipe.telemetry import action
+
+    with action("publish.usd", payload={"kind": "asset", "publish_path": str(path)}):
+        do_the_publish()
+
+    # Snapshot-shaped (periodic pollers):
+    from pipe.telemetry import emit, EVENT_TRACTOR_FARM_SNAPSHOT, STATUS_INFO
+
+    emit(EVENT_TRACTOR_FARM_SNAPSHOT, status=STATUS_INFO, payload={...})
+
+The action context manager emits exactly one terminal event on exit
+(`success` with duration, or `error` with `error_code` from the exception).
+It never suppresses exceptions.
+
+Where to find what:
+
+- ``events.py``  — the 10 event types this pipeline emits, plus payload contracts
+- ``errors.py``  — typed exceptions whose ``error_code`` attribute drives error events
+- ``scope.py``   — turn entity-shaped objects into a {show, shot, asset, ...} dict
+- ``emit.py``    — implementation of action() and emit()
+- ``spool.py``   — JSONL writer to the shared production spool
+- ``config.py``  — env-var driven settings (PIPE_TELEMETRY_*)
 """
 
-from typing import Any
+from __future__ import annotations
 
-from . import events
-from .config import (
-    PlatformFlavor,
-    TelemetryConfig,
-    TelemetryLevel,
-    default_spool_dir,
-    detect_platform_flavor,
-    load_config,
+from .emit import Action, action, emit
+from .errors import (
+    DCCLaunchError,
+    HoudiniBuildError,
+    PipelineError,
+    PlayblastError,
+    PublishCopyError,
+    PublishPrecheckError,
+    RenderStatsHarvestError,
+    StorageScanError,
+    TextureConversionError,
+    TextureExportError,
+    TractorSnapshotError,
+    USDExportError,
 )
-from .context import (
-    SCOPE_FIELDS,
-    ScopeContext,
-    action_context,
-    begin_action,
-    clear_action_context,
-    clear_scope_context,
-    configure_scope_context,
-    configure_session_context,
-    extract_scope,
-    get_host_context,
-    get_pipeline_context,
-    get_scope_context,
-    get_session_context,
-    new_action_id,
-    new_event_id,
-    new_session_id,
-    utc_now_iso,
-)
-from .emit import (
-    EmitCounters,
-    build_event,
-    emit,
-    get_emit_counters,
-    reset_emit_counters,
-)
-from .registry import (
-    ERROR_CODES,
+from .events import (
+    EVENT_BUILD_HOUDINI_COMPONENT,
+    EVENT_DCC_LAUNCH,
+    EVENT_PLAYBLAST_CREATE,
+    EVENT_PUBLISH_USD,
+    EVENT_RENDER_STATS_SUMMARY,
+    EVENT_STORAGE_SCAN_BUCKET,
+    EVENT_STORAGE_SCAN_SUMMARY,
+    EVENT_TEXTURE_CONVERT_TEX,
+    EVENT_TEXTURE_EXPORT_SUBSTANCE,
+    EVENT_TRACTOR_FARM_SNAPSHOT,
     EVENT_DEFINITIONS,
-    EVENT_TYPES,
     EVENTS_BY_TYPE,
-    SCHEMA_VERSION,
     STATUS_ERROR,
     STATUS_INFO,
     STATUS_SUCCESS,
-    STATUS_VALUES,
-    STATUS_WARNING,
-    TERMINAL_STATUS_VALUES,
     EventDefinition,
+    Status,
     get_event_definition,
-    is_known_event_type,
-    list_error_codes,
-    list_event_definitions,
-    list_event_types,
 )
-from .spool import (
-    AsyncJsonlSpoolWriter,
-    AsyncSpoolStats,
-    JsonlSpoolWriter,
-    MemorySpoolWriter,
-    NullSpoolWriter,
-    configure_spool_writer,
-    get_spool_writer,
-)
-
-
-def render_contract_markdown() -> str:
-    """Return telemetry contract markdown generated from the registry."""
-
-    from .docs import render_contract_markdown as _render_contract_markdown
-
-    return _render_contract_markdown()
-
-
-def scan_storage(*args: Any, **kwargs: Any) -> Any:
-    """Proxy to ``pipe.telemetry.storage_scan.scan_storage``."""
-
-    from .storage_scan import scan_storage as _scan_storage
-
-    return _scan_storage(*args, **kwargs)
-
-
-def build_storage_events(*args: Any, **kwargs: Any) -> Any:
-    """Proxy to ``pipe.telemetry.storage_scan.build_storage_events``."""
-
-    from .storage_scan import build_storage_events as _build_storage_events
-
-    return _build_storage_events(*args, **kwargs)
-
-
-def classify_path(*args: Any, **kwargs: Any) -> Any:
-    """Proxy to ``pipe.telemetry.storage_scan.classify_path``."""
-
-    from .storage_scan import classify_path as _classify_path
-
-    return _classify_path(*args, **kwargs)
-
-
-def poll_tractor_farm_snapshot(*args: Any, **kwargs: Any) -> Any:
-    """Proxy to ``pipe.telemetry.tractor_poll.poll_tractor_farm_snapshot``."""
-
-    from .tractor_poll import poll_tractor_farm_snapshot as _poll_tractor_farm_snapshot
-
-    return _poll_tractor_farm_snapshot(*args, **kwargs)
-
-
-def run_tractor_poll_loop(*args: Any, **kwargs: Any) -> Any:
-    """Proxy to ``pipe.telemetry.tractor_poll.run_tractor_poll_loop``."""
-
-    from .tractor_poll import run_tractor_poll_loop as _run_tractor_poll_loop
-
-    return _run_tractor_poll_loop(*args, **kwargs)
-
-
-def harvest_render_diagnostics(*args: Any, **kwargs: Any) -> Any:
-    """Proxy to ``pipe.telemetry.render_harvest.harvest_render_diagnostics``."""
-
-    from .render_harvest import (
-        harvest_render_diagnostics as _harvest_render_diagnostics,
-    )
-
-    return _harvest_render_diagnostics(*args, **kwargs)
-
-
-def run_render_harvest_loop(*args: Any, **kwargs: Any) -> Any:
-    """Proxy to ``pipe.telemetry.render_harvest.run_render_harvest_loop``."""
-
-    from .render_harvest import run_render_harvest_loop as _run_render_harvest_loop
-
-    return _run_render_harvest_loop(*args, **kwargs)
-
+from .scope import SCOPE_FIELDS, ScopeContext, extract_scope
 
 __all__ = [
-    "events",
-    "TelemetryConfig",
-    "TelemetryLevel",
-    "PlatformFlavor",
-    "detect_platform_flavor",
-    "default_spool_dir",
-    "load_config",
-    "new_session_id",
-    "new_action_id",
-    "new_event_id",
-    "utc_now_iso",
-    "configure_session_context",
-    "begin_action",
-    "clear_action_context",
-    "action_context",
-    "get_session_context",
-    "SCOPE_FIELDS",
-    "ScopeContext",
-    "extract_scope",
-    "configure_scope_context",
-    "clear_scope_context",
-    "get_scope_context",
-    "get_host_context",
-    "get_pipeline_context",
+    # Public API: workflow CM and bare emit
+    "action",
+    "Action",
     "emit",
-    "build_event",
-    "EmitCounters",
-    "get_emit_counters",
-    "reset_emit_counters",
-    "NullSpoolWriter",
-    "MemorySpoolWriter",
-    "JsonlSpoolWriter",
-    "AsyncSpoolStats",
-    "AsyncJsonlSpoolWriter",
-    "configure_spool_writer",
-    "get_spool_writer",
-    "render_contract_markdown",
-    "scan_storage",
-    "build_storage_events",
-    "classify_path",
-    "poll_tractor_farm_snapshot",
-    "run_tractor_poll_loop",
-    "harvest_render_diagnostics",
-    "run_render_harvest_loop",
-    "SCHEMA_VERSION",
+    # Scope helpers
+    "extract_scope",
+    "ScopeContext",
+    "SCOPE_FIELDS",
+    # Event types
+    "EVENT_DCC_LAUNCH",
+    "EVENT_PUBLISH_USD",
+    "EVENT_BUILD_HOUDINI_COMPONENT",
+    "EVENT_TEXTURE_EXPORT_SUBSTANCE",
+    "EVENT_TEXTURE_CONVERT_TEX",
+    "EVENT_PLAYBLAST_CREATE",
+    "EVENT_TRACTOR_FARM_SNAPSHOT",
+    "EVENT_RENDER_STATS_SUMMARY",
+    "EVENT_STORAGE_SCAN_SUMMARY",
+    "EVENT_STORAGE_SCAN_BUCKET",
+    # Status values
+    "STATUS_INFO",
     "STATUS_SUCCESS",
     "STATUS_ERROR",
-    "STATUS_WARNING",
-    "STATUS_INFO",
-    "STATUS_VALUES",
-    "TERMINAL_STATUS_VALUES",
-    "ERROR_CODES",
+    "Status",
+    # Registry inspection
     "EventDefinition",
     "EVENT_DEFINITIONS",
-    "EVENT_TYPES",
     "EVENTS_BY_TYPE",
-    "list_event_definitions",
-    "list_event_types",
-    "list_error_codes",
     "get_event_definition",
-    "is_known_event_type",
+    # Typed exceptions (each carries an `error_code` class attribute)
+    "PipelineError",
+    "DCCLaunchError",
+    "PublishPrecheckError",
+    "USDExportError",
+    "PublishCopyError",
+    "HoudiniBuildError",
+    "TextureExportError",
+    "TextureConversionError",
+    "PlayblastError",
+    "TractorSnapshotError",
+    "RenderStatsHarvestError",
+    "StorageScanError",
 ]

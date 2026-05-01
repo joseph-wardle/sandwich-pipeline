@@ -1,0 +1,27 @@
+# One-shot Tractor farm-pressure poll. Invoked by the matching .timer.
+#
+# In Phase 1 this unit references the legacy `pipe.telemetry.tractor_poll`
+# entrypoint (kept on the existing cron host as a stopgap). Phase 2 will
+# replace it with a slimmed-down poller that follows the new coding standard.
+
+[Unit]
+Description=Sandwich pipeline Tractor farm pressure poll (one-shot)
+Documentation=https://github.com/joseph-wardle/sandwich-pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=sandwich-telemetry
+Group=sandwich-telemetry
+Environment=PYTHONPATH=/opt/sandwich-pipeline/pipeline
+# Edit to point at the show's Tractor engine.
+Environment=TRACTOR_ENGINE_URL=http://tractor.lab.byu.edu:80
+
+ExecStart=/opt/sandwich-pipeline/.venv/bin/python -m pipe.telemetry.tractor_poll \
+    --once --engine-url ${TRACTOR_ENGINE_URL}
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true

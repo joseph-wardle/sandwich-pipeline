@@ -1,0 +1,158 @@
+{
+  "title": "Sandwich Pipeline — Operational",
+  "uid": "sandwich-operational",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "graphTooltip": 1,
+  "tags": ["sandwich", "telemetry", "operational"],
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "event_type",
+        "type": "query",
+        "datasource": { "type": "postgres", "uid": "telemetry" },
+        "label": "Event type",
+        "multi": true,
+        "includeAll": true,
+        "query": "SELECT DISTINCT event_type FROM events ORDER BY event_type",
+        "refresh": 2
+      },
+      {
+        "name": "shot",
+        "type": "query",
+        "datasource": { "type": "postgres", "uid": "telemetry" },
+        "label": "Shot",
+        "multi": true,
+        "includeAll": true,
+        "query": "SELECT DISTINCT scope_shot FROM events WHERE scope_shot IS NOT NULL ORDER BY scope_shot",
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Errors per hour, by event_type",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', occurred_at) AS time, event_type AS metric, count(*) AS value FROM events WHERE status = 'error' AND $__timeFilter(occurred_at) AND event_type IN ($event_type) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } }
+    },
+    {
+      "id": 2,
+      "title": "Errors per hour, by error_code",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', occurred_at) AS time, COALESCE(error_code, 'UNKNOWN') AS metric, count(*) AS value FROM events WHERE status = 'error' AND $__timeFilter(occurred_at) AND event_type IN ($event_type) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "External tool failures (failed_tool)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "description": "Counts of error events tagged with `failed_tool` in their payload, grouped by tool name. Captures husk/prman/mayapy/tex failures across all parent event types.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', occurred_at) AS time, payload->>'failed_tool' AS metric, count(*) AS value FROM events WHERE status = 'error' AND payload ? 'failed_tool' AND $__timeFilter(occurred_at) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Tractor saturation",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "description": "Waiting / running jobs and busy / total slots over time. Reads the periodic `tractor.farm.snapshot` event.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT occurred_at AS time, (payload->>'waiting_jobs')::int AS waiting_jobs, (payload->>'running_jobs')::int AS running_jobs, (payload->>'busy_slots')::int AS busy_slots, (payload->>'total_slots')::int AS total_slots FROM events WHERE event_type = 'tractor.farm.snapshot' AND status = 'info' AND $__timeFilter(occurred_at) ORDER BY occurred_at"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Storage by category — total bytes (latest scan)",
+      "type": "barchart",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "description": "Latest storage.scan.bucket events, summed per category.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "WITH latest_scan AS (SELECT max(occurred_at) AS ts FROM events WHERE event_type = 'storage.scan.summary') SELECT payload->>'category' AS category, sum((payload->>'size_bytes')::bigint) AS bytes FROM events, latest_scan WHERE event_type = 'storage.scan.bucket' AND occurred_at >= latest_scan.ts - interval '1 hour' GROUP BY 1 ORDER BY 2 DESC"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Reclaimable storage by category (latest scan)",
+      "type": "barchart",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "description": "Bytes flagged `is_reclaimable=true`, summed per category. The dashboard answer to 'how much space could we free if we ran cleanup right now?'",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "WITH latest_scan AS (SELECT max(occurred_at) AS ts FROM events WHERE event_type = 'storage.scan.summary') SELECT payload->>'category' AS category, sum((payload->>'size_bytes')::bigint) AS reclaimable_bytes FROM events, latest_scan WHERE event_type = 'storage.scan.bucket' AND (payload->>'is_reclaimable')::bool = true AND occurred_at >= latest_scan.ts - interval '1 hour' GROUP BY 1 ORDER BY 2 DESC"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Events per hour, by hostname (health-via-absence)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "description": "If a workstation goes flat for several hours during work hours, something on that workstation is broken. Investigate the workstation's local logs.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', occurred_at) AS time, COALESCE(hostname, '<unknown>') AS metric, count(*) AS value FROM events WHERE $__timeFilter(occurred_at) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Ingester lag",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "description": "Seconds between the most recent event the ingester has read and now(). Growing lag means the ingester has stalled or fallen behind.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT now() AS time, spool_path AS metric, EXTRACT(EPOCH FROM (now() - last_read_at))::int AS value FROM ingester_status"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    }
+  ]
+}

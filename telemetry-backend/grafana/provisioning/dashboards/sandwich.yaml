@@ -1,0 +1,16 @@
+# Tell Grafana to load every dashboard JSON in `grafana/dashboards/` on
+# startup. Dashboards in git are the source of truth — edits made through the
+# UI get reverted on the next provisioning cycle.
+
+apiVersion: 1
+
+providers:
+  - name: sandwich-pipeline
+    orgId: 1
+    folder: Sandwich Pipeline
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

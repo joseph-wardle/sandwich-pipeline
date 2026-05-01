@@ -1,0 +1,41 @@
+# Telemetry ingester: tails the shared JSONL spool and writes events to
+# Postgres. Runs continuously; sleeps PIPE_INGESTER_INTERVAL between scans.
+#
+# Install:  cp this file to /etc/systemd/system/, then
+#           systemctl daemon-reload
+#           systemctl enable --now sandwich-telemetry-ingester.service
+
+[Unit]
+Description=Sandwich pipeline telemetry ingester
+Documentation=https://github.com/joseph-wardle/sandwich-pipeline
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=sandwich-telemetry
+Group=sandwich-telemetry
+
+# Edit these paths to match the deploy. The spool root is the read-only
+# mount of the show share's `.telemetry/raw/` directory.
+Environment=PIPE_INGESTER_SPOOL_ROOT=/mnt/show/.telemetry/raw
+Environment=PIPE_INGESTER_DB_DSN=postgresql://sandwich-telemetry@localhost/sandwich_telemetry
+Environment=PIPE_INGESTER_INTERVAL=5
+Environment=PYTHONPATH=/opt/sandwich-pipeline/pipeline
+
+ExecStart=/opt/sandwich-pipeline/.venv/bin/python -m pipe.telemetry.ingester
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Hardening — the ingester only needs to read the spool and talk to Postgres.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/mnt/show/.telemetry/raw
+
+[Install]
+WantedBy=multi-user.target

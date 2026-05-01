@@ -1,0 +1,17 @@
+# Fire `sandwich-tractor-poll.service` every 5 minutes.
+#
+# Install:  cp this file to /etc/systemd/system/, then
+#           systemctl daemon-reload
+#           systemctl enable --now sandwich-tractor-poll.timer
+
+[Unit]
+Description=Sandwich pipeline Tractor farm pressure poll (every 5 min)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
