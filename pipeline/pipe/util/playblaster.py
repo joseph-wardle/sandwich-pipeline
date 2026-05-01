@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 from abc import ABCMeta, abstractmethod
@@ -14,6 +15,7 @@ import ffmpeg  # type: ignore[import-untyped]
 
 from pipe.telemetry import (
     EVENT_PLAYBLAST_CREATE,
+    Action,
     PlayblastError,
     action,
     extract_scope,
@@ -145,15 +147,6 @@ class Playblaster(metaclass=ABCMeta):
         normalized = str(preset).strip().lower()
         return normalized or "unknown"
 
-    @staticmethod
-    def _safe_file_size(path: Path) -> int:
-        try:
-            if path.is_file():
-                return int(path.stat().st_size)
-        except Exception:
-            pass
-        return 0
-
     def _playblast_scope(self) -> dict[str, str] | None:
         scope = extract_scope(self._shot)
         shot_code = str(getattr(self._shot, "code", "")).strip()
@@ -169,17 +162,11 @@ class Playblaster(metaclass=ABCMeta):
         if not self._in_context:
             raise RuntimeError("_do_playblast not called from within context self")
 
-        if not out_paths:
-            out_paths = {}
-        expected_total_outputs = sum(len(paths) for paths in out_paths.values())
-
+        out_paths = out_paths or {}
         tempdir = Path(os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))).resolve()
+        filename_prefix = f"bobo_pb_temp.{self._shot.code or ''}"
 
-        FILENAME = "bobo_pb_temp." + (self._shot.code or "")
-
-        # remove any old playblasts
-        for p in tempdir.glob(FILENAME + "*"):
-            p.unlink()
+        self._clean_temp_playblasts(tempdir, filename_prefix)
 
         cut_in, cut_out = self._shot.frame_range
         frame_start = cut_in - tails[0]
@@ -191,10 +178,61 @@ class Playblaster(metaclass=ABCMeta):
         }
         scope = self._playblast_scope()
 
-        # Image write — failure here aborts every preset, so it gets one
-        # `playblast.create` event tagged preset="unknown".
+        self._write_images_or_record_failure(
+            tempdir=tempdir,
+            filename_prefix=filename_prefix,
+            common_payload=common_payload,
+            scope=scope,
+            expected_total_outputs=sum(len(paths) for paths in out_paths.values()),
+        )
+        self._pad_negative_frame_numbers(tempdir, filename_prefix)
+        images = self._build_ffmpeg_input_stream(tempdir, filename_prefix, frame_start)
+
+        for preset, paths in out_paths.items():
+            with action(
+                EVENT_PLAYBLAST_CREATE,
+                payload={
+                    **common_payload,
+                    "preset": self._preset_name(preset),
+                    "output_count": len(paths),
+                },
+                scope=scope,
+            ) as t:
+                self._encode_and_publish_preset(
+                    preset=preset,
+                    paths=paths,
+                    images=images,
+                    out_filename=f"{tempdir / filename_prefix}.{preset.ext}",
+                    start_frame=frame_start,
+                    t=t,
+                )
+
+        if not log.isEnabledFor(logging.DEBUG):
+            self._clean_temp_playblasts(tempdir, filename_prefix)
+
+    @staticmethod
+    def _clean_temp_playblasts(tempdir: Path, filename_prefix: str) -> None:
+        """Remove leftover playblast temp files matching `filename_prefix`."""
+        for path in tempdir.glob(filename_prefix + "*"):
+            path.unlink()
+
+    def _write_images_or_record_failure(
+        self,
+        *,
+        tempdir: Path,
+        filename_prefix: str,
+        common_payload: dict[str, object],
+        scope: dict[str, str] | None,
+        expected_total_outputs: int,
+    ) -> None:
+        """Write the playblast image sequence; record one error event on failure.
+
+        A write failure aborts every preset that would have followed, so the
+        single `playblast.create` event is tagged `preset="unknown"` to mean
+        "the artist tried to playblast, but no preset got produced."
+        """
         try:
-            self._write_images(str(tempdir / FILENAME))
+            self._write_images(str(tempdir / filename_prefix))
         except Exception as exc:
             with action(
                 EVENT_PLAYBLAST_CREATE,
@@ -206,25 +244,30 @@ class Playblaster(metaclass=ABCMeta):
                 scope=scope,
             ):
                 raise PlayblastError(str(exc) or exc.__class__.__name__) from exc
-            return  # unreachable; raise above propagates
 
-        # 0 padding on negative numbers
-        import re
+    @staticmethod
+    def _pad_negative_frame_numbers(tempdir: Path, filename_prefix: str) -> None:
+        """Rename `prefix.-3.png` → `prefix.-0003.png` so frames sort numerically.
 
-        pattern = re.compile(rf"{re.escape(FILENAME)}\.(\-?\d+)\.png$")
-        for p in tempdir.glob(f"{FILENAME}.*.png"):
-            match = pattern.match(p.name)
+        Maya writes negative frame numbers without zero padding. ffmpeg's
+        `%04d` input pattern needs a fixed-width sequence — pad here so the
+        glob ordering matches frame ordering.
+        """
+        pattern = re.compile(rf"{re.escape(filename_prefix)}\.(\-?\d+)\.png$")
+        for path in tempdir.glob(f"{filename_prefix}.*.png"):
+            match = pattern.match(path.name)
             if not match:
                 continue
             num = int(match.group(1))
-            new_name = f"{FILENAME}.{num:+05d}.png".replace("+", "")
-            new_path = p.with_name(new_name)
-            p.rename(new_path)
+            padded_name = f"{filename_prefix}.{num:+05d}.png".replace("+", "")
+            path.rename(path.with_name(padded_name))
 
-        # use ffmpeg to encode the video
-        start_frame = frame_start
-        images = ffmpeg.input(
-            str(tempdir / FILENAME) + ".%04d.png",
+    def _build_ffmpeg_input_stream(
+        self, tempdir: Path, filename_prefix: str, start_frame: int
+    ) -> Any:
+        """Build the ffmpeg input stream that every preset's encode shares."""
+        return ffmpeg.input(
+            str(tempdir / filename_prefix) + ".%04d.png",
             start_number=start_frame,
             r=self.FR,
             # precisely define input colorspace
@@ -232,61 +275,35 @@ class Playblaster(metaclass=ABCMeta):
             color_trc="iec61966-2-1",
         ).filter("format", "yuv422p")
 
-        for preset, paths in out_paths.items():
-            preset_name = self._preset_name(preset)
-            expected_outputs = len(paths)
-            with action(
-                EVENT_PLAYBLAST_CREATE,
-                payload={
-                    **common_payload,
-                    "preset": preset_name,
-                    "output_count": expected_outputs,
-                },
-                scope=scope,
-            ) as t:
-                self._encode_and_publish_preset(
-                    preset=preset,
-                    paths=paths,
-                    images=images,
-                    out_filename=str(tempdir / FILENAME) + "." + preset.ext,
-                    start_frame=start_frame,
-                    t=t,
-                )
-
-        # clean up if not in debug mode
-        if not log.isEnabledFor(logging.DEBUG):
-            for p in tempdir.glob(FILENAME + "*"):
-                p.unlink()
-
     def _encode_and_publish_preset(
         self,
         *,
-        preset: Any,
+        preset: Playblaster.PRESET,
         paths: list[Path | str],
         images: Any,
         out_filename: str,
         start_frame: int,
-        t: Any,
+        t: Action,
     ) -> None:
         """Encode a single preset's video, copy it to all destination paths,
         and run post-process. Raises PlayblastError on encode/copy failure;
         post-process failures are best-effort and logged."""
+        timecode = f"00:00:{start_frame // self.FR:02d}:{start_frame % self.FR:02d}"
         try:
             ffmpeg.output(
                 images,
                 out_filename,
                 **preset.out_kwargs,
-                timecode="00:00:{:02}:{:02}".format(
-                    start_frame // self.FR,
-                    start_frame % self.FR,
-                ),
+                timecode=timecode,
                 r=self.FR,
             ).overwrite_output().run()
         except ffmpeg.Error as exc:
             if exc.stdout:
-                print("stdout:", exc.stdout.decode())
+                log.error(f"ffmpeg stdout: {exc.stdout.decode()}")
             if exc.stderr:
-                print("stderr:", exc.stderr.decode())
+                log.error(
+                    f"ffmpeg stderr: {exc.stderr.decode()}",
+                )
             raise PlayblastError(str(exc) or exc.__class__.__name__) from exc
 
         final_paths: list[Path] = []

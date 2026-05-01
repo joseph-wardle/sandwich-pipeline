@@ -79,7 +79,7 @@ class DCC(DCCInterface):
         if PYTHONPATH not in venv:
             venv[PYTHONPATH] = ""
 
-        print(venv[PYTHONPATH])
+        log.debug(f"PYTHONPATH for launch: {venv[PYTHONPATH]}")
         return venv
 
     @staticmethod

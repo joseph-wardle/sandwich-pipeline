@@ -19,6 +19,7 @@ import hou
 from pipe.asset.paths import ASSET_BUILDER_FILENAME
 from pipe.telemetry import (
     EVENT_BUILD_HOUDINI_COMPONENT,
+    TELEMETRY_ACTION_ID_ENV,
     HoudiniBuildError,
     action,
 )
@@ -383,12 +384,12 @@ def _first_error_message(result: HeadlessPublishResult) -> str | None:
 def _is_invoked_from_parent_action() -> bool:
     """Return True when a parent process is wrapping us in its own telemetry action.
 
-    Maya's asset publisher sets `PIPE_TELEMETRY_ACTION_ID` before launching
+    Maya's asset publisher sets `TELEMETRY_ACTION_ID_ENV` before launching
     hython. In that case the parent emits the `build.houdini.component` event
     based on parsed stdout; we must stay silent to avoid double-counting.
     """
 
-    return bool(os.getenv("PIPE_TELEMETRY_ACTION_ID", "").strip())
+    return bool(os.getenv(TELEMETRY_ACTION_ID_ENV, "").strip())
 
 
 def _build_initial_payload(args: argparse.Namespace) -> dict[str, Any]:

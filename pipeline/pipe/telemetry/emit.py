@@ -45,6 +45,11 @@ _LOG = logging.getLogger(__name__)
 
 _UNKNOWN_ERROR_CODE: Final[str] = "UNKNOWN"
 
+#: Env var the parent process sets so a child subprocess inherits its
+#: action_id. The child is expected to skip its own emission when this is
+#: set (the parent's `action()` block will record the event from outside).
+TELEMETRY_ACTION_ID_ENV: Final[str] = "PIPE_TELEMETRY_ACTION_ID"
+
 
 def _utc_now_iso() -> str:
     """Return current UTC time as an ISO-8601 string with `Z` suffix."""
@@ -321,6 +326,7 @@ __all__ = [
     "STATUS_SUCCESS",
     "STATUS_ERROR",
     "INFO_ONLY_STATUSES",
+    "TELEMETRY_ACTION_ID_ENV",
     "Action",
     "action",
     "emit",

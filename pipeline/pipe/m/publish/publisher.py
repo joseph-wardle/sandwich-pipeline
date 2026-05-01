@@ -4,7 +4,6 @@ import logging
 import os
 import platform
 import shutil
-import traceback
 from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -127,7 +126,7 @@ class Publisher:
                 sources.append(value)
         return extract_scope(*sources)
 
-    def publish(self):
+    def publish(self) -> None:
         """Generic publishing function.
         `Exporter().publish()` will publish the selected geometry to the place
         chosen in the pop-up dialog, accounting for the USD export bug on
@@ -146,52 +145,8 @@ class Publisher:
                 return
 
             if entity_list := self._get_entity_list():
-                from pipe.m.publish.asset import (
-                    PublishAssetOptionsDialog,
-                    PublishAssetPickerDialog,
-                )
-                from pipe.m.publish.previs_asset import PublishPrevisAssetDialog
-
-                dialog_type = cast(Any, self._dialog_T)
-                if self._dialog_T in (
-                    PublishAssetOptionsDialog,
-                    PublishAssetPickerDialog,
-                    PublishPrevisAssetDialog,
-                ):
-                    # Pass extra parameter (conn) if dialog needs DB access
-                    self._dialog = dialog_type(self._window, entity_list, self._conn)
-                else:
-                    # Otherwise, use the dialog normally
-                    self._dialog = self._dialog_T(self._window, entity_list)
-
-                if not self._dialog.exec_():
+                if not self._select_publish_target_or_cancel(entity_list):
                     return
-
-                selected_item = self._dialog.get_selected_item()
-                if selected_item is None:
-                    MessageDialog(
-                        self._window,
-                        "Error: Nothing selected. Nothing exported",
-                        "Error",
-                    ).exec_()
-                    return
-                self._selected_item = selected_item
-
-                # get the corresponding SGEntity object
-                if self._use_sg_entity:
-                    try:
-                        self._entity = self._get_entity_from_name(self._selected_item)
-                    except AssertionError:
-                        entity_label = SGEntity.__name__
-                        MessageDialog(
-                            self._window,
-                            "Error: The selected item did not correspond to a valid "
-                            f"{entity_label} in ShotGrid. Please "
-                            "report this error. Nothing exported",
-                            "Error",
-                        ).exec_()
-                        return
-                    log.debug(self._entity)
 
             self._publish_path = self._get_save_path()
             if not self._publish_path:
@@ -208,6 +163,60 @@ class Publisher:
                 self._get_confirm_message(),
                 "Export Complete",
             ).exec_()
+
+    def _select_publish_target_or_cancel(self, entity_list: list[str]) -> bool:
+        """Run the entity-selection dialog and populate `self._selected_item`/`self._entity`.
+
+        Returns True if an entity was successfully selected. Returns False if
+        the user cancelled or the selection was invalid — in which case an
+        artist-facing dialog has already been shown.
+        """
+        from pipe.m.publish.asset import (
+            PublishAssetOptionsDialog,
+            PublishAssetPickerDialog,
+        )
+        from pipe.m.publish.previs_asset import PublishPrevisAssetDialog
+
+        dialog_type = cast(Any, self._dialog_T)
+        if self._dialog_T in (
+            PublishAssetOptionsDialog,
+            PublishAssetPickerDialog,
+            PublishPrevisAssetDialog,
+        ):
+            # These dialog classes need DB access; pass the ShotGrid conn.
+            self._dialog = dialog_type(self._window, entity_list, self._conn)
+        else:
+            self._dialog = self._dialog_T(self._window, entity_list)
+
+        if not self._dialog.exec_():
+            return False
+
+        selected_item = self._dialog.get_selected_item()
+        if selected_item is None:
+            MessageDialog(
+                self._window,
+                "Error: Nothing selected. Nothing exported",
+                "Error",
+            ).exec_()
+            return False
+        self._selected_item = selected_item
+
+        if self._use_sg_entity:
+            try:
+                self._entity = self._get_entity_from_name(self._selected_item)
+            except AssertionError:
+                entity_label = SGEntity.__name__
+                MessageDialog(
+                    self._window,
+                    "Error: The selected item did not correspond to a valid "
+                    f"{entity_label} in ShotGrid. Please "
+                    "report this error. Nothing exported",
+                    "Error",
+                ).exec_()
+                return False
+            log.debug(self._entity)
+
+        return True
 
     def _do_publish_export(self) -> None:
         """Run the timed export work, wrapped in a telemetry action.
@@ -251,7 +260,7 @@ class Publisher:
         try:
             mc.mayaUSDExport(**kwargs)  # type: ignore
         except Exception as exc:
-            print(traceback.format_exc())
+            log.exception("Maya USD export failed")
             MessageDialog(
                 self._window,
                 "WARNING: Publish failed! Please check the console for more information",

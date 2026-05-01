@@ -29,7 +29,7 @@ Where to find what:
 
 from __future__ import annotations
 
-from .emit import Action, action, emit
+from .emit import TELEMETRY_ACTION_ID_ENV, Action, action, emit
 from .errors import (
     DCCLaunchError,
     HoudiniBuildError,
@@ -71,6 +71,7 @@ __all__ = [
     "action",
     "Action",
     "emit",
+    "TELEMETRY_ACTION_ID_ENV",
     # Scope helpers
     "extract_scope",
     "ScopeContext",
