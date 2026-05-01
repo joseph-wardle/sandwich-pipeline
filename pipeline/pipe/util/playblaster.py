@@ -4,7 +4,6 @@ import logging
 import os
 import shutil
 import subprocess
-import time
 from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
@@ -12,6 +11,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import ffmpeg  # type: ignore[import-untyped]
+
+from pipe.telemetry import (
+    EVENT_PLAYBLAST_CREATE,
+    PlayblastError,
+    action,
+    extract_scope,
+)
 
 if TYPE_CHECKING:
     from typing import Any, Self
@@ -129,7 +135,7 @@ class Playblaster(metaclass=ABCMeta):
         temp_output.rename(video_path)
 
     @staticmethod
-    def _telemetry_preset_name(preset: object | None) -> str:
+    def _preset_name(preset: object | None) -> str:
         if isinstance(preset, Enum):
             normalized = str(preset.name).strip().lower()
             if normalized:
@@ -148,91 +154,12 @@ class Playblaster(metaclass=ABCMeta):
             pass
         return 0
 
-    def _telemetry_scope(self) -> dict[str, str] | None:
-        try:
-            from pipe.telemetry import extract_scope
-        except Exception:
-            return None
-
+    def _playblast_scope(self) -> dict[str, str] | None:
         scope = extract_scope(self._shot)
         shot_code = str(getattr(self._shot, "code", "")).strip()
         if shot_code:
             scope.setdefault("shot", shot_code)
         return scope or None
-
-    @staticmethod
-    def _new_playblast_action_id() -> str | None:
-        try:
-            from pipe.telemetry import new_action_id
-        except Exception:
-            return None
-        return new_action_id()
-
-    def _emit_playblast_event(
-        self,
-        *,
-        status: str,
-        preset: str,
-        output_count: int,
-        frame_start: int,
-        frame_end: int,
-        duration_ms: int,
-        output_size_bytes: int,
-        action_id: str | None,
-        error_message: str | None = None,
-        exception_type: str | None = None,
-    ) -> None:
-        try:
-            from pipe.telemetry import (
-                STATUS_ERROR,
-                STATUS_SUCCESS,
-                emit,
-                events,
-                get_event_definition,
-            )
-        except Exception:
-            log.debug(
-                "Telemetry import unavailable for playblast.create", exc_info=True
-            )
-            return
-
-        status_value = STATUS_SUCCESS if status == "success" else STATUS_ERROR
-        payload = {
-            "preset": str(preset),
-            "output_count": max(0, int(output_count)),
-            "frame_start": int(frame_start),
-            "frame_end": int(frame_end),
-            "fps": max(1, int(self.FR)),
-        }
-        metrics = {
-            "duration_ms": max(0, int(duration_ms)),
-            "output_size_bytes": max(0, int(output_size_bytes)),
-        }
-
-        error = None
-        if status == "error":
-            error_code = "PLAYBLAST_FAILED"
-            try:
-                definition = get_event_definition(events.EVENT_PLAYBLAST_CREATE)
-                if definition.error_codes:
-                    error_code = definition.error_codes[0]
-            except Exception:
-                pass
-            error = {
-                "code": error_code,
-                "message": error_message or "Playblast failed",
-                "exception_type": exception_type or "RuntimeError",
-            }
-
-        emit(
-            events.EVENT_PLAYBLAST_CREATE,
-            status=status_value,
-            action_id=action_id,
-            payload=payload,
-            metrics=metrics,
-            scope=self._telemetry_scope(),
-            error=error,
-        )
 
     def _do_playblast(
         self,
@@ -257,27 +184,29 @@ class Playblaster(metaclass=ABCMeta):
         cut_in, cut_out = self._shot.frame_range
         frame_start = cut_in - tails[0]
         frame_end = cut_out + tails[1]
-        playblast_action_id = self._new_playblast_action_id()
+        common_payload: dict[str, object] = {
+            "frame_start": frame_start,
+            "frame_end": frame_end,
+            "fps": max(1, int(self.FR)),
+        }
+        scope = self._playblast_scope()
 
-        # do the playblast
-        image_write_started_at = time.perf_counter()
+        # Image write — failure here aborts every preset, so it gets one
+        # `playblast.create` event tagged preset="unknown".
         try:
             self._write_images(str(tempdir / FILENAME))
         except Exception as exc:
-            duration_ms = int((time.perf_counter() - image_write_started_at) * 1000)
-            self._emit_playblast_event(
-                status="error",
-                preset="unknown",
-                output_count=expected_total_outputs,
-                frame_start=frame_start,
-                frame_end=frame_end,
-                duration_ms=duration_ms,
-                output_size_bytes=0,
-                action_id=playblast_action_id,
-                error_message=str(exc),
-                exception_type=type(exc).__name__,
-            )
-            raise
+            with action(
+                EVENT_PLAYBLAST_CREATE,
+                payload={
+                    **common_payload,
+                    "preset": "unknown",
+                    "output_count": expected_total_outputs,
+                },
+                scope=scope,
+            ):
+                raise PlayblastError(str(exc) or exc.__class__.__name__) from exc
+            return  # unreachable; raise above propagates
 
         # 0 padding on negative numbers
         import re
@@ -302,93 +231,82 @@ class Playblaster(metaclass=ABCMeta):
             colorspace="bt709",
             color_trc="iec61966-2-1",
         ).filter("format", "yuv422p")
+
         for preset, paths in out_paths.items():
-            preset_started_at = time.perf_counter()
-            preset_name = self._telemetry_preset_name(preset)
+            preset_name = self._preset_name(preset)
             expected_outputs = len(paths)
-            try:
-                out_filename = str(tempdir / FILENAME) + "." + preset.ext
-                ffmpeg.output(
-                    images,
-                    out_filename,
-                    **preset.out_kwargs,
-                    timecode="00:00:{:02}:{:02}".format(
-                        start_frame // self.FR,
-                        start_frame % self.FR,
-                    ),
-                    r=self.FR,
-                ).overwrite_output().run()
-            except ffmpeg.Error as e:
-                if e.stdout:
-                    print("stdout:", e.stdout.decode())
-                if e.stderr:
-                    print("stderr:", e.stderr.decode())
-                duration_ms = int((time.perf_counter() - preset_started_at) * 1000)
-                self._emit_playblast_event(
-                    status="error",
-                    preset=preset_name,
-                    output_count=expected_outputs,
-                    frame_start=frame_start,
-                    frame_end=frame_end,
-                    duration_ms=duration_ms,
-                    output_size_bytes=0,
-                    action_id=playblast_action_id,
-                    error_message=str(e),
-                    exception_type=type(e).__name__,
+            with action(
+                EVENT_PLAYBLAST_CREATE,
+                payload={
+                    **common_payload,
+                    "preset": preset_name,
+                    "output_count": expected_outputs,
+                },
+                scope=scope,
+            ) as t:
+                self._encode_and_publish_preset(
+                    preset=preset,
+                    paths=paths,
+                    images=images,
+                    out_filename=str(tempdir / FILENAME) + "." + preset.ext,
+                    start_frame=start_frame,
+                    t=t,
                 )
-                raise
-
-            # copy video out of tempdir
-            final_paths: list[Path] = []
-
-            # copy video out of tempdir
-            try:
-                for path in (Path(str(p) + "." + preset.ext) for p in paths):
-                    if not path.parent.exists():
-                        path.parent.mkdir(mode=0o770, parents=True)
-                    shutil.copyfile(out_filename, path)
-                    final_paths.append(path)  # <-- collect final output path
-            except Exception as exc:
-                duration_ms = int((time.perf_counter() - preset_started_at) * 1000)
-                self._emit_playblast_event(
-                    status="error",
-                    preset=preset_name,
-                    output_count=expected_outputs,
-                    frame_start=frame_start,
-                    frame_end=frame_end,
-                    duration_ms=duration_ms,
-                    output_size_bytes=0,
-                    action_id=playblast_action_id,
-                    error_message=str(exc),
-                    exception_type=type(exc).__name__,
-                )
-                raise
-
-            # run postprocess so video works in vlc
-            for final_path in final_paths:
-                try:
-                    self._run_postprocess(final_path)
-                except Exception as e:
-                    log.error(f"Post-process failed for {final_path}: {e}")
-            output_size_bytes = sum(self._safe_file_size(path) for path in final_paths)
-            duration_ms = int((time.perf_counter() - preset_started_at) * 1000)
-            self._emit_playblast_event(
-                status="success",
-                preset=preset_name,
-                output_count=len(final_paths),
-                frame_start=frame_start,
-                frame_end=frame_end,
-                duration_ms=duration_ms,
-                output_size_bytes=output_size_bytes,
-                action_id=playblast_action_id,
-            )
 
         # clean up if not in debug mode
         if not log.isEnabledFor(logging.DEBUG):
             for p in tempdir.glob(FILENAME + "*"):
                 p.unlink()
 
-        #
+    def _encode_and_publish_preset(
+        self,
+        *,
+        preset: Any,
+        paths: list[Path | str],
+        images: Any,
+        out_filename: str,
+        start_frame: int,
+        t: Any,
+    ) -> None:
+        """Encode a single preset's video, copy it to all destination paths,
+        and run post-process. Raises PlayblastError on encode/copy failure;
+        post-process failures are best-effort and logged."""
+        try:
+            ffmpeg.output(
+                images,
+                out_filename,
+                **preset.out_kwargs,
+                timecode="00:00:{:02}:{:02}".format(
+                    start_frame // self.FR,
+                    start_frame % self.FR,
+                ),
+                r=self.FR,
+            ).overwrite_output().run()
+        except ffmpeg.Error as exc:
+            if exc.stdout:
+                print("stdout:", exc.stdout.decode())
+            if exc.stderr:
+                print("stderr:", exc.stderr.decode())
+            raise PlayblastError(str(exc) or exc.__class__.__name__) from exc
+
+        final_paths: list[Path] = []
+        try:
+            for path in (Path(str(p) + "." + preset.ext) for p in paths):
+                if not path.parent.exists():
+                    path.parent.mkdir(mode=0o770, parents=True)
+                shutil.copyfile(out_filename, path)
+                final_paths.append(path)
+        except Exception as exc:
+            raise PlayblastError(str(exc) or exc.__class__.__name__) from exc
+
+        # Post-process is best-effort — failure does not invalidate the playblast.
+        for final_path in final_paths:
+            try:
+                self._run_postprocess(final_path)
+            except Exception as exc:
+                log.error(f"Post-process failed for {final_path}: {exc}")
+
+        t.update_payload(output_count=len(final_paths))
 
     @abstractmethod
     def playblast(self) -> None:

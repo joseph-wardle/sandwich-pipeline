@@ -205,79 +205,8 @@ class HShotFileManager(HFileManager):
         stream, _, _ = resolved
         self._do_save_version(hip_path, stream)
 
-    def _shot_setup_payload(self, *, shot: Shot, path: Path) -> dict[str, object]:
-        return {
-            "entity_type": self._telemetry_entity_type(shot),
-            "entity_code": self._telemetry_entity_code(shot),
-            "path": str(path),
-            "department": self._department_value(),
-        }
-
-    def _shot_setup_scope(self, shot: Shot) -> dict[str, str] | None:
-        scope = self._telemetry_scope(shot) or {}
-        department = self._department_value()
-        if department:
-            scope.setdefault("department", department)
-        return scope or None
-
-    @staticmethod
-    def _new_shot_setup_action_id() -> str | None:
-        try:
-            from pipe.telemetry import new_action_id
-        except Exception:
-            return None
-        return new_action_id()
-
-    def _emit_shot_setup_event(
-        self,
-        *,
-        status: str,
-        shot: Shot,
-        path: Path,
-        action_id: str | None,
-        error_message: str | None = None,
-        exception_type: str | None = None,
-    ) -> None:
-        try:
-            from pipe.telemetry import (
-                STATUS_ERROR,
-                STATUS_SUCCESS,
-                emit,
-                events,
-                get_event_definition,
-            )
-        except Exception:
-            log.debug("Telemetry import unavailable for shot.setup", exc_info=True)
-            return
-
-        status_value = STATUS_SUCCESS if status == "success" else STATUS_ERROR
-        error = None
-        if status == "error":
-            error_code = "SHOT_SETUP_FAILED"
-            try:
-                definition = get_event_definition(events.EVENT_SHOT_SETUP)
-                if definition.error_codes:
-                    error_code = definition.error_codes[0]
-            except Exception:
-                pass
-            error = {
-                "code": error_code,
-                "message": error_message or "Shot setup failed",
-                "exception_type": exception_type or "RuntimeError",
-            }
-
-        emit(
-            events.EVENT_SHOT_SETUP,
-            status=status_value,
-            action_id=action_id,
-            payload=self._shot_setup_payload(shot=shot, path=path),
-            scope=self._shot_setup_scope(shot),
-            error=error,
-        )
-
     def _setup_file(self, path: Path, entity: SGEntity) -> None:
         shot = cast(Shot, entity)
-        action_id = self._new_shot_setup_action_id()
         try:
             super()._setup_file(path, entity)
             self._set_shot_context(shot)
@@ -317,12 +246,6 @@ class HShotFileManager(HFileManager):
             self._post_open_file(shot)
 
             hou.hipFile.save()
-            self._emit_shot_setup_event(
-                status="success",
-                shot=shot,
-                path=path,
-                action_id=action_id,
-            )
         except Exception as exc:
             tb = traceback.format_exc()
             log.exception(
@@ -342,14 +265,6 @@ class HShotFileManager(HFileManager):
                 title="Shot Setup Error",
                 message=message,
                 details=details,
-            )
-            self._emit_shot_setup_event(
-                status="error",
-                shot=shot,
-                path=path,
-                action_id=action_id,
-                error_message=f"{error_id}: {exc}",
-                exception_type=type(exc).__name__,
             )
             raise
 

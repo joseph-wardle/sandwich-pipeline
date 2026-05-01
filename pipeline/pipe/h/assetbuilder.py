@@ -11,13 +11,17 @@ import json
 import logging
 import os
 import sys
-import time
 from pathlib import Path
 from typing import Any, Mapping, TypedDict
 
 import hou
 
 from pipe.asset.paths import ASSET_BUILDER_FILENAME
+from pipe.telemetry import (
+    EVENT_BUILD_HOUDINI_COMPONENT,
+    HoudiniBuildError,
+    action,
+)
 
 from . import nodelayouts
 from .publish import PublishOptions, publish_component
@@ -376,61 +380,32 @@ def _first_error_message(result: HeadlessPublishResult) -> str | None:
     return None
 
 
-def _emit_houdini_component_telemetry(
-    result: HeadlessPublishResult, *, duration_ms: int
-) -> None:
-    try:
-        from pipe.telemetry import STATUS_ERROR, STATUS_SUCCESS, emit, events
-        from pipe.telemetry.registry import ERROR_HOUDINI_BUILD_FAILED
-    except Exception:
-        return
+def _is_invoked_from_parent_action() -> bool:
+    """Return True when a parent process is wrapping us in its own telemetry action.
 
-    ensure_builder = bool(result.get("ensure_builder"))
-    publish_requested = bool(result.get("publish_requested"))
-    status_text = str(result.get("status", "failed")).strip().lower()
-    is_success = status_text == "success"
+    Maya's asset publisher sets `PIPE_TELEMETRY_ACTION_ID` before launching
+    hython. In that case the parent emits the `build.houdini.component` event
+    based on parsed stdout; we must stay silent to avoid double-counting.
+    """
 
-    warnings_count = _result_message_count(result, "warnings")
-    errors_count = _result_message_count(result, "errors")
-    if not is_success and errors_count == 0:
-        errors_count = 1
+    return bool(os.getenv("PIPE_TELEMETRY_ACTION_ID", "").strip())
 
-    payload = {
+
+def _build_initial_payload(args: argparse.Namespace) -> dict[str, Any]:
+    return {
         "mode": _component_build_mode(
-            ensure_builder=ensure_builder,
-            publish_requested=publish_requested,
+            ensure_builder=args.ensure_builder,
+            publish_requested=args.publish,
         ),
-        "variant": str(result.get("variant") or "main"),
-        "warnings_count": warnings_count,
-        "errors_count": errors_count,
-        "ensure_builder": ensure_builder,
-        "publish_requested": publish_requested,
+        "variant": str(args.variant or "main"),
+        "warnings_count": 0,
+        "errors_count": 0,
     }
 
-    scope = None
-    asset_name = str(result.get("asset_name") or "").strip()
-    if asset_name:
-        scope = {"asset": asset_name}
 
-    status = STATUS_SUCCESS if is_success else STATUS_ERROR
-    error = None
-    if not is_success:
-        error = {
-            "code": ERROR_HOUDINI_BUILD_FAILED,
-            "message": _first_error_message(result) or "Houdini component build failed",
-            "exception_type": "RuntimeError",
-        }
-
-    action_id = os.getenv("PIPE_TELEMETRY_ACTION_ID", "").strip() or None
-    emit(
-        events.EVENT_BUILD_HOUDINI_COMPONENT,
-        status=status,
-        action_id=action_id,
-        payload=payload,
-        metrics={"duration_ms": max(0, int(duration_ms))},
-        scope=scope,
-        error=error,
-    )
+def _scope_from_args(args: argparse.Namespace) -> dict[str, str] | None:
+    asset_name = str(args.asset_name or "").strip()
+    return {"asset": asset_name} if asset_name else None
 
 
 def _configure_logging(level: str) -> None:
@@ -520,8 +495,34 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv or sys.argv[1:])
     _configure_logging(args.log_level)
 
-    started_at = time.perf_counter()
-    result = run_headless_publish(
+    if _is_invoked_from_parent_action():
+        # The parent (e.g. Maya asset publisher) wraps this subprocess in its
+        # own action() block and emits the build event itself. Stay silent.
+        result = _run_publish(args)
+        _emit_result(result)
+        return 1 if result["errors"] else 0
+
+    with action(
+        EVENT_BUILD_HOUDINI_COMPONENT,
+        payload=_build_initial_payload(args),
+        scope=_scope_from_args(args),
+    ) as t:
+        result = _run_publish(args)
+        t.update_payload(
+            warnings_count=_result_message_count(result, "warnings"),
+            errors_count=_result_message_count(result, "errors"),
+        )
+        _emit_result(result)
+        if result["errors"]:
+            t.fail(
+                HoudiniBuildError.error_code,
+                _first_error_message(result) or "Houdini component build failed",
+            )
+    return 1 if result["errors"] else 0
+
+
+def _run_publish(args: argparse.Namespace) -> HeadlessPublishResult:
+    return run_headless_publish(
         asset_root=Path(args.asset_root),
         asset_name=args.asset_name,
         asset_path=args.asset_path,
@@ -535,11 +536,6 @@ def main(argv: list[str] | None = None) -> int:
         turnaround=args.turnaround,
         fail_on_hook_error=args.fail_on_hook_error,
     )
-
-    duration_ms = int((time.perf_counter() - started_at) * 1000)
-    _emit_houdini_component_telemetry(result, duration_ms=duration_ms)
-    _emit_result(result)
-    return 1 if result["errors"] else 0
 
 
 if __name__ == "__main__":

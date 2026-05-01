@@ -160,132 +160,6 @@ class FileManager(metaclass=ABCMeta):
             path.mkdir(mode=0o770, parents=True)
         return True
 
-    @staticmethod
-    def _telemetry_text(value: object | None, *, fallback: str) -> str:
-        if value is None:
-            return fallback
-        normalized = str(value).strip()
-        return normalized or fallback
-
-    def _telemetry_entity_type(self, entity: SGEntity) -> str:
-        entity_name = self._telemetry_text(
-            getattr(entity.__class__, "__name__", None),
-            fallback=self._entity_type.__name__,
-        )
-        return entity_name.lower()
-
-    def _telemetry_entity_code(self, entity: SGEntity) -> str:
-        code = self._telemetry_text(getattr(entity, "code", None), fallback="")
-        if code:
-            return code
-        return self._telemetry_text(getattr(entity, "id", None), fallback="unknown")
-
-    def _telemetry_file_payload(
-        self,
-        *,
-        entity: SGEntity,
-        path: Path,
-        opened_backup: bool | None = None,
-    ) -> dict[str, object]:
-        payload: dict[str, object] = {
-            "entity_type": self._telemetry_entity_type(entity),
-            "entity_code": self._telemetry_entity_code(entity),
-            "path": str(path),
-            "versioned": bool(self._versioning),
-        }
-        if opened_backup is not None:
-            payload["opened_backup"] = bool(opened_backup)
-        return payload
-
-    def _telemetry_scope(self, entity: SGEntity) -> dict[str, str] | None:
-        try:
-            from pipe.telemetry import extract_scope
-        except Exception:
-            return None
-
-        scope = extract_scope(entity)
-        entity_type = self._telemetry_entity_type(entity)
-        entity_code = self._telemetry_entity_code(entity)
-        if entity_type == "shot":
-            scope.setdefault("shot", entity_code)
-        elif entity_type == "asset":
-            scope.setdefault("asset", entity_code)
-        return scope or None
-
-    @staticmethod
-    def _telemetry_file_events() -> tuple[str | None, str | None]:
-        try:
-            from pipe.telemetry import events
-        except Exception:
-            return None, None
-        return events.EVENT_FILE_OPEN, events.EVENT_FILE_CREATE
-
-    @staticmethod
-    def _new_file_action_id() -> str | None:
-        try:
-            from pipe.telemetry import new_action_id
-        except Exception:
-            return None
-        return new_action_id()
-
-    def _emit_file_event(
-        self,
-        *,
-        event_type: str,
-        status: str,
-        entity: SGEntity,
-        path: Path,
-        action_id: str | None,
-        opened_backup: bool | None = None,
-        error_message: str | None = None,
-        exception_type: str | None = None,
-    ) -> None:
-        try:
-            from pipe.telemetry import (
-                STATUS_ERROR,
-                STATUS_SUCCESS,
-                emit,
-                get_event_definition,
-            )
-        except Exception:
-            log.debug("Telemetry import unavailable for %s", event_type, exc_info=True)
-            return
-
-        status_value = STATUS_SUCCESS if status == "success" else STATUS_ERROR
-        payload = self._telemetry_file_payload(
-            entity=entity,
-            path=path,
-            opened_backup=opened_backup,
-        )
-        scope = self._telemetry_scope(entity)
-
-        error = None
-        if status == "error":
-            operation = "open" if event_type.endswith(".open") else "create"
-            error_code = (
-                "FILE_OPEN_FAILED" if operation == "open" else "FILE_CREATE_FAILED"
-            )
-            try:
-                definition = get_event_definition(event_type)
-                if definition.error_codes:
-                    error_code = definition.error_codes[0]
-            except Exception:
-                pass
-            error = {
-                "code": error_code,
-                "message": error_message or f"Scene file {operation} failed",
-                "exception_type": exception_type or "RuntimeError",
-            }
-
-        emit(
-            event_type,
-            status=status_value,
-            action_id=action_id,
-            payload=payload,
-            scope=scope,
-            error=error,
-        )
-
     def open_file(self) -> None:
         if not self._check_unsaved_changes():
             return
@@ -336,7 +210,6 @@ class FileManager(metaclass=ABCMeta):
 
         filename, ext = self._generate_filename_ext(entity)
         file_path = entity_path / f"{filename}.{ext}"
-        opened_backup: bool | None = None
 
         if self._versioning:
             files = [file_path] + sorted(
@@ -365,40 +238,8 @@ class FileManager(metaclass=ABCMeta):
             else:
                 file_path = files.pop()
 
-            opened_backup = file_path != (entity_path / f"{filename}.{ext}")
-
-        file_open_event, file_create_event = self._telemetry_file_events()
-        action_id = self._new_file_action_id()
-        file_exists = file_path.is_file()
-        event_type = file_open_event if file_exists else file_create_event
-        open_payload_backup = opened_backup if file_exists else None
-
-        try:
-            if file_exists:
-                self._open_file(file_path)
-            else:
-                self._setup_file(file_path, entity)
-            self._post_open_file(entity)
-        except Exception as exc:
-            if event_type:
-                self._emit_file_event(
-                    event_type=event_type,
-                    status="error",
-                    entity=entity,
-                    path=file_path,
-                    action_id=action_id,
-                    opened_backup=open_payload_backup,
-                    error_message=str(exc),
-                    exception_type=type(exc).__name__,
-                )
-            raise
-
-        if event_type:
-            self._emit_file_event(
-                event_type=event_type,
-                status="success",
-                entity=entity,
-                path=file_path,
-                action_id=action_id,
-                opened_backup=open_payload_backup,
-            )
+        if file_path.is_file():
+            self._open_file(file_path)
+        else:
+            self._setup_file(file_path, entity)
+        self._post_open_file(entity)

@@ -21,6 +21,7 @@ from pipe.sp.progress import (
     PublishProgressUpdate,
     PublishStage,
 )
+from pipe.telemetry import EVENT_TEXTURE_CONVERT_TEX, action
 from pipe.util import silent_startupinfo
 
 log = logging.getLogger(__name__)
@@ -46,14 +47,15 @@ def _nearest_pow2(n: int) -> int:
 
 
 class TexConversionError(ChildProcessError):
-    pass
+    """Raised when one of the tex / preview-image conversion subprocesses fails."""
+
+    error_code = "TEXTURE_CONVERSION_FAILED"
 
 
 class TexConverter:
     tex_path: Path
     preview_path: Path
     imgs_by_tex_set: list[list[str]]
-    action_id: str | None
     asset_name: str | None
     geo_variant: str | None
     material_variant: str | None
@@ -66,7 +68,6 @@ class TexConverter:
         preview_path: Path,
         imgs_by_tex_set: typing.Iterable[list[str]],
         *,
-        action_id: str | None = None,
         asset_name: str | None = None,
         geo_variant: str | None = None,
         material_variant: str | None = None,
@@ -77,29 +78,21 @@ class TexConverter:
         self.tex_path = tex_path
         self.preview_path = preview_path
         self.imgs_by_tex_set = [list(imgs) for imgs in imgs_by_tex_set]
-        self.action_id = action_id
         self.asset_name = asset_name
         self.geo_variant = geo_variant
         self.material_variant = material_variant
         self.renderman_variant = renderman_variant
         self.batch_size = max(1, int(batch_size))
         self.progress_callback = progress_callback
-        self._last_converted_tex_count = 0
-        self._last_converted_preview_count = 0
 
     def _source_count(self) -> int:
         return sum(len(imgs) for imgs in self.imgs_by_tex_set)
 
-    def _telemetry_payload(
-        self,
-        *,
-        converted_tex_count: int,
-        converted_preview_count: int,
-    ) -> dict[str, object]:
+    def convert_all(self) -> tuple[list[Path], list[Path]]:
         payload: dict[str, object] = {
-            "source_count": max(0, int(self._source_count())),
-            "converted_tex_count": max(0, int(converted_tex_count)),
-            "converted_preview_count": max(0, int(converted_preview_count)),
+            "source_count": self._source_count(),
+            "converted_tex_count": 0,
+            "converted_preview_count": 0,
             "batch_size": self.batch_size,
         }
         if self.asset_name:
@@ -110,75 +103,19 @@ class TexConverter:
             payload["material_variant"] = str(self.material_variant)
         if self.renderman_variant:
             payload["renderman_variant"] = str(self.renderman_variant)
-        return payload
 
-    def _telemetry_scope(self) -> dict[str, str] | None:
-        if not self.asset_name:
-            return None
-        return {"asset": str(self.asset_name)}
+        scope = {"asset": str(self.asset_name)} if self.asset_name else None
 
-    def _emit_conversion_event(
-        self,
-        *,
-        status: str,
-        converted_tex_count: int,
-        converted_preview_count: int,
-        duration_ms: int,
-        error_message: str | None = None,
-        exception_type: str | None = None,
-    ) -> None:
-        try:
-            from pipe.telemetry import STATUS_ERROR, STATUS_SUCCESS, emit, events
-            from pipe.telemetry.registry import ERROR_TEXTURE_CONVERSION_FAILED
-        except Exception:
-            return
-
-        status_value = STATUS_SUCCESS if status == "success" else STATUS_ERROR
-        error_data = None
-        if status == "error":
-            error_data = {
-                "code": ERROR_TEXTURE_CONVERSION_FAILED,
-                "message": error_message or "Texture conversion failed",
-                "exception_type": exception_type or "RuntimeError",
-            }
-
-        emit(
-            events.EVENT_TEXTURE_CONVERT_TEX,
-            status=status_value,
-            action_id=self.action_id,
-            payload=self._telemetry_payload(
-                converted_tex_count=converted_tex_count,
-                converted_preview_count=converted_preview_count,
-            ),
-            metrics={"duration_ms": max(0, int(duration_ms))},
-            scope=self._telemetry_scope(),
-            error=error_data,
-        )
-
-    def convert_all(self) -> tuple[list[Path], list[Path]]:
-        started_at = time.perf_counter()
-        converted_tex: list[Path] = []
-        converted_preview: list[Path] = []
-        try:
+        with action(
+            EVENT_TEXTURE_CONVERT_TEX,
+            payload=payload,
+            scope=scope,
+        ) as t:
             converted_tex = self.convert_tex()
+            t.update_payload(converted_tex_count=len(converted_tex))
             converted_preview = self.convert_previewsurface()
-        except Exception as exc:
-            self._emit_conversion_event(
-                status="error",
-                converted_tex_count=self._last_converted_tex_count,
-                converted_preview_count=self._last_converted_preview_count,
-                duration_ms=int((time.perf_counter() - started_at) * 1000),
-                error_message=str(exc),
-                exception_type=type(exc).__name__,
-            )
-            raise
+            t.update_payload(converted_preview_count=len(converted_preview))
 
-        self._emit_conversion_event(
-            status="success",
-            converted_tex_count=len(converted_tex),
-            converted_preview_count=len(converted_preview),
-            duration_ms=int((time.perf_counter() - started_at) * 1000),
-        )
         return converted_tex, converted_preview
 
     def convert_tex(self) -> list[Path]:
@@ -279,7 +216,6 @@ class TexConverter:
                 current=1,
                 total=1,
             )
-            self._last_converted_tex_count = 0
             return []
 
         self._report_progress(
@@ -295,7 +231,6 @@ class TexConverter:
             stage=PublishStage.CONVERTING_TEX,
             message="Converting source textures to TEX.",
         )
-        self._last_converted_tex_count = len(finished_imgs)
 
         if len(finished_imgs) != len(cmdlines):
             raise TexConversionError("Not all png textures were converted")
@@ -362,7 +297,6 @@ class TexConverter:
                 current=1,
                 total=1,
             )
-            self._last_converted_preview_count = 0
             return []
 
         self._report_progress(
@@ -378,7 +312,6 @@ class TexConverter:
             stage=PublishStage.CONVERTING_PREVIEW,
             message="Building preview textures.",
         )
-        self._last_converted_preview_count = len(finished_imgs)
 
         if len(finished_imgs) != len(cmdlines):
             raise TexConversionError("Not all jpeg textures were converted")
