@@ -50,7 +50,6 @@ class MayaDCC(DCC):
         module_paths: list[str] = [
             str(pipe_path / "lib/y-rig/third_party/mgear/release")
         ]
-        # adding the preexisting path, if it exists
         existing_module_path = os.environ.get("MAYA_MODULE_PATH")
         if existing_module_path:
             module_paths.extend(existing_module_path.split(os.pathsep))
@@ -62,6 +61,7 @@ class MayaDCC(DCC):
             str(get_lib_path() / "mayacapture"),
             str(get_lib_path() / "maya-timeline-marker/scripts"),
             str(get_lib_path() / "modelChecker"),
+            str(get_lib_path() / "studiolibrary/src"),
             str(get_lib_path() / "y-rig/src"),
         ]
 

@@ -43,21 +43,8 @@ dev = [
 [tool.ruff]
 exclude = [
     ".git",
-    "MOPS",
     "NukeSurvivalToolkit_publicRelease",
-    "VFX-LYNX",
-    "ae_SVG",
-    "dwpicker",
-    "dwpicker_git",
-    "lib/python",
-    "mayacapture",
-    "maya-timeline-marker_git",
-    "modelChecker",
-    "modelChecker_git",
-    "rjg",
-    'y-rig',
-    "studiolibrary",
-    "timeline_marker",
+    "lib",
     "pipeline/software/maya/scripts/**"
 ]
 
@@ -85,9 +72,15 @@ replace-imports-with-any = [
 
 [tool.ty.environment]
 extra-paths = [
-    "pipeline/software/maya/scripts/",
-    "pipeline/software/nuke/tools/SKD_Tools/scripts",
     "pipeline/",
+    "pipeline/software/nuke/tools/SKD_Tools/scripts",
+    "pipeline/lib/aperture",
+    "pipeline/lib/dwpicker",
+    "pipeline/lib/mayacapture",
+    "pipeline/lib/maya-timeline-marker/scripts",
+    "pipeline/lib/modelChecker",
+    "pipeline/lib/studiolibrary/src",
+    "pipeline/lib/y-rig/src",
 ]
 
 [tool.ty.src]
@@ -97,14 +90,7 @@ exclude = [
     ".git",
     "pipeline/lib/MOPS/**",
     "pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease",
-    "pipeline/lib/VFX-LYNX/**",
-    "pipeline/lib/ae_SVG/**",
-    "pipeline/lib/python/**",
-    "pipeline/**/mayacapture/**",
-    "pipeline/**/maya-timeline-marker_git/**",
-    "pipeline/lib/y-rig/**",
-    "pipeline/**/studiolibrary/**",
-    "pipeline/**/timeline_marker/**",
+    "pipeline/lib/**",
     "pipeline/**/houdini/scripts/**",
     "pipeline/**/maya/scripts/**",
     "pipeline/software/houdini/hsite/**/scripts/"
@@ -113,8 +99,14 @@ exclude = [
 
 [tool.pyright]
 extraPaths = [
-    "pipeline/software/maya/scripts/",
     "pipeline/",
+    "pipeline/lib/aperture",
+    "pipeline/lib/dwpicker",
+    "pipeline/lib/mayacapture",
+    "pipeline/lib/maya-timeline-marker/scripts",
+    "pipeline/lib/modelChecker",
+    "pipeline/lib/studiolibrary",
+    "pipeline/lib/y-rig/src",
 ]
 typeCheckingMode = "standard"
 reportMissingModuleSource = "information"
