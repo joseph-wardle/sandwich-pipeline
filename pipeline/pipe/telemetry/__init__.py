@@ -13,7 +13,7 @@ It never suppresses exceptions.
 
 Failure classification: `action()` reads `exc.error_code` from any exception
 that escapes a wrapped block. Workflow modules define their own typed
-exceptions next to the raise sites (e.g. `PlayblastError` in `pipe.util.playblaster`,
+exceptions next to the raise sites (e.g. `PlayblastError` in `pipe.playblast.playblaster`,
 `USDExportError` in `pipe.m.publish.publisher`) and set `error_code` as a
 class attribute. Anything without the attribute falls through to
 `error_code = "UNKNOWN"`. Call sites can also override on a case-by-case

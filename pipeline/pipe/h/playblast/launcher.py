@@ -2,29 +2,30 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import hou
 from env_sg import DB_Config
 
 from pipe.glui.dialogs import MessageDialog
 from pipe.h import local
-from pipe.playblast_artist import resolve_artist_display_name
-from pipe.playblast_shotgrid import (
-    UPLOAD_TARGET_REVIEW,
-    UPLOAD_TARGET_VERSION_ONLY,
-    PlayblastVersionUploadRequest,
-    default_version_name_from_movie_path,
-    resolve_preferred_upload_movie_path,
-    upload_playblast_version,
+from pipe.h.playblast.config import (
+    HoudiniPlayblastExportConfig,
+    HoudiniPlayblastLaunchContext,
+    ResolvedOutputDestination,
+)
+from pipe.h.playblast.dialog import HPlayblastDialog
+from pipe.h.playblast.playblaster import HPlayblaster
+from pipe.playblast import FFmpegPreset
+from pipe.playblast.shotgrid import (
+    PlayblastEntity,
+    PlayblastUploadIntent,
+    UploadTarget,
+    run_playblast_upload,
 )
 from pipe.shotgrid import Shot, ShotGrid
-from pipe.util import Playblaster
-
-from .playblaster import HPlayblaster
-from .ui import HPlayblastDialog
+from shared.users import resolve_artist_display_name
 
 log = logging.getLogger(__name__)
 
@@ -32,41 +33,6 @@ if TYPE_CHECKING:
     from Qt import QtWidgets
 
 SHOT_CODE_FALLBACK_PATTERN = re.compile(r"[A-Za-z]+_\d{3}(?:_[A-Za-z0-9]+)*")
-
-
-@dataclass(frozen=True)
-class HoudiniPlayblastLaunchContext:
-    """Resolved inputs used by the Houdini playblast launch flow."""
-
-    source_mode: Literal["shot", "custom"]
-    shot_code: str | None
-    custom_camera_path: str | None
-    custom_frame_range: tuple[int, int] | None
-    custom_shot_code: str
-    output_destinations: tuple["ResolvedOutputDestination", ...]
-    shotgrid_description: str
-    upload_to_shotgrid: bool
-    shotgrid_upload_target: str
-    shotgrid_review_playlist_id: int | None
-    shotgrid_review_load_error: str | None
-
-
-@dataclass(frozen=True)
-class ResolvedOutputDestination:
-    """Resolved output base path paired with its destination label."""
-
-    destination_name: str
-    output_base: Path
-
-
-@dataclass(frozen=True)
-class HoudiniPlayblastExportConfig:
-    """Fully resolved export configuration used by launch orchestration."""
-
-    context: HoudiniPlayblastLaunchContext
-    shot: Shot
-    out_paths: dict[Playblaster.PRESET, list[Path | str]]
-    final_movies: tuple[Path, ...]
 
 
 def launch_playblast() -> None:
@@ -237,9 +203,9 @@ def _build_custom_mode_shot(context: HoudiniPlayblastLaunchContext) -> Shot | No
 
 def _build_output_paths(
     context: HoudiniPlayblastLaunchContext,
-) -> dict[Playblaster.PRESET, list[Path | str]]:
+) -> dict[FFmpegPreset, list[Path | str]]:
     return {
-        Playblaster.PRESET.EDIT_SQ: [
+        FFmpegPreset.EDIT_SQ: [
             destination.output_base for destination in context.output_destinations
         ]
     }
@@ -281,7 +247,7 @@ def _run_local_playblast_or_report(
     return True
 
 
-def _final_movie_path(output_base: str | Path, preset: Playblaster.PRESET) -> Path:
+def _final_movie_path(output_base: str | Path, preset: FFmpegPreset) -> Path:
     return Path(str(output_base) + f".{preset.ext}")
 
 
@@ -289,7 +255,7 @@ def _ordered_final_movie_paths_for_upload(
     context: HoudiniPlayblastLaunchContext,
 ) -> list[Path]:
     return [
-        _final_movie_path(destination.output_base, Playblaster.PRESET.EDIT_SQ)
+        _final_movie_path(destination.output_base, FFmpegPreset.EDIT_SQ)
         for destination in context.output_destinations
     ]
 
@@ -300,20 +266,8 @@ def _preferred_edit_movie_paths_for_upload(
     for destination in context.output_destinations:
         if destination.destination_name != HPlayblastDialog.DESTINATION_EDIT:
             continue
-        return [_final_movie_path(destination.output_base, Playblaster.PRESET.EDIT_SQ)]
+        return [_final_movie_path(destination.output_base, FFmpegPreset.EDIT_SQ)]
     return []
-
-
-def _resolve_shotgrid_upload_movie_path(
-    context: HoudiniPlayblastLaunchContext,
-) -> Path | None:
-    """Resolve upload path deterministically: prefer Edit, then destination order."""
-    ordered_paths = _ordered_final_movie_paths_for_upload(context)
-    preferred_paths = _preferred_edit_movie_paths_for_upload(context)
-    return resolve_preferred_upload_movie_path(
-        ordered_paths,
-        preferred_paths=preferred_paths,
-    )
 
 
 def _run_post_export_actions(config: HoudiniPlayblastExportConfig) -> list[str]:
@@ -321,112 +275,23 @@ def _run_post_export_actions(config: HoudiniPlayblastExportConfig) -> list[str]:
     if context.source_mode != "shot" or not context.upload_to_shotgrid:
         return []
 
-    upload_movie = _resolve_shotgrid_upload_movie_path(context)
-    if upload_movie is None:
-        log.warning(
-            "ShotGrid upload requested but no valid movie output was found in selected destinations."
-        )
-        return ["ShotGrid Upload: Skipped - no valid playblast movie file was found."]
-
-    return _upload_shot_playblast_to_shotgrid(context, upload_movie)
-
-
-def _upload_shot_playblast_to_shotgrid(
-    context: HoudiniPlayblastLaunchContext,
-    movie_path: Path,
-) -> list[str]:
     shot_code = str(context.shot_code or "").strip()
     if not shot_code:
         return ["ShotGrid Upload: Skipped - shot code is missing."]
 
-    version_name = default_version_name_from_movie_path(movie_path)
-    if not version_name:
-        version_name = f"{shot_code}_playblast"
-
-    artist_name = resolve_artist_display_name().strip() or None
-    (
-        upload_target,
-        review_playlist_id,
-        pre_upload_warning,
-        fallback_reason,
-        selected_playlist_id,
-    ) = _resolve_upload_target_for_request(context)
-    upload_request = PlayblastVersionUploadRequest(
-        shot_code=shot_code,
-        movie_path=movie_path,
-        version_name=version_name,
+    intent = PlayblastUploadIntent(
+        entity=PlayblastEntity.shot(shot_code),
+        output_paths=tuple(_ordered_final_movie_paths_for_upload(context)),
+        preferred_paths=tuple(_preferred_edit_movie_paths_for_upload(context)),
         description=context.shotgrid_description or None,
-        artist_display_name=artist_name,
-        upload_target=upload_target,
-        review_playlist_id=review_playlist_id,
+        artist_display_name=resolve_artist_display_name().strip() or None,
+        upload_version=True,
+        upload_to_review=context.shotgrid_upload_target == UploadTarget.REVIEW,
+        review_playlist_id=context.shotgrid_review_playlist_id,
+        review_load_error=context.shotgrid_review_load_error,
+        fallback_version_name=f"{shot_code}_playblast",
     )
-
-    try:
-        upload_result = upload_playblast_version(upload_request)
-    except Exception as exc:
-        log.exception("ShotGrid upload failed for shot '%s'", shot_code)
-        return [f"ShotGrid Upload: Failed - {exc}"]
-
-    message_lines: list[str] = []
-    if upload_result.ok:
-        success_message = (
-            f"ShotGrid Upload: Success - {upload_result.version_name}"
-            f" (shot {upload_result.shot_code})."
-        )
-        if upload_result.version_id is not None:
-            success_message = (
-                f"{success_message} Version ID: {upload_result.version_id}."
-            )
-        message_lines.append(success_message)
-    else:
-        message_lines.append(f"ShotGrid Upload: Failed - {upload_result.message}")
-
-    if pre_upload_warning and upload_result.ok:
-        message_lines.append(f"ShotGrid Warning: {pre_upload_warning}")
-    if pre_upload_warning:
-        log.warning(
-            "ShotGrid review upload fallback to version upload "
-            "(shot_code=%s, version_id=%s, playlist_id=%s, reason=%s)",
-            shot_code,
-            upload_result.version_id,
-            selected_playlist_id,
-            fallback_reason or "review playlist unavailable",
-        )
-    for warning in upload_result.warnings:
-        message_lines.append(f"ShotGrid Warning: {warning}")
-
-    return message_lines
-
-
-def _resolve_upload_target_for_request(
-    context: HoudiniPlayblastLaunchContext,
-) -> tuple[str, int | None, str | None, str | None, int | None]:
-    normalized_target = str(context.shotgrid_upload_target or "").strip().lower()
-    if normalized_target != UPLOAD_TARGET_REVIEW:
-        return (UPLOAD_TARGET_VERSION_ONLY, None, None, None, None)
-
-    playlist_id = context.shotgrid_review_playlist_id
-    if isinstance(playlist_id, int) and playlist_id > 0:
-        return (UPLOAD_TARGET_REVIEW, playlist_id, None, None, playlist_id)
-
-    if context.shotgrid_review_load_error:
-        return (
-            UPLOAD_TARGET_VERSION_ONLY,
-            None,
-            "Review upload skipped because recent reviews could not be loaded. "
-            "Version upload continued.",
-            context.shotgrid_review_load_error,
-            playlist_id,
-        )
-
-    return (
-        UPLOAD_TARGET_VERSION_ONLY,
-        None,
-        "Review upload skipped because no valid review playlist was selected. "
-        "Version upload continued.",
-        "missing review playlist id",
-        playlist_id,
-    )
+    return run_playblast_upload(intent)
 
 
 def _build_success_message(

@@ -13,7 +13,7 @@ suppresses the exception.
 Failure classification is duck-typed: `action()` reads `getattr(exc, "error_code")`
 from whatever exception escapes the block. Workflow modules each define
 their own typed exceptions alongside the raise sites and set `error_code`
-as a class attribute (see `pipe.util.playblaster.PlayblastError`,
+as a class attribute (see `pipe.playblast.playblaster.PlayblastError`,
 `pipe.m.publish.publisher.USDExportError`, etc.). Exceptions without the
 attribute fall through to `error_code = "UNKNOWN"`.
 

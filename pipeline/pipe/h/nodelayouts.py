@@ -8,6 +8,7 @@ from typing import Any, cast
 # mypy: disable-error-code="union-attr"
 import hou
 import loptoolutils  # type: ignore
+
 from . import variants
 
 """Node-graph builders for Houdini Solaris tools.
@@ -1005,7 +1006,7 @@ def skd_layoutgroup(kwargs: dict) -> hou.Node:
     if old_inputs := contextoptions.inputs():
         beginblock.setInput(0, old_inputs[0])
     contextoptions.setInput(0, groupprim)
-    contextoptions.parm("createoptionsblock").set(True)
+    _set_parm_if_exists(contextoptions, "createoptionsblock", True)
     groupprim.setInput(0, beginblock)
 
     for n in (beginblock, groupprim, contextoptions):
@@ -1018,24 +1019,27 @@ def skd_layoutgroup(kwargs: dict) -> hou.Node:
     groupprim.setName("layoutprim", True)
     contextoptions.setName("layoutgroup", True)
 
-    groupprim.parm("primpath").set("`@PATH`")
-    groupprim.parm("primkind").set("Group")
-    groupprim.parm("parentprimtype").set("Scope")
+    _set_parm_if_exists(groupprim, "primpath", "`@PATH`")
+    _set_parm_if_exists(groupprim, "primkind", "Group")
+    _set_parm_if_exists(groupprim, "parentprimtype", "Scope")
 
     contextoptions.addSpareParmTuple(
         hou.StringParmTemplate(
             name="group", label="Group Name", num_components=1, default_value=("$OS",)
         )
     )
-    contextoptions.parm("optioncount").insertMultiParmInstance(0)
-    contextoptions.parm("optionname1").set("GROUP")
-    contextoptions.parm("optionstrvalue1").set('`chs("./group")`')
-    contextoptions.parm("optionname2").set("PATH")
-    contextoptions.parm("optionstrvalue2").set(
-        '/environment/`@ASSEMBLY`/`chs("./group")`'
+    optioncount_parm = contextoptions.parm("optioncount")
+    if optioncount_parm is not None:
+        optioncount_parm.insertMultiParmInstance(0)
+    _set_parm_if_exists(contextoptions, "optionname1", "GROUP")
+    _set_parm_if_exists(contextoptions, "optionstrvalue1", '`chs("./group")`')
+    _set_parm_if_exists(contextoptions, "optionname2", "PATH")
+    _set_parm_if_exists(
+        contextoptions, "optionstrvalue2", '/environment/`@ASSEMBLY`/`chs("./group")`'
     )
-
-    contextoptions.parm("createoptionsblock").hide(True)
+    optionsblock_parm = contextoptions.parm("createoptionsblock")
+    if optionsblock_parm is not None:
+        optionsblock_parm.hide(True)
     _hide_contextoptions_folders(contextoptions)
 
     beginblock_move = hou.Vector2(0, 2.0)

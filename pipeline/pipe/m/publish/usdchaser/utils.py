@@ -133,25 +133,26 @@ def make_topo_attrs_default(stage: Usd.Stage) -> None:
                 attr.Set(data, Usd.TimeCode.Default())
 
 
-def update_material_bindings(
-    stage: Usd.Stage, old: str, new: str, name_prepend: str = ""
+def prefix_material_bindings(
+    stage: Usd.Stage,
+    collection_owner_path: Sdf.Path,
+    name_prepend: str = "",
 ) -> None:
-    """Update material bindings to what Houdini will expect"""
+    """
+    Convert collection material bindings to use paths relative to the geo prim and optionally add a prefix.
+    """
+    geo_prim = stage.GetPrimAtPath(collection_owner_path)
+    bindings = UsdShade.MaterialBindingAPI(geo_prim)
 
-    bindings = UsdShade.MaterialBindingAPI(stage.GetPrimAtPath(Sdf.Path(new)))
     for rel in bindings.GetCollectionBindingRels():
-        t1, t2 = rel.GetTargets()
-        # strip the namespace because the USD exporter strips the geo namespace but not the material namespace
-        new_name = t2.name
-        # Change the material binding to match how it will look in Houdini
-        rel.SetTargets(
-            (
-                t1,
-                Sdf.Path(
-                    f"{str(t2.GetParentPath()).replace(old, new)}/{name_prepend}{new_name}"
-                ),
+        collection_target, material_target = rel.GetTargets()
+        # Optionally rename material
+        if name_prepend:
+            parent = material_target.GetParentPath()
+            material_target = parent.AppendChild(
+                f"{name_prepend}{material_target.name}"
             )
-        )
+        rel.SetTargets((collection_target, material_target))
 
 
 def move_prim(

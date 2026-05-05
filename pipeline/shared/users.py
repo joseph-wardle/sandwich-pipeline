@@ -37,7 +37,7 @@ def _username_display_map() -> dict[str, str]:
 
     try:
         raw_data = json.loads(mapping_path.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         log.exception(
             "Could not load username mapping from %s. Falling back to login usernames.",
             mapping_path,
