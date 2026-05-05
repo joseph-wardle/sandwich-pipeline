@@ -8,7 +8,10 @@ telemetry.
 
 File layout: one or more files per process, named
 `telemetry-<UTC timestamp>-<pid>-<seq>.jsonl`. Files rotate when they exceed
-`rotate_mb`. A retention sweep deletes files older than `retention_days`.
+`rotate_mb`. By default the JSONL spool is kept forever — the spool is the
+canonical record of every emitted event, and Postgres is derived state.
+Setting `retention_days` to a positive integer opts into time-based
+pruning if disk pressure ever becomes a concern.
 """
 
 from __future__ import annotations
@@ -182,6 +185,12 @@ class AsyncJsonlSpoolWriter:
         self._sweep_retention(force=False)
 
     def _sweep_retention(self, *, force: bool) -> None:
+        # `retention_days=0` (the default) means "never sweep" — JSONL files
+        # are the canonical record of every emitted event and we keep them
+        # indefinitely so Postgres can be rebuilt from scratch if needed.
+        if self._retention_seconds <= 0:
+            return
+
         now = time.monotonic()
         if (
             not force

@@ -9,6 +9,11 @@ Defaults work without any env vars set. The two knobs that matter most:
 The spool directory defaults to the shared production path
 (`get_shared_telemetry_spool_dir()` in `pipeline/shared/util.py`). Override
 with `PIPE_TELEMETRY_SPOOL_DIR` for tests or for the laptop POC.
+
+`PIPE_TELEMETRY_RETENTION_DAYS=0` (the default) disables the spool retention
+sweep entirely — JSONL files persist forever, which preserves the canonical
+record of every event ever emitted. Set to a positive integer (e.g. 90) to
+opt into time-based pruning if disk pressure ever becomes a concern.
 """
 
 from __future__ import annotations
@@ -77,7 +82,7 @@ def load_config() -> TelemetryConfig:
         / 1000.0,
         rotate_mb=_parse_int("PIPE_TELEMETRY_ROTATE_MB", default=8, minimum=1),
         retention_days=_parse_int(
-            "PIPE_TELEMETRY_RETENTION_DAYS", default=90, minimum=1
+            "PIPE_TELEMETRY_RETENTION_DAYS", default=0, minimum=0
         ),
     )
 
