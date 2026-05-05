@@ -57,15 +57,18 @@ State on the production share, owned by the orchestrator:
 
 ## Day-to-day workflow
 
+Run from the pipeline checkout root. The repo isn't declared as an
+installable package, so `pipe` has to be put on `PYTHONPATH` explicitly:
+
 ```sh
 # Bring the stack up. Foreground; ^C when done.
-python -m pipe.telemetry up
+PYTHONPATH=pipeline uv run python -m pipe.telemetry up
 
-# One-shot ingest (no Grafana). Useful from a CI box or for a quick catch-up.
-python -m pipe.telemetry catch-up
+# One-shot ingest (no Grafana). Useful for a quick catch-up.
+PYTHONPATH=pipeline uv run python -m pipe.telemetry catch-up
 
 # Find out whether the stack is up and on which host.
-python -m pipe.telemetry status
+PYTHONPATH=pipeline uv run python -m pipe.telemetry status
 ```
 
 `up` prints something like:

@@ -7,9 +7,10 @@ in `ingester_status` so the ingester resumes cleanly after a restart.
 
 The orchestrator (`pipe/telemetry/local_stack.py`) starts the ingester as a
 subprocess of `pipe telemetry up` and `pipe telemetry catch-up`. It can also
-be invoked directly for ad-hoc backfill or testing:
+be invoked directly for ad-hoc backfill or testing (run from the pipeline
+checkout root):
 
-    python -m pipe.telemetry.ingester \\
+    PYTHONPATH=pipeline uv run python -m pipe.telemetry.ingester \\
         --spool-root /groups/sandwich/05_production/.telemetry/raw \\
         --db-dsn postgresql://sandwich-telemetry@127.0.0.1:55432/sandwich_telemetry \\
         --once

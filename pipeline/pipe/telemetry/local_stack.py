@@ -5,11 +5,12 @@ the production share, with all state living on the share. State is durable
 across boots: any machine that brings the stack up next ingests events that
 arrived in the spool since the last shutdown.
 
-Subcommands:
+Run from the pipeline checkout root (the repo isn't declared as an
+installable package, so `pipe` has to go on `PYTHONPATH`):
 
-    pipe telemetry up        # foreground; ^C to stop
-    pipe telemetry catch-up  # one-shot ingest; no Grafana
-    pipe telemetry status    # print whether the stack is up and on which host
+    PYTHONPATH=pipeline uv run python -m pipe.telemetry up        # ^C to stop
+    PYTHONPATH=pipeline uv run python -m pipe.telemetry catch-up  # one-shot ingest
+    PYTHONPATH=pipeline uv run python -m pipe.telemetry status    # who holds the lock
 
 Concurrency: the orchestrator holds an exclusive `flock` on
 ``<production>/.telemetry/locks/orchestrator.lock`` for its whole lifetime.
@@ -179,19 +180,29 @@ def _read_lock_info(lock_path: Path) -> dict[str, str] | None:
 # ---------------------------------------------------------------------------
 
 
+def _enforce_pg_data_perms(paths: StackPaths) -> None:
+    """Force `pg_data` to mode 0700 before every Postgres start.
+
+    Postgres refuses to start unless `pg_data` is 0700 or 0750. The
+    production share's parent dirs are 0770 (group-rwx), and that mode
+    silently propagates to `pg_data` between boots — observed both at
+    initdb time and after the directory has been sitting on the share
+    while the stack is down. Re-chmodding on every up is cheap and the
+    only way to keep the next `pipe telemetry up` from failing with a
+    confusing FATAL log line.
+    """
+
+    paths.pg_data.parent.mkdir(parents=True, exist_ok=True)
+    paths.pg_data.mkdir(mode=0o700, exist_ok=True)
+    paths.pg_data.chmod(0o700)
+
+
 def _ensure_pg_initialized(paths: StackPaths) -> bool:
     """Run `initdb` if the data dir is empty. Returns True on first init."""
 
     version_file = paths.pg_data / "PG_VERSION"
     if version_file.exists():
         return False
-
-    # Postgres refuses to start unless `pg_data` is mode 0700 or 0750. The
-    # production share's parent dirs are 0770 (group-rwx) and that mode
-    # propagates to newly created subdirs, so we explicitly chmod here.
-    paths.pg_data.parent.mkdir(parents=True, exist_ok=True)
-    paths.pg_data.mkdir(mode=0o700, exist_ok=True)
-    paths.pg_data.chmod(0o700)
 
     _LOG.info("initializing postgres data dir at %s", paths.pg_data)
     subprocess.run(
@@ -415,6 +426,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     grafana_proc: subprocess.Popen[bytes] | None = None
     ingester_proc: subprocess.Popen[bytes] | None = None
     try:
+        _enforce_pg_data_perms(paths)
         _ensure_pg_initialized(paths)
         _start_postgres(paths, args.pg_port)
         _wait_pg_ready(paths, args.pg_port)
@@ -469,6 +481,7 @@ def cmd_catch_up(args: argparse.Namespace) -> int:
 
     lock_fd = _acquire_lock(paths.lock_file)
     try:
+        _enforce_pg_data_perms(paths)
         _ensure_pg_initialized(paths)
         _start_postgres(paths, args.pg_port)
         try:

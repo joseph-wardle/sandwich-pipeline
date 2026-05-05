@@ -108,8 +108,12 @@ want a different version. The version string is `MAJOR.MINOR.PATCH`
 ```sh
 cd <pipeline-checkout>
 uv sync --dev
-python -m pipe.telemetry up
+PYTHONPATH=pipeline uv run python -m pipe.telemetry up
 ```
+
+`PYTHONPATH=pipeline` is required because the repo isn't declared as an
+installable package — `pipe` lives at `pipeline/pipe/` and can't be found
+on `sys.path` without it.
 
 On first boot the orchestrator runs `initdb` against
 `/groups/sandwich/05_production/.telemetry/pg_data/`, creates the

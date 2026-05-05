@@ -1,5 +1,9 @@
 """`python -m pipe.telemetry` dispatches to the local-stack orchestrator.
 
+Run from the pipeline checkout root with `pipe` on PYTHONPATH:
+
+    PYTHONPATH=pipeline uv run python -m pipe.telemetry <subcommand>
+
 Subcommands: `up`, `catch-up`, `status` (see `local_stack.py`).
 """
 
