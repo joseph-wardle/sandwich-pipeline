@@ -118,19 +118,15 @@ class Publisher:
     def _get_confirm_message(self) -> str:
         return f"The selected objects have been exported to {self._publish_path}"
 
-    # Map subclass module path -> publish kind (the value of the `kind`
-    # payload field on `publish.usd` events). Subclasses outside this map
-    # publish without recording telemetry.
-    _PUBLISH_KIND_BY_MODULE: dict[str, str] = {
-        "pipe.m.publish.asset": "asset",
-        "pipe.m.publish.anim": "anim",
-        "pipe.m.publish.camera": "camera",
-        "pipe.m.publish.customanim": "customanim",
-        "pipe.m.publish.previs_asset": "previs_asset",
-    }
+    # Subclasses opt in to `publish.usd` telemetry by setting this to a short
+    # stable token (e.g. "asset", "anim", "camera"). The value becomes the
+    # `kind` payload field on the emitted event, which is what the Grafana
+    # dashboards group by. Leave as None (the default) for internal helpers
+    # or one-off flows the show doesn't need to track
+    _PUBLISH_KIND: str | None = None
 
     def _publish_kind(self) -> str | None:
-        return self._PUBLISH_KIND_BY_MODULE.get(self.__class__.__module__)
+        return self._PUBLISH_KIND
 
     def _publish_scope(self) -> dict[str, str]:
         sources: list[object] = []
@@ -235,9 +231,8 @@ class Publisher:
     def _do_publish_export(self) -> None:
         """Run the timed export work, wrapped in a telemetry action.
 
-        Subclasses outside `_PUBLISH_KIND_BY_MODULE` publish without
-        recording an event — they're either internal helpers or one-off
-        flows the show doesn't need to track.
+        Subclasses that leave `_PUBLISH_KIND` as None publish without
+        recording an event.
         """
         kind = self._publish_kind()
         if kind is None:

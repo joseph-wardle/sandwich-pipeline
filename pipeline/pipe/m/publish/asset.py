@@ -327,6 +327,8 @@ class PublishAssetPickerDialog(
 
 
 class AssetPublisher(Publisher):
+    _PUBLISH_KIND = "asset"
+
     _override: bool
     _geo_variant: str
     _component_export_dir: Path | None

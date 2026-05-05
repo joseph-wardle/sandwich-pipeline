@@ -45,6 +45,8 @@ class PublishPrevisAssetDialog(FilteredListDialog):
 
 
 class PrevisAssetPublisher(Publisher):
+    _PUBLISH_KIND = "previs_asset"
+
     _override: bool
 
     def __init__(self) -> None:
