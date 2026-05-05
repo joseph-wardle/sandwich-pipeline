@@ -7,11 +7,6 @@ uses it on the read side; Grafana dashboards reference these names.
 
 Adding a new event type is one entry in `EVENT_DEFINITIONS` and one
 `EVENT_*` constant. Adding a new payload field is editing one tuple.
-
-Every event type follows the workflow lifecycle (success or error). Earlier
-revisions of this module also defined info-only snapshot events for the
-tractor and storage pollers; those have been retired along with the pollers
-themselves and will be re-introduced when the polling work returns.
 """
 
 from __future__ import annotations
@@ -39,8 +34,6 @@ class EventDefinition:
     """One event type's contract.
 
     `required_payload_fields` lists keys that must be present in the payload.
-    Strict mode (PIPE_TELEMETRY_STRICT=1, used in CI) raises on missing
-    fields; lenient mode (production default) drops the event with a warning.
     """
 
     event_type: str

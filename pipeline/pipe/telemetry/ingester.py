@@ -1,4 +1,4 @@
-"""JSONL → Postgres ingester. Spawned by the local-stack orchestrator.
+"""JSONL -> Postgres ingester. Spawned by the local-stack orchestrator.
 
 The ingester tails the shared spool (`{production_root}/.telemetry/raw/...`),
 validates each event's payload shape against the registry in `events.py`, and
@@ -7,8 +7,7 @@ in `ingester_status` so the ingester resumes cleanly after a restart.
 
 The orchestrator (`pipe/telemetry/local_stack.py`) starts the ingester as a
 subprocess of `pipe telemetry up` and `pipe telemetry catch-up`. It can also
-be invoked directly for ad-hoc backfill or testing (run from the pipeline
-checkout root):
+be invoked directly for ad-hoc backfill or testing (run from the pipeline root):
 
     PYTHONPATH=pipeline uv run python -m pipe.telemetry.ingester \\
         --spool-root /groups/sandwich/05_production/.telemetry/raw \\
@@ -395,8 +394,7 @@ def _coerce_naive_to_utc(value: datetime) -> datetime:
 
 # ---------------------------------------------------------------------------
 # CLI entrypoint — invoked via `python -m pipe.telemetry.ingester`, either by
-# the local-stack orchestrator or by hand for backfill. The CLI is a thin
-# wrapper over IngesterRunner; tests exercise the runner directly.
+# the local-stack orchestrator or by hand for backfill
 # ---------------------------------------------------------------------------
 
 

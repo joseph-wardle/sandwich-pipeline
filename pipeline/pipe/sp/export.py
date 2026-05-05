@@ -17,6 +17,7 @@ from shared.util import resolve_mapped_path
 from substance_painter.exception import ProjectError
 
 from pipe.asset.paths import paths_for_asset
+from pipe.shotgrid import Asset
 from pipe.sp.export_config import (
     count_udim_sets,
     generate_export_config,
@@ -40,7 +41,6 @@ from pipe.sp.progress import (
     PublishProgressUpdate,
     PublishStage,
 )
-from pipe.shotgrid import Asset
 from pipe.telemetry import (
     EVENT_TEXTURE_EXPORT_SUBSTANCE,
     action,
@@ -52,14 +52,6 @@ log = logging.getLogger(__name__)
 
 
 class TextureExportError(Exception):
-    """Raised when Substance Painter texture export or its planning fails.
-
-    Covers invalid export configuration, planner mismatches, the SP export
-    call itself, and the post-export material-info write. The `error_code`
-    attribute is read by `pipe.telemetry.action` to tag the failure on the
-    emitted `texture.export.substance` event.
-    """
-
     error_code = "TEXTURE_EXPORT_FAILED"
 
 
