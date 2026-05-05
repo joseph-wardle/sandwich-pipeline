@@ -77,7 +77,7 @@ def load_config() -> TelemetryConfig:
         / 1000.0,
         rotate_mb=_parse_int("PIPE_TELEMETRY_ROTATE_MB", default=8, minimum=1),
         retention_days=_parse_int(
-            "PIPE_TELEMETRY_RETENTION_DAYS", default=7, minimum=1
+            "PIPE_TELEMETRY_RETENTION_DAYS", default=90, minimum=1
         ),
     )
 

@@ -6,9 +6,9 @@ inserts a row into the `events` table. Per-spool read offsets are persisted
 in `ingester_status` so the ingester resumes cleanly after a restart and the
 "ingester lag" Grafana panel can show how far behind real time it is.
 
-Run via the docker-compose stack under `telemetry-backend/`:
+Run via the compose stack under `telemetry-backend/`:
 
-    docker compose up -d ingester
+    podman compose up -d ingester
 
 Inside the container, the entrypoint runs:
 

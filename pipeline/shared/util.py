@@ -163,6 +163,17 @@ def _sanitize_path_segment(value: str, *, fallback: str) -> str:
     return sanitized or fallback
 
 
+def get_shared_telemetry_backend_dir() -> Path:
+    """Return the shared production root for telemetry backend state.
+
+    Holds the JSONL spool, the Postgres data directory, the Grafana data
+    directory, and the orchestrator lock. Lives next to the show production
+    path so any lab machine that mounts the share can boot the local stack.
+    """
+
+    return resolve_mapped_path(get_production_path() / ".telemetry")
+
+
 def get_shared_telemetry_spool_dir() -> Path:
     """Return the shared production telemetry spool directory for this user/host."""
 
@@ -173,9 +184,7 @@ def get_shared_telemetry_spool_dir() -> Path:
     host = socket.gethostname() or platform.node()
     safe_user = _sanitize_path_segment(username, fallback="unknown_user")
     safe_host = _sanitize_path_segment(host, fallback="unknown_host")
-    return resolve_mapped_path(
-        get_production_path() / ".telemetry" / "raw" / safe_host / safe_user
-    )
+    return get_shared_telemetry_backend_dir() / "raw" / safe_host / safe_user
 
 
 def get_rigging_path() -> Path:

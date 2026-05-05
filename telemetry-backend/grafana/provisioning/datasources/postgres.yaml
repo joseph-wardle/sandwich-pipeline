@@ -1,9 +1,15 @@
 # Provision the Postgres datasource for the sandwich-pipeline telemetry DB.
 #
-# Grafana reads this on startup. The `postgres` host name resolves to the
-# Postgres container on the docker-compose network. The password lives in the
-# GF_DATASOURCES_TELEMETRY_PASSWORD env var (set in docker-compose.yaml) so it
-# never lands in git.
+# The orchestrator (`pipe telemetry up` -> pipe.telemetry.local_stack) sets
+# these env vars before launching grafana-server:
+#
+#   GF_SANDWICH_PG_URL       127.0.0.1:<chosen-port>
+#   GF_SANDWICH_PG_PASSWORD  the password the orchestrator generated for
+#                            the sandwich-telemetry role on first init
+#
+# Grafana substitutes ${GF_SANDWICH_PG_URL} / ${GF_SANDWICH_PG_PASSWORD} at
+# load time, so this file stays static and the orchestrator owns the moving
+# pieces.
 
 apiVersion: 1
 
@@ -12,7 +18,7 @@ datasources:
     type: postgres
     uid: telemetry
     access: proxy
-    url: postgres:5432
+    url: ${GF_SANDWICH_PG_URL}
     user: sandwich-telemetry
     database: sandwich_telemetry
     isDefault: true
@@ -22,4 +28,4 @@ datasources:
       postgresVersion: 1500
       timescaledb: false
     secureJsonData:
-      password: ${GF_DATASOURCES_TELEMETRY_PASSWORD}
+      password: ${GF_SANDWICH_PG_PASSWORD}

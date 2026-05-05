@@ -2,7 +2,7 @@
   "title": "Sandwich Pipeline — Tool health",
   "uid": "sandwich-tool-health",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": false,
   "graphTooltip": 1,
   "tags": ["sandwich", "telemetry", "errors", "users"],
@@ -41,61 +41,149 @@
     {
       "id": 3,
       "title": "Errors by tool",
-      "type": "bargauge",
+      "type": "table",
       "datasource": { "type": "postgres", "uid": "telemetry" },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
-      "description": "Count of error events per tool (event_type) in the selected time range.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 10 },
+      "description": "Per-tool reliability. Shows raw errors and the error rate against total runs so a low-volume flaky tool doesn't get drowned out by a high-volume one with rare failures. The trend column is errors per hour over the dashboard time range.",
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT event_type AS metric, count(*) AS value FROM events WHERE status = 'error' AND $__timeFilter(occurred_at) GROUP BY event_type ORDER BY value DESC"
+          "rawSql": "SELECT event_type AS \"tool\", COUNT(*) FILTER (WHERE status = 'error') AS \"errors\", COUNT(*) AS \"runs\", CASE WHEN COUNT(*) > 0 THEN ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'error') / COUNT(*), 1) ELSE 0 END AS \"err rate\", COUNT(DISTINCT host_user) FILTER (WHERE status = 'error') AS \"users\", COUNT(DISTINCT error_code) FILTER (WHERE status = 'error') AS \"codes\", MAX(occurred_at) FILTER (WHERE status = 'error') AS \"last failure\" FROM events WHERE $__timeFilter(occurred_at) GROUP BY event_type HAVING COUNT(*) FILTER (WHERE status = 'error') > 0 ORDER BY \"errors\" DESC"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', occurred_at) AS \"time\", event_type AS \"tool\", COUNT(*) AS value FROM events WHERE status = 'error' AND $__timeFilter(occurred_at) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "timeSeriesTable",
+          "options": { "B": { "stat": "sum" } }
+        },
+        {
+          "id": "joinByField",
+          "options": { "byField": "tool", "mode": "outer" }
         }
       ],
       "options": {
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true
+        "showHeader": true,
+        "sortBy": [{ "displayName": "errors", "desc": true }]
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "err rate" },
+            "properties": [{ "id": "unit", "value": "percent" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "last failure" },
+            "properties": [{ "id": "unit", "value": "dateTimeFromNow" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Trend #B" },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": { "type": "sparkline" }
+              },
+              { "id": "displayName", "value": "trend" }
+            ]
+          }
+        ]
       }
     },
     {
       "id": 4,
       "title": "Errors by user",
-      "type": "bargauge",
+      "type": "table",
       "datasource": { "type": "postgres", "uid": "telemetry" },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
-      "description": "Count of error events per user in the selected time range.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 10 },
+      "description": "Per-user reliability. The 'top error code' column counts the most-frequent error_code per user — spots someone hitting the same bug repeatedly, vs an even spread across many issues.",
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COALESCE(host_user, '<unknown>') AS metric, count(*) AS value FROM events WHERE status = 'error' AND $__timeFilter(occurred_at) GROUP BY host_user ORDER BY value DESC"
+          "rawSql": "WITH stats AS (SELECT COALESCE(host_user, '<unknown>') AS \"user\", COUNT(*) FILTER (WHERE status = 'error') AS \"errors\", COUNT(*) AS \"runs\", COUNT(DISTINCT event_type) FILTER (WHERE status = 'error') AS \"tools w/ errors\", MAX(occurred_at) FILTER (WHERE status = 'error') AS \"last failure\" FROM events WHERE $__timeFilter(occurred_at) GROUP BY COALESCE(host_user, '<unknown>')), top_codes AS (SELECT COALESCE(host_user, '<unknown>') AS \"user\", COALESCE(error_code, 'UNKNOWN') || ' (' || COUNT(*) || ')' AS \"top error code\", ROW_NUMBER() OVER (PARTITION BY COALESCE(host_user, '<unknown>') ORDER BY COUNT(*) DESC) AS rn FROM events WHERE status = 'error' AND $__timeFilter(occurred_at) GROUP BY COALESCE(host_user, '<unknown>'), error_code) SELECT s.\"user\", s.\"errors\", s.\"runs\", CASE WHEN s.\"runs\" > 0 THEN ROUND(100.0 * s.\"errors\" / s.\"runs\", 1) ELSE 0 END AS \"err rate\", s.\"tools w/ errors\", COALESCE(tc.\"top error code\", '-') AS \"top error code\", s.\"last failure\" FROM stats s LEFT JOIN top_codes tc ON tc.\"user\" = s.\"user\" AND tc.rn = 1 WHERE s.\"errors\" > 0 ORDER BY s.\"errors\" DESC"
         }
       ],
       "options": {
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true
+        "showHeader": true,
+        "sortBy": [{ "displayName": "errors", "desc": true }]
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "err rate" },
+            "properties": [{ "id": "unit", "value": "percent" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "last failure" },
+            "properties": [{ "id": "unit", "value": "dateTimeFromNow" }]
+          }
+        ]
       }
     },
     {
       "id": 5,
       "title": "Errors by error_code",
-      "type": "bargauge",
+      "type": "table",
       "datasource": { "type": "postgres", "uid": "telemetry" },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
-      "description": "Count of error events per error_code (the stable token from PipelineError subclasses) in the selected time range.",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 19 },
+      "description": "Failure modes ranked by frequency. The sample-message column is what makes UNKNOWN rows useful — without it you'd have to bounce to Recent failures to read the actual exception. The trend column is occurrences per hour.",
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COALESCE(error_code, 'UNKNOWN') AS metric, count(*) AS value FROM events WHERE status = 'error' AND $__timeFilter(occurred_at) GROUP BY error_code ORDER BY value DESC"
+          "rawSql": "WITH stats AS (SELECT COALESCE(error_code, 'UNKNOWN') AS \"error_code\", COUNT(*) AS \"count\", COUNT(DISTINCT event_type) AS \"tools\", COUNT(DISTINCT host_user) AS \"users\", MAX(occurred_at) AS \"last seen\" FROM events WHERE status = 'error' AND $__timeFilter(occurred_at) GROUP BY COALESCE(error_code, 'UNKNOWN')), recent_msg AS (SELECT DISTINCT ON (COALESCE(error_code, 'UNKNOWN')) COALESCE(error_code, 'UNKNOWN') AS \"error_code\", error_message AS \"sample error_message\" FROM events WHERE status = 'error' AND $__timeFilter(occurred_at) ORDER BY COALESCE(error_code, 'UNKNOWN'), occurred_at DESC) SELECT s.\"error_code\", s.\"count\", s.\"tools\", s.\"users\", s.\"last seen\", COALESCE(rm.\"sample error_message\", '') AS \"sample error_message\" FROM stats s LEFT JOIN recent_msg rm USING (\"error_code\") ORDER BY s.\"count\" DESC"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', occurred_at) AS \"time\", COALESCE(error_code, 'UNKNOWN') AS \"error_code\", COUNT(*) AS value FROM events WHERE status = 'error' AND $__timeFilter(occurred_at) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "timeSeriesTable",
+          "options": { "B": { "stat": "sum" } }
+        },
+        {
+          "id": "joinByField",
+          "options": { "byField": "error_code", "mode": "outer" }
         }
       ],
       "options": {
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true
+        "showHeader": true,
+        "sortBy": [{ "displayName": "count", "desc": true }]
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "last seen" },
+            "properties": [{ "id": "unit", "value": "dateTimeFromNow" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "sample error_message" },
+            "properties": [
+              { "id": "custom.width", "value": 480 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Trend #B" },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": { "type": "sparkline" }
+              },
+              { "id": "displayName", "value": "trend" }
+            ]
+          }
+        ]
       }
     },
     {
@@ -103,27 +191,35 @@
       "title": "Activity by user",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 29 },
       "panels": []
     },
     {
       "id": 7,
-      "title": "Events per user (all statuses)",
-      "type": "bargauge",
+      "title": "Events per user",
+      "type": "table",
       "datasource": { "type": "postgres", "uid": "telemetry" },
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 19 },
-      "description": "Total events emitted per user. Sort descending to see who is exercising the pipeline most — these are the people to ask for feedback.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 30 },
+      "description": "Per-user usage profile (all statuses). The 'favorite tool' column shows each user's most-used event_type with its run count — the fastest answer to 'who do I ask about feature X?'",
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COALESCE(host_user, '<unknown>') AS metric, count(*) AS value FROM events WHERE $__timeFilter(occurred_at) GROUP BY host_user ORDER BY value DESC"
+          "rawSql": "WITH usage AS (SELECT COALESCE(host_user, '<unknown>') AS \"user\", COUNT(*) AS \"runs\", COUNT(DISTINCT event_type) AS \"tools used\", MAX(occurred_at) AS \"last activity\" FROM events WHERE $__timeFilter(occurred_at) GROUP BY COALESCE(host_user, '<unknown>')), favorite AS (SELECT COALESCE(host_user, '<unknown>') AS \"user\", event_type || ' (' || COUNT(*) || ')' AS \"favorite tool\", ROW_NUMBER() OVER (PARTITION BY COALESCE(host_user, '<unknown>') ORDER BY COUNT(*) DESC) AS rn FROM events WHERE $__timeFilter(occurred_at) GROUP BY COALESCE(host_user, '<unknown>'), event_type) SELECT u.\"user\", u.\"runs\", u.\"tools used\", COALESCE(f.\"favorite tool\", '-') AS \"favorite tool\", u.\"last activity\" FROM usage u LEFT JOIN favorite f ON f.\"user\" = u.\"user\" AND f.rn = 1 ORDER BY u.\"runs\" DESC"
         }
       ],
       "options": {
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true
+        "showHeader": true,
+        "sortBy": [{ "displayName": "runs", "desc": true }]
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "last activity" },
+            "properties": [{ "id": "unit", "value": "dateTimeFromNow" }]
+          }
+        ]
       }
     },
     {
@@ -131,7 +227,7 @@
       "title": "Tools used per user",
       "type": "table",
       "datasource": { "type": "postgres", "uid": "telemetry" },
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 19 },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 30 },
       "description": "For each (user, tool) pair: how many runs and how many errors. Spot tools that one user hits but nobody else exercises.",
       "targets": [
         {

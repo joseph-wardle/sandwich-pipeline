@@ -1,6 +1,10 @@
-# Tell Grafana to load every dashboard JSON in `grafana/dashboards/` on
-# startup. Dashboards in git are the source of truth — edits made through the
-# UI get reverted on the next provisioning cycle.
+# Tell Grafana to load every dashboard JSON from `path` on startup.
+# Dashboards in git are the source of truth — edits made through the UI get
+# reverted on the next provisioning cycle.
+#
+# The orchestrator (`pipe.telemetry.local_stack`) sets
+# GF_SANDWICH_DASHBOARDS_DIR to the repo's `telemetry-backend/grafana/dashboards`
+# before launching grafana-server, so this file stays static.
 
 apiVersion: 1
 
@@ -12,5 +16,5 @@ providers:
     disableDeletion: true
     allowUiUpdates: false
     options:
-      path: /var/lib/grafana/dashboards
+      path: ${GF_SANDWICH_DASHBOARDS_DIR}
       foldersFromFilesStructure: false
