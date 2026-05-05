@@ -18,11 +18,11 @@ team already maintains lives at the same level.
 /groups/sandwich/
 ├── .tools/
 │   ├── uv/                          (existing)
-│   ├── postgres/                    (NEW; PG 16 binaries)
+│   ├── postgres/                    (NEW; PG 18 binaries)
 │   │   ├── bin/                     # postgres, pg_ctl, psql, pg_isready, initdb, ...
 │   │   ├── lib/
 │   │   └── share/
-│   └── grafana/                     (NEW; Grafana OSS 10 binaries)
+│   └── grafana/                     (NEW; Grafana OSS 13 binaries)
 │       ├── bin/                     # grafana (and grafana-cli on 11.x; the legacy grafana-server is absent on 12+)
 │       ├── conf/                    # defaults.ini
 │       ├── public/
@@ -37,7 +37,7 @@ The `theseus-rs/postgresql-binaries` GitHub release ships clean,
 relocatable Postgres builds for Linux x86-64. They are ordinary `.tar.gz`
 artifacts — no license token, no installer.
 
-**Tested-working version: `17.9.0`.** You can also browse
+**Tested-working version: `18.3.0`.** You can also browse
 <https://github.com/theseus-rs/postgresql-binaries/releases> for newer
 tags; pick the `MAJOR.MINOR.PATCH` form (e.g. `17.9.0`, `18.3.0`) — the
 URLs require all three components. PG 16, 17, and 18 all work with this
@@ -59,7 +59,7 @@ tree into your current directory.
 ( set -e
   cd /groups/sandwich/.tools
 
-  PG_VERSION=17.9.0
+  PG_VERSION=18.3.0
   PG_URL="https://github.com/theseus-rs/postgresql-binaries/releases/download/${PG_VERSION}/postgresql-${PG_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
 
   curl -fL -o postgres.tar.gz "$PG_URL"
@@ -68,7 +68,7 @@ tree into your current directory.
   tar -xzf postgres.tar.gz -C postgres --strip-components=1
   rm postgres.tar.gz
 
-  # Sanity check: should print "postgres (PostgreSQL) 17.9" or similar.
+  # Sanity check: should print "postgres (PostgreSQL) 18.3" or similar.
   ./postgres/bin/postgres --version
 )
 ```
@@ -78,11 +78,12 @@ tree into your current directory.
 Grafana ships a self-contained Linux tarball directly from `dl.grafana.com`.
 No license token.
 
-**Tested-working version: `11.6.0`.** Newer 11.x and 12.x releases also
-work with the dashboards in this directory. Browse
+**Tested-working version: `13.0.1`.** Earlier 11.x and 12.x releases also
+work with the dashboards in this directory; the orchestrator invokes
+`bin/grafana server` (the unified subcommand introduced in 12.x). Browse
 <https://grafana.com/grafana/download?platform=linux&edition=oss> if you
 want a different version. The version string is `MAJOR.MINOR.PATCH`
-(e.g. `11.6.0`, `12.0.0`).
+(e.g. `11.6.0`, `13.0.1`).
 
 ```sh
 ( set -e

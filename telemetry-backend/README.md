@@ -16,9 +16,10 @@ the meantime.
 
 - `uv`-managed pipeline checkout with the `dev` group installed (the
   ingester needs `psycopg`, which is in `pyproject.toml`'s `dev` group).
-- Postgres 16 and Grafana OSS 10 binaries pre-extracted under
-  `/groups/sandwich/05_production/.tools/postgres/` and `…/.tools/grafana/`.
-  See **`install_tarballs.md`** in this directory for the one-time setup.
+- Postgres 18 and Grafana OSS 13 binaries pre-extracted under
+  `/groups/sandwich/.tools/postgres/` and `/groups/sandwich/.tools/grafana/`
+  (sibling of `05_production/`, not under it). See
+  **`install_tarballs.md`** in this directory for the one-time setup.
 - Read/write access to `/groups/sandwich/05_production/.telemetry/` (where
   the spool, `pg_data/`, Grafana state, and the orchestrator lock live).
 
@@ -41,12 +42,17 @@ telemetry-backend/
 State on the production share, owned by the orchestrator:
 
 ```
-/groups/sandwich/05_production/.telemetry/
-├── raw/<host>/<user>/*.jsonl    # workstation spool (existing)
-├── pg_data/                     # Postgres data directory; initdb on first up
-├── grafana/{data,log}/          # Grafana sessions / logs
-├── pg.log                       # Postgres server log
-└── locks/orchestrator.lock      # exclusive flock; one orchestrator across all hosts
+/groups/sandwich/
+├── .tools/                          # binaries (sibling of 05_production)
+│   ├── postgres/                    # PG 18 tarball
+│   └── grafana/                     # Grafana OSS 13 tarball
+└── 05_production/
+    └── .telemetry/
+        ├── raw/<host>/<user>/*.jsonl    # workstation spool
+        ├── pg_data/                     # Postgres data directory; initdb on first up
+        ├── grafana/{data,log}/          # Grafana sessions / logs
+        ├── pg.log                       # Postgres server log
+        └── locks/orchestrator.lock      # exclusive flock; one orchestrator across all hosts
 ```
 
 ## Day-to-day workflow
@@ -100,24 +106,6 @@ occasionally-booted analytics database the trade-off is acceptable, and
 the workstation spool — which is independent and append-only — remains
 the source of truth for any event that hasn't been ingested yet.
 
-If telemetry ever becomes load-bearing for production decisions
-(typically when the pollers come back), that's the moment to ask CSRs to
-stand up Postgres and Grafana on a managed machine. Until then, this
-self-orchestrated stack is the right size.
-
-## Local development against a laptop spool
-
-For dashboard work without leaving your laptop, override the spool dir and
-the production root via env vars:
-
-```sh
-# 1. Generate synthetic events into a local dir
-PYTHONPATH=pipeline:tests uv run python -m tests.telemetry.synthesize_events \
-    --out /tmp/sandwich-poc-spool
-
-# 2. Bring the stack up against that path. The orchestrator reads the
-#    backend dir from pipeline.shared.util; you can point it at a temp
-#    location by overriding production_path in pipeline/env.py for your
-#    local checkout.
-python -m pipe.telemetry up
-```
+If telemetry ever becomes load-bearing for production decisions, that's
+the moment to ask CSRs to stand up Postgres and Grafana on a managed
+machine. Until then, this self-orchestrated stack works.
