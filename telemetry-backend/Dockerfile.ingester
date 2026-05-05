@@ -1,0 +1,34 @@
+# Container image for the telemetry ingester.
+#
+# The ingester only depends on the `pipe.telemetry` subpackage and `psycopg`,
+# so the image stays small. Build context is the repo root so we can copy the
+# pipeline package into the image without symlinks.
+#
+# Build (run from repo root):
+#   docker build -f telemetry-backend/Dockerfile.ingester -t sandwich-telemetry-ingester .
+
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /opt/sandwich-pipeline
+
+RUN pip install "psycopg[binary]>=3.2,<4"
+
+# Copy only the telemetry subpackage and the shared util it imports for the
+# spool path resolver. Anything else in the pipeline package is irrelevant on
+# the ingester host.
+COPY pipeline/pipe/telemetry/ ./pipeline/pipe/telemetry/
+COPY pipeline/pipe/__init__.py ./pipeline/pipe/__init__.py
+COPY pipeline/__init__.py ./pipeline/__init__.py
+COPY pipeline/shared/ ./pipeline/shared/
+
+ENV PYTHONPATH=/opt/sandwich-pipeline/pipeline
+
+# The actual command (with --spool-root and --db-dsn) is set in
+# docker-compose.yaml so the compose file is the single source of deployment
+# truth.
+ENTRYPOINT ["python", "-m", "pipe.telemetry.ingester"]

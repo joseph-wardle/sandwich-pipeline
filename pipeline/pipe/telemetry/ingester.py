@@ -1,4 +1,4 @@
-"""JSONL → Postgres ingester. Runs on the telemetry host.
+"""JSONL → Postgres ingester. Runs as a container in the telemetry stack.
 
 The ingester tails the shared spool (`{production_root}/.telemetry/raw/...`),
 validates each event's payload shape against the registry in `events.py`, and
@@ -6,13 +6,17 @@ inserts a row into the `events` table. Per-spool read offsets are persisted
 in `ingester_status` so the ingester resumes cleanly after a restart and the
 "ingester lag" Grafana panel can show how far behind real time it is.
 
-Run via systemd on the telemetry host:
+Run via the docker-compose stack under `telemetry-backend/`:
+
+    docker compose up -d ingester
+
+Inside the container, the entrypoint runs:
 
     python -m pipe.telemetry.ingester \\
-        --spool-root /mnt/show/.telemetry/raw \\
-        --db-dsn postgresql://sandwich-telemetry@localhost/sandwich_telemetry
+        --spool-root /mnt/spool \\
+        --db-dsn postgresql://sandwich-telemetry@postgres/sandwich_telemetry
 
-Environment variable equivalents (the systemd unit uses these):
+Environment variable equivalents (set in `docker-compose.yaml`):
 
     PIPE_INGESTER_SPOOL_ROOT
     PIPE_INGESTER_DB_DSN

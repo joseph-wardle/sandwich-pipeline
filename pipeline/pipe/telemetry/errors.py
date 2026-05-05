@@ -74,24 +74,6 @@ class DCCLaunchError(PipelineError):
     error_code = "DCC_LAUNCH_FAILED"
 
 
-class TractorSnapshotError(PipelineError):
-    """Polling Tractor for a farm-pressure snapshot failed."""
-
-    error_code = "TRACTOR_SNAPSHOT_FAILED"
-
-
-class RenderStatsHarvestError(PipelineError):
-    """Harvesting render statistics from job artifacts failed."""
-
-    error_code = "RENDER_STATS_HARVEST_FAILED"
-
-
-class StorageScanError(PipelineError):
-    """A storage scan run failed."""
-
-    error_code = "STORAGE_SCAN_FAILED"
-
-
 __all__ = [
     "PipelineError",
     "PublishPrecheckError",
@@ -102,7 +84,4 @@ __all__ = [
     "TextureConversionError",
     "PlayblastError",
     "DCCLaunchError",
-    "TractorSnapshotError",
-    "RenderStatsHarvestError",
-    "StorageScanError",
 ]

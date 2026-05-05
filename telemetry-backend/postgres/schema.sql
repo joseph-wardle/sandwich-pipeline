@@ -47,9 +47,12 @@ CREATE INDEX IF NOT EXISTS events_status_error
     ON events (event_type, error_code)
     WHERE status = 'error';
 
--- The "events per hour by hostname" health panel.
-CREATE INDEX IF NOT EXISTS events_hostname_time
-    ON events (hostname, occurred_at DESC);
+-- The "events / errors by user" panels group by host_user. Tool callers
+-- always populate it via getpass.getuser() so the partial index is just
+-- defensive.
+CREATE INDEX IF NOT EXISTS events_user_time
+    ON events (host_user, occurred_at DESC)
+    WHERE host_user IS NOT NULL;
 
 -- The "failed_tool" cross-event-type panel uses an expression index so the
 -- query plan stays sharp without committing the field to a typed column.

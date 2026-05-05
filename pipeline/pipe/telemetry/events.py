@@ -1,4 +1,4 @@
-"""Telemetry event registry — the 10 event types this pipeline emits.
+"""Telemetry event registry — the six tool event types this pipeline emits.
 
 The registry is the single source of truth for which events exist and what
 fields each one's `payload` is expected to contain. The `action` context
@@ -8,9 +8,10 @@ uses it on the read side; Grafana dashboards reference these names.
 Adding a new event type is one entry in `EVENT_DEFINITIONS` and one
 `EVENT_*` constant. Adding a new payload field is editing one tuple.
 
-Two events are info-only (snapshots that aren't workflow-shaped):
-`tractor.farm.snapshot` and `storage.scan.bucket`. The rest follow the
-workflow lifecycle (success or error).
+Every event type follows the workflow lifecycle (success or error). Earlier
+revisions of this module also defined info-only snapshot events for the
+tractor and storage pollers; those have been retired along with the pollers
+themselves and will be re-introduced when the polling work returns.
 """
 
 from __future__ import annotations
@@ -18,14 +19,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final, Literal
 
-Status = Literal["info", "success", "error"]
+Status = Literal["success", "error"]
 
-STATUS_INFO: Final[Status] = "info"
 STATUS_SUCCESS: Final[Status] = "success"
 STATUS_ERROR: Final[Status] = "error"
 
 WORKFLOW_STATUSES: Final[tuple[Status, ...]] = (STATUS_SUCCESS, STATUS_ERROR)
-INFO_ONLY_STATUSES: Final[tuple[Status, ...]] = (STATUS_INFO,)
 
 EVENT_DCC_LAUNCH: Final[str] = "dcc.launch"
 EVENT_PUBLISH_USD: Final[str] = "publish.usd"
@@ -33,10 +32,6 @@ EVENT_BUILD_HOUDINI_COMPONENT: Final[str] = "build.houdini.component"
 EVENT_TEXTURE_EXPORT_SUBSTANCE: Final[str] = "texture.export.substance"
 EVENT_TEXTURE_CONVERT_TEX: Final[str] = "texture.convert.tex"
 EVENT_PLAYBLAST_CREATE: Final[str] = "playblast.create"
-EVENT_TRACTOR_FARM_SNAPSHOT: Final[str] = "tractor.farm.snapshot"
-EVENT_RENDER_STATS_SUMMARY: Final[str] = "render.stats.summary"
-EVENT_STORAGE_SCAN_SUMMARY: Final[str] = "storage.scan.summary"
-EVENT_STORAGE_SCAN_BUCKET: Final[str] = "storage.scan.bucket"
 
 
 @dataclass(frozen=True)
@@ -94,56 +89,6 @@ EVENT_DEFINITIONS: Final[tuple[EventDefinition, ...]] = (
         required_payload_fields=("preset", "frame_start", "frame_end", "fps"),
         has_duration=True,
     ),
-    EventDefinition(
-        event_type=EVENT_TRACTOR_FARM_SNAPSHOT,
-        description="Periodic Tractor farm pressure snapshot.",
-        required_payload_fields=(
-            "engine_url",
-            "waiting_jobs",
-            "running_jobs",
-            "busy_slots",
-            "total_slots",
-            "active_blades",
-            "total_blades",
-        ),
-        statuses=INFO_ONLY_STATUSES,
-    ),
-    EventDefinition(
-        event_type=EVENT_RENDER_STATS_SUMMARY,
-        description="Per-render-job statistics harvested from Tractor artifacts.",
-        required_payload_fields=(
-            "job_id",
-            "renderer",
-            "total_frames",
-            "failed_frames",
-        ),
-    ),
-    EventDefinition(
-        event_type=EVENT_STORAGE_SCAN_SUMMARY,
-        description="Run-summary event for one storage scan pass.",
-        required_payload_fields=(
-            "scan_id",
-            "roots_scanned_count",
-            "buckets_emitted_count",
-        ),
-        has_duration=True,
-    ),
-    EventDefinition(
-        event_type=EVENT_STORAGE_SCAN_BUCKET,
-        description=(
-            "One aggregated storage bucket. `is_reclaimable` and `reason` "
-            "express whether the storage scanner classified this bucket as "
-            "safe to delete."
-        ),
-        required_payload_fields=(
-            "bucket_id",
-            "category",
-            "path",
-            "size_bytes",
-            "file_count",
-        ),
-        statuses=INFO_ONLY_STATUSES,
-    ),
 )
 
 
@@ -166,7 +111,6 @@ def get_event_definition(event_type: str) -> EventDefinition:
 
 __all__ = [
     "Status",
-    "STATUS_INFO",
     "STATUS_SUCCESS",
     "STATUS_ERROR",
     "EVENT_DCC_LAUNCH",
@@ -175,10 +119,6 @@ __all__ = [
     "EVENT_TEXTURE_EXPORT_SUBSTANCE",
     "EVENT_TEXTURE_CONVERT_TEX",
     "EVENT_PLAYBLAST_CREATE",
-    "EVENT_TRACTOR_FARM_SNAPSHOT",
-    "EVENT_RENDER_STATS_SUMMARY",
-    "EVENT_STORAGE_SCAN_SUMMARY",
-    "EVENT_STORAGE_SCAN_BUCKET",
     "EventDefinition",
     "EVENT_DEFINITIONS",
     "EVENTS_BY_TYPE",

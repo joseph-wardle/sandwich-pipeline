@@ -1,0 +1,149 @@
+{
+  "title": "Sandwich Pipeline — Tool health",
+  "uid": "sandwich-tool-health",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "graphTooltip": 1,
+  "tags": ["sandwich", "telemetry", "errors", "users"],
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": { "from": "now-7d", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Errors",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "title": "Recent failures",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 1 },
+      "description": "Most recent 100 error events. The user, tool, error_code, and message are everything you need to chase a failure.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT occurred_at AS \"time\", host_user AS \"user\", event_type AS \"tool\", error_code, error_message, scope_shot, scope_asset FROM events WHERE status = 'error' AND $__timeFilter(occurred_at) ORDER BY occurred_at DESC LIMIT 100"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "time", "desc": true }]
+      }
+    },
+    {
+      "id": 3,
+      "title": "Errors by tool",
+      "type": "bargauge",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
+      "description": "Count of error events per tool (event_type) in the selected time range.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT event_type AS metric, count(*) AS value FROM events WHERE status = 'error' AND $__timeFilter(occurred_at) GROUP BY event_type ORDER BY value DESC"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 4,
+      "title": "Errors by user",
+      "type": "bargauge",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
+      "description": "Count of error events per user in the selected time range.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COALESCE(host_user, '<unknown>') AS metric, count(*) AS value FROM events WHERE status = 'error' AND $__timeFilter(occurred_at) GROUP BY host_user ORDER BY value DESC"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 5,
+      "title": "Errors by error_code",
+      "type": "bargauge",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
+      "description": "Count of error events per error_code (the stable token from PipelineError subclasses) in the selected time range.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COALESCE(error_code, 'UNKNOWN') AS metric, count(*) AS value FROM events WHERE status = 'error' AND $__timeFilter(occurred_at) GROUP BY error_code ORDER BY value DESC"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 6,
+      "title": "Activity by user",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "panels": []
+    },
+    {
+      "id": 7,
+      "title": "Events per user (all statuses)",
+      "type": "bargauge",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 19 },
+      "description": "Total events emitted per user. Sort descending to see who is exercising the pipeline most — these are the people to ask for feedback.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COALESCE(host_user, '<unknown>') AS metric, count(*) AS value FROM events WHERE $__timeFilter(occurred_at) GROUP BY host_user ORDER BY value DESC"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 8,
+      "title": "Tools used per user",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "telemetry" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 19 },
+      "description": "For each (user, tool) pair: how many runs and how many errors. Spot tools that one user hits but nobody else exercises.",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COALESCE(host_user, '<unknown>') AS \"user\", event_type AS \"tool\", count(*) AS \"runs\", count(*) FILTER (WHERE status = 'error') AS \"errors\" FROM events WHERE $__timeFilter(occurred_at) GROUP BY host_user, event_type ORDER BY \"runs\" DESC"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "runs", "desc": true }]
+      }
+    }
+  ]
+}

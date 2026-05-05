@@ -1,4 +1,4 @@
-"""The two telemetry surfaces: `emit()` and the `action()` context manager.
+"""The telemetry surfaces: the `action()` context manager and the bare `emit()`.
 
 `action(event_type, payload, scope=None)` wraps a workflow step:
 
@@ -10,9 +10,10 @@ The CM emits exactly one terminal event when the block exits — `success` with
 `duration_ms`, or `error` with the exception's `error_code`. It never
 suppresses the exception.
 
-`emit(event_type, status, payload, scope=None)` is for snapshot-shaped
-events that don't have a success/error lifecycle (the periodic Tractor and
-storage scanner pollers).
+`emit(event_type, status, payload, scope=None)` is the underlying primitive
+for one-shot events that don't fit the workflow shape. No in-tree caller
+uses it today; it remains available for code that needs to record a single
+terminal event without a CM around it.
 """
 
 from __future__ import annotations
@@ -30,11 +31,8 @@ from types import TracebackType
 from typing import Any, Final
 
 from .events import (
-    INFO_ONLY_STATUSES,
     STATUS_ERROR,
-    STATUS_INFO,
     STATUS_SUCCESS,
-    WORKFLOW_STATUSES,
     EventDefinition,
     Status,
     get_event_definition,
@@ -158,7 +156,7 @@ def emit(
     error_message: str | None = None,
     duration_ms: int | None = None,
 ) -> None:
-    """Emit one telemetry event directly. Use for snapshot-shaped events only.
+    """Emit one telemetry event directly without a CM around it.
 
     For workflow-shaped events (publish, build, export, render), use
     `action()` — it handles success/error/timing correctly and can't be
@@ -200,12 +198,6 @@ class Action:
         scope: Mapping[str, str] | None,
     ) -> None:
         self._definition = get_event_definition(event_type)
-        if not set(self._definition.statuses) & set(WORKFLOW_STATUSES):
-            raise ValueError(
-                f"Event {event_type!r} is info-only and cannot be used with "
-                f"action(); use emit() instead."
-            )
-
         self._event_type = event_type
         self._payload: dict[str, Any] = dict(payload)
         self._scope: dict[str, str] | None = dict(scope) if scope else None
@@ -322,10 +314,8 @@ def action(
 
 
 __all__ = [
-    "STATUS_INFO",
     "STATUS_SUCCESS",
     "STATUS_ERROR",
-    "INFO_ONLY_STATUSES",
     "TELEMETRY_ACTION_ID_ENV",
     "Action",
     "action",
