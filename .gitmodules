@@ -23,9 +23,6 @@
 [submodule "pipeline/lib/mayacapture/mayacapture"]
 	path = pipeline/lib/mayacapture/mayacapture
 	url = https://github.com/abstractfactory/maya-capture.git
-[submodule "pipeline/lib/mayacapture/mayacapture"]
-	path = pipeline/lib/mayacapture/mayacapture
-	url = https://github.com/scottdmilner/maya-capture.git
 [submodule "pipeline/lib/tractor-lops"]
 	path = pipeline/lib/tractor-lops
 	url = git@github.com:joseph-wardle/tractor-lops.git
