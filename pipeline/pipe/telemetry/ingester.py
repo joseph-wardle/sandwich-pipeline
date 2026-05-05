@@ -1,4 +1,4 @@
-"""JSONL → Postgres ingester. Runs as a container in the telemetry stack.
+"""JSONL → Postgres ingester. Spawned by the local-stack orchestrator.
 
 The ingester tails the shared spool (`{production_root}/.telemetry/raw/...`),
 validates each event's payload shape against the registry in `events.py`, and
@@ -6,17 +6,17 @@ inserts a row into the `events` table. Per-spool read offsets are persisted
 in `ingester_status` so the ingester resumes cleanly after a restart and the
 "ingester lag" Grafana panel can show how far behind real time it is.
 
-Run via the compose stack under `telemetry-backend/`:
-
-    podman compose up -d ingester
-
-Inside the container, the entrypoint runs:
+The orchestrator (`pipe/telemetry/local_stack.py`) starts the ingester as a
+subprocess of `pipe telemetry up` and `pipe telemetry catch-up`. It can also
+be invoked directly for ad-hoc backfill or testing:
 
     python -m pipe.telemetry.ingester \\
-        --spool-root /mnt/spool \\
-        --db-dsn postgresql://sandwich-telemetry@postgres/sandwich_telemetry
+        --spool-root /groups/sandwich/05_production/.telemetry/raw \\
+        --db-dsn postgresql://sandwich-telemetry@127.0.0.1:55432/sandwich_telemetry \\
+        --once
 
-Environment variable equivalents (set in `docker-compose.yaml`):
+Env-var fallbacks (used only by manual invocations; the orchestrator passes
+everything as flags):
 
     PIPE_INGESTER_SPOOL_ROOT
     PIPE_INGESTER_DB_DSN
@@ -394,9 +394,9 @@ def _coerce_naive_to_utc(value: datetime) -> datetime:
 
 
 # ---------------------------------------------------------------------------
-# CLI entrypoint — invoked via `python -m pipe.telemetry.ingester` from the
-# systemd unit. The CLI is a thin wrapper over IngesterRunner; tests exercise
-# the runner directly without going through this layer.
+# CLI entrypoint — invoked via `python -m pipe.telemetry.ingester`, either by
+# the local-stack orchestrator or by hand for backfill. The CLI is a thin
+# wrapper over IngesterRunner; tests exercise the runner directly.
 # ---------------------------------------------------------------------------
 
 
