@@ -1,5 +1,5 @@
 [submodule "pipeline/software/maya/scripts/dwpicker_git"]
-	path = pipeline/software/maya/scripts/dwpicker_git
+	path = pipeline/lib/dwpicker
 	url = https://github.com/DreamWall-Animation/dwpicker.git
 [submodule "pipeline/lib/MOPS"]
 	path = pipeline/lib/MOPS
@@ -12,16 +12,16 @@
 	path = pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease
 	url = https://github.com/CreativeLyons/NukeSurvivalToolkit_publicRelease.git
 [submodule "pipeline/software/maya/scripts/studiolibrary"]
-	path = pipeline/software/maya/scripts/studiolibrary
+	path = pipeline/lib/studiolibrary
 	url = https://github.com/krathjen/studiolibrary.git
 [submodule "pipeline/software/maya/scripts/modelChecker_git"]
-	path = pipeline/software/maya/scripts/modelChecker_git
+	path = pipeline/lib/modelChecker
 	url = https://github.com/JakobJK/modelChecker.git
 [submodule "pipeline/software/maya/scripts/maya-timeline-marker_git"]
-	path = pipeline/software/maya/scripts/maya-timeline-marker_git
+	path = pipeline/lib/maya-timeline-marker
 	url = https://github.com/scottdmilner/maya-timeline-marker.git
 [submodule "pipeline/software/maya/scripts/maya-capture"]
-	path = pipeline/software/maya/scripts/mayacapture
+	path = pipeline/lib/mayacapture/mayacapture
 	url = https://github.com/abstractfactory/maya-capture.git
 [submodule "pipeline/software/maya/scripts/mayacapture"]
 	url = https://github.com/scottdmilner/maya-capture.git
@@ -30,7 +30,7 @@
 	url = git@github.com:joseph-wardle/tractor-lops.git
 	branch = prod
 [submodule "pipeline/software/maya/scripts/aperture_git"]
-	path = pipeline/software/maya/scripts/aperture_git
+	path = pipeline/lib/aperture
 	url = git@github.com:michaelharmonart/aperture.git
 	branch = main
 [submodule "pipeline/lib/y-rig"]

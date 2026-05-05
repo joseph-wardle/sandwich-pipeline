@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 from env import Executables
 from shared.util import (
+    get_lib_path,
     get_production_path,
     get_rig_build_path,
     get_shared_telemetry_spool_dir,
@@ -46,14 +47,23 @@ class MayaDCC(DCC):
 
         env_vars: typing.Mapping[str, int | str | None] | None  #############
 
-        module_paths = []  # Initialize an empty list for module paths
-        # add the production path plus the folders where we put our modules
-        module_paths.append(str(get_production_path() / "maya/module"))
-        module_paths.append(str(pipe_path / "lib/y-rig/third_party/mgear/release"))
+        module_paths: list[str] = [
+            str(pipe_path / "lib/y-rig/third_party/mgear/release")
+        ]
         # adding the preexisting path, if it exists
         existing_module_path = os.environ.get("MAYA_MODULE_PATH")
         if existing_module_path:
             module_paths.extend(existing_module_path.split(os.pathsep))
+
+        python_module_paths: list[str] = [
+            str(pipe_path),
+            str(get_lib_path() / "aperture"),
+            str(get_lib_path() / "dwpicker"),
+            str(get_lib_path() / "mayacapture"),
+            str(get_lib_path() / "maya-timeline-marker/scripts"),
+            str(get_lib_path() / "modelChecker"),
+            str(get_lib_path() / "y-rig/src"),
+        ]
 
         env_vars = {
             "DCC": str(this_path.parent.name),
@@ -64,14 +74,7 @@ class MayaDCC(DCC):
             "MAYA_MODULE_PATH": os.pathsep.join(module_paths),
             "MAYA_PLUG_IN_PATH": str(this_path.parent / "plugins"),
             "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
-            "PYTHONPATH": os.pathsep.join(
-                [
-                    str(pipe_path),
-                    str(this_path.parent / "scripts"),
-                    str(this_path.parent / "userSetup"),
-                    str(this_path.parent / "scripts/studiolibrary/src"),
-                ]
-            ),
+            "PYTHONPATH": os.pathsep.join(python_module_paths),
             "OCIO": str(pipe_path / "lib/ocio/sandwich-v01/config.ocio"),
             "QT_FONT_DPI": os.getenv("MAYA_FONT_DPI") if system == "Linux" else None,
             "QT_PLUGIN_PATH": None,
