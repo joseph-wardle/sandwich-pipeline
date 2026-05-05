@@ -14,11 +14,11 @@ from env_sg import DB_Config
 import pipe
 from pipe.glui.dialogs import FilteredListDialog, MessageDialog
 from pipe.m.util import maintain_selection
-from pipe.shotgrid import SGEntity, ShotGrid
+from pipe.shotgrid import Asset, SGEntity, Shot, ShotGrid
 from pipe.telemetry import (
     EVENT_PUBLISH_USD,
     action,
-    extract_scope,
+    build_scope,
 )
 
 if TYPE_CHECKING:
@@ -129,12 +129,27 @@ class Publisher:
         return self._PUBLISH_KIND
 
     def _publish_scope(self) -> dict[str, str]:
-        sources: list[object] = []
-        for attr_name in ("_entity", "_shot", "_scene_asset"):
-            value = getattr(self, attr_name, None)
-            if value is not None:
-                sources.append(value)
-        return extract_scope(*sources)
+        """Build the scope dict for this publisher's `publish.usd` event.
+
+        `_entity` is polymorphic across subclasses: `AssetPublisher` and
+        `PrevisAssetPublisher` set it to an `Asset`; `CameraPublisher` sets
+        it to a `Shot`; the anim publishers leave it unset and use `_shot`.
+        `_scene_asset` is set by `AssetPublisher` when the active scene
+        resolves to an asset.
+        """
+        entity = getattr(self, "_entity", None)
+        shot = getattr(self, "_shot", None)
+        scene_asset = getattr(self, "_scene_asset", None)
+
+        asset_obj: object | None = scene_asset
+        if asset_obj is None and isinstance(entity, Asset):
+            asset_obj = entity
+
+        shot_obj: object | None = shot
+        if shot_obj is None and isinstance(entity, Shot):
+            shot_obj = entity
+
+        return build_scope(asset=asset_obj, shot=shot_obj)
 
     def publish(self) -> None:
         """Generic publishing function.

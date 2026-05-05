@@ -46,7 +46,7 @@ from .events import (
     Status,
     get_event_definition,
 )
-from .scope import SCOPE_FIELDS, ScopeContext, extract_scope
+from .scope import build_scope
 
 __all__ = [
     # Public API: workflow CM and bare emit
@@ -55,9 +55,7 @@ __all__ = [
     "emit",
     "TELEMETRY_ACTION_ID_ENV",
     # Scope helpers
-    "extract_scope",
-    "ScopeContext",
-    "SCOPE_FIELDS",
+    "build_scope",
     # Event types
     "EVENT_DCC_LAUNCH",
     "EVENT_PUBLISH_USD",

@@ -44,7 +44,7 @@ from pipe.shotgrid import Asset
 from pipe.telemetry import (
     EVENT_TEXTURE_EXPORT_SUBSTANCE,
     action,
-    extract_scope,
+    build_scope,
 )
 from pipe.texconverter import TexConversionError, TexConverter
 
@@ -397,7 +397,7 @@ class Exporter:
             texture_set_count=len(exp_setting_arr),
             udim_set_count=count_udim_sets(exp_setting_arr),
         )
-        scope = extract_scope(self._asset) or None
+        scope = build_scope(asset=self._asset) or None
 
         with action(
             EVENT_TEXTURE_EXPORT_SUBSTANCE,

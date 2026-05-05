@@ -1,132 +1,70 @@
-"""Scope extraction — turn entity-shaped objects into the canonical scope dict.
+"""Build a `{scope_dim: value}` dict for one telemetry event.
 
-Most call sites have access to entity objects (the active Asset, Shot, Sequence)
-already. They pass those objects to `extract_scope`, which reads the canonical
-fields without each caller knowing the shape:
+Each call site that wraps a workflow in `action()` declares which scope
+dimensions apply to it by passing entities (or strings) to `build_scope`:
 
 ```python
-from pipe.telemetry import extract_scope
+from pipe.telemetry import action, build_scope
 
-scope = extract_scope(self._entity, self._shot)
-# {"shot": "SQ010_010", "asset": "Hero"}
+with action(
+    "publish.usd",
+    payload={"kind": "asset", "publish_path": str(path)},
+    scope=build_scope(asset=self._entity, shot=self._shot),
+):
+    do_the_publish()
 ```
 
-Sources can be:
-- ScopeContext (returned as-is)
-- Mapping (read by canonical key, then by alias)
-- Object with attributes like `code`, `name`, `display_name`, `content`, `id`
-- Nested objects (for ShotGrid records: `entity.code`)
-
-Later sources override earlier ones, so the most-specific entity goes last.
+For object arguments (Asset, Shot, Sequence, Environment), the canonical
+`code` attribute is read. Strings are accepted as-is and stripped. None
+values are skipped. The result is the dict consumed by
+`pipe.telemetry.action(scope=...)` and persisted as `scope_<dim>` columns
+by the ingester.
 """
 
 from __future__ import annotations
 
-import os
-from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Any, Final
 
-SCOPE_FIELDS: Final[tuple[str, ...]] = (
-    "show",
-    "sequence",
-    "shot",
-    "asset",
-    "department",
-)
+def build_scope(
+    *,
+    show: object | None = None,
+    sequence: object | None = None,
+    shot: object | None = None,
+    asset: object | None = None,
+    department: object | None = None,
+) -> dict[str, str]:
+    """Build a scope dict for one telemetry event."""
 
-_SCOPE_FIELD_ALIASES: Final[dict[str, tuple[str, ...]]] = {
-    "show": ("show", "show_code", "project", "project_code"),
-    "sequence": ("sequence", "sequence_code", "seq"),
-    "shot": ("shot", "shot_code", "entity", "entity_code"),
-    "asset": ("asset", "asset_code", "asset_name"),
-    "department": ("department", "dept", "step"),
-}
-
-_NESTED_VALUE_ATTRS: Final[tuple[str, ...]] = (
-    "code",
-    "name",
-    "display_name",
-    "content",
-    "id",
-)
+    out: dict[str, str] = {}
+    for dim, value in (
+        ("show", show),
+        ("sequence", sequence),
+        ("shot", shot),
+        ("asset", asset),
+        ("department", department),
+    ):
+        resolved = _resolve_scope_value(value)
+        if resolved is not None:
+            out[dim] = resolved
+    return out
 
 
-@dataclass(frozen=True)
-class ScopeContext:
-    """Canonical scope keys captured from an entity context."""
+def _resolve_scope_value(value: object | None) -> str | None:
+    """Coerce a candidate scope value to a clean string, or None if unusable.
 
-    show: str | None = None
-    sequence: str | None = None
-    shot: str | None = None
-    asset: str | None = None
-    department: str | None = None
-
-    def as_dict(self) -> dict[str, str]:
-        return {
-            field: value
-            for field in SCOPE_FIELDS
-            if (value := getattr(self, field)) is not None
-        }
-
-
-def _read_attr_or_key(source: Any, key: str) -> Any:
-    """Return the value at `key` from a mapping or object, or None if absent."""
-
-    if isinstance(source, Mapping):
-        return source.get(key)
-    return getattr(source, key, None)
-
-
-def _normalize_scope_value(value: Any) -> str | None:
-    """Coerce a candidate scope value to a clean string, or None if not usable.
-
-    Falls through nested objects/mappings looking for a `code`/`name`/etc.
-    attribute — ShotGrid records often nest the readable identifier this way.
+    Strings are stripped. Objects with a `code` attribute (every ShotGrid
+    entity in this repo) read that. Anything else is rejected
     """
 
     if value is None:
         return None
     if isinstance(value, str):
-        normalized = value.strip()
-        return normalized or None
-    if isinstance(value, (int, float, bool)):
-        return str(value)
-    if isinstance(value, os.PathLike):
-        normalized = os.fspath(value).strip()
-        return normalized or None
-
-    for nested_attr in _NESTED_VALUE_ATTRS:
-        nested = _read_attr_or_key(value, nested_attr)
-        normalized = _normalize_scope_value(nested)
-        if normalized is not None:
-            return normalized
+        stripped = value.strip()
+        return stripped or None
+    code = getattr(value, "code", None)
+    if isinstance(code, str):
+        stripped = code.strip()
+        return stripped or None
     return None
 
 
-def _extract_from_source(source: Any) -> dict[str, str]:
-    if source is None:
-        return {}
-    if isinstance(source, ScopeContext):
-        return source.as_dict()
-
-    extracted: dict[str, str] = {}
-    for field_name in SCOPE_FIELDS:
-        for alias in _SCOPE_FIELD_ALIASES[field_name]:
-            normalized = _normalize_scope_value(_read_attr_or_key(source, alias))
-            if normalized is not None:
-                extracted[field_name] = normalized
-                break
-    return extracted
-
-
-def extract_scope(*sources: Any) -> dict[str, str]:
-    """Merge scope keys from one or more entity sources, last-source-wins."""
-
-    merged: dict[str, str] = {}
-    for source in sources:
-        merged.update(_extract_from_source(source))
-    return merged
-
-
-__all__ = ["SCOPE_FIELDS", "ScopeContext", "extract_scope"]
+__all__ = ["build_scope"]

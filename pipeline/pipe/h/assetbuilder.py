@@ -21,6 +21,7 @@ from pipe.telemetry import (
     EVENT_BUILD_HOUDINI_COMPONENT,
     TELEMETRY_ACTION_ID_ENV,
     action,
+    build_scope,
 )
 
 from . import nodelayouts
@@ -410,8 +411,7 @@ def _build_initial_payload(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _scope_from_args(args: argparse.Namespace) -> dict[str, str] | None:
-    asset_name = str(args.asset_name or "").strip()
-    return {"asset": asset_name} if asset_name else None
+    return build_scope(asset=args.asset_name) or None
 
 
 def _configure_logging(level: str) -> None:

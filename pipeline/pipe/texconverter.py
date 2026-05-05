@@ -21,7 +21,7 @@ from pipe.sp.progress import (
     PublishProgressUpdate,
     PublishStage,
 )
-from pipe.telemetry import EVENT_TEXTURE_CONVERT_TEX, action
+from pipe.telemetry import EVENT_TEXTURE_CONVERT_TEX, action, build_scope
 from pipe.util import silent_startupinfo
 
 log = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ class TexConverter:
         if self.renderman_variant:
             payload["renderman_variant"] = str(self.renderman_variant)
 
-        scope = {"asset": str(self.asset_name)} if self.asset_name else None
+        scope = build_scope(asset=self.asset_name) or None
 
         with action(
             EVENT_TEXTURE_CONVERT_TEX,

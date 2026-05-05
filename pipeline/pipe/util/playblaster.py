@@ -17,7 +17,7 @@ from pipe.telemetry import (
     EVENT_PLAYBLAST_CREATE,
     Action,
     action,
-    extract_scope,
+    build_scope,
 )
 
 if TYPE_CHECKING:
@@ -153,11 +153,7 @@ class Playblaster(metaclass=ABCMeta):
         return normalized or "unknown"
 
     def _playblast_scope(self) -> dict[str, str] | None:
-        scope = extract_scope(self._shot)
-        shot_code = str(getattr(self._shot, "code", "")).strip()
-        if shot_code:
-            scope.setdefault("shot", shot_code)
-        return scope or None
+        return build_scope(shot=self._shot) or None
 
     def _do_playblast(
         self,
