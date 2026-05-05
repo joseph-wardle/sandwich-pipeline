@@ -33,7 +33,6 @@ SCOPE_FIELDS: Final[tuple[str, ...]] = (
     "shot",
     "asset",
     "department",
-    "task",
 )
 
 _SCOPE_FIELD_ALIASES: Final[dict[str, tuple[str, ...]]] = {
@@ -42,7 +41,6 @@ _SCOPE_FIELD_ALIASES: Final[dict[str, tuple[str, ...]]] = {
     "shot": ("shot", "shot_code", "entity", "entity_code"),
     "asset": ("asset", "asset_code", "asset_name"),
     "department": ("department", "dept", "step"),
-    "task": ("task", "task_name", "content"),
 }
 
 _NESTED_VALUE_ATTRS: Final[tuple[str, ...]] = (
@@ -63,7 +61,6 @@ class ScopeContext:
     shot: str | None = None
     asset: str | None = None
     department: str | None = None
-    task: str | None = None
 
     def as_dict(self) -> dict[str, str]:
         return {
