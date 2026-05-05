@@ -183,16 +183,7 @@ class Playblaster(metaclass=ABCMeta):
         }
         scope = self._playblast_scope()
 
-        self._write_images_or_record_failure(
-            tempdir=tempdir,
-            filename_prefix=filename_prefix,
-            common_payload=common_payload,
-            scope=scope,
-            expected_total_outputs=sum(len(paths) for paths in out_paths.values()),
-        )
-        self._pad_negative_frame_numbers(tempdir, filename_prefix)
-        images = self._build_ffmpeg_input_stream(tempdir, filename_prefix, frame_start)
-
+        images: Any = None
         for preset, paths in out_paths.items():
             with action(
                 EVENT_PLAYBLAST_CREATE,
@@ -203,6 +194,18 @@ class Playblaster(metaclass=ABCMeta):
                 },
                 scope=scope,
             ) as t:
+                if images is None:
+                    try:
+                        self._write_images(str(tempdir / filename_prefix))
+                    except Exception as exc:
+                        raise PlayblastError(
+                            str(exc) or exc.__class__.__name__
+                        ) from exc
+                    self._pad_negative_frame_numbers(tempdir, filename_prefix)
+                    images = self._build_ffmpeg_input_stream(
+                        tempdir, filename_prefix, frame_start
+                    )
+
                 self._encode_and_publish_preset(
                     preset=preset,
                     paths=paths,
@@ -220,35 +223,6 @@ class Playblaster(metaclass=ABCMeta):
         """Remove leftover playblast temp files matching `filename_prefix`."""
         for path in tempdir.glob(filename_prefix + "*"):
             path.unlink()
-
-    def _write_images_or_record_failure(
-        self,
-        *,
-        tempdir: Path,
-        filename_prefix: str,
-        common_payload: dict[str, object],
-        scope: dict[str, str] | None,
-        expected_total_outputs: int,
-    ) -> None:
-        """Write the playblast image sequence; record one error event on failure.
-
-        A write failure aborts every preset that would have followed, so the
-        single `playblast.create` event is tagged `preset="unknown"` to mean
-        "the artist tried to playblast, but no preset got produced."
-        """
-        try:
-            self._write_images(str(tempdir / filename_prefix))
-        except Exception as exc:
-            with action(
-                EVENT_PLAYBLAST_CREATE,
-                payload={
-                    **common_payload,
-                    "preset": "unknown",
-                    "output_count": expected_total_outputs,
-                },
-                scope=scope,
-            ):
-                raise PlayblastError(str(exc) or exc.__class__.__name__) from exc
 
     @staticmethod
     def _pad_negative_frame_numbers(tempdir: Path, filename_prefix: str) -> None:
