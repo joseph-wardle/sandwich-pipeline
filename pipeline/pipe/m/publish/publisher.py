@@ -17,8 +17,6 @@ from pipe.m.util import maintain_selection
 from pipe.shotgrid import SGEntity, ShotGrid
 from pipe.telemetry import (
     EVENT_PUBLISH_USD,
-    PublishCopyError,
-    USDExportError,
     action,
     extract_scope,
 )
@@ -27,6 +25,22 @@ if TYPE_CHECKING:
     from Qt.QtWidgets import QWidget
 
 log = logging.getLogger(__name__)
+
+
+class USDExportError(Exception):
+    """Raised when `mc.mayaUSDExport` (or an equivalent USD writer) fails.
+
+    The `error_code` attribute is read by `pipe.telemetry.action` to tag the
+    failure on the emitted `publish.usd` event.
+    """
+
+    error_code = "USD_EXPORT_FAILED"
+
+
+class PublishCopyError(Exception):
+    """Raised when copying a published file into its final publish location fails."""
+
+    error_code = "PUBLISH_COPY_FAILED"
 
 
 class Publisher:

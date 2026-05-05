@@ -47,15 +47,26 @@ from pipe.telemetry import (
     EVENT_PUBLISH_USD,
     TELEMETRY_ACTION_ID_ENV,
     Action,
-    HoudiniBuildError,
-    PublishCopyError,
-    USDExportError,
     action,
 )
 from pipe.versioning import BackupResult
 from pipe.versioning.store import backup_if_changed
 
-from .publisher import Publisher
+from .publisher import Publisher, PublishCopyError, USDExportError
+
+
+class HoudiniBuildError(Exception):
+    """Raised when the headless Houdini component build fails.
+
+    Maya launches Houdini's asset builder as a subprocess; failures during
+    launch, parsing, or the build itself surface here. The matching string
+    in `pipe.h.assetbuilder` (which cannot import this class — its parent
+    package eagerly imports `hou`, which Maya does not have) must stay in
+    sync. The `error_code` attribute is read by `pipe.telemetry.action`.
+    """
+
+    error_code = "HOUDINI_BUILD_FAILED"
+
 
 try:
     from modelChecker.modelChecker_UI import UI as ImportedMCUI

@@ -11,10 +11,17 @@ The action context manager emits exactly one terminal event on exit
 (`success` with duration, or `error` with `error_code` from the exception).
 It never suppresses exceptions.
 
+Failure classification: `action()` reads `exc.error_code` from any exception
+that escapes a wrapped block. Workflow modules define their own typed
+exceptions next to the raise sites (e.g. `PlayblastError` in `pipe.util.playblaster`,
+`USDExportError` in `pipe.m.publish.publisher`) and set `error_code` as a
+class attribute. Anything without the attribute falls through to
+`error_code = "UNKNOWN"`. Call sites can also override on a case-by-case
+basis with `t.fail(code, message)` inside an except block.
+
 Where to find what:
 
 - ``events.py``  — the tool event types this pipeline emits, plus payload contracts
-- ``errors.py``  — typed exceptions whose ``error_code`` attribute drives error events
 - ``scope.py``   — turn entity-shaped objects into a {show, shot, asset, ...} dict
 - ``emit.py``    — implementation of action() and the lower-level emit()
 - ``spool.py``   — JSONL writer to the shared production spool
@@ -24,17 +31,6 @@ Where to find what:
 from __future__ import annotations
 
 from .emit import TELEMETRY_ACTION_ID_ENV, Action, action, emit
-from .errors import (
-    DCCLaunchError,
-    HoudiniBuildError,
-    PipelineError,
-    PlayblastError,
-    PublishCopyError,
-    PublishPrecheckError,
-    TextureConversionError,
-    TextureExportError,
-    USDExportError,
-)
 from .events import (
     EVENT_BUILD_HOUDINI_COMPONENT,
     EVENT_DCC_LAUNCH,
@@ -78,14 +74,4 @@ __all__ = [
     "EVENT_DEFINITIONS",
     "EVENTS_BY_TYPE",
     "get_event_definition",
-    # Typed exceptions (each carries an `error_code` class attribute)
-    "PipelineError",
-    "DCCLaunchError",
-    "PublishPrecheckError",
-    "USDExportError",
-    "PublishCopyError",
-    "HoudiniBuildError",
-    "TextureExportError",
-    "TextureConversionError",
-    "PlayblastError",
 ]

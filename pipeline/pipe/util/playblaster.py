@@ -16,7 +16,6 @@ import ffmpeg  # type: ignore[import-untyped]
 from pipe.telemetry import (
     EVENT_PLAYBLAST_CREATE,
     Action,
-    PlayblastError,
     action,
     extract_scope,
 )
@@ -28,6 +27,12 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+
+class PlayblastError(Exception):
+    """Raised when playblast image-write, encode, or copy steps fail."""
+
+    error_code = "PLAYBLAST_FAILED"
 
 
 @dataclass(frozen=True)

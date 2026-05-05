@@ -20,7 +20,6 @@ from pipe.asset.paths import ASSET_BUILDER_FILENAME
 from pipe.telemetry import (
     EVENT_BUILD_HOUDINI_COMPONENT,
     TELEMETRY_ACTION_ID_ENV,
-    HoudiniBuildError,
     action,
 )
 
@@ -33,6 +32,12 @@ RESULT_START_MARKER = "--BUILD-RESULT--"
 RESULT_END_MARKER = "--END-BUILD-RESULT--"
 
 TURNAROUND_HOOK = "turnaround"
+
+# Mirrors `HoudiniBuildError.error_code` in `pipe.m.publish.asset`. Houdini's
+# parent package (`pipe.h`) eagerly imports `hou`, so Maya cannot import the
+# exception class itself; the two values must stay in sync so the dashboard
+# groups failures from both sides under one bucket.
+_HOUDINI_BUILD_FAILED_CODE = "HOUDINI_BUILD_FAILED"
 
 
 class ResultMessage(TypedDict):
@@ -516,7 +521,7 @@ def main(argv: list[str] | None = None) -> int:
         _emit_result(result)
         if result["errors"]:
             t.fail(
-                HoudiniBuildError.error_code,
+                _HOUDINI_BUILD_FAILED_CODE,
                 _first_error_message(result) or "Houdini component build failed",
             )
     return 1 if result["errors"] else 0

@@ -43,13 +43,24 @@ from pipe.sp.progress import (
 from pipe.shotgrid import Asset
 from pipe.telemetry import (
     EVENT_TEXTURE_EXPORT_SUBSTANCE,
-    TextureExportError,
     action,
     extract_scope,
 )
 from pipe.texconverter import TexConversionError, TexConverter
 
 log = logging.getLogger(__name__)
+
+
+class TextureExportError(Exception):
+    """Raised when Substance Painter texture export or its planning fails.
+
+    Covers invalid export configuration, planner mismatches, the SP export
+    call itself, and the post-export material-info write. The `error_code`
+    attribute is read by `pipe.telemetry.action` to tag the failure on the
+    emitted `texture.export.substance` event.
+    """
+
+    error_code = "TEXTURE_EXPORT_FAILED"
 
 
 class Exporter:

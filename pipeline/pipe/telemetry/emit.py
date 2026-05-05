@@ -4,11 +4,18 @@
 
     with telemetry.action("publish.usd", payload={"kind": "asset", ...}) as t:
         do_the_publish()                       # success: emits success on exit
-        # raise USDExportError("...")          # error:   emits error on exit, re-raises
+        # raise SomePipelineError("...")       # error:   emits error on exit, re-raises
 
 The CM emits exactly one terminal event when the block exits — `success` with
 `duration_ms`, or `error` with the exception's `error_code`. It never
 suppresses the exception.
+
+Failure classification is duck-typed: `action()` reads `getattr(exc, "error_code")`
+from whatever exception escapes the block. Workflow modules each define
+their own typed exceptions alongside the raise sites and set `error_code`
+as a class attribute (see `pipe.util.playblaster.PlayblastError`,
+`pipe.m.publish.publisher.USDExportError`, etc.). Exceptions without the
+attribute fall through to `error_code = "UNKNOWN"`.
 
 `emit(event_type, status, payload, scope=None)` is the underlying primitive
 for one-shot events that don't fit the workflow shape. No in-tree caller
