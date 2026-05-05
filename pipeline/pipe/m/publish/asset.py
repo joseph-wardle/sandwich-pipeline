@@ -965,7 +965,10 @@ class AssetPublisher(Publisher):
         if asset_name == "asset":
             asset_name = asset_paths.root.name
 
-        scope = dict(self._publish_scope())
+        # `_publish_scope` reads the entity's `code`; fall back to the path-
+        # derived asset_name when the entity has no usable code (e.g. asset
+        # built from a scene resolution rather than a SG record).
+        scope = self._publish_scope()
         scope.setdefault("asset", asset_name.strip())
 
         with action(

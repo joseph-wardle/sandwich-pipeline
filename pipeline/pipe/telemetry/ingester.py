@@ -3,8 +3,7 @@
 The ingester tails the shared spool (`{production_root}/.telemetry/raw/...`),
 validates each event's payload shape against the registry in `events.py`, and
 inserts a row into the `events` table. Per-spool read offsets are persisted
-in `ingester_status` so the ingester resumes cleanly after a restart and the
-"ingester lag" Grafana panel can show how far behind real time it is.
+in `ingester_status` so the ingester resumes cleanly after a restart.
 
 The orchestrator (`pipe/telemetry/local_stack.py`) starts the ingester as a
 subprocess of `pipe telemetry up` and `pipe telemetry catch-up`. It can also

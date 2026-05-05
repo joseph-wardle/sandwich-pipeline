@@ -38,6 +38,10 @@ dev = [
     "nptyping>=2.5.0,<3",
     "ty>=0.0.20",
     "fake-bpy-module-5-0>=20260128",
+    # `psycopg` is only used by the telemetry ingester. Lab machines that
+    # boot `pipe telemetry up` need it; workstations that only emit telemetry
+    # don't. Lives in `dev` so type checking always finds it.
+    "psycopg[binary]>=3.2,<4",
 ]
 
 [tool.ruff]
