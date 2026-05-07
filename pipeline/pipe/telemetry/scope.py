@@ -1,30 +1,19 @@
-"""Build a `{scope_dim: value}` dict for one telemetry event.
+"""Internal: turn record() entity kwargs into a {scope_dim: value} dict.
 
-Each call site that wraps a workflow in `action()` declares which scope
-dimensions apply to it by passing entities (or strings) to `build_scope`:
+`record()` accepts the five known scope dimensions as named kwargs (one
+each for show, sequence, shot, asset, department). This module's job is to
+coerce those kwargs into the flat string dict that the JSONL writer and
+the ingester expect — reading `.code` from ShotGrid-style entities,
+stripping strings, and dropping anything that resolves to empty.
 
-```python
-from pipe.telemetry import action, build_scope
-
-with action(
-    "publish.usd",
-    payload={"kind": "asset", "publish_path": str(path)},
-    scope=build_scope(asset=self._entity, shot=self._shot),
-):
-    do_the_publish()
-```
-
-For object arguments (Asset, Shot, Sequence, Environment), the canonical
-`code` attribute is read. Strings are accepted as-is and stripped. None
-values are skipped. The result is the dict consumed by
-`pipe.telemetry.action(scope=...)` and persisted as `scope_<dim>` columns
-by the ingester.
+The word "scope" stays inside `pipe.telemetry/`. Call sites pass entity
+kwargs straight to `record()` and never see this module.
 """
 
 from __future__ import annotations
 
 
-def build_scope(
+def _build_scope_dict(
     *,
     show: object | None = None,
     sequence: object | None = None,
@@ -32,7 +21,7 @@ def build_scope(
     asset: object | None = None,
     department: object | None = None,
 ) -> dict[str, str]:
-    """Build a scope dict for one telemetry event."""
+    """Build the scope dict that `record()` attaches to an emitted event."""
 
     out: dict[str, str] = {}
     for dim, value in (
@@ -52,7 +41,7 @@ def _resolve_scope_value(value: object | None) -> str | None:
     """Coerce a candidate scope value to a clean string, or None if unusable.
 
     Strings are stripped. Objects with a `code` attribute (every ShotGrid
-    entity in this repo) read that. Anything else is rejected
+    entity in this repo) read that. Anything else is rejected.
     """
 
     if value is None:
@@ -67,4 +56,4 @@ def _resolve_scope_value(value: object | None) -> str | None:
     return None
 
 
-__all__ = ["build_scope"]
+__all__ = ["_build_scope_dict"]

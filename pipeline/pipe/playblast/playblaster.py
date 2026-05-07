@@ -8,15 +8,10 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pipe import telemetry
 from pipe.playblast.encoding import build_image_input_chain, encode_movie
 from pipe.playblast.presets import FFmpegPreset
 from pipe.playblast.tempdir import resolve_playblast_tempdir
-from pipe.telemetry import (
-    EVENT_PLAYBLAST_CREATE,
-    Action,
-    action,
-    build_scope,
-)
 
 if TYPE_CHECKING:
     from pipe.shotgrid import Shot
@@ -28,7 +23,7 @@ log = logging.getLogger(__name__)
 class PlayblastError(Exception):
     """Raised when playblast image-write, encode, or copy steps fail.
 
-    The `error_code` attribute is read by `pipe.telemetry.action` to tag the
+    The `error_code` attribute is read by `pipe.telemetry.record` to tag the
     failure on the emitted `playblast.create` event.
     """
 
@@ -83,24 +78,23 @@ class Playblaster(metaclass=ABCMeta):
             "frame_end": frame_end,
             "fps": max(1, int(self.fps)),
         }
-        scope = build_scope(shot=shot) or None
 
         # Image write / frame normalize / ffmpeg input-chain build is shared
         # work for every preset in this call, so it runs once on the first
-        # preset's action() block. A failure there is recorded against that
+        # preset's telemetry event. A failure there is recorded against that
         # preset (the one the artist actually triggered) and the propagating
         # PlayblastError skips the remaining presets in out_paths.
         encoded_input: Any = None
         for preset, paths in out_paths.items():
-            with action(
-                EVENT_PLAYBLAST_CREATE,
+            with telemetry.record(
+                telemetry.EVENT_PLAYBLAST_CREATE,
                 payload={
                     **common_payload,
                     "preset": self._preset_name(preset),
                     "output_count": len(paths),
                 },
-                scope=scope,
-            ) as t:
+                shot=shot,
+            ) as telemetry_event:
                 if encoded_input is None:
                     try:
                         self._write_images(shot, str(tempdir / image_basename))
@@ -113,7 +107,7 @@ class Playblaster(metaclass=ABCMeta):
                         shot, tempdir, image_basename, frame_start
                     )
 
-                self._encode_and_publish_preset(
+                final_paths = self._encode_and_publish_preset(
                     shot=shot,
                     preset=preset,
                     paths=paths,
@@ -121,8 +115,8 @@ class Playblaster(metaclass=ABCMeta):
                     tempdir=tempdir,
                     image_basename=image_basename,
                     start_frame=frame_start,
-                    t=t,
                 )
+                telemetry_event.note(output_count=len(final_paths))
 
         if not log.isEnabledFor(logging.DEBUG):
             self._cleanup_temp_files(tempdir, image_basename)
@@ -220,13 +214,13 @@ class Playblaster(metaclass=ABCMeta):
         tempdir: Path,
         image_basename: str,
         start_frame: int,
-        t: Action,
-    ) -> None:
+    ) -> list[Path]:
         """Encode one preset, copy to all destinations, run post-process.
 
+        Returns the list of final destination paths actually produced (the
+        caller folds `len(final_paths)` into the playblast's telemetry event).
         Raises PlayblastError on encode/copy failure; post-process failures
-        are best-effort and logged. `t.update_payload(output_count=...)`
-        records how many destinations actually received the encoded file.
+        are best-effort and logged.
         """
         del shot  # parity with `_build_ffmpeg_input`; HUD subclasses may want this
         try:
@@ -245,7 +239,7 @@ class Playblaster(metaclass=ABCMeta):
         for final_path in final_paths:
             self._safe_run_postprocess(final_path)
 
-        t.update_payload(output_count=len(final_paths))
+        return final_paths
 
     @staticmethod
     def _preset_name(preset: object | None) -> str:

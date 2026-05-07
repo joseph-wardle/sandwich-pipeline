@@ -9,20 +9,14 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any, Mapping, TypedDict
 
 import hou
 
+from pipe import telemetry
 from pipe.asset.paths import ASSET_BUILDER_FILENAME
-from pipe.telemetry import (
-    EVENT_BUILD_HOUDINI_COMPONENT,
-    TELEMETRY_ACTION_ID_ENV,
-    action,
-    build_scope,
-)
 
 from . import nodelayouts
 from .publish import PublishOptions, publish_component
@@ -387,17 +381,6 @@ def _first_error_message(result: HeadlessPublishResult) -> str | None:
     return None
 
 
-def _is_invoked_from_parent_action() -> bool:
-    """Return True when a parent process is wrapping us in its own telemetry action.
-
-    Maya's asset publisher sets `TELEMETRY_ACTION_ID_ENV` before launching
-    hython. In that case the parent emits the `build.houdini.component` event
-    based on parsed stdout; we must stay silent to avoid double-counting.
-    """
-
-    return bool(os.getenv(TELEMETRY_ACTION_ID_ENV, "").strip())
-
-
 def _build_initial_payload(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "mode": _component_build_mode(
@@ -408,10 +391,6 @@ def _build_initial_payload(args: argparse.Namespace) -> dict[str, Any]:
         "warnings_count": 0,
         "errors_count": 0,
     }
-
-
-def _scope_from_args(args: argparse.Namespace) -> dict[str, str] | None:
-    return build_scope(asset=args.asset_name) or None
 
 
 def _configure_logging(level: str) -> None:
@@ -501,26 +480,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv or sys.argv[1:])
     _configure_logging(args.log_level)
 
-    if _is_invoked_from_parent_action():
+    if telemetry._running_under_parent_event():
         # The parent (e.g. Maya asset publisher) wraps this subprocess in its
-        # own action() block and emits the build event itself. Stay silent.
+        # own record() block and emits the build event itself. Stay silent.
         result = _run_publish(args)
         _emit_result(result)
         return 1 if result["errors"] else 0
 
-    with action(
-        EVENT_BUILD_HOUDINI_COMPONENT,
+    with telemetry.record(
+        telemetry.EVENT_BUILD_HOUDINI_COMPONENT,
         payload=_build_initial_payload(args),
-        scope=_scope_from_args(args),
-    ) as t:
+        asset=args.asset_name,
+    ) as telemetry_event:
         result = _run_publish(args)
-        t.update_payload(
+        _emit_result(result)
+        telemetry_event.note(
             warnings_count=_result_message_count(result, "warnings"),
             errors_count=_result_message_count(result, "errors"),
         )
-        _emit_result(result)
         if result["errors"]:
-            t.fail(
+            telemetry_event.fail(
                 _HOUDINI_BUILD_FAILED_CODE,
                 _first_error_message(result) or "Houdini component build failed",
             )

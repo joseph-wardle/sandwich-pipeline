@@ -16,12 +16,12 @@ if TYPE_CHECKING:
 
 from env import Executables
 
+from pipe import telemetry
 from pipe.sp.progress import (
     PublishProgressCallback,
     PublishProgressUpdate,
     PublishStage,
 )
-from pipe.telemetry import EVENT_TEXTURE_CONVERT_TEX, action, build_scope
 from pipe.util import silent_startupinfo
 
 log = logging.getLogger(__name__)
@@ -95,8 +95,6 @@ class TexConverter:
             "converted_preview_count": 0,
             "batch_size": self.batch_size,
         }
-        if self.asset_name:
-            payload["asset"] = str(self.asset_name)
         if self.geo_variant:
             payload["geo_variant"] = str(self.geo_variant)
         if self.material_variant:
@@ -104,17 +102,26 @@ class TexConverter:
         if self.renderman_variant:
             payload["renderman_variant"] = str(self.renderman_variant)
 
-        scope = build_scope(asset=self.asset_name) or None
+        # Tracked across both conversion steps; finally folds whatever
+        # was reached into the event so a partial failure ("tex convert
+        # succeeded, preview surface failed") shows up in the dashboard
+        # rather than reporting zero.
+        converted_tex: list[Path] = []
+        converted_preview: list[Path] = []
 
-        with action(
-            EVENT_TEXTURE_CONVERT_TEX,
+        with telemetry.record(
+            telemetry.EVENT_TEXTURE_CONVERT_TEX,
             payload=payload,
-            scope=scope,
-        ) as t:
-            converted_tex = self.convert_tex()
-            t.update_payload(converted_tex_count=len(converted_tex))
-            converted_preview = self.convert_previewsurface()
-            t.update_payload(converted_preview_count=len(converted_preview))
+            asset=self.asset_name,
+        ) as telemetry_event:
+            try:
+                converted_tex = self.convert_tex()
+                converted_preview = self.convert_previewsurface()
+            finally:
+                telemetry_event.note(
+                    converted_tex_count=len(converted_tex),
+                    converted_preview_count=len(converted_preview),
+                )
 
         return converted_tex, converted_preview
 

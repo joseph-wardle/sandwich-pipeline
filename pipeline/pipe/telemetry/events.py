@@ -66,8 +66,12 @@ EVENT_DEFINITIONS: Final[tuple[EventDefinition, ...]] = (
     ),
     EventDefinition(
         event_type=EVENT_TEXTURE_EXPORT_SUBSTANCE,
-        description="Substance Painter texture export terminal event.",
-        required_payload_fields=("asset", "texture_set_count"),
+        description=(
+            "Substance Painter texture export terminal event. "
+            "The asset identity lives on the event's scope (asset= kwarg "
+            "to record()), not duplicated in the payload."
+        ),
+        required_payload_fields=("texture_set_count",),
         has_duration=True,
     ),
     EventDefinition(

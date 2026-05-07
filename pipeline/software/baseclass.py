@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import typing
 
-from pipe.telemetry import EVENT_DCC_LAUNCH, action
+from pipe import telemetry
 from shared.util import fix_launcher_metadata
 
 from .interface import DCCInterface, DCCLocalizerInterface
@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 
 # DCC launch failures are tagged on the telemetry event but never raised as a
 # typed exception — the original exception (e.g. FileNotFoundError) is allowed
-# to propagate so the caller sees the real cause, and `t.fail()` carries the
-# classification on the side.
+# to propagate so the caller sees the real cause, and `telemetry_event.fail()`
+# carries the classification on the side.
 _DCC_LAUNCH_FAILED_CODE = "DCC_LAUNCH_FAILED"
 
 
@@ -123,11 +123,10 @@ class DCC(DCCInterface):
         if pre_launch_tasks is None:
             pre_launch_tasks = self.pre_launch_tasks
 
-        with action(
-            EVENT_DCC_LAUNCH,
+        with telemetry.record(
+            telemetry.EVENT_DCC_LAUNCH,
             payload=self._launch_payload(command, args),
-            scope=None,
-        ) as t:
+        ) as telemetry_event:
             try:
                 fix_launcher_metadata()
                 pre_launch_tasks()
@@ -139,14 +138,16 @@ class DCC(DCCInterface):
             except Exception as exc:
                 # Tag the failure on the dashboard, then let the original
                 # exception type propagate to the caller unchanged.
-                t.fail(_DCC_LAUNCH_FAILED_CODE, str(exc) or exc.__class__.__name__)
+                telemetry_event.fail(
+                    _DCC_LAUNCH_FAILED_CODE, str(exc) or exc.__class__.__name__
+                )
                 raise
 
             if return_code != 0:
                 # Non-zero DCC exit is recorded as an error event, but is
                 # not raised — DCCs exit non-zero for many recoverable
                 # reasons (artist closed without saving, etc.).
-                t.fail(
+                telemetry_event.fail(
                     _DCC_LAUNCH_FAILED_CODE,
                     f"DCC exited with return code {return_code}",
                 )

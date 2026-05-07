@@ -1,8 +1,14 @@
-"""The telemetry surfaces: the `action()` context manager and the bare `emit()`.
+"""The telemetry surfaces: the `record()` context manager and the bare `emit()`.
 
-`action(event_type, payload, scope=None)` wraps a workflow step:
+`record(event_type, payload=..., **entity_kwargs)` wraps a workflow step:
 
-    with telemetry.action("publish.usd", payload={"kind": "asset", ...}) as t:
+    from pipe import telemetry
+
+    with telemetry.record(
+        telemetry.EVENT_PUBLISH_USD,
+        payload={"kind": "asset", "publish_path": str(path)},
+        asset=asset,
+    ) as telemetry_event:
         do_the_publish()                       # success: emits success on exit
         # raise SomePipelineError("...")       # error:   emits error on exit, re-raises
 
@@ -10,12 +16,20 @@ The CM emits exactly one terminal event when the block exits — `success` with
 `duration_ms`, or `error` with the exception's `error_code`. It never
 suppresses the exception.
 
-Failure classification is duck-typed: `action()` reads `getattr(exc, "error_code")`
-from whatever exception escapes the block. Workflow modules each define
-their own typed exceptions alongside the raise sites and set `error_code`
-as a class attribute (see `pipe.playblast.playblaster.PlayblastError`,
+`payload` carries event-specific facts (the metrics about *what happened*).
+The `show`/`sequence`/`shot`/`asset`/`department` kwargs carry the entity
+context (which production entity this event is *for*) and accept either a
+ShotGrid entity object (with a `.code` attribute) or a plain string.
+
+Failure classification is duck-typed: `record()` reads
+`getattr(exc, "error_code")` from whatever exception escapes the block.
+Workflow modules each define their own typed exceptions alongside the
+raise sites and set `error_code` as a class attribute (see
+`pipe.playblast.playblaster.PlayblastError`,
 `pipe.m.publish.publisher.USDExportError`, etc.). Exceptions without the
-attribute fall through to `error_code = "UNKNOWN"`.
+attribute fall through to `error_code = "UNKNOWN"`. Call sites can
+override on a case-by-case basis with `telemetry_event.fail(code, message)`
+— typically when the work returns a structured result instead of raising.
 
 `emit(event_type, status, payload, scope=None)` is the underlying primitive
 for one-shot events that don't fit the workflow shape. No in-tree caller
@@ -44,6 +58,7 @@ from .events import (
     Status,
     get_event_definition,
 )
+from .scope import _build_scope_dict
 from .spool import get_spool_writer
 
 _LOG = logging.getLogger(__name__)
@@ -51,9 +66,11 @@ _LOG = logging.getLogger(__name__)
 _UNKNOWN_ERROR_CODE: Final[str] = "UNKNOWN"
 
 #: Env var the parent process sets so a child subprocess inherits its
-#: action_id. The child is expected to skip its own emission when this is
-#: set (the parent's `action()` block will record the event from outside).
-TELEMETRY_ACTION_ID_ENV: Final[str] = "PIPE_TELEMETRY_ACTION_ID"
+#: action_id. Children read this at their entry point and skip their own
+#: emission so the parent stays the sole emitter. Written by
+#: `Event.attach_to_subprocess`; read by `pipe.h.assetbuilder.main`.
+#: Internal — call sites use the method, not the constant.
+_ACTION_ID_ENV: Final[str] = "PIPE_TELEMETRY_ACTION_ID"
 
 
 def _utc_now_iso() -> str:
@@ -117,7 +134,7 @@ def _report_invalid(message: str, *, strict: bool) -> bool:
     return False
 
 
-def _build_event(
+def _build_event_row(
     *,
     event_type: str,
     status: Status,
@@ -128,9 +145,13 @@ def _build_event(
     error_code: str | None,
     error_message: str | None,
 ) -> dict[str, Any]:
-    """Build the JSONL event row that the ingester will read."""
+    """Build the JSONL row that the ingester will read for this event.
 
-    event: dict[str, Any] = {
+    The returned dict is the on-disk shape; the public `Event` class is
+    distinct from this dict and carries the in-progress workflow handle.
+    """
+
+    row: dict[str, Any] = {
         "event_id": str(uuid.uuid4()),
         "event_type": event_type,
         "status": status,
@@ -142,14 +163,14 @@ def _build_event(
         "payload": dict(payload),
     }
     if scope:
-        event["scope"] = dict(scope)
+        row["scope"] = dict(scope)
     if duration_ms is not None:
-        event["duration_ms"] = duration_ms
+        row["duration_ms"] = duration_ms
     if error_code is not None:
-        event["error_code"] = error_code
+        row["error_code"] = error_code
     if error_message is not None:
-        event["error_message"] = error_message
-    return event
+        row["error_message"] = error_message
+    return row
 
 
 def emit(
@@ -166,7 +187,7 @@ def emit(
     """Emit one telemetry event directly without a CM around it.
 
     For workflow-shaped events (publish, build, export, render), use
-    `action()` — it handles success/error/timing correctly and can't be
+    `record()` — it handles success/error/timing correctly and can't be
     forgotten on the error path.
     """
 
@@ -177,7 +198,7 @@ def emit(
     if not _validate_payload(definition, status, payload, strict=config.strict):
         return
 
-    event = _build_event(
+    row = _build_event_row(
         event_type=event_type,
         status=status,
         payload=payload,
@@ -187,14 +208,20 @@ def emit(
         error_code=error_code,
         error_message=error_message,
     )
-    get_spool_writer().write_event(event)
+    get_spool_writer().write_event(row)
 
 
-class Action:
-    """Context manager for a workflow step that emits one terminal event.
+class Event:
+    """An in-progress telemetry event for one workflow step.
 
-    Construct via `action(event_type, payload, scope=None)`. Do not instantiate
-    this class directly outside the telemetry module.
+    Construct via `record(event_type, payload=..., **entity_kwargs)`. Do
+    not instantiate this class directly outside the telemetry module.
+
+    Bound name at the call site is conventionally `telemetry_event`:
+
+        with telemetry.record(...) as telemetry_event:
+            do_the_work()
+            telemetry_event.note(metric=value)        # final metrics
     """
 
     def __init__(
@@ -214,30 +241,46 @@ class Action:
 
     @property
     def action_id(self) -> str:
-        """Unique id for this action, useful when the caller needs to log it."""
+        """Unique id for this event. Useful for correlating subprocesses
+        — see `attach_to_subprocess`."""
 
         return self._action_id
 
-    def update_payload(self, **kwargs: Any) -> None:
-        """Add or overwrite payload fields mid-action.
+    def note(self, **kwargs: Any) -> None:
+        """Add or overwrite payload fields on this event.
 
-        Common use: tagging `failed_tool` after a subprocess raises but before
-        the exception propagates out of the `with` block.
+        Prefer one call at the bottom of the `with` block, after the work
+        completes — so telemetry sits at the seam, not interleaved with
+        publish logic. Mid-flight calls are allowed only when partial-metric
+        fidelity on failure is genuinely useful, and should carry a comment
+        explaining why that metric needed to escape early.
         """
 
         self._payload.update(kwargs)
 
     def fail(self, error_code: str, message: str) -> None:
-        """Explicitly mark this action as failed before raising.
+        """Explicitly mark this event as failed before it exits.
 
-        Use when the exception about to be raised does not carry an
-        `error_code` attribute — typically stdlib exceptions, or contexts
-        where one exception type means different things in different places.
+        Use only when the work returns a structured result (no exception)
+        and you've inspected it for failure. When the work raises a typed
+        exception with an `error_code` class attribute, prefer letting that
+        classify the failure automatically — do not call `fail()`.
         """
 
         self._explicit_failure = (error_code, message)
 
-    def __enter__(self) -> Action:
+    def attach_to_subprocess(self, env: dict[str, str]) -> None:
+        """Mutate `env` so a child subprocess correlates with this event.
+
+        The child reads the env var at its entry point and skips its own
+        emission, so the parent's `record()` block remains the sole emitter
+        for this action_id. Intended use: pass `env` straight into
+        `subprocess.run`/`Popen` after this call.
+        """
+
+        env[_ACTION_ID_ENV] = self._action_id
+
+    def __enter__(self) -> Event:
         self._started_at = time.perf_counter()
         return self
 
@@ -290,7 +333,7 @@ class Action:
         ):
             return
 
-        event = _build_event(
+        row = _build_event_row(
             event_type=self._event_type,
             status=status,
             payload=self._payload,
@@ -300,31 +343,59 @@ class Action:
             error_code=error_code,
             error_message=error_message,
         )
-        get_spool_writer().write_event(event)
+        get_spool_writer().write_event(row)
 
 
-def action(
+def record(
     event_type: str,
     *,
     payload: Mapping[str, Any],
-    scope: Mapping[str, str] | None = None,
-) -> Action:
-    """Wrap a workflow step in a telemetry action.
+    show: object | None = None,
+    sequence: object | None = None,
+    shot: object | None = None,
+    asset: object | None = None,
+    department: object | None = None,
+) -> Event:
+    """Wrap a workflow step in a telemetry event.
 
     Returns a context manager. On clean exit, emits a `success` event with
     `duration_ms`. On exception, emits an `error` event with `error_code`
     derived from the exception (`exc.error_code` if present, else `UNKNOWN`)
     and re-raises the exception unchanged.
+
+    `payload` is the dict of event-specific facts (the metrics about *what
+    happened*). The five entity kwargs name the production entities this
+    event is *for* — each accepts a ShotGrid entity object (with a `.code`
+    attribute) or a plain string; pass only the dimensions that apply.
     """
 
-    return Action(event_type, payload=payload, scope=scope)
+    scope = _build_scope_dict(
+        show=show,
+        sequence=sequence,
+        shot=shot,
+        asset=asset,
+        department=department,
+    )
+    return Event(event_type, payload=payload, scope=scope or None)
+
+
+def _running_under_parent_event() -> bool:
+    """Return True when a parent process is wrapping this one in its own event.
+
+    DCC subprocesses (e.g. `pipe.h.assetbuilder` launched from Maya) check
+    this at their entry point. When the parent has set the correlation env
+    var via `Event.attach_to_subprocess`, the child must skip its own
+    emission so the event isn't double-counted.
+    """
+
+    return bool(os.getenv(_ACTION_ID_ENV, "").strip())
 
 
 __all__ = [
     "STATUS_SUCCESS",
     "STATUS_ERROR",
-    "TELEMETRY_ACTION_ID_ENV",
-    "Action",
-    "action",
+    "Event",
+    "record",
     "emit",
+    "_running_under_parent_event",
 ]

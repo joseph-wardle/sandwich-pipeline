@@ -14,12 +14,8 @@ from env_sg import DB_Config
 import pipe
 from pipe.glui.dialogs import FilteredListDialog, MessageDialog
 from pipe.m.util import maintain_selection
+from pipe import telemetry
 from pipe.shotgrid import Asset, SGEntity, Shot, ShotGrid
-from pipe.telemetry import (
-    EVENT_PUBLISH_USD,
-    action,
-    build_scope,
-)
 
 if TYPE_CHECKING:
     from Qt.QtWidgets import QWidget
@@ -30,7 +26,7 @@ log = logging.getLogger(__name__)
 class USDExportError(Exception):
     """Raised when `mc.mayaUSDExport` (or an equivalent USD writer) fails.
 
-    The `error_code` attribute is read by `pipe.telemetry.action` to tag the
+    The `error_code` attribute is read by `pipe.telemetry.record` to tag the
     failure on the emitted `publish.usd` event.
     """
 
@@ -128,28 +124,37 @@ class Publisher:
     def _publish_kind(self) -> str | None:
         return self._PUBLISH_KIND
 
-    def _publish_scope(self) -> dict[str, str]:
-        """Build the scope dict for this publisher's `publish.usd` event.
+    def _publish_scope_kwargs(self) -> dict[str, object]:
+        """Return entity kwargs for `telemetry.record()` describing this publish.
 
         `_entity` is polymorphic across subclasses: `AssetPublisher` and
         `PrevisAssetPublisher` set it to an `Asset`; `CameraPublisher` sets
         it to a `Shot`; the anim publishers leave it unset and use `_shot`.
         `_scene_asset` is set by `AssetPublisher` when the active scene
         resolves to an asset.
+
+        Spread the result into `telemetry.record(**self._publish_scope_kwargs())`.
+        Only the dimensions that resolve to a real entity are included.
         """
         entity = getattr(self, "_entity", None)
         shot = getattr(self, "_shot", None)
         scene_asset = getattr(self, "_scene_asset", None)
 
+        kwargs: dict[str, object] = {}
+
         asset_obj: object | None = scene_asset
         if asset_obj is None and isinstance(entity, Asset):
             asset_obj = entity
+        if asset_obj is not None:
+            kwargs["asset"] = asset_obj
 
         shot_obj: object | None = shot
         if shot_obj is None and isinstance(entity, Shot):
             shot_obj = entity
+        if shot_obj is not None:
+            kwargs["shot"] = shot_obj
 
-        return build_scope(asset=asset_obj, shot=shot_obj)
+        return kwargs
 
     def publish(self) -> None:
         """Generic publishing function.
@@ -244,7 +249,7 @@ class Publisher:
         return True
 
     def _do_publish_export(self) -> None:
-        """Run the timed export work, wrapped in a telemetry action.
+        """Run the timed export work, wrapped in a telemetry event.
 
         Subclasses that leave `_PUBLISH_KIND` as None publish without
         recording an event.
@@ -254,13 +259,13 @@ class Publisher:
             self._mayausd_export_and_finalize()
             return
 
-        with action(
-            EVENT_PUBLISH_USD,
+        with telemetry.record(
+            telemetry.EVENT_PUBLISH_USD,
             payload={
                 "kind": kind,
                 "publish_path": str(self._publish_path),
             },
-            scope=self._publish_scope(),
+            **self._publish_scope_kwargs(),
         ):
             self._mayausd_export_and_finalize()
 
@@ -268,7 +273,7 @@ class Publisher:
         """The export → Windows fix-up → postpublish chain.
 
         Errors at each stage raise typed exceptions whose `error_code`
-        attribute drives the telemetry event written by `action()`.
+        attribute drives the telemetry event written by `record()`.
         """
         self._publish_path.parent.mkdir(parents=True, exist_ok=True)
         temp_publish_path = str(Path(os.getenv("TEMP", "")) / self._publish_path.name)
