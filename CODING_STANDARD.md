@@ -1,94 +1,39 @@
 # `sandwich-pipeline` Coding Standard
 
-## Purpose
-
-This codebase is a proven production infrastructure for BYU’s animated short film production. It must empower to do their best work even with tight restrictions, and it must also serve as a teaching artifact for the student TDs who inherit it.
-
-This standard is not about stylistic purity. It exists to help maintainers make safe, readable, practical changes when context is incomplete and time is limited.
-
-When a rule conflicts with production reality, choose the option that makes the code easier for a new maintainer to read, trust, and modify safely.
-
----
-
-## Priority Order
-
-All decisions should follow this order:
-
-1. **Self-documenting code**
-2. **Readability for future maintainers**
-3. **Lightweight, simple code with minimal abstraction**
-4. **Good user-facing errors**
-5. **Correct and clear API usage across complicated tools**
-
-If a design improves one lower priority by harming a higher one, it is usually the wrong design.
-
----
-
-## Core Philosophy
+Thanks for looking after this codebase! It’s been helpful to many and we hope to keep it tidy and easy to understand for those who use it in the future.
 
 Good pipeline code is:
+* easy to read
+* easy to trace
+* easy to modify
 
-* easy to read in one pass
-* easy to trace from entry point to side effect
-* explicit about what external system it touches
-* named in terms artists and TDs already use
-* typed enough that editors and checkers help the next maintainer
-* boring in the best way
+Every function and every file should help future developers quickly understand what it does, 
+why it exists, and how to extend it safely without needing the original author beside them.
+Here are some principles to help you achieve this goal:
 
-The code should teach the reader how the workflow works.
+### Comments explain why, not what
 
-Prefer:
+Avoid comments that merely restate the code. If code needs a comment to explain what it does, first ask whether it can be rewritten more clearly.
 
-* direct code over framework-like code
-* explicit data flow over hidden state
-* thin wrappers over abstraction layers
-* local clarity over clever reuse
+### Everything should be typed
 
----
+Every function should have parameter types and a return type, including private helpers and class members. 
 
-## Code Organization and Naming
+All maintained code should pass:
 
-### Organize by workflow and domain
+* `ruff format`
+* `ruff check`
+* `ty check`
 
-A new maintainer should be able to find code by asking:
+`Any`, `cast`, and `type: ignore` are sometimes necessary. Keep them narrow, and explain why.
 
-* Where is Maya publishing?
-* Where is the Houdini environment built?
-* Where is the ShotGrid version created?
-* Where is the Nuke loader UI?
+### Avoid mega-functions and mega-files
 
-The path to a given script should explain its function, and finding the implementation of a function should be natural due to the folder structure.
+Each file should be a clear set of related functions.  If files start poking past 500 or 1000 lines, pause, 
+and consider if the file should be split, either by seperating unrelated concerns, or by dividing in a structured module with clear sub-concerns.
 
-### Name things by production meaning
-
-Names should reflect the terminology used by the DCC, API, or production workflow.
-
-Use nouns for data and verbs for actions:
-
-* `build_publish_context`
-* `validate_component_output_node`
-* `resolve_texture_directory`
-* `create_shotgrid_version`
-
-If a function name needs a long comment to explain what it does, the structure or naming is probably wrong.
-
-### File size
-
-There is no hard line limit, but very large files are a signal to review whether unrelated concerns are accumulating. Long files are acceptable when they remain cohesive. 
-
----
-
-## Function and Module Design
-
-### Functions should represent one workflow step
-
-A good function usually does one understandable action.
-
-Split code when splitting improves comprehension. Do not split code into tiny helpers if doing so makes the workflow harder to follow.
-
-### Prefer shallow call stacks
-
-A maintainer under crunch should be able to trace a workflow without bouncing across many files.
+Conversely, bouncing across many files imcreases the mental overhead of understanding a system. 
+Keep call stacks shallow, and split code only when splitting improves comprehension. 
 
 A good pattern is:
 
@@ -108,35 +53,7 @@ Examples:
 * launching subprocesses
 * modifying environment variables
 
-Avoid helpers that look harmless but secretly mutate the scene or write to disk.
-
-### Prefer simple orchestration over internal frameworks
-
-Avoid building mini-frameworks inside the pipeline.  Reusable code is good. Premature architecture is not.
-
----
-
-## Typing and Data Modeling
-
-### Everything should be typed
-
-Every function should have parameter types and a return type, including private helpers.
-
-Code should pass:
-
-* `ruff check`
-* `ruff format`
-* `ty check`
-
-Types are part of the documentation.
-
-### Localize dynamic boundaries
-
-`Any`, `cast`, and `type: ignore` are sometimes necessary, especially around DCC APIs and legacy integrations. Keep them at the narrowest possible boundary.
-
----
-
-## DCC and External API Integration Principles
+Avoid helpers that look harmless but secretly mutate the scene or write to disk
 
 ### Consult official documentation first
 
@@ -148,58 +65,17 @@ Before changing Maya, Houdini, Nuke, Substance Painter, USD, Qt, ShotGrid, or si
 
 Do not assume the current code is correct just because it already exists.
 
-### Preserve native terminology
-
-If Maya calls it a node, call it a node.
-If Houdini calls it a parameter, call it a parameter.
-If USD calls it a prim, layer, or payload, use those words.
-If ShotGrid uses asset, shot, task, or version, use those words.
-
-### Thin wrappers are encouraged when they add safety or clarity
-
-A wrapper is good when it:
-
-* centralizes repeated validation
-* enforces required options
-* normalizes inconsistent return shapes
-* improves user-facing errors
-* makes call sites clearer
-
-A wrapper is bad when it only adds indirection or hides which external system is being called.
-
-### Guard external API calls at the boundary
-
-DCC and USD APIs often return empty results or invalid objects without raising.
-
-Examples of required guarding:
-
-* do not index `mc.ls(...)[0]` without checking the result
-* check `prim.IsValid()` after `GetPrimAtPath()`
-* do not assume Houdini context or parameters always exist
-
-Fail early with clear production-facing messages.
-
 ### Keep canonical schema and field names centralized
 
-Magic strings used as:
+Magic strings should be named constants, not repeated bare literals. This makes schema changes searchable and safer.
+
+Examples:
 
 * ShotGrid field names
 * metadata keys
 * variant names
 * protocol markers
 * node type names
-
-should be named constants, not repeated bare literals.
-
-This makes schema changes searchable and safer.
-
-### Be honest about host constraints
-
-DCC scripting often involves global states, mutable scene states, version quirks, and platform-specific workarounds. Do not contort the code to pretend these are not real. Isolate them, name them clearly, and document the reason when needed.
-
----
-
-## Error Handling and Logging
 
 ### Error handling must help recovery
 
@@ -210,177 +86,53 @@ Every failure path should help answer:
 * what they can do next
 * what a developer may need to inspect
 
-### Distinguish user-facing and developer-facing errors
+#### Distinguish user-facing and developer-facing errors
 
-User-facing messages should be:
-
-* brief
-* specific
-* actionable
-* written in production language
-* free of traceback noise
-
-Developer-facing diagnostics should be:
-
-* concise
-* relevant
-* logged with useful identifiers
-* detailed enough to debug without guesswork
-
+User-facing messages should be brief, specific, and actionable. 
 Artists should not need to parse Python exceptions.
-
-### Catch exceptions deliberately
-
-Catch only what you can handle meaningfully.
-
-Use broad catches only at true workflow boundaries, cleanup paths, or intentionally optional integrations, and log enough context to debug them.
-
-If an exception is intentionally suppressed, explain why.
-
-### Validate early at boundaries
-
-Check assumptions close to the input edge:
-
-* required scene state
-* required nodes
-* expected file layout
-* required config values
-* valid publish roots
-* required ShotGrid links
-
-Fail early rather than allowing downstream crashes.
-
-### Use logging, not `print`
-
-Use the `logging` module for diagnostics in maintained production code.
-
-Logs should be sparse, useful, and searchable.
-
----
-
-## Comments and Docstrings
-
-### Comments explain why, not what
-
-Avoid comments that merely restate the code.
-
-### Prefer restructuring over explanatory comments
-
-If code needs a comment to explain what it does, first ask whether it can be rewritten more clearly.
-
-### Use docstrings deliberately
-
-Docstrings are useful when they improve:
-
-* IDE discoverability
-* public or reused helper clarity
-* workflow boundary understanding
-* non-obvious side effects
-* return or failure expectations
-* wrappers around external APIs
-
-Docstrings are not required for every trivial private helper.
-
-### Module-level docstrings
-
-Each maintained module should have a short docstring explaining what it is for and where it fits in the pipeline.
-
-### Keep comments and docstrings fresh
-
-If a comment or docstring is stale when you touch code, update or remove it immediately.
-
----
-
-## Guidance for UI-Facing Tools
-
-### UI code should optimize for artist confidence
-
-A tool should help the user understand:
-
-* what action they are taking
-* what the tool will do
-* what went wrong
-* how to recover
-
-### Artist-facing messages are required
-
-Any error shown to an artist must use plain production language and, where possible, tell them what to do next.
+Catch errors at the UI boundary and convert them into clean artist-facing messages. Log the technical details separately.
+If an artist doesnt read an error message, that is your fault.
 
 Bad:
 
 * “Publish failed”
-* “Invalid input”
-* “ShotGrid error”
+* “Failed to evaluate unknown context option 'RENDER_THUMBNAIL'.”
 
 Better:
 
 * “Could not publish because the current Maya scene has not been saved.”
-* “Could not create the version because this task is missing its ShotGrid link.”
-* “The selected output directory is not inside the asset publish root.”
+* “Could not render the thumbnail because no camera has been selected”
 
-### Do not leak Python exceptions into the UI
+Developer-facing diagnostics should contain the full context needed to fix an issue without guesswork
 
-Catch errors at the UI boundary and convert them into clean artist-facing messages. Log the technical details separately.
+Example:
 
-### Keep UI and workflow logic separated
-
-Dialog classes should coordinate user interaction. They should not contain large chunks of publish logic, filesystem work, or API orchestration.
-
-### Long-running work should be observable
-
-UI tools should make expensive operations visible through progress, status, or clear blocking behavior. Do not leave artists guessing whether the tool is hung.
-
----
-
-## Guidance for Modifying Legacy Code
-
-### Improve touched code opportunistically
-
-When modifying a file, make safe local improvements where they clearly help.
-
-Do not turn a small fix into a multi-file cleanup campaign.
-
-### Preserve behavior unless behavior change is explicit
-
-A style improvement should not silently change pipeline semantics.
-
-If behavior must change, make that change explicit and document why.
-
-### Extract new logic out of legacy hubs
-
-If a legacy file is already too large or too mixed-purpose, prefer adding new logic in a small adjacent module and thinning the old entry point rather than making the large file larger.
-
-### Mark intentional workarounds
-
-If code exists to work around a DCC bug, platform bug, or external API limitation, label it clearly so it can be found and removed later.
-
----
-
-## Tooling and Enforcement
-
-All maintained code should pass:
-
-* `ruff format`
-* `ruff check`
-* `ty check`
-
-Do not suppress lint or type errors casually.
-
-If `# noqa`, `# type: ignore`, or similar suppression is necessary, keep it narrow and explain why.
-
----
+```
+14:44:33.144: Node Error: Failed to evaluate unknown context option 'RENDER_THUMBNAIL'.
+              Context:    /stage/componentoutput1/auto_thumbnail_camera
+```
 
 ## When to Write External Documentation
 
-The code should remain the primary source of truth for implementation details.
+The code should remain the primary source of truth for implementation details. 
+Don't ask developers to read a seperate wiki entry to understand what you've written.
 
-Write external documentation when the information is:
+However, artist facing documentation is encouraged! When you make a new tool, add notes and images that explain how to use it to this repositories wiki. 
+Not only will this help inform artists of the resources avalible to them, but it will also help you build a presentable portfolio.
 
-* cross-cutting across many modules
-* operational rather than code-local
-* about workflow policy rather than implementation
-* required before someone can safely modify the system
-* difficult to infer from code alone
+---
+
+## Updating existing code
+
+This codebase does not currently follow this standard everywhere. 😳
+
+Help us out (and yourself) by leaving this codebase better than you found it!
+Dont assume that just because code works it cant be better.
+There are plenty of oppurtinities for improvement!
+
+That being said, you should be *opportunistically* improving the code you touch as you extend it with new features. 
+Do not try to fix code for the sake of fixing code. Changing existing code purely for stylistic reasons increases 
+the chance of unintended side effects for tools people actively use.
 
 ---
 
