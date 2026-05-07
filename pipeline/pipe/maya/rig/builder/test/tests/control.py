@@ -106,7 +106,7 @@ class TestControlsInSet(RigBuildTest):
         if problem_controls:
             self.log_warn(
                 "Scene has controls that aren't in the controls set: "
-                f"{format_max_items(problem_controls, 'control(s)')} need added to the \"{CONTROLS_SET_NAME}\" set."
+                f'{format_max_items(problem_controls, "control(s)")} need added to the "{CONTROLS_SET_NAME}" set.'
             )
             return False
         else:

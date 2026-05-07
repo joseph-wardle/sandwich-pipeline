@@ -34,7 +34,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.shotfile import MAnimShotFileManager; fm = MAnimShotFileManager(); fm.open_file()"
+        -command "from pipe.maya.shotfile import MAnimShotFileManager; fm = MAnimShotFileManager(); fm.open_file()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -69,7 +69,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.shotfile import MAnimShotFileManager; MAnimShotFileManager().save_version_for_current_scene()"
+        -command "from pipe.maya.shotfile import MAnimShotFileManager; MAnimShotFileManager().save_version_for_current_scene()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -104,7 +104,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.shotfile import MAnimShotFileManager; MAnimShotFileManager().open_version_browser()"
+        -command "from pipe.maya.shotfile import MAnimShotFileManager; MAnimShotFileManager().open_version_browser()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -138,7 +138,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import pipe.m.picker; pipe.m.picker.run()"
+        -command "import pipe.maya.picker; pipe.maya.picker.run()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -173,7 +173,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import pipe.m.studiolibrary; pipe.m.studiolibrary.run()"
+        -command "import pipe.maya.studiolibrary; pipe.maya.studiolibrary.run()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -208,7 +208,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import pipe.m.space_switch as spsw; spsw.run()"
+        -command "import pipe.maya.space_switch as spsw; spsw.run()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -278,7 +278,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.playblast import AnimPlayblastDialog; from pipe.m.local import get_main_qt_window; AnimPlayblastDialog(get_main_qt_window()).show();"
+        -command "from pipe.maya.playblast import AnimPlayblastDialog; from pipe.maya.local import get_main_qt_window; AnimPlayblastDialog(get_main_qt_window()).show();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -313,7 +313,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.publish import AnimPublisher; AnimPublisher().publish();"
+        -command "from pipe.maya.publish import AnimPublisher; AnimPublisher().publish();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -348,7 +348,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.m.publish import AnimPublisher\nAnimPublisher(spline_publish=True).publish()"
+        -command "from pipe.maya.publish import AnimPublisher\nAnimPublisher(spline_publish=True).publish()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -383,7 +383,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import pipe.m.wrangler; pipe.m.wrangler.run()"
+        -command "import pipe.maya.wrangler; pipe.maya.wrangler.run()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1

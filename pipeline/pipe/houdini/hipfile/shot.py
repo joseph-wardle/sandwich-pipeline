@@ -33,7 +33,7 @@ log = logging.getLogger(__name__)
 class HShotFileManager(HFileManager):
     _department: str | None
 
-    # `Department` is the canonical enum (see `pipe/h/hipfile/departments.py`);
+    # `Department` is the canonical enum (see `pipe/houdini/hipfile/departments.py`);
     # the class alias is kept so call sites that reference `HShotFileManager.DEPARTMENT`
     # continue to work without touching every site.
     DEPARTMENT = Department

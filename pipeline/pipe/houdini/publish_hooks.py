@@ -228,9 +228,7 @@ register_hook(
 register_hook(
     "turnaround_shotgrid",
     turnaround_shotgrid,
-    description=(
-        "Upload turnaround media and metadata to ShotGrid " "(stub in Phase 7)."
-    ),
+    description=("Upload turnaround media and metadata to ShotGrid (stub in Phase 7)."),
 )
 
 

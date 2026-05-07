@@ -115,7 +115,7 @@ class TestGeoNotSelectable(RigBuildTest):
         if problem_geo:
             self.log_warn(
                 f"Scene has geometry that is selectable: "
-                f'{format_max_items(problem_geo, "mesh(es)")} need to set to reference display to make them unselectable.'
+                f"{format_max_items(problem_geo, 'mesh(es)')} need to set to reference display to make them unselectable."
             )
             return False
         else:

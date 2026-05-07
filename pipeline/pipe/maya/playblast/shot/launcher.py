@@ -1,5 +1,5 @@
 """Headless helpers for the Maya shot playblast flow. The dialog
-(`pipe/m/playblast/shot/dialog.py`) collects user input, builds an
+(`pipe/maya/playblast/shot/dialog.py`) collects user input, builds an
 `MPlayblastConfig`, then calls into these functions to:
 
 - compute final movie file paths,
