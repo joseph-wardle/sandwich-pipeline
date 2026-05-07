@@ -1,13 +1,7 @@
 """Internal: turn record() entity kwargs into a {scope_dim: value} dict.
 
-`record()` accepts the five known scope dimensions as named kwargs (one
-each for show, sequence, shot, asset, department). This module's job is to
-coerce those kwargs into the flat string dict that the JSONL writer and
-the ingester expect — reading `.code` from ShotGrid-style entities,
-stripping strings, and dropping anything that resolves to empty.
-
-The word "scope" stays inside `pipe.telemetry/`. Call sites pass entity
-kwargs straight to `record()` and never see this module.
+Reads `.code` from ShotGrid entities, strips strings, and drops empties.
+Call sites pass entity kwargs straight to `record()`
 """
 
 from __future__ import annotations
@@ -38,10 +32,10 @@ def _build_scope_dict(
 
 
 def _resolve_scope_value(value: object | None) -> str | None:
-    """Coerce a candidate scope value to a clean string, or None if unusable.
+    """Bully a value into a clean string, or None if unusable.
 
-    Strings are stripped. Objects with a `code` attribute (every ShotGrid
-    entity in this repo) read that. Anything else is rejected.
+    Strings are stripped; ShotGrid entities yield their `.code`; anything
+    else returns None.
     """
 
     if value is None:

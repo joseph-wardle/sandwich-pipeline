@@ -118,7 +118,7 @@ class TexConverter:
                 converted_tex = self.convert_tex()
                 converted_preview = self.convert_previewsurface()
             finally:
-                telemetry_event.note(
+                telemetry_event.update(
                     converted_tex_count=len(converted_tex),
                     converted_preview_count=len(converted_preview),
                 )

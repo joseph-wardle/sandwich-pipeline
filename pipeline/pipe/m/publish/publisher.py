@@ -24,11 +24,7 @@ log = logging.getLogger(__name__)
 
 
 class USDExportError(Exception):
-    """Raised when `mc.mayaUSDExport` (or an equivalent USD writer) fails.
-
-    The `error_code` attribute is read by `pipe.telemetry.record` to tag the
-    failure on the emitted `publish.usd` event.
-    """
+    """`error_code` is read by `telemetry.record()`"""
 
     error_code = "USD_EXPORT_FAILED"
 
@@ -125,17 +121,7 @@ class Publisher:
         return self._PUBLISH_KIND
 
     def _publish_scope_kwargs(self) -> dict[str, object]:
-        """Return entity kwargs for `telemetry.record()` describing this publish.
-
-        `_entity` is polymorphic across subclasses: `AssetPublisher` and
-        `PrevisAssetPublisher` set it to an `Asset`; `CameraPublisher` sets
-        it to a `Shot`; the anim publishers leave it unset and use `_shot`.
-        `_scene_asset` is set by `AssetPublisher` when the active scene
-        resolves to an asset.
-
-        Spread the result into `telemetry.record(**self._publish_scope_kwargs())`.
-        Only the dimensions that resolve to a real entity are included.
-        """
+        """Return entity kwargs for `telemetry.record()` describing this publish."""
         entity = getattr(self, "_entity", None)
         shot = getattr(self, "_shot", None)
         scene_asset = getattr(self, "_scene_asset", None)
@@ -249,10 +235,9 @@ class Publisher:
         return True
 
     def _do_publish_export(self) -> None:
-        """Run the timed export work, wrapped in a telemetry event.
+        """Run the timed export, wrapped in a telemetry event.
 
-        Subclasses that leave `_PUBLISH_KIND` as None publish without
-        recording an event.
+        Subclasses with `_PUBLISH_KIND = None` publish without telemetry.
         """
         kind = self._publish_kind()
         if kind is None:

@@ -1,19 +1,16 @@
 """Telemetry runtime configuration, driven by `PIPE_TELEMETRY_*` env vars.
 
-Defaults work without any env vars set. The two knobs that matter most:
-
-- `PIPE_TELEMETRY_ENABLED=0` disables emit entirely (returns a no-op writer).
-- `PIPE_TELEMETRY_STRICT=1` flips validation from "drop and warn" to "raise."
-  Used in CI; never set in production.
+Defaults work without any env vars set. The knob that matters most:
+`PIPE_TELEMETRY_ENABLED=0` disables emit entirely (returns a no-op writer).
 
 The spool directory defaults to the shared production path
 (`get_shared_telemetry_spool_dir()` in `pipeline/shared/util.py`). Override
 with `PIPE_TELEMETRY_SPOOL_DIR` for tests or for the laptop POC.
 
 `PIPE_TELEMETRY_RETENTION_DAYS=0` (the default) disables the spool retention
-sweep entirely — JSONL files persist forever, which preserves the canonical
-record of every event ever emitted. Set to a positive integer (e.g. 90) to
-opt into time-based pruning if disk pressure ever becomes a concern.
+sweep — JSONL files persist forever, preserving the canonical record of
+every event ever emitted. Set to a positive integer to opt into time-based
+pruning if disk pressure becomes a concern.
 """
 
 from __future__ import annotations
@@ -62,7 +59,6 @@ class TelemetryConfig:
     """Resolved telemetry settings for this process."""
 
     enabled: bool
-    strict: bool
     spool_dir: Path
     queue_max: int
     flush_seconds: float
@@ -75,7 +71,6 @@ def load_config() -> TelemetryConfig:
 
     return TelemetryConfig(
         enabled=_parse_bool("PIPE_TELEMETRY_ENABLED", default=True),
-        strict=_parse_bool("PIPE_TELEMETRY_STRICT", default=False),
         spool_dir=_resolve_spool_dir(),
         queue_max=_parse_int("PIPE_TELEMETRY_QUEUE_MAX", default=5000, minimum=1),
         flush_seconds=_parse_int("PIPE_TELEMETRY_FLUSH_MS", default=1000, minimum=1)

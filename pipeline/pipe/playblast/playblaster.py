@@ -23,8 +23,7 @@ log = logging.getLogger(__name__)
 class PlayblastError(Exception):
     """Raised when playblast image-write, encode, or copy steps fail.
 
-    The `error_code` attribute is read by `pipe.telemetry.record` to tag the
-    failure on the emitted `playblast.create` event.
+    `error_code` is read by `telemetry.record()` to classify the event.
     """
 
     error_code = "PLAYBLAST_FAILED"
@@ -116,7 +115,7 @@ class Playblaster(metaclass=ABCMeta):
                     image_basename=image_basename,
                     start_frame=frame_start,
                 )
-                telemetry_event.note(output_count=len(final_paths))
+                telemetry_event.update(output_count=len(final_paths))
 
         if not log.isEnabledFor(logging.DEBUG):
             self._cleanup_temp_files(tempdir, image_basename)
@@ -217,10 +216,7 @@ class Playblaster(metaclass=ABCMeta):
     ) -> list[Path]:
         """Encode one preset, copy to all destinations, run post-process.
 
-        Returns the list of final destination paths actually produced (the
-        caller folds `len(final_paths)` into the playblast's telemetry event).
-        Raises PlayblastError on encode/copy failure; post-process failures
-        are best-effort and logged.
+        Returns the destination paths produced
         """
         del shot  # parity with `_build_ffmpeg_input`; HUD subclasses may want this
         try:

@@ -1,12 +1,7 @@
-"""Telemetry event registry — the six tool event types this pipeline emits.
+"""Telemetry event registry — the event types this pipeline emits.
 
-The registry is the single source of truth for which events exist and what
-fields each one's `payload` is expected to contain. The `action` context
-manager and the bare `emit` function use it for validation; the ingester
-uses it on the read side; Grafana dashboards reference these names.
 
-Adding a new event type is one entry in `EVENT_DEFINITIONS` and one
-`EVENT_*` constant. Adding a new payload field is editing one tuple.
+To add an event: one entry in `EVENT_DEFINITIONS` and one `EVENT_*` constant.
 """
 
 from __future__ import annotations
@@ -66,11 +61,7 @@ EVENT_DEFINITIONS: Final[tuple[EventDefinition, ...]] = (
     ),
     EventDefinition(
         event_type=EVENT_TEXTURE_EXPORT_SUBSTANCE,
-        description=(
-            "Substance Painter texture export terminal event. "
-            "The asset identity lives on the event's scope (asset= kwarg "
-            "to record()), not duplicated in the payload."
-        ),
+        description="Substance Painter texture export terminal event.",
         required_payload_fields=("texture_set_count",),
         has_duration=True,
     ),

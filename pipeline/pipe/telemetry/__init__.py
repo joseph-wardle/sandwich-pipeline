@@ -1,6 +1,6 @@
 """Pipeline telemetry — record what tools did, how long it took, and what failed.
 
-Wrap a workflow step with the `record()` context manager:
+Wrap a workflow step with `record()`:
 
     from pipe import telemetry
 
@@ -11,32 +11,9 @@ Wrap a workflow step with the `record()` context manager:
     ) as telemetry_event:
         do_the_publish()
 
-The event context manager emits exactly one terminal event on exit
-(`success` with duration, or `error` with `error_code` from the exception).
-It never suppresses exceptions.
-
-The `payload` kwarg is the dict of event-specific facts — what happened.
-The five entity kwargs (`show`, `sequence`, `shot`, `asset`, `department`)
-name the production entities this event is *for*; each accepts a ShotGrid
-entity object with a `.code` attribute or a plain string. Pass only the
-dimensions that apply to the event.
-
-Failure classification: `record()` reads `exc.error_code` from any exception
-that escapes a wrapped block. Workflow modules define their own typed
-exceptions next to the raise sites (e.g. `PlayblastError`,
-`USDExportError`) and set `error_code` as a class attribute. Anything
-without the attribute falls through to `error_code = "UNKNOWN"`. Call
-sites can also override with `telemetry_event.fail(code, message)` inside
-the block — typically when the work returns a structured result instead
-of raising.
-
-Where to find what:
-
-- ``events.py``  — the tool event types this pipeline emits, plus payload contracts
-- ``scope.py``   — internal coercion of entity kwargs into the scope dict
-- ``emit.py``    — implementation of record() / Event and the lower-level emit()
-- ``spool.py``   — JSONL writer to the shared production spool
-- ``config.py``  — env-var driven settings (PIPE_TELEMETRY_*)
+One event lands in the spool when the block exits, either `success` with a
+duration on clean exit, or `error` carrying the exception's `error_code`
+on failure. The block never swallows the exception.
 """
 
 from __future__ import annotations

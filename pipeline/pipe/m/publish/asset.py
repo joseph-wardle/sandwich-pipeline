@@ -50,14 +50,7 @@ from .publisher import PublishCopyError, Publisher, USDExportError
 
 
 class HoudiniBuildError(Exception):
-    """Raised when the headless Houdini component build fails.
-
-    Maya launches Houdini's asset builder as a subprocess; failures during
-    launch, parsing, or the build itself surface here. The matching string
-    in `pipe.h.assetbuilder` (which cannot import this class — its parent
-    package eagerly imports `hou`, which Maya does not have) must stay in
-    sync. The `error_code` attribute is read by `pipe.telemetry.record`.
-    """
+    """`error_code` is read by `telemetry.record()`"""
 
     error_code = "HOUDINI_BUILD_FAILED"
 
@@ -992,15 +985,15 @@ class AssetPublisher(Publisher):
                     asset, asset_paths, asset_name, variant, env=env
                 )
             except HoudiniBuildError as exc:
-                # Inline note: the error event needs warnings/errors_count
+                # Inline update: the error event needs warnings/errors_count
                 # parsed from hython's failed stdout, otherwise the dashboard
                 # has zero diagnostics on every Houdini-build failure.
-                telemetry_event.note(
+                telemetry_event.update(
                     warnings_count=len(exc.payload.get("warnings") or []),
                     errors_count=len(exc.payload.get("errors") or []),
                 )
                 raise
-            telemetry_event.note(
+            telemetry_event.update(
                 warnings_count=len(payload.get("warnings") or []),
                 errors_count=len(payload.get("errors") or []),
             )
@@ -1013,14 +1006,7 @@ class AssetPublisher(Publisher):
         variant: str,
         env: dict[str, str],
     ) -> dict[str, Any]:
-        """Run hython, parse its structured result, and return the payload.
-
-        Raises HoudiniBuildError on subprocess failure or unparseable output.
-        When the failure was parseable (hython exited non-zero but produced
-        its JSON result block), the parsed payload rides on the exception's
-        `payload` attribute so the caller can fold partial diagnostics into
-        the telemetry error event.
-        """
+        """Run hython and return its parsed JSON result payload."""
         command = [
             str(Executables.hython),
             "-m",
@@ -1041,9 +1027,7 @@ class AssetPublisher(Publisher):
             command.extend(["--asset-id", str(asset.id)])
 
         log.info(
-            "Running Houdini headless publish for %s (variant=%s)",
-            asset_name,
-            variant,
+            f"Running Houdini headless publish for {asset_name} (variant={variant})",
         )
 
         try:

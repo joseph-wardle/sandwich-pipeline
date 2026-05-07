@@ -494,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
     ) as telemetry_event:
         result = _run_publish(args)
         _emit_result(result)
-        telemetry_event.note(
+        telemetry_event.update(
             warnings_count=_result_message_count(result, "warnings"),
             errors_count=_result_message_count(result, "errors"),
         )

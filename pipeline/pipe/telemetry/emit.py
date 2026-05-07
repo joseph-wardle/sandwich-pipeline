@@ -1,41 +1,4 @@
-"""The telemetry surfaces: the `record()` context manager and the bare `emit()`.
-
-`record(event_type, payload=..., **entity_kwargs)` wraps a workflow step:
-
-    from pipe import telemetry
-
-    with telemetry.record(
-        telemetry.EVENT_PUBLISH_USD,
-        payload={"kind": "asset", "publish_path": str(path)},
-        asset=asset,
-    ) as telemetry_event:
-        do_the_publish()                       # success: emits success on exit
-        # raise SomePipelineError("...")       # error:   emits error on exit, re-raises
-
-The CM emits exactly one terminal event when the block exits — `success` with
-`duration_ms`, or `error` with the exception's `error_code`. It never
-suppresses the exception.
-
-`payload` carries event-specific facts (the metrics about *what happened*).
-The `show`/`sequence`/`shot`/`asset`/`department` kwargs carry the entity
-context (which production entity this event is *for*) and accept either a
-ShotGrid entity object (with a `.code` attribute) or a plain string.
-
-Failure classification is duck-typed: `record()` reads
-`getattr(exc, "error_code")` from whatever exception escapes the block.
-Workflow modules each define their own typed exceptions alongside the
-raise sites and set `error_code` as a class attribute (see
-`pipe.playblast.playblaster.PlayblastError`,
-`pipe.m.publish.publisher.USDExportError`, etc.). Exceptions without the
-attribute fall through to `error_code = "UNKNOWN"`. Call sites can
-override on a case-by-case basis with `telemetry_event.fail(code, message)`
-— typically when the work returns a structured result instead of raising.
-
-`emit(event_type, status, payload, scope=None)` is the underlying primitive
-for one-shot events that don't fit the workflow shape. No in-tree caller
-uses it today; it remains available for code that needs to record a single
-terminal event without a CM around it.
-"""
+"""Implementation of `record()`, the `Event` context manager, and bare `emit()`."""
 
 from __future__ import annotations
 
@@ -65,11 +28,7 @@ _LOG = logging.getLogger(__name__)
 
 _UNKNOWN_ERROR_CODE: Final[str] = "UNKNOWN"
 
-#: Env var the parent process sets so a child subprocess inherits its
-#: action_id. Children read this at their entry point and skip their own
-#: emission so the parent stays the sole emitter. Written by
-#: `Event.attach_to_subprocess`; read by `pipe.h.assetbuilder.main`.
-#: Internal — call sites use the method, not the constant.
+#: Internal env var carrying the parent's action_id into a child subprocess.
 _ACTION_ID_ENV: Final[str] = "PIPE_TELEMETRY_ACTION_ID"
 
 
@@ -98,40 +57,33 @@ def _validate_payload(
     definition: EventDefinition,
     status: Status,
     payload: Mapping[str, Any],
-    *,
-    strict: bool,
 ) -> bool:
-    """Check `payload` against the registry contract. Returns True if valid.
+    """Check `payload` against the event's required fields.
 
-    In strict mode, raises ValueError on contract violations (used in CI).
-    In lenient mode (production default), logs a WARNING and returns False
-    so the caller can drop the event.
+    Returns True if valid. On invalid input, logs a warning and returns
+    False so the caller drops the event.
     """
 
     if status not in definition.statuses:
-        return _report_invalid(
-            f"event {definition.event_type!r} does not allow status "
-            f"{status!r}; allowed: {definition.statuses}",
-            strict=strict,
+        _LOG.warning(
+            "Telemetry event %r does not allow status %r; allowed: %s",
+            definition.event_type,
+            status,
+            definition.statuses,
         )
+        return False
 
     missing = [
         field for field in definition.required_payload_fields if field not in payload
     ]
     if missing:
-        return _report_invalid(
-            f"event {definition.event_type!r} payload is missing required "
-            f"fields: {missing}",
-            strict=strict,
+        _LOG.warning(
+            "Telemetry event %r payload is missing required fields: %s",
+            definition.event_type,
+            missing,
         )
+        return False
     return True
-
-
-def _report_invalid(message: str, *, strict: bool) -> bool:
-    if strict:
-        raise ValueError(message)
-    _LOG.warning("Telemetry event rejected: %s", message)
-    return False
 
 
 def _build_event_row(
@@ -145,11 +97,7 @@ def _build_event_row(
     error_code: str | None,
     error_message: str | None,
 ) -> dict[str, Any]:
-    """Build the JSONL row that the ingester will read for this event.
-
-    The returned dict is the on-disk shape; the public `Event` class is
-    distinct from this dict and carries the in-progress workflow handle.
-    """
+    """Build the JSONL row that the ingester will read for this event."""
 
     row: dict[str, Any] = {
         "event_id": str(uuid.uuid4()),
@@ -184,18 +132,14 @@ def emit(
     error_message: str | None = None,
     duration_ms: int | None = None,
 ) -> None:
-    """Emit one telemetry event directly without a CM around it.
+    """Emit one telemetry event directly, without wrapping a `with` block.
 
-    For workflow-shaped events (publish, build, export, render), use
-    `record()` — it handles success/error/timing correctly and can't be
-    forgotten on the error path.
+    Prefer `record()` for workflow steps — it handles timing and the
+    error path automatically.
     """
 
-    from .config import load_config
-
-    config = load_config()
     definition = get_event_definition(event_type)
-    if not _validate_payload(definition, status, payload, strict=config.strict):
+    if not _validate_payload(definition, status, payload):
         return
 
     row = _build_event_row(
@@ -214,14 +158,12 @@ def emit(
 class Event:
     """An in-progress telemetry event for one workflow step.
 
-    Construct via `record(event_type, payload=..., **entity_kwargs)`. Do
-    not instantiate this class directly outside the telemetry module.
-
-    Bound name at the call site is conventionally `telemetry_event`:
+    Construct via `record(...)`; the bound name is conventionally
+    `telemetry_event`:
 
         with telemetry.record(...) as telemetry_event:
             do_the_work()
-            telemetry_event.note(metric=value)        # final metrics
+            telemetry_event.update(metric=value)
     """
 
     def __init__(
@@ -241,42 +183,27 @@ class Event:
 
     @property
     def action_id(self) -> str:
-        """Unique id for this event. Useful for correlating subprocesses
-        — see `attach_to_subprocess`."""
+        """Unique id for this event. See `attach_to_subprocess` for use."""
 
         return self._action_id
 
-    def note(self, **kwargs: Any) -> None:
-        """Add or overwrite payload fields on this event.
-
-        Prefer one call at the bottom of the `with` block, after the work
-        completes — so telemetry sits at the seam, not interleaved with
-        publish logic. Mid-flight calls are allowed only when partial-metric
-        fidelity on failure is genuinely useful, and should carry a comment
-        explaining why that metric needed to escape early.
-        """
+    def update(self, **kwargs: Any) -> None:
+        """Add or overwrite payload fields on this event."""
 
         self._payload.update(kwargs)
 
     def fail(self, error_code: str, message: str) -> None:
-        """Explicitly mark this event as failed before it exits.
+        """Mark this event failed with the given error code and message.
 
-        Use only when the work returns a structured result (no exception)
-        and you've inspected it for failure. When the work raises a typed
-        exception with an `error_code` class attribute, prefer letting that
-        classify the failure automatically — do not call `fail()`.
+        Use only when the work returns a result instead of raising. When
+        a typed exception with `error_code` is available, let it classify
+        the failure automatically — don't call this.
         """
 
         self._explicit_failure = (error_code, message)
 
     def attach_to_subprocess(self, env: dict[str, str]) -> None:
-        """Mutate `env` so a child subprocess correlates with this event.
-
-        The child reads the env var at its entry point and skips its own
-        emission, so the parent's `record()` block remains the sole emitter
-        for this action_id. Intended use: pass `env` straight into
-        `subprocess.run`/`Popen` after this call.
-        """
+        """Mutate `env` so a child subprocess correlates with this event."""
 
         env[_ACTION_ID_ENV] = self._action_id
 
@@ -325,12 +252,7 @@ class Event:
         error_code: str | None,
         error_message: str | None,
     ) -> None:
-        from .config import load_config
-
-        config = load_config()
-        if not _validate_payload(
-            self._definition, status, self._payload, strict=config.strict
-        ):
+        if not _validate_payload(self._definition, status, self._payload):
             return
 
         row = _build_event_row(
@@ -358,15 +280,13 @@ def record(
 ) -> Event:
     """Wrap a workflow step in a telemetry event.
 
-    Returns a context manager. On clean exit, emits a `success` event with
+    Returns a context manager. On exit, emits a `success` event with
     `duration_ms`. On exception, emits an `error` event with `error_code`
-    derived from the exception (`exc.error_code` if present, else `UNKNOWN`)
-    and re-raises the exception unchanged.
+    derived from the exception
 
-    `payload` is the dict of event-specific facts (the metrics about *what
-    happened*). The five entity kwargs name the production entities this
-    event is *for* — each accepts a ShotGrid entity object (with a `.code`
-    attribute) or a plain string; pass only the dimensions that apply.
+    `payload` is event-specific data (what happened). The entity kwargs
+    attach this event to a show/sequence/shot/asset/department; each
+    accepts a ShotGrid entity or a plain string. Pass only what applies.
     """
 
     scope = _build_scope_dict(
@@ -380,12 +300,10 @@ def record(
 
 
 def _running_under_parent_event() -> bool:
-    """Return True when a parent process is wrapping this one in its own event.
+    """Return True if a parent process is already recording this work.
 
-    DCC subprocesses (e.g. `pipe.h.assetbuilder` launched from Maya) check
-    this at their entry point. When the parent has set the correlation env
-    var via `Event.attach_to_subprocess`, the child must skip its own
-    emission so the event isn't double-counted.
+    DCC subprocesses check this at their entry point and skip their own
+    emission when set, so the event isn't double-counted.
     """
 
     return bool(os.getenv(_ACTION_ID_ENV, "").strip())

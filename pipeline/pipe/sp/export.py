@@ -386,7 +386,7 @@ class Exporter:
         )
 
         # Counts populated as work proceeds. The finally block at the bottom
-        # emits one note() with whatever has been reached when the block
+        # emits one update() with whatever has been reached when the block
         # exits — success or failure both report partial progress, which the
         # dashboard needs to diagnose where in the export pipeline a failure
         # occurred.
@@ -493,7 +493,7 @@ class Exporter:
 
                 return all_exported_textures
             finally:
-                telemetry_event.note(
+                telemetry_event.update(
                     texture_set_count=resolved_target_count,
                     udim_set_count=udim_target_count,
                     preexisting_source_file_count=preexisting_src_count,
