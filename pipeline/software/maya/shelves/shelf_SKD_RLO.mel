@@ -1,4 +1,4 @@
-global proc shelf_Bobo_RLO () {
+global proc shelf_SKD_RLO () {
     global string $gBuffStr;
     global string $gBuffStr0;
     global string $gBuffStr1;

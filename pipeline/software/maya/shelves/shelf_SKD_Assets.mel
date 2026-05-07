@@ -1,4 +1,4 @@
-global proc shelf_Bobo_Assets () {
+global proc shelf_SKD_Assets () {
     global string $gBuffStr;
     global string $gBuffStr0;
     global string $gBuffStr1;
