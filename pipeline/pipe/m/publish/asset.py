@@ -6,7 +6,6 @@ import os
 import re
 import shutil
 import subprocess
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence, cast
@@ -28,7 +27,8 @@ from Qt.QtWidgets import (
 )
 from software.houdini.dcc import HoudiniDCC
 
-from pipe.asset.paths import paths_for_asset
+from pipe import telemetry
+from pipe.asset.paths import AssetPaths, paths_for_asset
 from pipe.asset.version_adapter import asset_owner_for, maya_model_stream
 from pipe.glui.dialogs import (
     FilteredListDialog,
@@ -46,7 +46,18 @@ from pipe.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
 from pipe.versioning import BackupResult
 from pipe.versioning.store import backup_if_changed
 
-from .publisher import Publisher
+from .publisher import PublishCopyError, Publisher, USDExportError
+
+
+class HoudiniBuildError(Exception):
+    """`error_code` is read by `telemetry.record()`"""
+
+    error_code = "HOUDINI_BUILD_FAILED"
+
+    def __init__(self, message: str, *, payload: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.payload: dict[str, Any] = dict(payload) if payload else {}
+
 
 try:
     from modelChecker.modelChecker_UI import UI as ImportedMCUI
@@ -60,7 +71,6 @@ log = logging.getLogger(__name__)
 ENABLE_HOUDINI_ASSET_BUILD = True
 _HOUDINI_RESULT_START = "--BUILD-RESULT--"
 _HOUDINI_RESULT_END = "--END-BUILD-RESULT--"
-_TELEMETRY_ACTION_ID_ENV = "PIPE_TELEMETRY_ACTION_ID"
 
 
 def _current_scene_path() -> Path | None:
@@ -68,12 +78,6 @@ def _current_scene_path() -> Path | None:
     if isinstance(raw_path, str) and raw_path:
         return Path(raw_path)
     return None
-
-
-class HoudiniBuildError(RuntimeError):
-    """Raised when the Houdini asset build fails"""
-
-    pass
 
 
 class _PublishAssetVariantControls:
@@ -314,6 +318,8 @@ class PublishAssetPickerDialog(
 
 
 class AssetPublisher(Publisher):
+    _PUBLISH_KIND = "asset"
+
     _override: bool
     _geo_variant: str
     _component_export_dir: Path | None
@@ -702,233 +708,187 @@ class AssetPublisher(Publisher):
         return message
 
     def publish(self) -> None:
-        publish_telemetry = self._new_publish_telemetry_state()
-        publish_path: Path | None = None
-        try:
-            with maintain_selection():
-                self._backup_result = None
-                self._backup_status = None
-                self._version_title = None
-                self._version_note = None
-                if not self._ensure_scene_saved():
-                    self._emit_publish_error(
-                        publish_telemetry,
-                        error_code_name="precheck",
-                        error_message="Scene must be saved before publishing",
-                        exception_type="PrepublishFailed",
-                        publish_path=publish_path,
-                    )
+        with maintain_selection():
+            self._backup_result = None
+            self._backup_status = None
+            self._version_title = None
+            self._version_note = None
+
+            if not self._ensure_scene_saved():
+                return
+            if not self._prepublish():
+                return
+
+            if entity_list := self._get_entity_list():
+                if not self._select_asset_publish_target_or_cancel(entity_list):
                     return
 
-                if not self._prepublish():
-                    self._emit_publish_error(
-                        publish_telemetry,
-                        error_code_name="precheck",
-                        error_message="Publish precheck failed before export",
-                        exception_type="PrepublishFailed",
-                        publish_path=publish_path,
-                    )
-                    return
+            save_path = self._get_save_path()
+            self._publish_path = save_path  # ty:ignore[invalid-assignment]
+            if not self._publish_path:
+                mc.error("No save path found!")
+                return
 
-                if entity_list := self._get_entity_list():
-                    dialog_type = cast(Any, self._dialog_T)
-                    if self._dialog_T in (
-                        PublishAssetOptionsDialog,
-                        PublishAssetPickerDialog,
-                    ):
-                        self._dialog = dialog_type(
-                            self._window, entity_list, self._conn
-                        )
-                    else:
-                        self._dialog = self._dialog_T(self._window, entity_list)
+            if not self._presave():
+                return
 
-                    if not self._dialog.exec_():
-                        return
+            self._do_publish_export()
 
-                    selected_item = self._dialog.get_selected_item()
-                    if selected_item is None:
-                        MessageDialog(
-                            self._window,
-                            "Error: Nothing selected. Nothing exported",
-                            "Error",
-                        ).exec_()
-                        self._emit_publish_error(
-                            publish_telemetry,
-                            error_code_name="precheck",
-                            error_message="No publish target selected",
-                            exception_type="SelectionError",
-                            publish_path=publish_path,
-                        )
-                        return
-                    self._selected_item = selected_item
+            MessageDialog(
+                self._window,
+                self._get_confirm_message(),
+                "Export Complete",
+            ).exec_()
 
-                    if self._use_sg_entity:
-                        try:
-                            self._entity = cast(
-                                SGEntity,
-                                self._get_entity_from_name(self._selected_item),
-                            )
-                        except ShotGridError as exc:
-                            entity_label = Asset.__name__
-                            MessageDialog(
-                                self._window,
-                                "Error: The selected item did not correspond to a valid "
-                                f"{entity_label} in ShotGrid. Please "
-                                "report this error. Nothing exported",
-                                "Error",
-                            ).exec_()
-                            self._emit_publish_error(
-                                publish_telemetry,
-                                error_code_name="precheck",
-                                error_message=str(exc)
-                                or "Selected item is not a valid SG entity",
-                                exception_type=type(exc).__name__,
-                                publish_path=publish_path,
-                            )
-                            return
+    def _select_asset_publish_target_or_cancel(self, entity_list: list[str]) -> bool:
+        """Run the asset-publisher dialog and populate `self._selected_item`/`self._entity`.
 
-                self._restart_publish_telemetry_timer(publish_telemetry)
-                save_path = self._get_save_path()
-                self._publish_path = save_path  # ty:ignore[invalid-assignment]
-                publish_path = self._publish_path
-                if not self._publish_path:
-                    self._emit_publish_error(
-                        publish_telemetry,
-                        error_code_name="precheck",
-                        error_message="No publish path resolved",
-                        exception_type="PathResolutionError",
-                        publish_path=publish_path,
-                    )
-                    mc.error("No save path found!")
-                    return
+        Returns True if an entity was successfully selected. Returns False if
+        the user cancelled or the selection was invalid — in which case an
+        artist-facing dialog has already been shown.
+        """
+        dialog_type = cast(Any, self._dialog_T)
+        if self._dialog_T in (PublishAssetOptionsDialog, PublishAssetPickerDialog):
+            self._dialog = dialog_type(self._window, entity_list, self._conn)
+        else:
+            self._dialog = self._dialog_T(self._window, entity_list)
 
-                if not self._presave():
-                    self._emit_publish_error(
-                        publish_telemetry,
-                        error_code_name="precheck",
-                        error_message="Publish presave checks failed",
-                        exception_type="PresaveFailed",
-                        publish_path=publish_path,
-                    )
-                    return
+        if not self._dialog.exec_():
+            return False
 
-                self._publish_path.parent.mkdir(parents=True, exist_ok=True)
-                temp_publish_path = (
-                    os.getenv("TEMP", "") + os.pathsep + self._publish_path.name
+        selected_item = self._dialog.get_selected_item()
+        if selected_item is None:
+            MessageDialog(
+                self._window,
+                "Error: Nothing selected. Nothing exported",
+                "Error",
+            ).exec_()
+            return False
+        self._selected_item = selected_item
+
+        if self._use_sg_entity:
+            try:
+                self._entity = cast(
+                    SGEntity, self._get_entity_from_name(self._selected_item)
                 )
-
-                kwargs = {
-                    "file": str(
-                        temp_publish_path if self._IS_WINDOWS else self._publish_path
-                    ),
-                    "selection": True,
-                    "stripNamespaces": True,
-                    "exportCollectionBasedBindings": True,
-                    **self._get_mayausd_kwargs(),
-                }
-
-                publish_steps = ["Exporting USD"]
-                if ENABLE_HOUDINI_ASSET_BUILD:
-                    publish_steps.append("Building Houdini component")
-                publish_steps.append("Backing up asset")
-
-                with progress_scope(
-                    parent=self._window,
-                    title="Publishing Asset",
-                    steps=publish_steps,
-                ) as progress:
-                    progress.begin_step("Exporting USD", "This may take a moment...")
-                    try:
-                        mc.mayaUSDExport(**kwargs)  # type: ignore
-                    except Exception as exc:
-                        log.exception("USD export failed")
-                        MessageDialog(
-                            self._window,
-                            "WARNING: Publish failed! Please check the console for more information",
-                            "Export Failed",
-                        ).exec_()
-                        self._emit_publish_error(
-                            publish_telemetry,
-                            error_code_name="export",
-                            error_message=str(exc),
-                            exception_type=type(exc).__name__,
-                            publish_path=publish_path,
-                        )
-                        return
-
-                    if self._IS_WINDOWS:
-                        try:
-                            shutil.move(temp_publish_path, self._publish_path)
-                        except Exception as exc:
-                            self._emit_publish_error(
-                                publish_telemetry,
-                                error_code_name="windows_move",
-                                error_message=str(exc),
-                                exception_type=type(exc).__name__,
-                                publish_path=publish_path,
-                            )
-                            raise
-
-                    if ENABLE_HOUDINI_ASSET_BUILD:
-                        progress.begin_step(
-                            "Building Houdini component",
-                            "This may take a moment...",
-                        )
-                    try:
-                        self._postpublish()
-                    except Exception as exc:
-                        self._emit_publish_error(
-                            publish_telemetry,
-                            error_code_name="copy",
-                            error_message=str(exc),
-                            exception_type=type(exc).__name__,
-                            publish_path=publish_path,
-                        )
-                        raise
-
-                    progress.begin_step("Backing up asset")
-                    asset = None
-                    if getattr(self, "_entity", None):
-                        asset = cast(Asset, self._entity)
-                    if asset is None:
-                        asset = self._scene_asset or self._resolve_scene_asset()
-                    try:
-                        if asset:
-                            self._run_backup(asset)
-                        else:
-                            self._backup_status = (
-                                "Backup skipped: asset could not be resolved."
-                            )
-                            log.warning("Backup skipped: asset could not be resolved.")
-                    except Exception as exc:
-                        self._emit_publish_error(
-                            publish_telemetry,
-                            error_code_name="copy",
-                            error_message=str(exc),
-                            exception_type=type(exc).__name__,
-                            publish_path=publish_path,
-                        )
-                        raise
-
-                self._emit_publish_success(
-                    publish_telemetry,
-                    publish_path=publish_path,
-                )
-
+            except ShotGridError:
+                entity_label = Asset.__name__
                 MessageDialog(
                     self._window,
-                    self._get_confirm_message(),
-                    "Export Complete",
+                    "Error: The selected item did not correspond to a valid "
+                    f"{entity_label} in ShotGrid. Please "
+                    "report this error. Nothing exported",
+                    "Error",
                 ).exec_()
+                return False
+
+        return True
+
+    def _do_publish_export(self) -> None:
+        """The timed export work for an asset publish.
+
+        Reads as a checklist: export USD → run postpublish (Houdini build) →
+        back up the asset. Each stage raises a typed exception on failure;
+        `record()` reads `error_code` from those typed exceptions.
+        """
+        kind = self._publish_kind() or "asset"
+
+        with telemetry.record(
+            telemetry.EVENT_PUBLISH_USD,
+            payload={
+                "kind": kind,
+                "publish_path": str(self._publish_path),
+            },
+            **self._publish_scope_kwargs(),
+        ):
+            with progress_scope(
+                parent=self._window,
+                title="Publishing Asset",
+                steps=self._publish_step_labels(),
+            ) as progress:
+                progress.begin_step("Exporting USD", "This may take a moment...")
+                self._export_usd_to_publish_path()
+
+                if ENABLE_HOUDINI_ASSET_BUILD:
+                    progress.begin_step(
+                        "Building Houdini component",
+                        "This may take a moment...",
+                    )
+                self._run_postpublish_hook()
+
+                progress.begin_step("Backing up asset")
+                self._backup_active_asset()
+
+    @staticmethod
+    def _publish_step_labels() -> list[str]:
+        """Step labels for the asset publish progress dialog."""
+        steps = ["Exporting USD"]
+        if ENABLE_HOUDINI_ASSET_BUILD:
+            steps.append("Building Houdini component")
+        steps.append("Backing up asset")
+        return steps
+
+    def _export_usd_to_publish_path(self) -> None:
+        """Run `mayaUSDExport` plus the Windows-specific temp-file workaround.
+
+        On Windows, `mayaUSDExport` writes to a temp directory and then we
+        move the result into the final publish path — see
+        https://github.com/PixarAnimationStudios/OpenUSD/issues/849.
+        """
+        self._publish_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_publish_path = os.getenv("TEMP", "") + os.pathsep + self._publish_path.name
+
+        kwargs = {
+            "file": str(temp_publish_path if self._IS_WINDOWS else self._publish_path),
+            "selection": True,
+            "stripNamespaces": True,
+            "exportCollectionBasedBindings": True,
+            **self._get_mayausd_kwargs(),
+        }
+
+        try:
+            mc.mayaUSDExport(**kwargs)  # type: ignore
         except Exception as exc:
-            self._emit_publish_error(
-                publish_telemetry,
-                error_code_name="precheck",
-                error_message=str(exc),
-                exception_type=type(exc).__name__,
-                publish_path=publish_path,
-            )
-            raise
+            log.exception("USD export failed")
+            MessageDialog(
+                self._window,
+                "WARNING: Publish failed! Please check the console for more information",
+                "Export Failed",
+            ).exec_()
+            raise USDExportError(str(exc) or exc.__class__.__name__) from exc
+
+        if self._IS_WINDOWS:
+            try:
+                shutil.move(temp_publish_path, self._publish_path)
+            except Exception as exc:
+                raise PublishCopyError(
+                    f"Could not move publish from {temp_publish_path} to "
+                    f"{self._publish_path}: {exc}"
+                ) from exc
+
+    def _run_postpublish_hook(self) -> None:
+        """Invoke the subclass postpublish hook (e.g. the Houdini build)."""
+        try:
+            self._postpublish()
+        except Exception as exc:
+            raise PublishCopyError(f"Postpublish step failed: {exc}") from exc
+
+    def _backup_active_asset(self) -> None:
+        """Back up the published asset using the entity / scene / resolver chain."""
+        asset = None
+        if getattr(self, "_entity", None):
+            asset = cast(Asset, self._entity)
+        if asset is None:
+            asset = self._scene_asset or self._resolve_scene_asset()
+
+        try:
+            if asset:
+                self._run_backup(asset)
+            else:
+                self._backup_status = "Backup skipped: asset could not be resolved."
+                log.warning("Backup skipped: asset could not be resolved.")
+        except Exception as exc:
+            raise PublishCopyError(f"Asset backup failed: {exc}") from exc
 
     @staticmethod
     def _component_build_mode(*, ensure_builder: bool, publish_requested: bool) -> str:
@@ -939,77 +899,6 @@ class AssetPublisher(Publisher):
         if ensure_builder:
             return "ensure_only"
         return "none"
-
-    @staticmethod
-    def _new_houdini_build_action_id() -> str | None:
-        try:
-            from pipe.telemetry import new_action_id
-        except Exception:
-            return None
-        return new_action_id()
-
-    def _emit_houdini_component_build_event(
-        self,
-        *,
-        status: str,
-        duration_ms: int,
-        variant: str,
-        ensure_builder: bool,
-        publish_requested: bool,
-        warnings_count: int,
-        errors_count: int,
-        action_id: str | None,
-        asset_name: str,
-        error_code: str | None = None,
-        error_message: str | None = None,
-        exception_type: str | None = None,
-    ) -> None:
-        try:
-            from pipe.telemetry import STATUS_ERROR, STATUS_SUCCESS, emit, events
-        except Exception:
-            return
-
-        if status == "success":
-            status_value = STATUS_SUCCESS
-        else:
-            status_value = STATUS_ERROR
-
-        payload = {
-            "mode": self._component_build_mode(
-                ensure_builder=ensure_builder,
-                publish_requested=publish_requested,
-            ),
-            "variant": str(variant or "main"),
-            "warnings_count": max(0, int(warnings_count)),
-            "errors_count": max(0, int(errors_count)),
-            "ensure_builder": bool(ensure_builder),
-            "publish_requested": bool(publish_requested),
-        }
-
-        scope = self._get_publish_scope() or {}
-        if asset_name.strip():
-            scope = dict(scope)
-            scope.setdefault("asset", asset_name.strip())
-
-        error_data = None
-        if status == "error":
-            if not error_code:
-                return
-            error_data = {
-                "code": error_code,
-                "message": error_message or "Houdini component build failed",
-                "exception_type": exception_type or "RuntimeError",
-            }
-
-        emit(
-            events.EVENT_BUILD_HOUDINI_COMPONENT,
-            status=status_value,
-            action_id=action_id,
-            payload=payload,
-            metrics={"duration_ms": max(0, int(duration_ms))},
-            scope=scope or None,
-            error=error_data,
-        )
 
     def _presave(self) -> bool:
         return True
@@ -1043,73 +932,81 @@ class AssetPublisher(Publisher):
             ).exec_()
 
     def _run_houdini_asset_builder(self, asset: Asset) -> None:
-        ensure_builder_requested = True
-        publish_requested = True
         variant = str(self._geo_variant or "main")
-        build_action_id = self._new_houdini_build_action_id()
-        build_started_at = time.perf_counter()
-
-        build_failed_code = "HOUDINI_BUILD_FAILED"
-        try:
-            from pipe.telemetry.registry import ERROR_HOUDINI_BUILD_FAILED
-
-            build_failed_code = ERROR_HOUDINI_BUILD_FAILED
-        except Exception:
-            pass
-
         asset_name = self._asset_name or (asset.name or "").strip()
         if not asset_name and asset.asset_path:
             asset_name = Path(asset.asset_path).name
         if not asset_name:
             asset_name = "asset"
 
-        def _duration_ms() -> int:
-            return max(0, int((time.perf_counter() - build_started_at) * 1000))
-
-        def _emit_prelaunch_error(
-            message: str,
-            *,
-            exception_type: str,
-        ) -> None:
-            self._emit_houdini_component_build_event(
-                status="error",
-                duration_ms=_duration_ms(),
-                variant=variant,
-                ensure_builder=ensure_builder_requested,
-                publish_requested=publish_requested,
-                warnings_count=0,
-                errors_count=1,
-                action_id=build_action_id,
-                asset_name=asset_name,
-                error_code=build_failed_code,
-                error_message=message,
-                exception_type=exception_type,
-            )
-
         if getattr(self, "_publish_path", None) is None:
-            message = "Publish path is undefined; cannot run Houdini publish."
-            _emit_prelaunch_error(
-                message,
-                exception_type=HoudiniBuildError.__name__,
+            raise HoudiniBuildError(
+                "Publish path is undefined; cannot run Houdini publish."
             )
-            raise HoudiniBuildError(message)
 
         if not Executables.hython.exists():
-            message = f"Houdini executable not found at {Executables.hython}"
-            _emit_prelaunch_error(
-                message,
-                exception_type=HoudiniBuildError.__name__,
+            raise HoudiniBuildError(
+                f"Houdini executable not found at {Executables.hython}"
             )
-            raise HoudiniBuildError(message)
 
         asset_paths = paths_for_asset(asset)
-        hip_path = asset_paths.asset_builder_path
-        self._component_hip_path = hip_path
+        self._component_hip_path = asset_paths.asset_builder_path
         self._component_export_dir = asset_paths.publish_dir
 
         if asset_name == "asset":
             asset_name = asset_paths.root.name
 
+        # `_publish_scope_kwargs` reads the entity's `code`; fall back to the
+        # path-derived asset_name when the entity has no usable code (e.g.
+        # asset built from a scene resolution rather than a SG record).
+        scope_kwargs = self._publish_scope_kwargs()
+        scope_kwargs.setdefault("asset", asset_name.strip())
+
+        dcc = HoudiniDCC(is_python_shell=True)
+        env = dcc._get_env_vars()
+        env["PIPE_LOG_LEVEL"] = str(log.getEffectiveLevel())
+
+        with telemetry.record(
+            telemetry.EVENT_BUILD_HOUDINI_COMPONENT,
+            payload={
+                "mode": self._component_build_mode(
+                    ensure_builder=True,
+                    publish_requested=True,
+                ),
+                "variant": variant,
+                "warnings_count": 0,
+                "errors_count": 0,
+            },
+            **scope_kwargs,
+        ) as telemetry_event:
+            telemetry_event.attach_to_subprocess(env)
+            try:
+                payload = self._invoke_hython_builder(
+                    asset, asset_paths, asset_name, variant, env=env
+                )
+            except HoudiniBuildError as exc:
+                # Inline update: the error event needs warnings/errors_count
+                # parsed from hython's failed stdout, otherwise the dashboard
+                # has zero diagnostics on every Houdini-build failure.
+                telemetry_event.update(
+                    warnings_count=len(exc.payload.get("warnings") or []),
+                    errors_count=len(exc.payload.get("errors") or []),
+                )
+                raise
+            telemetry_event.update(
+                warnings_count=len(payload.get("warnings") or []),
+                errors_count=len(payload.get("errors") or []),
+            )
+
+    def _invoke_hython_builder(
+        self,
+        asset: Asset,
+        asset_paths: AssetPaths,
+        asset_name: str,
+        variant: str,
+        env: dict[str, str],
+    ) -> dict[str, Any]:
+        """Run hython and return its parsed JSON result payload."""
         command = [
             str(Executables.hython),
             "-m",
@@ -1124,23 +1021,15 @@ class AssetPublisher(Publisher):
             "--publish",
             "--respect-existing",
         ]
-
         if asset.asset_path:
             command.extend(["--asset-path", asset.asset_path])
         if asset.id is not None:
             command.extend(["--asset-id", str(asset.id)])
 
-        dcc = HoudiniDCC(is_python_shell=True)
-        env = dcc._get_env_vars()
-        env["PIPE_LOG_LEVEL"] = str(log.getEffectiveLevel())
-        if build_action_id:
-            env[_TELEMETRY_ACTION_ID_ENV] = build_action_id
-
         log.info(
-            "Running Houdini headless publish for %s (variant=%s)",
-            asset_name,
-            self._geo_variant,
+            f"Running Houdini headless publish for {asset_name} (variant={variant})",
         )
+
         try:
             result = subprocess.run(
                 command,
@@ -1150,51 +1039,45 @@ class AssetPublisher(Publisher):
                 env=env,
             )
         except FileNotFoundError as exc:
-            message = "Failed to execute hython; verify Houdini is installed."
-            _emit_prelaunch_error(
-                message,
-                exception_type=type(exc).__name__,
-            )
-            raise HoudiniBuildError(message) from exc
+            raise HoudiniBuildError(
+                "Failed to execute hython; verify Houdini is installed."
+            ) from exc
         except OSError as exc:
-            message = f"Failed to launch hython: {exc}"
-            _emit_prelaunch_error(
-                message,
-                exception_type=type(exc).__name__,
-            )
-            raise HoudiniBuildError(message) from exc
+            raise HoudiniBuildError(f"Failed to launch hython: {exc}") from exc
         except subprocess.CalledProcessError as exc:
-            stdout = exc.stdout or ""
-            stderr = exc.stderr or ""
-            payload = self._parse_houdini_result_payload(stdout)
-            if payload is not None:
-                self._houdini_result = payload
-                message = f"Build failed: {self._summarize_houdini_errors(payload)}"
-                raise HoudiniBuildError(message) from exc
-            if stdout:
-                log.error("Houdini asset builder stdout:\n%s", stdout)
-            if stderr:
-                log.error("Houdini asset builder stderr:\n%s", stderr)
-            message = (
-                f"Houdini component publish failed with exit code {exc.returncode}"
-            )
-            raise HoudiniBuildError(message) from exc
+            parsed = self._parse_houdini_result_payload(exc.stdout or "")
+            if parsed is not None:
+                self._houdini_result = parsed
+            else:
+                self._log_unparseable_hython_output(exc.stdout or "", exc.stderr or "")
+            raise HoudiniBuildError(
+                f"Houdini component publish failed with exit code {exc.returncode}",
+                payload=parsed,
+            ) from exc
 
-        # Parse the structured JSON output from the builder script
         stdout = result.stdout or ""
         payload = self._parse_houdini_result_payload(stdout)
         if payload is None:
-            log.error("Houdini asset builder stdout:\n%s", stdout)
-            log.error("Houdini asset builder stderr:\n%s", result.stderr or "")
-            message = "Failed to parse structured output from Houdini build."
-            raise HoudiniBuildError(message)
+            self._log_unparseable_hython_output(stdout, result.stderr or "")
+            raise HoudiniBuildError(
+                "Failed to parse structured output from Houdini build."
+            )
+
         self._houdini_result = payload
 
-        if self._houdini_result.get("status") != "success":  # type: ignore[union-attr]
-            message = (
-                f"Build failed: {self._summarize_houdini_errors(self._houdini_result)}"
+        if payload.get("status") != "success":
+            raise HoudiniBuildError(
+                f"Build failed: {self._summarize_houdini_errors(payload)}",
+                payload=payload,
             )
-            raise HoudiniBuildError(message)
+        return payload
+
+    @staticmethod
+    def _log_unparseable_hython_output(stdout: str, stderr: str) -> None:
+        if stdout:
+            log.error("Houdini asset builder stdout:\n%s", stdout)
+        if stderr:
+            log.error("Houdini asset builder stderr:\n%s", stderr)
 
     def check_material_bindings_of_selected(self) -> bool:
         selected: list[str] = mc.ls(selection=True)

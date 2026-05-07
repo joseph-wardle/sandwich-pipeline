@@ -31,6 +31,8 @@ PROP_SET = "prop_SET"
 
 
 class AnimPublisher(Publisher):
+    _PUBLISH_KIND = "customanim"
+
     _shot: Shot
     _init_success: bool
 

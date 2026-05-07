@@ -4,12 +4,12 @@ import json
 import logging
 import os
 import subprocess
-import uuid
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import typing
 
+from pipe import telemetry
 from shared.util import fix_launcher_metadata
 
 from .interface import DCCInterface, DCCLocalizerInterface
@@ -17,6 +17,12 @@ from .interface import DCCInterface, DCCLocalizerInterface
 """Baseclasses for interacting with DCCs"""
 
 log = logging.getLogger(__name__)
+
+# DCC launch failures are tagged on the telemetry event but never raised as a
+# typed exception — the original exception (e.g. FileNotFoundError) is allowed
+# to propagate so the caller sees the real cause, and `telemetry_event.fail()`
+# carries the classification on the side.
+_DCC_LAUNCH_FAILED_CODE = "DCC_LAUNCH_FAILED"
 
 
 class DCC(DCCInterface):
@@ -79,7 +85,7 @@ class DCC(DCCInterface):
         if PYTHONPATH not in venv:
             venv[PYTHONPATH] = ""
 
-        print(venv[PYTHONPATH])
+        log.debug(f"PYTHONPATH for launch: {venv[PYTHONPATH]}")
         return venv
 
     @staticmethod
@@ -97,55 +103,6 @@ class DCC(DCCInterface):
             "arg_count": len(list(args or [])),
             "env_keys_set": sorted({str(key) for key in self.env_vars.keys()}),
         }
-
-    def _emit_launch_event(
-        self,
-        *,
-        status: str,
-        action_id: str,
-        payload: dict[str, object],
-        error_message: str | None = None,
-        exception_type: str | None = None,
-    ) -> None:
-        # Keep launch behavior independent from telemetry import/runtime issues.
-        try:
-            from pipe.telemetry import (
-                STATUS_ERROR,
-                STATUS_SUCCESS,
-                emit,
-                events,
-                get_event_definition,
-            )
-        except Exception:
-            log.debug("Telemetry import unavailable for dcc.launch", exc_info=True)
-            return
-
-        if status == "success":
-            status_value = STATUS_SUCCESS
-        else:
-            status_value = STATUS_ERROR
-
-        error_data = None
-        if status == "error":
-            event_definition = get_event_definition(events.EVENT_DCC_LAUNCH)
-            error_code = (
-                event_definition.error_codes[0]
-                if event_definition.error_codes
-                else "UNKNOWN_DCC_LAUNCH_ERROR"
-            )
-            error_data = {
-                "code": error_code,
-                "message": error_message or "Unknown DCC launch failure",
-                "exception_type": exception_type,
-            }
-
-        emit(
-            events.EVENT_DCC_LAUNCH,
-            status=status_value,
-            action_id=action_id,
-            payload=payload,
-            error=error_data,
-        )
 
     def launch(
         self,
@@ -166,42 +123,35 @@ class DCC(DCCInterface):
         if pre_launch_tasks is None:
             pre_launch_tasks = self.pre_launch_tasks
 
-        launch_action_id = str(uuid.uuid4())
-        payload = self._launch_payload(command, args)
+        with telemetry.record(
+            telemetry.EVENT_DCC_LAUNCH,
+            payload=self._launch_payload(command, args),
+        ) as telemetry_event:
+            try:
+                fix_launcher_metadata()
+                pre_launch_tasks()
+                venv = self._get_env_vars()
 
-        try:
-            fix_launcher_metadata()
-            pre_launch_tasks()
-            venv = self._get_env_vars()
+                log.info("Launching the software")
+                log.debug(f"Command: {command}, Args: {args}")
+                return_code = subprocess.call([command] + list(args or []), env=venv)
+            except Exception as exc:
+                # Tag the failure on the dashboard, then let the original
+                # exception type propagate to the caller unchanged.
+                telemetry_event.fail(
+                    _DCC_LAUNCH_FAILED_CODE, str(exc) or exc.__class__.__name__
+                )
+                raise
 
-            log.info("Launching the software")
-            log.debug(f"Command: {command}, Args: {args}")
-            return_code = subprocess.call([command] + list(args or []), env=venv)
-        except Exception as exc:
-            self._emit_launch_event(
-                status="error",
-                action_id=launch_action_id,
-                payload=payload,
-                error_message=str(exc),
-                exception_type=type(exc).__name__,
-            )
-            raise
-
-        if return_code == 0:
-            self._emit_launch_event(
-                status="success",
-                action_id=launch_action_id,
-                payload=payload,
-            )
-            return
-
-        self._emit_launch_event(
-            status="error",
-            action_id=launch_action_id,
-            payload=payload,
-            error_message=f"DCC exited with return code {return_code}",
-        )
-        log.warning("DCC launch returned non-zero exit code: %s", return_code)
+            if return_code != 0:
+                # Non-zero DCC exit is recorded as an error event, but is
+                # not raised — DCCs exit non-zero for many recoverable
+                # reasons (artist closed without saving, etc.).
+                telemetry_event.fail(
+                    _DCC_LAUNCH_FAILED_CODE,
+                    f"DCC exited with return code {return_code}",
+                )
+                log.warning("DCC launch returned non-zero exit code: %s", return_code)
 
 
 class DCCLocalizer(DCCLocalizerInterface):

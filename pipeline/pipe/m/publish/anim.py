@@ -26,6 +26,8 @@ CACHE_SET = "rig_geo_grp"
 
 
 class AnimPublisher(Publisher):
+    _PUBLISH_KIND = "anim"
+
     _shot: Shot
     _init_success: bool
 

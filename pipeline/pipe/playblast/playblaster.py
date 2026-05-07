@@ -3,14 +3,12 @@ from __future__ import annotations
 import logging
 import re
 import shutil
-import time
 from abc import ABCMeta, abstractmethod
-from contextlib import contextmanager
-from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any
 
+from pipe import telemetry
 from pipe.playblast.encoding import build_image_input_chain, encode_movie
 from pipe.playblast.presets import FFmpegPreset
 from pipe.playblast.tempdir import resolve_playblast_tempdir
@@ -22,12 +20,13 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-@dataclass
-class _TelemetryPhase:
-    """Mutable record passed out of `_telemetry_phase` so the body can attach
-    what it produced before the context manager emits the success event."""
+class PlayblastError(Exception):
+    """Raised when playblast image-write, encode, or copy steps fail.
 
-    final_paths: list[Path] = field(default_factory=list)
+    `error_code` is read by `telemetry.record()` to classify the event.
+    """
+
+    error_code = "PLAYBLAST_FAILED"
 
 
 class Playblaster(metaclass=ABCMeta):
@@ -73,40 +72,50 @@ class Playblaster(metaclass=ABCMeta):
         cut_in, cut_out = shot.frame_range
         frame_start = cut_in - tails[0]
         frame_end = cut_out + tails[1]
-        action_id = self._new_playblast_action_id()
-        expected_total_outputs = sum(len(paths) for paths in out_paths.values())
+        common_payload: dict[str, object] = {
+            "frame_start": frame_start,
+            "frame_end": frame_end,
+            "fps": max(1, int(self.fps)),
+        }
 
-        with self._telemetry_phase(
-            shot=shot,
-            preset="unknown",
-            expected_outputs=expected_total_outputs,
-            frame_start=frame_start,
-            frame_end=frame_end,
-            action_id=action_id,
-        ):
-            self._write_images(shot, str(tempdir / image_basename))
-
-        self._normalize_frame_filenames(tempdir, image_basename)
-
-        encoded_input = self._build_ffmpeg_input(
-            shot, tempdir, image_basename, frame_start
-        )
-
+        # Image write / frame normalize / ffmpeg input-chain build is shared
+        # work for every preset in this call, so it runs once on the first
+        # preset's telemetry event. A failure there is recorded against that
+        # preset (the one the artist actually triggered) and the propagating
+        # PlayblastError skips the remaining presets in out_paths.
+        encoded_input: Any = None
         for preset, paths in out_paths.items():
-            with self._telemetry_phase(
+            with telemetry.record(
+                telemetry.EVENT_PLAYBLAST_CREATE,
+                payload={
+                    **common_payload,
+                    "preset": self._preset_name(preset),
+                    "output_count": len(paths),
+                },
                 shot=shot,
-                preset=self._telemetry_preset_name(preset),
-                expected_outputs=len(paths),
-                frame_start=frame_start,
-                frame_end=frame_end,
-                action_id=action_id,
-            ) as phase:
-                preset_temp = self._encode_preset(
-                    encoded_input, preset, tempdir, image_basename, frame_start
+            ) as telemetry_event:
+                if encoded_input is None:
+                    try:
+                        self._write_images(shot, str(tempdir / image_basename))
+                    except Exception as exc:
+                        raise PlayblastError(
+                            str(exc) or exc.__class__.__name__
+                        ) from exc
+                    self._normalize_frame_filenames(tempdir, image_basename)
+                    encoded_input = self._build_ffmpeg_input(
+                        shot, tempdir, image_basename, frame_start
+                    )
+
+                final_paths = self._encode_and_publish_preset(
+                    shot=shot,
+                    preset=preset,
+                    paths=paths,
+                    encoded_input=encoded_input,
+                    tempdir=tempdir,
+                    image_basename=image_basename,
+                    start_frame=frame_start,
                 )
-                phase.final_paths = self._copy_outputs(preset_temp, paths, preset.ext)
-                for final_path in phase.final_paths:
-                    self._safe_run_postprocess(final_path)
+                telemetry_event.update(output_count=len(final_paths))
 
         if not log.isEnabledFor(logging.DEBUG):
             self._cleanup_temp_files(tempdir, image_basename)
@@ -194,62 +203,42 @@ class Playblaster(metaclass=ABCMeta):
         except Exception as exc:
             log.error("Post-process failed for %s: %s", final_path, exc)
 
-    # ------------------------------------------------------------------
-    # TODO(telemetry-rewrite): The telemetry hooks below are scaffolding
-    # around today's `pipe.telemetry.emit`. The telemetry system is being
-    # rewritten in a follow-up PR; when that rewrite lands, the module-
-    # level `_safe_import_telemetry` helper plus the three methods that
-    # call it (`_telemetry_scope`, `_new_playblast_action_id`,
-    # `_emit_playblast_event`) collapse into the new telemetry adapter.
-    # ------------------------------------------------------------------
-
-    @contextmanager
-    def _telemetry_phase(
+    def _encode_and_publish_preset(
         self,
         *,
         shot: Shot,
-        preset: str,
-        expected_outputs: int,
-        frame_start: int,
-        frame_end: int,
-        action_id: str | None,
-    ) -> Iterator[_TelemetryPhase]:
-        phase = _TelemetryPhase()
-        started_at = time.perf_counter()
+        preset: FFmpegPreset,
+        paths: list[Path | str],
+        encoded_input: Any,
+        tempdir: Path,
+        image_basename: str,
+        start_frame: int,
+    ) -> list[Path]:
+        """Encode one preset, copy to all destinations, run post-process.
+
+        Returns the destination paths produced
+        """
+        del shot  # parity with `_build_ffmpeg_input`; HUD subclasses may want this
         try:
-            yield phase
-        except Exception as exc:
-            duration_ms = int((time.perf_counter() - started_at) * 1000)
-            self._emit_playblast_event(
-                shot=shot,
-                status="error",
-                preset=preset,
-                output_count=expected_outputs,
-                frame_start=frame_start,
-                frame_end=frame_end,
-                duration_ms=duration_ms,
-                output_size_bytes=0,
-                action_id=action_id,
-                error_message=str(exc),
-                exception_type=type(exc).__name__,
+            preset_temp = self._encode_preset(
+                encoded_input, preset, tempdir, image_basename, start_frame
             )
-            raise
-        duration_ms = int((time.perf_counter() - started_at) * 1000)
-        size_bytes = sum(self._safe_file_size(p) for p in phase.final_paths)
-        self._emit_playblast_event(
-            shot=shot,
-            status="success",
-            preset=preset,
-            output_count=len(phase.final_paths) or expected_outputs,
-            frame_start=frame_start,
-            frame_end=frame_end,
-            duration_ms=duration_ms,
-            output_size_bytes=size_bytes,
-            action_id=action_id,
-        )
+        except Exception as exc:
+            raise PlayblastError(str(exc) or exc.__class__.__name__) from exc
+
+        try:
+            final_paths = self._copy_outputs(preset_temp, paths, preset.ext)
+        except Exception as exc:
+            raise PlayblastError(str(exc) or exc.__class__.__name__) from exc
+
+        # Post-process is best-effort — failure does not invalidate the playblast.
+        for final_path in final_paths:
+            self._safe_run_postprocess(final_path)
+
+        return final_paths
 
     @staticmethod
-    def _telemetry_preset_name(preset: object | None) -> str:
+    def _preset_name(preset: object | None) -> str:
         if isinstance(preset, Enum):
             normalized = str(preset.name).strip().lower()
             if normalized:
@@ -258,95 +247,6 @@ class Playblaster(metaclass=ABCMeta):
             return "unknown"
         normalized = str(preset).strip().lower()
         return normalized or "unknown"
-
-    @staticmethod
-    def _safe_file_size(path: Path) -> int:
-        try:
-            if path.is_file():
-                return int(path.stat().st_size)
-        except OSError:
-            pass
-        return 0
-
-    @staticmethod
-    def _telemetry_scope(shot: Shot) -> dict[str, str] | None:
-        telemetry = _safe_import_telemetry()
-        if telemetry is None:
-            return None
-        scope = telemetry.extract_scope(shot)
-        shot_code = str(getattr(shot, "code", "")).strip()
-        if shot_code:
-            scope.setdefault("shot", shot_code)
-        return scope or None
-
-    @staticmethod
-    def _new_playblast_action_id() -> str | None:
-        telemetry = _safe_import_telemetry()
-        if telemetry is None:
-            return None
-        return telemetry.new_action_id()
-
-    def _emit_playblast_event(
-        self,
-        *,
-        shot: Shot,
-        status: str,
-        preset: str,
-        output_count: int,
-        frame_start: int,
-        frame_end: int,
-        duration_ms: int,
-        output_size_bytes: int,
-        action_id: str | None,
-        error_message: str | None = None,
-        exception_type: str | None = None,
-    ) -> None:
-        telemetry = _safe_import_telemetry()
-        if telemetry is None:
-            log.debug("Telemetry import unavailable for playblast.create")
-            return
-
-        status_value = (
-            telemetry.STATUS_SUCCESS if status == "success" else telemetry.STATUS_ERROR
-        )
-        payload = {
-            "preset": str(preset),
-            "output_count": max(0, int(output_count)),
-            "frame_start": int(frame_start),
-            "frame_end": int(frame_end),
-            "fps": max(1, int(self.fps)),
-        }
-        metrics = {
-            "duration_ms": max(0, int(duration_ms)),
-            "output_size_bytes": max(0, int(output_size_bytes)),
-        }
-
-        error = None
-        if status == "error":
-            error_code = "PLAYBLAST_FAILED"
-            try:
-                definition = telemetry.get_event_definition(
-                    telemetry.events.EVENT_PLAYBLAST_CREATE
-                )
-                if definition.error_codes:
-                    error_code = definition.error_codes[0]
-            except Exception:
-                pass
-            error = {
-                "code": error_code,
-                "message": error_message or "Playblast failed",
-                "exception_type": exception_type or "RuntimeError",
-            }
-
-        telemetry.emit(
-            telemetry.events.EVENT_PLAYBLAST_CREATE,
-            status=status_value,
-            action_id=action_id,
-            payload=payload,
-            metrics=metrics,
-            scope=self._telemetry_scope(shot),
-            error=error,
-        )
 
 
 def _padded_signed_int(num: int, width: int = 4) -> str:
@@ -360,15 +260,4 @@ def _padded_signed_int(num: int, width: int = 4) -> str:
     return f"{num:+0{width + 1}d}".replace("+", "")
 
 
-def _safe_import_telemetry() -> Any:
-    """Return `pipe.telemetry` if importable, else `None`. Treats import-
-    time failures as "telemetry is optional" so playblasts keep working on
-    hosts without telemetry credentials."""
-    try:
-        import pipe.telemetry as telemetry
-    except Exception:
-        return None
-    return telemetry
-
-
-__all__ = ["Playblaster"]
+__all__ = ["Playblaster", "PlayblastError"]

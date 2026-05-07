@@ -54,6 +54,8 @@ class PublishCameraDialog(FilteredListDialog):
 
 
 class CameraPublisher(Publisher):
+    _PUBLISH_KIND = "camera"
+
     def __init__(self) -> None:
         super().__init__(PublishCameraDialog)
 

@@ -467,33 +467,8 @@ class MAssetFileManager(FileManager):
                 ).exec_()
                 return
 
-            file_open_event, _ = self._telemetry_file_events()
-            action_id = self._new_file_action_id()
-            try:
-                self._open_file(backup_path)
-                self._ensure_scene_asset_metadata()
-            except Exception as exc:
-                if file_open_event:
-                    self._emit_file_event(
-                        event_type=file_open_event,
-                        status="error",
-                        entity=asset,
-                        path=backup_path,
-                        action_id=action_id,
-                        opened_backup=True,
-                        error_message=str(exc),
-                        exception_type=type(exc).__name__,
-                    )
-                raise
-            if file_open_event:
-                self._emit_file_event(
-                    event_type=file_open_event,
-                    status="success",
-                    entity=asset,
-                    path=backup_path,
-                    action_id=action_id,
-                    opened_backup=True,
-                )
+            self._open_file(backup_path)
+            self._ensure_scene_asset_metadata()
             return
 
         if selected_action == VersionBrowserWidget.ACTION_PROMOTE:
@@ -587,8 +562,6 @@ class MAssetFileManager(FileManager):
         if not asset:
             return
 
-        file_open_event, file_create_event = self._telemetry_file_events()
-        action_id = self._new_file_action_id()
         paths = paths_for_asset(asset)
 
         if not self._prompt_create_if_not_exist(paths.root):
@@ -596,54 +569,10 @@ class MAssetFileManager(FileManager):
 
         model_path = paths.model_path
         if model_path.is_file():
-            try:
-                self._open_file(model_path)
-                self._ensure_scene_asset_metadata(model_path)
-            except Exception as exc:
-                if file_open_event:
-                    self._emit_file_event(
-                        event_type=file_open_event,
-                        status="error",
-                        entity=asset,
-                        path=model_path,
-                        action_id=action_id,
-                        opened_backup=False,
-                        error_message=str(exc),
-                        exception_type=type(exc).__name__,
-                    )
-                raise
-            if file_open_event:
-                self._emit_file_event(
-                    event_type=file_open_event,
-                    status="success",
-                    entity=asset,
-                    path=model_path,
-                    action_id=action_id,
-                    opened_backup=False,
-                )
+            self._open_file(model_path)
+            self._ensure_scene_asset_metadata(model_path)
         else:
-            try:
-                self._setup_file(model_path, asset)
-            except Exception as exc:
-                if file_create_event:
-                    self._emit_file_event(
-                        event_type=file_create_event,
-                        status="error",
-                        entity=asset,
-                        path=model_path,
-                        action_id=action_id,
-                        error_message=str(exc),
-                        exception_type=type(exc).__name__,
-                    )
-                raise
-            if file_create_event:
-                self._emit_file_event(
-                    event_type=file_create_event,
-                    status="success",
-                    entity=asset,
-                    path=model_path,
-                    action_id=action_id,
-                )
+            self._setup_file(model_path, asset)
 
 
 def install_asset_menu(

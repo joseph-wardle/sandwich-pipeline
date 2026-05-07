@@ -1,202 +1,66 @@
-"""Telemetry package public exports.
+"""Pipeline telemetry — record what tools did, how long it took, and what failed.
 
-Step 4 exposes a thin public API for telemetry configuration, context,
-emission, and contract inspection.
+Wrap a workflow step with `record()`:
+
+    from pipe import telemetry
+
+    with telemetry.record(
+        telemetry.EVENT_PUBLISH_USD,
+        payload={"kind": "asset", "publish_path": str(path)},
+        asset=asset,
+    ) as telemetry_event:
+        do_the_publish()
+
+One event lands in the spool when the block exits, either `success` with a
+duration on clean exit, or `error` carrying the exception's `error_code`
+on failure. The block never swallows the exception.
 """
 
-from typing import Any
+from __future__ import annotations
 
-from . import events
-from .config import (
-    PlatformFlavor,
-    TelemetryConfig,
-    TelemetryLevel,
-    default_spool_dir,
-    detect_platform_flavor,
-    load_config,
-)
-from .context import (
-    SCOPE_FIELDS,
-    ScopeContext,
-    action_context,
-    begin_action,
-    clear_action_context,
-    clear_scope_context,
-    configure_scope_context,
-    configure_session_context,
-    extract_scope,
-    get_host_context,
-    get_pipeline_context,
-    get_scope_context,
-    get_session_context,
-    new_action_id,
-    new_event_id,
-    new_session_id,
-    utc_now_iso,
-)
 from .emit import (
-    EmitCounters,
-    build_event,
+    Event,
+    _running_under_parent_event,
     emit,
-    get_emit_counters,
-    reset_emit_counters,
+    record,
 )
-from .registry import (
-    ERROR_CODES,
+from .events import (
+    EVENT_BUILD_HOUDINI_COMPONENT,
+    EVENT_DCC_LAUNCH,
     EVENT_DEFINITIONS,
-    EVENT_TYPES,
+    EVENT_PLAYBLAST_CREATE,
+    EVENT_PUBLISH_USD,
+    EVENT_TEXTURE_CONVERT_TEX,
+    EVENT_TEXTURE_EXPORT_SUBSTANCE,
     EVENTS_BY_TYPE,
-    SCHEMA_VERSION,
     STATUS_ERROR,
-    STATUS_INFO,
     STATUS_SUCCESS,
-    STATUS_VALUES,
-    STATUS_WARNING,
-    TERMINAL_STATUS_VALUES,
     EventDefinition,
+    Status,
     get_event_definition,
-    is_known_event_type,
-    list_error_codes,
-    list_event_definitions,
-    list_event_types,
 )
-from .spool import (
-    AsyncJsonlSpoolWriter,
-    AsyncSpoolStats,
-    JsonlSpoolWriter,
-    MemorySpoolWriter,
-    NullSpoolWriter,
-    configure_spool_writer,
-    get_spool_writer,
-)
-
-
-def render_contract_markdown() -> str:
-    """Return telemetry contract markdown generated from the registry."""
-
-    from .docs import render_contract_markdown as _render_contract_markdown
-
-    return _render_contract_markdown()
-
-
-def scan_storage(*args: Any, **kwargs: Any) -> Any:
-    """Proxy to ``pipe.telemetry.storage_scan.scan_storage``."""
-
-    from .storage_scan import scan_storage as _scan_storage
-
-    return _scan_storage(*args, **kwargs)
-
-
-def build_storage_events(*args: Any, **kwargs: Any) -> Any:
-    """Proxy to ``pipe.telemetry.storage_scan.build_storage_events``."""
-
-    from .storage_scan import build_storage_events as _build_storage_events
-
-    return _build_storage_events(*args, **kwargs)
-
-
-def classify_path(*args: Any, **kwargs: Any) -> Any:
-    """Proxy to ``pipe.telemetry.storage_scan.classify_path``."""
-
-    from .storage_scan import classify_path as _classify_path
-
-    return _classify_path(*args, **kwargs)
-
-
-def poll_tractor_farm_snapshot(*args: Any, **kwargs: Any) -> Any:
-    """Proxy to ``pipe.telemetry.tractor_poll.poll_tractor_farm_snapshot``."""
-
-    from .tractor_poll import poll_tractor_farm_snapshot as _poll_tractor_farm_snapshot
-
-    return _poll_tractor_farm_snapshot(*args, **kwargs)
-
-
-def run_tractor_poll_loop(*args: Any, **kwargs: Any) -> Any:
-    """Proxy to ``pipe.telemetry.tractor_poll.run_tractor_poll_loop``."""
-
-    from .tractor_poll import run_tractor_poll_loop as _run_tractor_poll_loop
-
-    return _run_tractor_poll_loop(*args, **kwargs)
-
-
-def harvest_render_diagnostics(*args: Any, **kwargs: Any) -> Any:
-    """Proxy to ``pipe.telemetry.render_harvest.harvest_render_diagnostics``."""
-
-    from .render_harvest import (
-        harvest_render_diagnostics as _harvest_render_diagnostics,
-    )
-
-    return _harvest_render_diagnostics(*args, **kwargs)
-
-
-def run_render_harvest_loop(*args: Any, **kwargs: Any) -> Any:
-    """Proxy to ``pipe.telemetry.render_harvest.run_render_harvest_loop``."""
-
-    from .render_harvest import run_render_harvest_loop as _run_render_harvest_loop
-
-    return _run_render_harvest_loop(*args, **kwargs)
-
 
 __all__ = [
-    "events",
-    "TelemetryConfig",
-    "TelemetryLevel",
-    "PlatformFlavor",
-    "detect_platform_flavor",
-    "default_spool_dir",
-    "load_config",
-    "new_session_id",
-    "new_action_id",
-    "new_event_id",
-    "utc_now_iso",
-    "configure_session_context",
-    "begin_action",
-    "clear_action_context",
-    "action_context",
-    "get_session_context",
-    "SCOPE_FIELDS",
-    "ScopeContext",
-    "extract_scope",
-    "configure_scope_context",
-    "clear_scope_context",
-    "get_scope_context",
-    "get_host_context",
-    "get_pipeline_context",
+    # Public API: workflow CM and bare emit
+    "record",
+    "Event",
     "emit",
-    "build_event",
-    "EmitCounters",
-    "get_emit_counters",
-    "reset_emit_counters",
-    "NullSpoolWriter",
-    "MemorySpoolWriter",
-    "JsonlSpoolWriter",
-    "AsyncSpoolStats",
-    "AsyncJsonlSpoolWriter",
-    "configure_spool_writer",
-    "get_spool_writer",
-    "render_contract_markdown",
-    "scan_storage",
-    "build_storage_events",
-    "classify_path",
-    "poll_tractor_farm_snapshot",
-    "run_tractor_poll_loop",
-    "harvest_render_diagnostics",
-    "run_render_harvest_loop",
-    "SCHEMA_VERSION",
+    # Subprocess detection (used at DCC entry points)
+    "_running_under_parent_event",
+    # Event types
+    "EVENT_DCC_LAUNCH",
+    "EVENT_PUBLISH_USD",
+    "EVENT_BUILD_HOUDINI_COMPONENT",
+    "EVENT_TEXTURE_EXPORT_SUBSTANCE",
+    "EVENT_TEXTURE_CONVERT_TEX",
+    "EVENT_PLAYBLAST_CREATE",
+    # Status values
     "STATUS_SUCCESS",
     "STATUS_ERROR",
-    "STATUS_WARNING",
-    "STATUS_INFO",
-    "STATUS_VALUES",
-    "TERMINAL_STATUS_VALUES",
-    "ERROR_CODES",
+    "Status",
+    # Registry inspection
     "EventDefinition",
     "EVENT_DEFINITIONS",
-    "EVENT_TYPES",
     "EVENTS_BY_TYPE",
-    "list_event_definitions",
-    "list_event_types",
-    "list_error_codes",
     "get_event_definition",
-    "is_known_event_type",
 ]
