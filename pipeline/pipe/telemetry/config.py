@@ -19,7 +19,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from pipeline.shared.util import get_shared_telemetry_spool_dir
+from shared.util import get_shared_telemetry_spool_dir
 
 
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
