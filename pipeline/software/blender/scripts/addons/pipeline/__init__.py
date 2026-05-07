@@ -3,8 +3,8 @@ import logging
 import bpy
 from bpy.types import Operator
 from bpy.utils import register_class, unregister_class
-from pipe.b.assetfile import PipelineAssetProps
-from pipe.b.register import get_decorated_classes, get_decorated_operators
+from pipe.blender.assetfile import PipelineAssetProps
+from pipe.blender.register import get_decorated_classes, get_decorated_operators
 
 bl_info = {"name": "Sandwich Pipeline", "blender": (5, 0, 1), "category": "Pipeline"}
 
@@ -28,7 +28,7 @@ registered_classes: set[
 ] = set()
 menu_operators: list[type[Operator]] = []
 
-log = logging.getLogger("pipe.b.addon")
+log = logging.getLogger("pipe.blender.addon")
 
 
 class PIPELINE_PT_tools(bpy.types.Panel):

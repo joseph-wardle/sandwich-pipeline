@@ -23,18 +23,13 @@ _BASE_SUBMODULES = [
     "util",
     "versioning",
 ]
-_DCC_SUBMODULES = {
-    "houdini": "h",
-    "maya": "m",
-    "substance_painter": "sp",
-}
+_DCC_SUBMODULES = {"houdini", "maya", "blender", "substance_painter"}
 
 _dcc = _getenv("DCC", "")
-_selected_dcc_submodule = _DCC_SUBMODULES.get(_dcc)
 
 __all__ = list(_BASE_SUBMODULES)
-if _selected_dcc_submodule is not None:
-    __all__.append(_selected_dcc_submodule)
+if _dcc in _DCC_SUBMODULES:
+    __all__.append(_dcc)
 
 
 def __getattr__(name: str) -> _ModuleType:

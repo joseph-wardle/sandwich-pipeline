@@ -25,13 +25,13 @@ def main():
 
     # register USD Export chaser
     import mayaUsd.lib as mayaUsdLib  # type: ignore[import-not-found]
-    from pipe.m.publish import ExportChaser
+    from pipe.maya.publish import ExportChaser
 
     mayaUsdLib.ExportChaser.Register(ExportChaser, ExportChaser.ID)
 
     # Optional pipeline menu entries
     if os.getenv("PIPE_MAYA_ASSET_MENU", "0") == "1":
-        from pipe.m.assetfile import install_asset_menu
+        from pipe.maya.assetfile import install_asset_menu
 
         install_asset_menu(create_menu=os.getenv("PIPE_MAYA_CREATE_MENU", "0") == "1")
 
