@@ -21,9 +21,9 @@ fi
 echo "Static type checking (ty) on staged Python files..."
 ty check --no-progress --force-exclude "${STAGED_PY_FILES[@]}"
 echo "Linting (ruff) on staged Python files..."
-ruff check "${STAGED_PY_FILES[@]}"
+ruff check --force-exclude "${STAGED_PY_FILES[@]}"
 echo "Formatting (ruff) on staged Python files..."
-ruff format "${STAGED_PY_FILES[@]}"
+ruff format --force-exclude "${STAGED_PY_FILES[@]}"
 
 # Keep staged content aligned when formatting rewrites files.
 git add "${STAGED_PY_FILES[@]}"

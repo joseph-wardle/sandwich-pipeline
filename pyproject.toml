@@ -62,7 +62,7 @@ exclude = [
     'y-rig',
     "studiolibrary",
     "timeline_marker",
-    "pipeline/software/maya/scripts/**"
+    "src/software/maya/scripts/**"
 ]
 
 [tool.ty.rules]
@@ -89,36 +89,36 @@ replace-imports-with-any = [
 
 [tool.ty.environment]
 extra-paths = [
-    "pipeline/software/maya/scripts/",
-    "pipeline/software/nuke/tools/SKD_Tools/scripts",
-    "pipeline/",
+    "src/software/maya/scripts/",
+    "src/software/nuke/tools/SKD_Tools/scripts",
+    "src/",
 ]
 
 [tool.ty.src]
-include = ["pipeline"]
+include = ["src"]
 respect-ignore-files = false
 exclude = [
     ".git",
-    "pipeline/lib/MOPS/**",
-    "pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease",
-    "pipeline/lib/VFX-LYNX/**",
-    "pipeline/lib/ae_SVG/**",
-    "pipeline/lib/python/**",
-    "pipeline/**/mayacapture/**",
-    "pipeline/**/maya-timeline-marker_git/**",
-    "pipeline/lib/y-rig/**",
-    "pipeline/**/studiolibrary/**",
-    "pipeline/**/timeline_marker/**",
-    "pipeline/**/houdini/scripts/**",
-    "pipeline/**/maya/scripts/**",
-    "pipeline/software/houdini/hsite/**/scripts/"
+    "src/lib/MOPS/**",
+    "src/software/nuke/tools/NukeSurvivalToolkit_publicRelease",
+    "src/lib/VFX-LYNX/**",
+    "src/lib/ae_SVG/**",
+    "src/lib/python/**",
+    "src/**/mayacapture/**",
+    "src/**/maya-timeline-marker_git/**",
+    "src/lib/y-rig/**",
+    "src/**/studiolibrary/**",
+    "src/**/timeline_marker/**",
+    "src/**/houdini/scripts/**",
+    "src/**/maya/scripts/**",
+    "src/software/houdini/hsite/**/scripts/"
 ]
 
 
 [tool.pyright]
 extraPaths = [
-    "pipeline/software/maya/scripts/",
-    "pipeline/",
+    "src/software/maya/scripts/",
+    "src/",
 ]
 typeCheckingMode = "standard"
 reportMissingModuleSource = "information"
