@@ -1,42 +1,13 @@
-from __future__ import annotations
-from abc import ABCMeta, abstractmethod
-from typing import TYPE_CHECKING
+"""Compatibility shim — real definitions live in `framework.interface`.
 
-if TYPE_CHECKING:
-    import typing
+Existing `from software.interface import DCCInterface, DCCLocalizerInterface`
+imports continue to resolve here under their old names. The structural
+refactor's Phase 5 rewrites callers to import from `framework.interface`
+directly using the new names (`DCCLauncher`, `DCCRuntime`); this file is
+deleted then.
+"""
 
-"""Interfaces for interacting with DCCs"""
+from framework.interface import DCCLauncher as DCCInterface
+from framework.interface import DCCRuntime as DCCLocalizerInterface
 
-
-class DCCInterface(metaclass=ABCMeta):
-    """interface for DCCs"""
-
-    @abstractmethod
-    def __init__(self):
-        """Initialize the DCC"""
-        raise NotImplementedError
-
-    @abstractmethod
-    def launch(self) -> None:
-        """Launch the software"""
-        raise NotImplementedError
-
-
-class DCCLocalizerInterface(metaclass=ABCMeta):
-    """interface for functions that need to be localized to the DCC"""
-
-    @abstractmethod
-    def __init__(self) -> None:
-        """Initialize the pipe instance"""
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_main_qt_window(self) -> typing.Any:
-        """Get the QT object representing the main application window.
-        Use for the parent of other QT popups"""
-        raise NotImplementedError
-
-    @abstractmethod
-    def is_headless(self) -> bool:
-        """Check if this is a headless environment (no GUI)"""
-        raise NotImplementedError
+__all__ = ["DCCInterface", "DCCLocalizerInterface"]

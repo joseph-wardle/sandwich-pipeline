@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import getpass
-import importlib
-import importlib.util
 import inspect
 import os
 import platform
 import re
 import socket
 import subprocess
-from inspect import getmembers, isabstract, isclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,41 +15,15 @@ if TYPE_CHECKING:
 
 from env import production_path as _prp
 
+# `find_implementation` moved to `framework.dispatch` in the structural
+# refactor's Phase 2. Re-exported here so existing
+# `from shared.util import find_implementation` callers keep working until
+# Phase 5 rewrites them.
+from framework.dispatch import find_implementation as find_implementation
+
 _DOCUMENTATION_ENV_VAR = "PIPELINE_DOCUMENTATION_URL"
 _DEFAULT_DOCUMENTATION_URL = "https://github.com/joseph-wardle/sandwich-pipeline/wiki/"
 _SOURCE_CODE_ROOT_URL = "https://github.com/joseph-wardle/sandwich-pipeline/tree/prod"
-
-
-def find_implementation(cls: type, module: str, package: str | None = None) -> type:
-    """Find an implementation of the class in the specified module."""
-    # Check if the specified module exists
-    if importlib.util.find_spec(module, package):
-        # Import the module
-        imported_module = importlib.import_module(module, package)
-
-        # Check if the submodule contains an implementation of the class
-        classes = getmembers(
-            imported_module,
-            lambda obj: isclass(obj) and not isabstract(obj) and issubclass(obj, cls),
-        )
-
-        # Check if more or less than one implementation was found
-        if len(classes) < 1:
-            raise AssertionError(
-                f"module '{module}' does not contain an "
-                f"implementation of class '{cls.__name__}'"
-            )
-        elif len(classes) > 1:
-            raise AssertionError(
-                f"module '{module}' contains multiple "
-                f"implementations of class '{cls.__name__}'"
-            )
-
-        # Return the implementing class
-        return classes[0][1]
-
-    else:
-        raise ValueError(f"could not find module '{module}'")
 
 
 def fix_launcher_metadata() -> None:

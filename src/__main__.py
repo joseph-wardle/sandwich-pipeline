@@ -6,12 +6,14 @@ import site
 
 from argparse import ArgumentParser
 
-from shared.util import find_implementation
-from software.interface import DCCInterface
+from framework.dispatch import find_implementation
+from framework.interface import DCCLauncher
 
-r"""Launch the BYU 2026 Capstone pipeline ("Honey Buisness")
+r"""Launch the BYU 2026 Capstone pipeline ("Sandwich Kwon Do")
 
 With much credit to Scott Milner and the 2025 Capstone team.
+
+And additional credit to Dallin Clark and the 2026 capstone team.
 
 When run as a script, parse the software from the command line
 arguments, then run launch().
@@ -35,8 +37,11 @@ def launch(
     is_python_shell: bool = False,
     extra_args: list[str] | None = None,
 ) -> None:
-    software = find_implementation(DCCInterface, f"software.{software_name}")
-    software(is_python_shell, extra_args).launch()
+    # The dispatch string still points at `software.<name>` while Phase 4 of
+    # the structural refactor moves per-DCC launchers to `dcc.<name>`. Phase 4
+    # rewrites this to `f"dcc.{software_name}"`.
+    launcher_cls = find_implementation(DCCLauncher, f"software.{software_name}")
+    launcher_cls(is_python_shell, extra_args).launch()
 
 
 if __name__ == "__main__":
