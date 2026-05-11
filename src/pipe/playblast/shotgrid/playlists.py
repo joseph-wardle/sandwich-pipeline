@@ -1,52 +1,15 @@
+"""Compatibility shim — real implementation lives in `core.playblast.shotgrid.playlists`."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+import sys as _sys
 
-from pipe.shotgrid import ShotGrid
+import core.playblast.shotgrid.playlists as _real
 
+# Re-bind the legacy `pipe.playblast.shotgrid.playlists` name onto the canonical `core.playblast.shotgrid.playlists`
+# module object. After this assignment, `sys.modules["pipe.playblast.shotgrid.playlists"]` and
+# `sys.modules["core.playblast.shotgrid.playlists"]` point at the same module, so subpath
+# identity (`from pipe.playblast.shotgrid.playlists import X is core.playblast.shotgrid.playlists.X`) holds.
+_sys.modules[__name__] = _real
 
-@dataclass(frozen=True)
-class PlayblastReviewPlaylistOption:
-    """Normalized review playlist option for UI selection lists."""
-
-    playlist_id: int
-    code: str
-    updated_at: Any | None = None
-    created_at: Any | None = None
-
-    @property
-    def display_name(self) -> str:
-        code = self.code.strip()
-        if code:
-            return code
-        return f"Playlist {self.playlist_id}"
-
-
-def list_recent_review_playlists(
-    *,
-    conn: ShotGrid | None = None,
-    limit: int = 10,
-) -> tuple[PlayblastReviewPlaylistOption, ...]:
-    """Return recent review playlists as UI-friendly options."""
-    if conn is None:
-        from pipe.playblast.shotgrid._connection import default_db_connection
-
-        connection = default_db_connection()
-    else:
-        connection = conn
-    return tuple(
-        PlayblastReviewPlaylistOption(
-            playlist_id=playlist.id,
-            code=(playlist.code or "").strip(),
-            updated_at=playlist.updated_at,
-            created_at=playlist.created_at,
-        )
-        for playlist in connection.find_recent_playlists(limit=limit)
-    )
-
-
-__all__ = [
-    "PlayblastReviewPlaylistOption",
-    "list_recent_review_playlists",
-]
+from core.playblast.shotgrid.playlists import *  # noqa: E402, F401, F403

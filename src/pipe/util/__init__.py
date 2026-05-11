@@ -1,96 +1,30 @@
+"""Compatibility shim — real implementation lives in `core.util`.
+
+Phase 3 of the structural refactor moved this package out of `pipe/` and
+into `core/`. Existing `from pipe.util import X` and
+`from pipe.util.<sub> import X` imports continue to resolve here through
+Phase 5, which deletes the shim and rewrites callers to use `core.util`
+directly.
+
+The shim package keeps its own module identity (it does *not* replace itself
+in `sys.modules`) so per-submodule shim files at `pipe/util/<sub>.py`
+still execute and can alias their canonical `core.util.<sub>` module
+into `sys.modules`. Top-level attributes are re-exported below; chained
+attribute access (`pipe.util.<sub>`) is handled lazily by `__getattr__`
+so heavy submodules don't load unnecessarily.
+"""
+
 from __future__ import annotations
 
-import logging
-import platform
-import subprocess
-import sys
-from functools import wraps
-from typing import TYPE_CHECKING
+import importlib as _importlib
+from types import ModuleType as _ModuleType
 
-from Qt import QtWidgets
-
-from .filemanager import FileManager
-from .struct import dict_index, dotdict
-
-if TYPE_CHECKING:
-    from types import ModuleType
-    from typing import Any, Callable, Sequence
-
-log = logging.getLogger(__name__)
+from core.util import *  # noqa: F401, F403
 
 
-def checkbox_callback_helper(
-    checkbox: QtWidgets.QCheckBox, widget: QtWidgets.QWidget
-) -> Callable[[], None]:
-    """Helper function to generate a callback to enable/disable a widget when
-    a checkbox is checked"""
-
-    def inner() -> None:
-        widget.setEnabled(checkbox.isChecked())
-
-    return inner
-
-
-def log_errors(fun):
-    @wraps(fun)
-    def wrap(*args, **kwargs):
-        try:
-            return fun(*args, **kwargs)
-        except Exception as e:
-            log.error(e, exc_info=True)
-            raise
-
-    return wrap
-
-
-def reload_pipe(extra_modules: Sequence[ModuleType] | None = None) -> None:
-    """Reload all pipe python modules"""
-    if extra_modules is None:
-        extra_modules = []
-    else:
-        extra_modules = list(extra_modules)
-
-    pipe_modules = [
-        module
-        for name, module in sys.modules.items()
-        if (name.startswith("pipe") or name.startswith("shared"))
-        and ("shotgun_api3" not in name)
-        or (name == "env")
-    ] + extra_modules
-
-    for module in pipe_modules:
-        if (name := module.__name__) in sys.modules:
-            log.info(f"Unloading {name}")
-            del sys.modules[name]
-
-
-try:
-
-    def silent_startupinfo() -> subprocess.STARTUPINFO | None:  # type: ignore
-        """Returns a Windows-only object to make sure tasks launched through
-        subprocess don't open a cmd window.
-
-        Returns:
-            subprocess.STARTUPINFO -- the properly configured object if we are on
-                                    Windows, otherwise None
-        """
-        startupinfo = None
-        if platform.system() == "Windows":
-            startupinfo = subprocess.STARTUPINFO()  # type: ignore
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore
-        return startupinfo
-except Exception:
-
-    def silent_startupinfo() -> Any | None:
-        pass
-
-
-__all__ = [
-    "checkbox_callback_helper",
-    "dict_index",
-    "dotdict",
-    "log_errors",
-    "reload_pipe",
-    "silent_startupinfo",
-    "FileManager",
-]
+def __getattr__(name: str) -> _ModuleType:
+    """Lazily resolve `pipe.util.<sub>` to the canonical `core.util.<sub>`."""
+    try:
+        return _importlib.import_module(f"core.util.{name}")
+    except ImportError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc

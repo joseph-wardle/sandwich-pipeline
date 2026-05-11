@@ -1,36 +1,15 @@
+"""Compatibility shim — real implementation lives in `core.util.struct`."""
+
 from __future__ import annotations
 
-import logging
+import sys as _sys
 
-from typing import TYPE_CHECKING
+import core.util.struct as _real
 
+# Re-bind the legacy `pipe.util.struct` name onto the canonical `core.util.struct`
+# module object. After this assignment, `sys.modules["pipe.util.struct"]` and
+# `sys.modules["core.util.struct"]` point at the same module, so subpath
+# identity (`from pipe.util.struct import X is core.util.struct.X`) holds.
+_sys.modules[__name__] = _real
 
-if TYPE_CHECKING:
-    from typing import Any, ClassVar, Protocol, TypeVar
-
-    KT = TypeVar("KT")
-    VT = TypeVar("VT")
-
-    class IsDataclass(Protocol):
-        __dataclass_fields__: ClassVar[dict[str, Any]]
-        __match_args__: ClassVar[tuple[str]]
-
-
-log = logging.getLogger(__name__)
-
-
-class dotdict(dict):
-    """dot notation access to dictionary attributes"""
-
-    __getattr__ = dict.get
-    __setattr__ = dict.__setitem__  # type: ignore[assignment]
-    __delattr__ = dict.__delitem__  # type: ignore[assignment]
-
-
-def dataclass_as_tuple(dc: IsDataclass) -> tuple[Any]:
-    return tuple((getattr(dc, a) for a in dc.__match_args__))
-
-
-def dict_index(d: dict[KT, VT], v: VT) -> KT:
-    """List index function for dicts"""
-    return list(d.keys())[list(d.values()).index(v)]
+from core.util.struct import *  # noqa: E402, F401, F403

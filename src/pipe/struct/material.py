@@ -1,36 +1,15 @@
+"""Compatibility shim — real implementation lives in `core.struct.material`."""
+
 from __future__ import annotations
 
-import attrs
+import sys as _sys
 
-from enum import IntEnum
+import core.struct.material as _real
 
-from pipe.struct.util import JsonSerializable
+# Re-bind the legacy `pipe.struct.material` name onto the canonical `core.struct.material`
+# module object. After this assignment, `sys.modules["pipe.struct.material"]` and
+# `sys.modules["core.struct.material"]` point at the same module, so subpath
+# identity (`from pipe.struct.material import X is core.struct.material.X`) holds.
+_sys.modules[__name__] = _real
 
-
-class DisplacementSource(IntEnum):
-    NONE = 0
-    HEIGHT = 1
-    DISPLACEMENT = 2
-
-
-class NormalSource(IntEnum):
-    NORMAL_HEIGHT = 0
-    NORMAL_ONLY = 1
-
-
-class NormalType(IntEnum):
-    STANDARD = 0
-    BUMP_ROUGHNESS = 1
-
-
-@attrs.define
-class TexSetInfo(JsonSerializable):
-    displacement_source: DisplacementSource = DisplacementSource.NONE
-    has_udims: bool = True
-    normal_source: NormalSource = NormalSource.NORMAL_HEIGHT
-    normal_type: NormalType = NormalType.STANDARD
-
-
-@attrs.define
-class MaterialInfo(JsonSerializable):
-    tex_sets: dict[str, TexSetInfo] = dict()
+from core.struct.material import *  # noqa: E402, F401, F403

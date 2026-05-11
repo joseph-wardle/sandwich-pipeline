@@ -1,66 +1,30 @@
-"""Pipeline telemetry — record what tools did, how long it took, and what failed.
+"""Compatibility shim — real implementation lives in `core.telemetry`.
 
-Wrap a workflow step with `record()`:
+Phase 3 of the structural refactor moved this package out of `pipe/` and
+into `core/`. Existing `from pipe.telemetry import X` and
+`from pipe.telemetry.<sub> import X` imports continue to resolve here through
+Phase 5, which deletes the shim and rewrites callers to use `core.telemetry`
+directly.
 
-    from pipe import telemetry
-
-    with telemetry.record(
-        telemetry.EVENT_PUBLISH_USD,
-        payload={"kind": "asset", "publish_path": str(path)},
-        asset=asset,
-    ) as telemetry_event:
-        do_the_publish()
-
-One event lands in the spool when the block exits, either `success` with a
-duration on clean exit, or `error` carrying the exception's `error_code`
-on failure. The block never swallows the exception.
+The shim package keeps its own module identity (it does *not* replace itself
+in `sys.modules`) so per-submodule shim files at `pipe/telemetry/<sub>.py`
+still execute and can alias their canonical `core.telemetry.<sub>` module
+into `sys.modules`. Top-level attributes are re-exported below; chained
+attribute access (`pipe.telemetry.<sub>`) is handled lazily by `__getattr__`
+so heavy submodules don't load unnecessarily.
 """
 
 from __future__ import annotations
 
-from .emit import (
-    Event,
-    _running_under_parent_event,
-    emit,
-    record,
-)
-from .events import (
-    EVENT_BUILD_HOUDINI_COMPONENT,
-    EVENT_DCC_LAUNCH,
-    EVENT_DEFINITIONS,
-    EVENT_PLAYBLAST_CREATE,
-    EVENT_PUBLISH_USD,
-    EVENT_TEXTURE_CONVERT_TEX,
-    EVENT_TEXTURE_EXPORT_SUBSTANCE,
-    EVENTS_BY_TYPE,
-    STATUS_ERROR,
-    STATUS_SUCCESS,
-    EventDefinition,
-    Status,
-    get_event_definition,
-)
+import importlib as _importlib
+from types import ModuleType as _ModuleType
 
-__all__ = [
-    # Public API: workflow CM and bare emit
-    "record",
-    "Event",
-    "emit",
-    # Subprocess detection (used at DCC entry points)
-    "_running_under_parent_event",
-    # Event types
-    "EVENT_DCC_LAUNCH",
-    "EVENT_PUBLISH_USD",
-    "EVENT_BUILD_HOUDINI_COMPONENT",
-    "EVENT_TEXTURE_EXPORT_SUBSTANCE",
-    "EVENT_TEXTURE_CONVERT_TEX",
-    "EVENT_PLAYBLAST_CREATE",
-    # Status values
-    "STATUS_SUCCESS",
-    "STATUS_ERROR",
-    "Status",
-    # Registry inspection
-    "EventDefinition",
-    "EVENT_DEFINITIONS",
-    "EVENTS_BY_TYPE",
-    "get_event_definition",
-]
+from core.telemetry import *  # noqa: F401, F403
+
+
+def __getattr__(name: str) -> _ModuleType:
+    """Lazily resolve `pipe.telemetry.<sub>` to the canonical `core.telemetry.<sub>`."""
+    try:
+        return _importlib.import_module(f"core.telemetry.{name}")
+    except ImportError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc

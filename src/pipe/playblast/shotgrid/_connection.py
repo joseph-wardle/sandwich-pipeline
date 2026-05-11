@@ -1,20 +1,15 @@
-"""Lazy default ShotGrid connection used by `pipe.playblast.shotgrid`
-helpers when a caller hasn't passed an explicit `conn`. Lives in its own
-module so sibling submodules can import it without the `__init__.py`
-reverse-import dance the package used to do."""
+"""Compatibility shim — real implementation lives in `core.playblast.shotgrid._connection`."""
 
 from __future__ import annotations
 
-from pipe.shotgrid import ShotGrid
+import sys as _sys
 
+import core.playblast.shotgrid._connection as _real
 
-def default_db_connection() -> ShotGrid:
-    # `env_sg` holds the gitignored production credentials; keep the import
-    # lazy so importing this module on a host without credentials does not
-    # raise at module-load time.
-    from env_sg import DB_Config
+# Re-bind the legacy `pipe.playblast.shotgrid._connection` name onto the canonical `core.playblast.shotgrid._connection`
+# module object. After this assignment, `sys.modules["pipe.playblast.shotgrid._connection"]` and
+# `sys.modules["core.playblast.shotgrid._connection"]` point at the same module, so subpath
+# identity (`from pipe.playblast.shotgrid._connection import X is core.playblast.shotgrid._connection.X`) holds.
+_sys.modules[__name__] = _real
 
-    return ShotGrid.connect(DB_Config)
-
-
-__all__ = ["default_db_connection"]
+from core.playblast.shotgrid._connection import *  # noqa: E402, F401, F403

@@ -1,53 +1,15 @@
-"""Internal: turn record() entity kwargs into a {scope_dim: value} dict.
-
-Reads `.code` from ShotGrid entities, strips strings, and drops empties.
-Call sites pass entity kwargs straight to `record()`
-"""
+"""Compatibility shim — real implementation lives in `core.telemetry.scope`."""
 
 from __future__ import annotations
 
+import sys as _sys
 
-def _build_scope_dict(
-    *,
-    show: object | None = None,
-    sequence: object | None = None,
-    shot: object | None = None,
-    asset: object | None = None,
-    department: object | None = None,
-) -> dict[str, str]:
-    """Build the scope dict that `record()` attaches to an emitted event."""
+import core.telemetry.scope as _real
 
-    out: dict[str, str] = {}
-    for dim, value in (
-        ("show", show),
-        ("sequence", sequence),
-        ("shot", shot),
-        ("asset", asset),
-        ("department", department),
-    ):
-        resolved = _resolve_scope_value(value)
-        if resolved is not None:
-            out[dim] = resolved
-    return out
+# Re-bind the legacy `pipe.telemetry.scope` name onto the canonical `core.telemetry.scope`
+# module object. After this assignment, `sys.modules["pipe.telemetry.scope"]` and
+# `sys.modules["core.telemetry.scope"]` point at the same module, so subpath
+# identity (`from pipe.telemetry.scope import X is core.telemetry.scope.X`) holds.
+_sys.modules[__name__] = _real
 
-
-def _resolve_scope_value(value: object | None) -> str | None:
-    """Bully a value into a clean string, or None if unusable.
-
-    Strings are stripped; ShotGrid entities yield their `.code`; anything
-    else returns None.
-    """
-
-    if value is None:
-        return None
-    if isinstance(value, str):
-        stripped = value.strip()
-        return stripped or None
-    code = getattr(value, "code", None)
-    if isinstance(code, str):
-        stripped = code.strip()
-        return stripped or None
-    return None
-
-
-__all__ = ["_build_scope_dict"]
+from core.telemetry.scope import *  # noqa: E402, F401, F403

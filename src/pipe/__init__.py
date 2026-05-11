@@ -1,33 +1,36 @@
-"""Top-level pipe package with lazy submodule loading.
+"""Compatibility shim package — pipeline domain modules now live under `core.*`.
 
-Keep imports lightweight so utility entrypoints (such as telemetry docs
-generation) do not require DCC/runtime-only dependencies.
+Phase 3 of the structural refactor moved nine cross-DCC domain packages
+(`asset`, `environment`, `glui`, `playblast`, `shot`, `shotgrid`, `struct`,
+`telemetry`, `versioning`), the shared `util/` package, and `texconverter.py`
+out of `pipe/` and into `core/`. The DCC-specific subpackages `pipe.maya`,
+`pipe.houdini`, `pipe.blender`, and `pipe.substance_painter` continue to
+live here through Phase 3; Phase 4 of the refactor moves them under
+`dcc.<name>` and migrates the DCC-context gating below into `dcc/__init__.py`.
+
+Each `pipe/<moved>[/<sub>].py` shim under this package re-binds the
+corresponding `core.*` module via `sys.modules` so identity checks
+(`isinstance`, `is`) hold across the legacy `pipe.*` and canonical `core.*`
+paths. Phase 5 of the refactor rewrites every caller to import from `core.*`
+directly and deletes the shims.
 """
 
 from __future__ import annotations
 
 import importlib as _importlib
-import logging as _l
-from os import environ as _e
+import logging as _logging
+from os import environ as _environ
 from os import getenv as _getenv
 from types import ModuleType as _ModuleType
 
-_BASE_SUBMODULES = [
-    "db",
-    "environment",
-    "glui",
-    "shot",
-    "struct",
-    "telemetry",
-    "texconverter",
-    "util",
-    "versioning",
-]
-_DCC_SUBMODULES = {"houdini", "maya", "blender", "substance_painter"}
-
+# Which `pipe.<dcc>` submodule is reachable depends on the current DCC
+# context. Outside any DCC (headless / farm), none of them resolve; inside
+# Maya, only `pipe.maya` does; etc. This stops outer-venv tooling from
+# accidentally loading a DCC-API module that would crash on import.
+_DCC_SUBMODULES = frozenset({"houdini", "maya", "blender", "substance_painter"})
 _dcc = _getenv("DCC", "")
 
-__all__ = list(_BASE_SUBMODULES)
+__all__: list[str] = []
 if _dcc in _DCC_SUBMODULES:
     __all__.append(_dcc)
 
@@ -44,7 +47,7 @@ def __dir__() -> list[str]:
     return sorted(set(globals()) | set(__all__))
 
 
-_l.basicConfig(
-    level=int(_e.get("PIPE_LOG_LEVEL") or 0),
+_logging.basicConfig(
+    level=int(_environ.get("PIPE_LOG_LEVEL") or 0),
     format="%(asctime)s %(processName)s(%(process)s) %(threadName)s [%(name)s(%(lineno)s)] [%(levelname)s] %(message)s",
 )

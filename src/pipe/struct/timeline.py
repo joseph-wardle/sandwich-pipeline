@@ -1,46 +1,15 @@
+"""Compatibility shim — real implementation lives in `core.struct.timeline`."""
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import sys as _sys
 
-import attrs
+import core.struct.timeline as _real
 
-if TYPE_CHECKING:
-    from pipe.shotgrid import Shot
+# Re-bind the legacy `pipe.struct.timeline` name onto the canonical `core.struct.timeline`
+# module object. After this assignment, `sys.modules["pipe.struct.timeline"]` and
+# `sys.modules["core.struct.timeline"]` point at the same module, so subpath
+# identity (`from pipe.struct.timeline import X is core.struct.timeline.X`) holds.
+_sys.modules[__name__] = _real
 
-from .util import JsonSerializable
-
-PREROLL_DURATION = 55
-
-
-@attrs.define(frozen=True)
-class Timeline(JsonSerializable):  # ty: ignore[invalid-frozen-dataclass-subclass]
-    start: int
-    end: int
-    head_duration: int = attrs.field(default=5)
-    tail_duration: int = attrs.field(default=5)
-    preroll_duration: int = attrs.field(default=PREROLL_DURATION)
-    head: int = attrs.field(
-        init=False,
-        default=attrs.Factory(lambda s: s.start - s.head_duration, takes_self=True),
-    )
-    tail: int = attrs.field(
-        init=False,
-        default=attrs.Factory(lambda s: s.end + s.tail_duration, takes_self=True),
-    )
-    preroll: int = attrs.field(
-        init=False,
-        default=attrs.Factory(lambda s: s.head - s.preroll_duration, takes_self=True),
-    )
-
-    @classmethod
-    def from_shot(
-        cls: type[Timeline], shot: Shot, preroll_duration: int = PREROLL_DURATION
-    ) -> Timeline:
-        cut_in, cut_out = shot.frame_range
-        return cls(
-            start=cut_in - 5,
-            end=cut_out + 5,
-            preroll_duration=preroll_duration,
-            head_duration=5,
-            tail_duration=5,
-        )
+from core.struct.timeline import *  # noqa: E402, F401, F403

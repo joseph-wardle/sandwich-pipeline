@@ -1,47 +1,15 @@
+"""Compatibility shim — real implementation lives in `core.playblast.presets`."""
+
 from __future__ import annotations
 
-from enum import Enum
-from typing import Any
+import sys as _sys
 
+import core.playblast.presets as _real
 
-class FFmpegPreset(Enum):
-    """Catalog of named FFmpeg encoding presets used by playblast outputs.
+# Re-bind the legacy `pipe.playblast.presets` name onto the canonical `core.playblast.presets`
+# module object. After this assignment, `sys.modules["pipe.playblast.presets"]` and
+# `sys.modules["core.playblast.presets"]` point at the same module, so subpath
+# identity (`from pipe.playblast.presets import X is core.playblast.presets.X`) holds.
+_sys.modules[__name__] = _real
 
-    Each member's value is a `(ext, out_kwargs_items)` tuple. `out_kwargs` is
-    stored as a tuple-of-tuples so the Enum value is hashable, and exposed as
-    a fresh dict via the property.
-    """
-
-    EDIT_SQ = (
-        "mov",
-        (
-            ("vcodec", "dnxhd"),
-            ("pix_fmt", "yuv422p"),
-            ("vprofile", "dnxhr_sq"),
-            # Number from Avid's table in the DNxHD whitepaper.
-            ("video_bitrate", "124M"),
-            ("movflags", "+faststart"),
-        ),
-    )
-    WEB = (
-        "mp4",
-        (
-            ("vcodec", "libx264"),
-            ("preset", "medium"),
-            ("tune", "animation"),
-            ("crf", 20),
-            ("pix_fmt", "yuv420p"),
-            ("movflags", "+faststart"),
-        ),
-    )
-
-    @property
-    def ext(self) -> str:
-        return self.value[0]
-
-    @property
-    def out_kwargs(self) -> dict[str, Any]:
-        return dict(self.value[1])
-
-
-__all__ = ["FFmpegPreset"]
+from core.playblast.presets import *  # noqa: E402, F401, F403

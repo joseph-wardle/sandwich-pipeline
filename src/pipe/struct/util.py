@@ -1,22 +1,15 @@
+"""Compatibility shim — real implementation lives in `core.struct.util`."""
+
 from __future__ import annotations
 
-import json
-from typing import TypeVar
+import sys as _sys
 
-import attrs
-import cattrs
+import core.struct.util as _real
 
-_S = TypeVar("_S")
+# Re-bind the legacy `pipe.struct.util` name onto the canonical `core.struct.util`
+# module object. After this assignment, `sys.modules["pipe.struct.util"]` and
+# `sys.modules["core.struct.util"]` point at the same module, so subpath
+# identity (`from pipe.struct.util import X is core.struct.util.X`) holds.
+_sys.modules[__name__] = _real
 
-
-@attrs.define
-class JsonSerializable:
-    """Dataclass with methods to (de)serialize to JSON."""
-
-    @classmethod
-    def from_json(cls: type[_S], json_data: str | bytes | bytearray) -> _S:
-        return cattrs.structure(json.loads(json_data), cls)
-
-    def to_json(self) -> str:
-        c = cattrs.Converter(unstruct_collection_overrides={set: list})
-        return json.dumps(c.unstructure(self))
+from core.struct.util import *  # noqa: E402, F401, F403
