@@ -5,13 +5,13 @@ from typing import Any, cast
 import maya.cmds as mc
 from pxr import Usd, UsdGeom
 
-from pipe.maya.rig.utils import get_rig_filepath_from_asset
-from pipe.shot.version_adapter import (
+from dcc.maya.rig.utils import get_rig_filepath_from_asset
+from core.shot.version_adapter import (
     maya_anim_stream,
     shot_owner_for,
 )
-from pipe.shotgrid import Shot
-from pipe.versioning import VersionStreamSpec, path_matches_stream
+from core.shotgrid import Shot
+from core.versioning import VersionStreamSpec, path_matches_stream
 
 from .shotfile_manager import MShotFileManager
 

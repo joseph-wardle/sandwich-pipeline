@@ -33,7 +33,7 @@ global proc shelf_SKD_Layout () {
         -style "iconOnly" 
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.layout import MLayoutFileManager\nfm = MLayoutFileManager()\nfm.open_file()\n" 
+        -command "from dcc.maya.layout import MLayoutFileManager\nfm = MLayoutFileManager()\nfm.open_file()\n" 
         -sourceType "python" 
         -commandRepeatable 1
         -flat 1
@@ -67,7 +67,7 @@ global proc shelf_SKD_Layout () {
         -style "iconOnly" 
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.layout import LayoutMaker\nLayoutMaker().create_layout_group()" 
+        -command "from dcc.maya.layout import LayoutMaker\nLayoutMaker().create_layout_group()" 
         -sourceType "python" 
         -commandRepeatable 1
         -flat 1
@@ -101,7 +101,7 @@ global proc shelf_SKD_Layout () {
         -style "iconOnly" 
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.layout import LayoutMaker\nLayoutMaker().add_reference()\nfrom pipe.maya. reload import reload_pipe; reload_pipe()\n" 
+        -command "from dcc.maya.layout import LayoutMaker\nLayoutMaker().add_reference()\nfrom dcc.maya.util.reload import reload_pipe; reload_pipe()\n"
         -sourceType "python" 
         -commandRepeatable 1
         -flat 1
@@ -135,7 +135,7 @@ global proc shelf_SKD_Layout () {
         -style "iconOnly" 
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.layout import MLayoutPublisher\nMLayoutPublisher().publish()" 
+        -command "from dcc.maya.layout import MLayoutPublisher\nMLayoutPublisher().publish()" 
         -sourceType "python" 
         -commandRepeatable 1
         -flat 1
@@ -169,7 +169,7 @@ global proc shelf_SKD_Layout () {
         -style "iconOnly" 
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.layout import LayoutMaker\nLayoutMaker().match_houdini()" 
+        -command "from dcc.maya.layout import LayoutMaker\nLayoutMaker().match_houdini()" 
         -sourceType "python" 
         -commandRepeatable 1
         -flat 1

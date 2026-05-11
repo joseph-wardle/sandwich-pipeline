@@ -12,10 +12,10 @@ import maya.cmds as mc
 from env_sg import DB_Config
 
 from dcc.maya import runtime as maya_runtime
-from pipe import telemetry
-from pipe.glui.dialogs import FilteredListDialog, MessageDialog
-from pipe.maya.util import maintain_selection
-from pipe.shotgrid import Asset, SGEntity, Shot, ShotGrid
+from core import telemetry
+from core.glui.dialogs import FilteredListDialog, MessageDialog
+from dcc.maya.util.util import maintain_selection
+from core.shotgrid import Asset, SGEntity, Shot, ShotGrid
 
 if TYPE_CHECKING:
     from Qt.QtWidgets import QWidget
@@ -187,11 +187,11 @@ class Publisher:
         the user cancelled or the selection was invalid — in which case an
         artist-facing dialog has already been shown.
         """
-        from pipe.maya.publish.asset import (
+        from dcc.maya.publish.asset import (
             PublishAssetOptionsDialog,
             PublishAssetPickerDialog,
         )
-        from pipe.maya.publish.previs_asset import PublishPrevisAssetDialog
+        from dcc.maya.publish.previs_asset import PublishPrevisAssetDialog
 
         dialog_type = cast(Any, self._dialog_T)
         if self._dialog_T in (

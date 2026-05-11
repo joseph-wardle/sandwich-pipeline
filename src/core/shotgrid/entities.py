@@ -12,7 +12,7 @@ When ShotGrid returns a linked reference — e.g. the sequence linked to a shot
 — the dict carries only `{"type": "Sequence", "id": 3, "name": "a10"}`.
 Those become *partial* entities: `id` and `code` are set, every other
 field is `None`.  Reading any other field on a partial entity that is bound
-to a `pipe.shotgrid.client.ShotGrid` connection lazily fetches the full
+to a `core.shotgrid.client.ShotGrid` connection lazily fetches the full
 record from ShotGrid; see `SGEntity.__getattribute__`.
 
 Equality and hashing
@@ -86,7 +86,7 @@ class SGEntity:
     considered equal.
 
     When a caller reads any field that is `None` on a partial entity bound
-    to a `pipe.shotgrid.client.ShotGrid` connection, the entity calls
+    to a `core.shotgrid.client.ShotGrid` connection, the entity calls
     back to its connection, re-fetches itself, and fills in every field in
     place.  Hydration fires at most once per instance.
 
@@ -101,7 +101,7 @@ class SGEntity:
 
     # Private back-reference to the ShotGrid connection that produced this
     # entity.  Typed `Any` to avoid a circular import with
-    # `pipe.shotgrid.client`.
+    # `core.shotgrid.client`.
     _db: Any = field(init=False, default=None, eq=False, repr=False)
     _hydrated: bool = field(init=False, default=False, eq=False, repr=False)
 

@@ -26,35 +26,35 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.glui.dialogs import ButtonPair, MessageDialog
-from pipe.maya.playblast.hud import HudDefinition
-from pipe.maya.playblast.shot.config import (
+from core.glui.dialogs import ButtonPair, MessageDialog
+from dcc.maya.playblast.hud import HudDefinition
+from dcc.maya.playblast.shot.config import (
     MShotPlayblastConfig,
     SaveLocation,
     dummy_shot,
 )
-from pipe.maya.playblast.shot.launcher import (
+from dcc.maya.playblast.shot.launcher import (
     build_success_message,
     collect_output_paths,
     final_movie_paths_for_destination,
     ordered_final_movie_paths_for_upload,
 )
-from pipe.maya.playblast.shot.playblaster import MPlayblaster
-from pipe.playblast import FFmpegPreset
-from pipe.playblast.naming import next_versioned_basename
-from pipe.playblast.tempdir import resolve_playblast_tempdir
-from pipe.playblast.shotgrid import (
+from dcc.maya.playblast.shot.playblaster import MPlayblaster
+from core.playblast import FFmpegPreset
+from core.playblast.naming import next_versioned_basename
+from core.playblast.tempdir import resolve_playblast_tempdir
+from core.playblast.shotgrid import (
     PlayblastEntity,
     PlayblastUploadIntent,
     run_playblast_upload,
 )
-from pipe.playblast.ui import ReviewPlaylistCombo
-from pipe.shotgrid import ShotGrid, ShotGridError
-from shared.users import resolve_artist_display_name
+from core.playblast.ui import ReviewPlaylistCombo
+from core.shotgrid import ShotGrid, ShotGridError
+from core.users import resolve_artist_display_name
 
 if TYPE_CHECKING:
-    from pipe.maya.playblast.shot.config import MPlayblastConfig
-    from pipe.shotgrid import Shot
+    from dcc.maya.playblast.shot.config import MPlayblastConfig
+    from core.shotgrid import Shot
 
 log = logging.getLogger(__name__)
 

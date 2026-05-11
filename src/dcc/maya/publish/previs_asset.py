@@ -10,13 +10,13 @@ import maya.cmds as cmds
 from pxr import Gf, Sdf, Usd, UsdGeom, Vt
 from Qt.QtWidgets import QWidget
 
-from pipe.shotgrid import Asset, SGEntity, ShotGrid
+from core.shotgrid import Asset, SGEntity, ShotGrid
 
 if TYPE_CHECKING:
     from typing import Any, Sequence
-from shared.util import get_production_path
+from core.util.util import get_production_path
 
-from pipe.glui.dialogs import FilteredListDialog, MessageDialog
+from core.glui.dialogs import FilteredListDialog, MessageDialog
 
 from .publisher import Publisher
 

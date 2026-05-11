@@ -34,7 +34,7 @@ global proc shelf_SKD_Assets () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.publish import ModelChecker; chck = ModelChecker.get(); chck.configure(); chck.show_UI();"
+        -command "from dcc.maya.publish import ModelChecker; chck = ModelChecker.get(); chck.configure(); chck.show_UI();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -69,7 +69,7 @@ global proc shelf_SKD_Assets () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.assetfile import MAssetFileManager; MAssetFileManager().save_version_for_current_scene()"
+        -command "from dcc.maya.assetfile import MAssetFileManager; MAssetFileManager().save_version_for_current_scene()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -104,7 +104,7 @@ global proc shelf_SKD_Assets () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.assetfile import MAssetFileManager; MAssetFileManager().open_version_browser()"
+        -command "from dcc.maya.assetfile import MAssetFileManager; MAssetFileManager().open_version_browser()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -139,7 +139,7 @@ global proc shelf_SKD_Assets () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.assetfile import MAssetFileManager; MAssetFileManager().open_file()"
+        -command "from dcc.maya.assetfile import MAssetFileManager; MAssetFileManager().open_file()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -174,7 +174,7 @@ global proc shelf_SKD_Assets () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.publish import AssetPublisher; AssetPublisher().publish();"
+        -command "from dcc.maya.publish import AssetPublisher; AssetPublisher().publish();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -209,7 +209,7 @@ global proc shelf_SKD_Assets () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.publish import RigPublisher; RigPublisher().publish();"
+        -command "from dcc.maya.publish import RigPublisher; RigPublisher().publish();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -244,7 +244,7 @@ global proc shelf_SKD_Assets () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.turnaround import show_turnaround_dialog; show_turnaround_dialog()"
+        -command "from dcc.maya.util.turnaround import show_turnaround_dialog; show_turnaround_dialog()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -279,7 +279,7 @@ global proc shelf_SKD_Assets () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.scale_reference import show_scale_reference_dialog; show_scale_reference_dialog()"
+        -command "from dcc.maya.util.scale_reference import show_scale_reference_dialog; show_scale_reference_dialog()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -313,7 +313,7 @@ global proc shelf_SKD_Assets () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.symmetry import visualize_symmetry_of_selected\nvisualize_symmetry_of_selected()"
+        -command "from dcc.maya.symmetry import visualize_symmetry_of_selected\nvisualize_symmetry_of_selected()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1

@@ -12,10 +12,10 @@ if TYPE_CHECKING:
     from typing import Any, Sequence
 
 import maya.cmds as mc
-from shared.util import get_production_path
+from core.util.util import get_production_path
 
-from pipe.glui.dialogs import FilteredListDialog
-from pipe.shotgrid import SGEntity, Shot
+from core.glui.dialogs import FilteredListDialog
+from core.shotgrid import SGEntity, Shot
 
 from .publisher import Publisher
 from .usdchaser import ExportChaser, ExportChaserMode

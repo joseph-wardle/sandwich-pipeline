@@ -5,16 +5,16 @@ from pathlib import Path
 from typing import cast
 
 import hou
-from shared.util import get_production_path
+from core.util.util import get_production_path
 
-from pipe.asset.paths import BACKUP_DIRNAME, paths_for_asset
-from pipe.asset.version_adapter import (
+from core.asset.paths import BACKUP_DIRNAME, paths_for_asset
+from core.asset.version_adapter import (
     asset_owner_for,
     houdini_asset_builder_stream,
 )
-from pipe.glui.dialogs import FilteredListDialog, MessageDialog
-from pipe.shotgrid import Asset, SGEntity
-from pipe.versioning import VersionStreamSpec
+from core.glui.dialogs import FilteredListDialog, MessageDialog
+from core.shotgrid import Asset, SGEntity
+from core.versioning import VersionStreamSpec
 
 from ..publish import nodelayouts
 from .filemanager import HFileManager

@@ -8,10 +8,10 @@ from env_sg import DB_Config
 from pxr import Kind, Usd, UsdGeom
 from Qt import QtWidgets
 from Qt.QtCompat import wrapInstance
-from shared.util import get_production_path
+from core.util.util import get_production_path
 
-from pipe.glui.dialogs import FilteredListDialog
-from pipe.shotgrid import ShotGrid
+from core.glui.dialogs import FilteredListDialog
+from core.shotgrid import ShotGrid
 
 from .file_manager import HOUDINI_TO_MAYA_SCALE
 

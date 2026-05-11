@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import maya.cmds as mc
 
-from pipe.maya.command import maya_command
+from dcc.maya.command import maya_command
 
 
 def createSpaceSwitch():

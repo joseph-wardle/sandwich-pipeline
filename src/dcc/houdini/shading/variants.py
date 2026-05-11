@@ -2,7 +2,7 @@
 
 This module intentionally has no Houdini-node side effects. It discovers
 geometry/material publish variants and returns a deterministic build plan that
-`pipe.houdini.nodelayouts` can apply to the LOP network.
+`dcc.houdini.publish.nodelayouts` can apply to the LOP network.
 """
 
 from __future__ import annotations

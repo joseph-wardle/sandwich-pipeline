@@ -1,4 +1,4 @@
-from pipe.maya.optionvar import BoolOptionVar, IntOptionVar, StringOptionVar
+from dcc.maya.util.optionvar import BoolOptionVar, IntOptionVar, StringOptionVar
 
 
 class RigBuilderSettings:

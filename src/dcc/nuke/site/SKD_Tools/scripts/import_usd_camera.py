@@ -8,9 +8,9 @@ from typing import Any, cast
 import nuke
 from env_sg import DB_Config
 from Qt import QtCore, QtGui, QtWidgets
-from shared.util import get_production_path
+from core.util.util import get_production_path
 
-from pipe.shotgrid import ShotGrid
+from core.shotgrid import ShotGrid
 
 simple_window = None
 

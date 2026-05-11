@@ -6,13 +6,13 @@ from pathlib import Path
 import hou
 from env_sg import DB_Config
 
-import pipe.houdini
-from pipe.glui.dialogs import MessageDialog
-from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
-from pipe.glui.version_browser import VersionBrowserWidget
-from pipe.shotgrid import SGEntity, ShotGrid
-from pipe.util import FileManager
-from pipe.versioning import (
+from dcc.houdini import runtime as houdini_runtime
+from core.glui.dialogs import MessageDialog
+from core.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
+from core.glui.version_browser import VersionBrowserWidget
+from core.shotgrid import SGEntity, ShotGrid
+from core.util import FileManager
+from core.versioning import (
     VersionStreamSpec,
     list_version_records,
     promote_version as _promote_version,
@@ -31,7 +31,7 @@ class HFileManager(FileManager):
         version_glob: str = "",
     ) -> None:
         conn = ShotGrid.connect(DB_Config)
-        window = pipe.houdini.local.get_main_qt_window()
+        window = houdini_runtime.get_main_qt_window()
         super().__init__(
             conn, entity_type, window, versioning=versioning, version_glob=version_glob
         )

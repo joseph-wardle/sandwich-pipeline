@@ -8,14 +8,14 @@ from typing import cast
 
 import hou
 
-import pipe.houdini
-from pipe.glui.dialogs import FilteredListDialog, MessageDialog
-from pipe.houdini.hipfile.departments import DEPARTMENT_OPTIONS, Department
-from pipe.shot.version_adapter import (
+from dcc.houdini import runtime as houdini_runtime
+from core.glui.dialogs import FilteredListDialog, MessageDialog
+from dcc.houdini.hipfile.departments import DEPARTMENT_OPTIONS, Department
+from core.shot.version_adapter import (
     houdini_department_stream,
     shot_owner_for,
 )
-from pipe.shotgrid import (
+from core.shotgrid import (
     Environment,
     SGEntity,
     Shot,
@@ -23,7 +23,7 @@ from pipe.shotgrid import (
     ShotGridNotFound,
     validate_shot_code_token,
 )
-from pipe.versioning import VersionStreamSpec, path_matches_stream
+from core.versioning import VersionStreamSpec, path_matches_stream
 
 from .filemanager import HFileManager
 
@@ -33,7 +33,7 @@ log = logging.getLogger(__name__)
 class HShotFileManager(HFileManager):
     _department: str | None
 
-    # `Department` is the canonical enum (see `pipe/houdini/hipfile/departments.py`);
+    # `Department` is the canonical enum (see `dcc/houdini/hipfile/departments.py`);
     # the class alias is kept so call sites that reference `HShotFileManager.DEPARTMENT`
     # continue to work without touching every site.
     DEPARTMENT = Department
@@ -59,7 +59,7 @@ class HShotFileManager(HFileManager):
     @classmethod
     def _prompt_department(cls) -> str | None:
         department_dialog = FilteredListDialog(
-            pipe.houdini.local.get_main_qt_window(),
+            houdini_runtime.get_main_qt_window(),
             cls._department_options(),
             "Department Select",
             include_filter_field=False,
@@ -365,7 +365,7 @@ class HShotFileManager(HFileManager):
 
     def _show_setup_error(self, *, title: str, message: str, details: str) -> None:
         try:
-            if pipe.houdini.local.is_headless():
+            if houdini_runtime.is_headless():
                 print(message)
                 if details:
                     print("\nDetails:\n" + details)
@@ -393,7 +393,7 @@ class HShotFileManager(HFileManager):
                 )
                 return
 
-            parent = pipe.houdini.local.get_main_qt_window()
+            parent = houdini_runtime.get_main_qt_window()
             dialog = QtWidgets.QDialog(parent)
             dialog.setWindowTitle(title)
             dialog.setWindowFlags(dialog.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)

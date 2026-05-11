@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import pipe.substance_painter
 import substance_painter as sp
-from pipe.glui.dialogs import MessageDialog
-from pipe.substance_painter.ui import SubstanceExportWindow
+from core.glui.dialogs import MessageDialog
+from dcc.substance_painter import runtime as sp_runtime
+from dcc.substance_painter.ui import SubstanceExportWindow
 from Qt import QtWidgets
 
 plugin_widgets: list[QtWidgets.QWidget | QtWidgets.QAction] = []
@@ -51,7 +51,7 @@ if __name__ == "__main__":
 def launch_exporter():
     if not sp.project.is_open():
         MessageDialog(
-            pipe.substance_painter.local.get_main_qt_window(),
+            sp_runtime.get_main_qt_window(),
             "Please open a project before trying to publish",
             "No project open",
         ).exec_()
@@ -74,13 +74,13 @@ def launch_exporter():
 
 
 def launch_asset_opener():
-    from pipe.substance_painter.assetfile import launch_open_asset_textures
+    from dcc.substance_painter.assetfile import launch_open_asset_textures
 
     launch_open_asset_textures()
 
 
 def launch_save_version():
-    from pipe.substance_painter.assetfile import (
+    from dcc.substance_painter.assetfile import (
         launch_save_version as _launch_save_version,
     )
 
@@ -88,7 +88,7 @@ def launch_save_version():
 
 
 def launch_version_history():
-    from pipe.substance_painter.assetfile import (
+    from dcc.substance_painter.assetfile import (
         launch_version_browser_for_current_project as _launch_version_history,
     )
 

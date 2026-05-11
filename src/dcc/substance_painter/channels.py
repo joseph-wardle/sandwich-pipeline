@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import substance_painter as sp
 
-from pipe.substance_painter.local import get_main_qt_window
-from pipe.glui.dialogs import MessageDialog
+from dcc.substance_painter.runtime import get_main_qt_window
+from core.glui.dialogs import MessageDialog
 
 
 class sRGBChecker:

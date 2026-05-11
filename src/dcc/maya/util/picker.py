@@ -3,9 +3,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
-from shared.util import get_production_path
+from core.util.util import get_production_path
 
-from pipe.maya.command import maya_command
+from dcc.maya.command import maya_command
 
 log = logging.getLogger(__name__)
 

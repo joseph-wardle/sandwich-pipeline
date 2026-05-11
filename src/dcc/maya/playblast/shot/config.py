@@ -5,9 +5,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, cast
 
-from pipe.maya.playblast.hud import HudDefinition
-from pipe.playblast import FFmpegPreset
-from pipe.shotgrid import Shot
+from dcc.maya.playblast.hud import HudDefinition
+from core.playblast import FFmpegPreset
+from core.shotgrid import Shot
 
 log = logging.getLogger(__name__)
 

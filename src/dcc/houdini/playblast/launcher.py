@@ -8,24 +8,24 @@ from typing import TYPE_CHECKING, Any
 import hou
 from env_sg import DB_Config
 
-from pipe.glui.dialogs import MessageDialog
-from pipe.houdini import local
-from pipe.houdini.playblast.config import (
+from core.glui.dialogs import MessageDialog
+from dcc.houdini import runtime
+from dcc.houdini.playblast.config import (
     HoudiniPlayblastExportConfig,
     HoudiniPlayblastLaunchContext,
     ResolvedOutputDestination,
 )
-from pipe.houdini.playblast.dialog import HPlayblastDialog
-from pipe.houdini.playblast.playblaster import HPlayblaster
-from pipe.playblast import FFmpegPreset
-from pipe.playblast.shotgrid import (
+from dcc.houdini.playblast.dialog import HPlayblastDialog
+from dcc.houdini.playblast.playblaster import HPlayblaster
+from core.playblast import FFmpegPreset
+from core.playblast.shotgrid import (
     PlayblastEntity,
     PlayblastUploadIntent,
     UploadTarget,
     run_playblast_upload,
 )
-from pipe.shotgrid import Shot, ShotGrid
-from shared.users import resolve_artist_display_name
+from core.shotgrid import Shot, ShotGrid
+from core.users import resolve_artist_display_name
 
 log = logging.getLogger(__name__)
 
@@ -36,11 +36,11 @@ SHOT_CODE_FALLBACK_PATTERN = re.compile(r"[A-Za-z]+_\d{3}(?:_[A-Za-z0-9]+)*")
 
 
 def launch_playblast() -> None:
-    if local.is_headless():
+    if runtime.is_headless():
         MessageDialog(None, "Playblast requires the Houdini UI.", "Playblast").exec_()
         return
 
-    parent = local.get_main_qt_window()
+    parent = runtime.get_main_qt_window()
     conn = _resolve_connection_or_report(parent)
     if conn is None:
         return

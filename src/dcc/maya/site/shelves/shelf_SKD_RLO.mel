@@ -33,7 +33,7 @@ global proc shelf_SKD_RLO () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.shotfile import MRLOShotFileManager; fm = MRLOShotFileManager(); fm.open_file()"
+        -command "from dcc.maya.shotfile import MRLOShotFileManager; fm = MRLOShotFileManager(); fm.open_file()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -67,7 +67,7 @@ global proc shelf_SKD_RLO () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.shotfile import MRLOShotFileManager; MRLOShotFileManager().save_version_for_current_scene()"
+        -command "from dcc.maya.shotfile import MRLOShotFileManager; MRLOShotFileManager().save_version_for_current_scene()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -101,7 +101,7 @@ global proc shelf_SKD_RLO () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.shotfile import MRLOShotFileManager; MRLOShotFileManager().open_version_browser()"
+        -command "from dcc.maya.shotfile import MRLOShotFileManager; MRLOShotFileManager().open_version_browser()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -169,7 +169,7 @@ global proc shelf_SKD_RLO () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.publish import CameraPublisher; CameraPublisher().publish();"
+        -command "from dcc.maya.publish import CameraPublisher; CameraPublisher().publish();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -203,7 +203,7 @@ global proc shelf_SKD_RLO () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.playblast import PrevisPlayblastDialog; from pipe.maya.local import get_main_qt_window; PrevisPlayblastDialog(get_main_qt_window()).show();"
+        -command "from dcc.maya.playblast import PrevisPlayblastDialog; from dcc.maya.runtime import get_main_qt_window; PrevisPlayblastDialog(get_main_qt_window()).show();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -237,7 +237,7 @@ global proc shelf_SKD_RLO () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.scripts.Assign_FX_Material import assign_texture_with_dropdown; assign_texture_with_dropdown();\n"
+        -command "from dcc.maya.util.scripts.Assign_FX_Material import assign_texture_with_dropdown; assign_texture_with_dropdown();\n"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -271,7 +271,7 @@ global proc shelf_SKD_RLO () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.scripts.ALT_Camera import ReferenceAndMatchRig; ReferenceAndMatchRig().launch();\n"
+        -command "from dcc.maya.util.scripts.ALT_Camera import ReferenceAndMatchRig; ReferenceAndMatchRig().launch();\n"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -305,7 +305,7 @@ global proc shelf_SKD_RLO () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.scripts.Camera import show_camera_reference_ui; show_camera_reference_ui();\n"
+        -command "from dcc.maya.util.scripts.Camera import show_camera_reference_ui; show_camera_reference_ui();\n"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -339,7 +339,7 @@ global proc shelf_SKD_RLO () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.scripts.FX_Card_Rig import open_reference_ui; open_reference_ui();\n"
+        -command "from dcc.maya.util.scripts.FX_Card_Rig import open_reference_ui; open_reference_ui();\n"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -373,7 +373,7 @@ global proc shelf_SKD_RLO () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.scripts.FX_Card import FXCard; FXCard();\n"
+        -command "from dcc.maya.util.scripts.FX_Card import FXCard; FXCard();\n"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -407,7 +407,7 @@ global proc shelf_SKD_RLO () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.scripts.Pointlight_Rig import create_point_light_control; create_point_light_control();\n"
+        -command "from dcc.maya.util.scripts.Pointlight_Rig import create_point_light_control; create_point_light_control();\n"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -441,7 +441,7 @@ global proc shelf_SKD_RLO () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.scripts.Set_Up import setup; setup();"
+        -command "from dcc.maya.util.scripts.Set_Up import setup; setup();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -475,7 +475,7 @@ global proc shelf_SKD_RLO () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from pipe.maya.scripts.Spotlight_Rig import create_spotlight_rig_auto_index; create_spotlight_rig_auto_index();"
+        -command "from dcc.maya.util.scripts.Spotlight_Rig import create_spotlight_rig_auto_index; create_spotlight_rig_auto_index();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1

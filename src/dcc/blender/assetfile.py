@@ -2,9 +2,9 @@ import bpy
 from bpy.types import Context
 from env_sg import DB_Config
 
-from pipe.asset import paths_for_asset
-from pipe.blender.register import blender_class, blender_operator
-from pipe.shotgrid import Asset, ShotGrid
+from core.asset import paths_for_asset
+from dcc.blender.util.register import blender_class, blender_operator
+from core.shotgrid import Asset, ShotGrid
 
 
 @blender_class

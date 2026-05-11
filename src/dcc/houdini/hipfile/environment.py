@@ -5,22 +5,22 @@ from pathlib import Path
 from typing import cast
 
 import hou
-from shared.util import get_production_path
+from core.util.util import get_production_path
 
-from pipe.environment.version_adapter import (
+from core.environment.version_adapter import (
     environment_owner_for,
     houdini_set_stream,
 )
-from pipe.versioning import path_matches_stream
-from pipe.glui.dialogs import MessageDialog
-from pipe.shotgrid import (
+from core.versioning import path_matches_stream
+from core.glui.dialogs import MessageDialog
+from core.shotgrid import (
     Environment,
     SGEntity,
     ShotGridError,
     ShotGridNotFound,
     normalize_display_name,
 )
-from pipe.versioning import VersionStreamSpec
+from core.versioning import VersionStreamSpec
 
 from ..publish import nodelayouts
 from .filemanager import HFileManager

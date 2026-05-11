@@ -5,9 +5,9 @@ from typing import Any
 
 import nuke
 from env_sg import DB_Config
-from shared.util import get_edit_path, get_production_path
+from core.util.util import get_edit_path, get_production_path
 
-from pipe.shotgrid import Playlist, ShotGrid, ShotGridError, ShotGridNotFound
+from core.shotgrid import Playlist, ShotGrid, ShotGridError, ShotGridNotFound
 
 project_file = nuke.root()["name"].value()
 

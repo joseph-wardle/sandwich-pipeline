@@ -24,11 +24,11 @@ from typing import Any, Mapping, NotRequired, TypedDict, cast
 import hou
 from Qt import QtWidgets
 
-from pipe.asset.version_adapter import asset_owner_from_metadata
-from pipe.glui.progress import progress_scope
-from pipe.versioning import stream_key_for
-from pipe.versioning.model import DCC_HOUDINI
-from pipe.versioning.store import (
+from core.asset.version_adapter import asset_owner_from_metadata
+from core.glui.progress import progress_scope
+from core.versioning import stream_key_for
+from core.versioning.model import DCC_HOUDINI
+from core.versioning.store import (
     VERSION_MANIFEST_FILENAME,
     backup_file,
     get_manifest_path,

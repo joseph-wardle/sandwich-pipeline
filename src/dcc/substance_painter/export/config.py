@@ -9,12 +9,12 @@ from pathlib import Path
 import substance_painter as sp
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
-from pipe.substance_painter.export_types import (
+from dcc.substance_painter.export.types import (
     ResolvedExportTarget,
     TexSetExportSettings,
 )
-from pipe.substance_painter.util import texture_set_name
-from pipe.struct.material import DisplacementSource, NormalSource, NormalType
+from dcc.substance_painter.util.util import texture_set_name
+from core.struct.material import DisplacementSource, NormalSource, NormalType
 
 
 def channel_export_name(channel: sp.textureset.Channel) -> str:

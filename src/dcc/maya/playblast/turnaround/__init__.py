@@ -6,7 +6,7 @@ playblast captured by `MTurnaroundPlayblaster` (in `playblaster.py`). The
 geometry resolver live in `config.py`.
 """
 
-from pipe.maya.playblast.turnaround.dialog import (
+from dcc.maya.playblast.turnaround.dialog import (
     AssetTurnaroundDialog as AssetTurnaroundDialog,
 )
 

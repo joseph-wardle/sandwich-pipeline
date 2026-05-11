@@ -15,8 +15,8 @@ from typing import Any, Mapping, TypedDict
 
 import hou
 
-from pipe import telemetry
-from pipe.asset.paths import ASSET_BUILDER_FILENAME
+from core import telemetry
+from core.asset.paths import ASSET_BUILDER_FILENAME
 
 from . import nodelayouts
 from .main import PublishOptions, publish_component
@@ -28,8 +28,8 @@ RESULT_END_MARKER = "--END-BUILD-RESULT--"
 
 TURNAROUND_HOOK = "turnaround"
 
-# Mirrors `HoudiniBuildError.error_code` in `pipe.maya.publish.asset`. Houdini's
-# parent package (`pipe.houdini`) eagerly imports `hou`, so Maya cannot import the
+# Mirrors `HoudiniBuildError.error_code` in `dcc.maya.publish.asset`. Houdini's
+# parent package (`dcc.houdini`) eagerly imports `hou`, so Maya cannot import the
 # exception class itself; the two values must stay in sync so the dashboard
 # groups failures from both sides under one bucket.
 _HOUDINI_BUILD_FAILED_CODE = "HOUDINI_BUILD_FAILED"
@@ -84,7 +84,7 @@ def run_headless_publish(
     - Creates builder only when missing
     - Respects existing artist graph by default
     - Regenerates managed variant graph only when requested
-    - Delegates publish execution to `pipe.houdini.publish.publish_component`
+    - Delegates publish execution to `dcc.houdini.publish.main.publish_component`
     """
 
     normalized_variant = (variant or "").strip() or "main"

@@ -25,28 +25,28 @@ import substance_painter as sp
 from env_sg import DB_Config
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
-from pipe.asset.paths import paths_for_asset
-from pipe.asset.version_adapter import asset_owner_for, substance_project_stream
-from pipe.glui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButtons
-from pipe.glui.progress import ProgressDialog
-from pipe.shotgrid import Asset, ShotGrid
-from pipe.substance_painter.export import Exporter, TexSetExportSettings
-from pipe.substance_painter.houdini import (
+from core.asset.paths import paths_for_asset
+from core.asset.version_adapter import asset_owner_for, substance_project_stream
+from core.glui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButtons
+from core.glui.progress import ProgressDialog
+from core.shotgrid import Asset, ShotGrid
+from dcc.substance_painter.export.export import Exporter, TexSetExportSettings
+from dcc.substance_painter.houdini_bridge import (
     HoudiniPublishError,
     run_asset_builder,
     summarize_result,
 )
-from pipe.substance_painter.local import get_main_qt_window
-from pipe.substance_painter.metadata import get_active_asset_from_project
-from pipe.substance_painter.util import docs_link_html, texture_set_name
-from pipe.substance_painter.progress import (
+from dcc.substance_painter.runtime import get_main_qt_window
+from dcc.substance_painter.util.metadata import get_active_asset_from_project
+from dcc.substance_painter.util.util import docs_link_html, texture_set_name
+from dcc.substance_painter.util.progress import (
     DEFAULT_PUBLISH_STAGE_SEQUENCE,
     PublishProgressUpdate,
     PublishStage,
 )
-from pipe.struct.material import DisplacementSource, NormalSource, NormalType
-from pipe.util import checkbox_callback_helper, dict_index
-from pipe.versioning.store import backup_if_changed
+from core.struct.material import DisplacementSource, NormalSource, NormalType
+from core.util import checkbox_callback_helper, dict_index
+from core.versioning.store import backup_if_changed
 
 log = logging.getLogger(__name__)
 

@@ -20,10 +20,10 @@ from pathlib import Path
 from typing import Any
 
 from env import Executables
-from dcc.houdini.launch import HoudiniLauncher as HoudiniDCC
+from dcc.houdini.launch import HoudiniLauncher
 
-from pipe.asset.paths import paths_for_asset
-from pipe.shotgrid import Asset
+from core.asset.paths import paths_for_asset
+from core.shotgrid import Asset
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def run_asset_builder(asset: Asset, *, geo_variant: str) -> dict[str, Any]:
     command = [
         str(Executables.hython),
         "-m",
-        "pipe.houdini.assetbuilder",
+        "dcc.houdini.publish.assetbuilder",
         "--asset-root",
         str(asset_paths.root),
         "--asset-name",
@@ -74,7 +74,7 @@ def run_asset_builder(asset: Asset, *, geo_variant: str) -> dict[str, Any]:
     if asset.id is not None:
         command.extend(["--asset-id", str(asset.id)])
 
-    dcc = HoudiniDCC(is_python_shell=True)
+    dcc = HoudiniLauncher(is_python_shell=True)
     env = dcc._get_env_vars()
     env["PIPE_LOG_LEVEL"] = str(log.getEffectiveLevel())
 

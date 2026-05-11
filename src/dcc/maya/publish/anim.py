@@ -7,14 +7,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from typing import Any
 
-    from pipe.shotgrid import Shot
+    from core.shotgrid import Shot
 
 import maya.cmds as mc
-from shared.util import get_production_path
-from software.houdini import HoudiniDCC  # noqa
+from core.util.util import get_production_path
 
-from pipe.glui.dialogs import MessageDialog
-from pipe.struct.timeline import Timeline
+from core.glui.dialogs import MessageDialog
+from core.struct.timeline import Timeline
 
 from .anim_lock import confirm_anim_republish_allowed
 from .publisher import Publisher
@@ -109,13 +108,13 @@ class AnimPublisher(Publisher):
 
         # post_script = ";".join(
         #     [
-        #         "from pipe.houdini.animpostprocess import AnimPostProcessor",
+        #         "from dcc.houdini.shot.animpostprocess import AnimPostProcessor",
         #         f"AnimPostProcessor().run('{self._shot.code}')",
         #         "exit()",
         #     ]
         # )
 
-        # HoudiniDCC(is_python_shell=True, extra_args=["-c", post_script]).launch()
+        # HoudiniLauncher(is_python_shell=True, extra_args=["-c", post_script]).launch()
 
         # root_layer = Sdf.Layer.FindOrOpen(str(self._publish_path))
         # root_layer.subLayerPaths.append("post-process.usd")

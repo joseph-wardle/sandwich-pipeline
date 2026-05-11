@@ -9,11 +9,11 @@ import mayaUsd.lib as mayaUsdLib  # type: ignore[import-not-found]
 from env_sg import DB_Config
 from mayaUsd.lib import proxyAccessor as pa
 from pxr import Gf, Usd, UsdGeom
-from shared.util import get_production_path
+from core.util.util import get_production_path
 
-from pipe.maya.local import get_main_qt_window
-from pipe.shotgrid import Environment, SGEntity, ShotGrid
-from pipe.util import FileManager, log_errors
+from dcc.maya.runtime import get_main_qt_window
+from core.shotgrid import Environment, SGEntity, ShotGrid
+from core.util import FileManager, log_errors
 
 from .publish import MLayoutPublisher
 
@@ -127,7 +127,7 @@ class MLayoutFileManager(FileManager):
         classname = self.__class__.__name__
         mc.scriptNode(
             beforeScript=(
-                f"from pipe.maya.layout import {classname};"
+                f"from dcc.maya.layout import {classname};"
                 f"{classname}.{self.__class__.run_on_open.__name__}()"
             ),
             name=ON_OPEN_SCRIPT,

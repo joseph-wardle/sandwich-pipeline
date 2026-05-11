@@ -7,7 +7,7 @@ from maya.OpenMayaUI import MQtUtil
 from Qt import QtCore
 from Qt.QtWidgets import QWidget
 
-from pipe.maya.local import get_main_qt_window
+from dcc.maya.runtime import get_main_qt_window
 
 from .. import build, publish
 from ..build import RigDefinition, has_local_override_directory
@@ -82,7 +82,7 @@ class RigBuilderWindow(RigBuilderWindowUI):
         self.load_data_async()  # Start loading after UI is initialized
 
     def connect_ui(self):
-        builder_log = logging.getLogger("pipe.maya.rig.builder")
+        builder_log = logging.getLogger("dcc.maya.rig.builder")
         builder_log.setLevel(logging.DEBUG)
         self.rig_build_log_box.connect_logger(builder_log)
 

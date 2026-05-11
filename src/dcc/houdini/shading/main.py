@@ -9,8 +9,8 @@ from typing import Any, cast
 import hou
 from env_sg import DB_Config
 
-from pipe.shotgrid import Asset, ShotGrid
-from pipe.struct.material import MaterialInfo
+from core.shotgrid import Asset, ShotGrid
+from core.struct.material import MaterialInfo
 
 from . import variants
 

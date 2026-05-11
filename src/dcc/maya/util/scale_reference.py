@@ -15,12 +15,12 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.asset.paths import paths_for_asset
-from pipe.glui.dialogs import ButtonPair, MessageDialog
-from pipe.shotgrid import ShotGrid
-from pipe.maya.command import maya_command
-from pipe.maya.local import get_main_qt_window
-from pipe.maya.optionvar import StringOptionVar
+from core.asset.paths import paths_for_asset
+from core.glui.dialogs import ButtonPair, MessageDialog
+from core.shotgrid import ShotGrid
+from dcc.maya.command import maya_command
+from dcc.maya.runtime import get_main_qt_window
+from dcc.maya.util.optionvar import StringOptionVar
 
 log = logging.getLogger(__name__)
 

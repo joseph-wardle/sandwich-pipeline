@@ -1,9 +1,9 @@
 """ShotGrid integration — single-import surface for every pipeline caller.
 
-The `ShotGrid` connection class lives in `pipe.shotgrid.client`; the
-entity types in `pipe.shotgrid.entities`; the path helpers in
-`pipe.shotgrid.paths`; the exception hierarchy in
-`pipe.shotgrid.errors`.  Callers should reach for everything via this
+The `ShotGrid` connection class lives in `core.shotgrid.client`; the
+entity types in `core.shotgrid.entities`; the path helpers in
+`core.shotgrid.paths`; the exception hierarchy in
+`core.shotgrid.errors`.  Callers should reach for everything via this
 package: `from core.shotgrid import ShotGrid, Asset, ShotGridNotFound, ...`.
 """
 

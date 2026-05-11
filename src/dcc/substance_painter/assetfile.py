@@ -20,15 +20,15 @@ import substance_painter as sp
 from env_sg import DB_Config
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 from Qt import QtWidgets
-from shared.util import resolve_mapped_path
+from core.util.util import resolve_mapped_path
 
-from pipe.asset.paths import paths_for_asset
-from pipe.asset.version_adapter import asset_owner_for, substance_project_stream
-from pipe.shotgrid import Asset, ShotGrid
-from pipe.glui.dialogs import MessageDialog, MessageDialogCustomButtons
-from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
-from pipe.glui.version_browser import VersionBrowserWidget
-from pipe.substance_painter.dialogs import (
+from core.asset.paths import paths_for_asset
+from core.asset.version_adapter import asset_owner_for, substance_project_stream
+from core.shotgrid import Asset, ShotGrid
+from core.glui.dialogs import MessageDialog, MessageDialogCustomButtons
+from core.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
+from core.glui.version_browser import VersionBrowserWidget
+from dcc.substance_painter.dialogs import (
     SubstanceAssetCreateModeDialog,
     SubstanceAssetDefaultProjectDialog,
     SubstanceAssetSelectDialog,
@@ -37,15 +37,15 @@ from pipe.substance_painter.dialogs import (
     project_template_path,
     resolve_default_mesh_paths,
 )
-from pipe.substance_painter.local import get_main_qt_window
-from pipe.substance_painter.metadata import (
+from dcc.substance_painter.runtime import get_main_qt_window
+from dcc.substance_painter.util.metadata import (
     current_project_path,
     get_active_asset_from_project,
     get_asset_selection_metadata,
     run_when_project_editable,
     store_asset_metadata_when_ready,
 )
-from pipe.versioning import (
+from core.versioning import (
     list_version_records,
     promote_version,
     save_version,
@@ -680,9 +680,9 @@ def launch_save_version() -> None:
 # ---------------------------------------------------------------------------
 
 # These symbols were historically imported from this module by other code.
-# They now live in pipe.substance_painter.metadata but are re-exported here so that
+# They now live in dcc.substance_painter.util.metadata but are re-exported here so that
 # existing import paths continue to work.
-from pipe.substance_painter.metadata import (  # noqa: E402, F401
+from dcc.substance_painter.util.metadata import (  # noqa: E402, F401
     PIPE_SP_METADATA_CONTEXT,
     PIPE_SP_METADATA_KEY,
     PIPE_SP_METADATA_SCHEMA_VERSION,

@@ -9,7 +9,7 @@ The orchestrator (`pipe/telemetry/local_stack.py`) starts the ingester as a
 subprocess of `pipe telemetry up` and `pipe telemetry catch-up`. It can also
 be invoked directly for ad-hoc backfill or testing (run from the pipeline root):
 
-    PYTHONPATH=pipeline uv run python -m pipe.telemetry.ingester \\
+    PYTHONPATH=pipeline uv run python -m core.telemetry.ingester \\
         --spool-root /groups/sandwich/05_production/.telemetry/raw \\
         --db-dsn postgresql://sandwich-telemetry@127.0.0.1:55432/sandwich_telemetry \\
         --once
@@ -393,7 +393,7 @@ def _coerce_naive_to_utc(value: datetime) -> datetime:
 
 
 # ---------------------------------------------------------------------------
-# CLI entrypoint — invoked via `python -m pipe.telemetry.ingester`, either by
+# CLI entrypoint — invoked via `python -m core.telemetry.ingester`, either by
 # the local-stack orchestrator or by hand for backfill
 # ---------------------------------------------------------------------------
 
@@ -414,7 +414,7 @@ def _build_runner(args: argparse.Namespace) -> IngesterRunner:
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="pipe.telemetry.ingester",
+        prog="core.telemetry.ingester",
         description="Tail the shared telemetry JSONL spool into Postgres.",
     )
     parser.add_argument(

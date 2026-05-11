@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Callable, Iterable
 
 log = logging.getLogger(__name__)
-test_log = logging.getLogger("pipe.maya.rig.builder.test")
+test_log = logging.getLogger("dcc.maya.rig.builder.test")
 
 
 class TestRunner:

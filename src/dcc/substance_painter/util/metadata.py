@@ -32,12 +32,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 import substance_painter as sp
-from shared.util import get_production_path
+from core.util.util import get_production_path
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
-from pipe.asset.paths import DCC_SUBSTANCE
-from pipe.shotgrid import Asset, ShotGrid, build_asset_path
-from pipe.substance_painter.util import texture_set_name
+from core.asset.paths import DCC_SUBSTANCE
+from core.shotgrid import Asset, ShotGrid, build_asset_path
+from dcc.substance_painter.util.util import texture_set_name
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ PIPE_SP_METADATA_SCHEMA_VERSION = 1
 # Shared utilities
 # ---------------------------------------------------------------------------
 
-# texture_set_name is imported from pipe.substance_painter.util
+# texture_set_name is imported from dcc.substance_painter.util.util
 
 
 def current_project_path() -> Path | None:

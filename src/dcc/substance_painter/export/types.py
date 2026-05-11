@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import substance_painter as sp
 
-from pipe.struct.material import DisplacementSource, NormalSource, NormalType
+from core.struct.material import DisplacementSource, NormalSource, NormalType
 
 
 @dataclass

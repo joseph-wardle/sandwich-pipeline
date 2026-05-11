@@ -8,9 +8,9 @@ arrived in the spool since the last shutdown.
 Run from the pipeline checkout root (the repo isn't declared as an
 installable package, so `pipe` has to go on `PYTHONPATH`):
 
-    PYTHONPATH=pipeline uv run python -m pipe.telemetry up        # ^C to stop
-    PYTHONPATH=pipeline uv run python -m pipe.telemetry catch-up  # one-shot ingest
-    PYTHONPATH=pipeline uv run python -m pipe.telemetry status    # who holds the lock
+    PYTHONPATH=pipeline uv run python -m core.telemetry up        # ^C to stop
+    PYTHONPATH=pipeline uv run python -m core.telemetry catch-up  # one-shot ingest
+    PYTHONPATH=pipeline uv run python -m core.telemetry status    # who holds the lock
 
 Concurrency: the orchestrator holds an exclusive `flock` on
 ``<production>/.telemetry/locks/orchestrator.lock`` for its whole lifetime.
@@ -44,7 +44,7 @@ from core.util.util import (
     get_shared_telemetry_backend_dir,
 )
 
-_LOG = logging.getLogger("pipe.telemetry.local_stack")
+_LOG = logging.getLogger("core.telemetry.local_stack")
 
 _DEFAULT_PG_PORT = 55432
 _DEFAULT_GRAFANA_PORT = 3001
@@ -351,7 +351,7 @@ def _spawn_ingester(
     cmd = [
         sys.executable,
         "-m",
-        "pipe.telemetry.ingester",
+        "core.telemetry.ingester",
         "--spool-root",
         str(paths.spool_root),
         "--db-dsn",

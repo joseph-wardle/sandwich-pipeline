@@ -8,16 +8,16 @@ from typing import TYPE_CHECKING, Any, Iterator, cast
 
 import hou
 
-from pipe.houdini.playblast.config import DEFAULT_RESOLUTION
-from pipe.houdini.playblast.hud import (
+from dcc.houdini.playblast.config import DEFAULT_RESOLUTION
+from dcc.houdini.playblast.hud import (
     build_hud_filter_args,
     resolve_current_hip_version,
 )
-from pipe.playblast import FFmpegPreset, Playblaster
-from shared.users import resolve_artist_display_name
+from core.playblast import FFmpegPreset, Playblaster
+from core.users import resolve_artist_display_name
 
 if TYPE_CHECKING:
-    from pipe.shotgrid import Shot
+    from core.shotgrid import Shot
 
 log = logging.getLogger(__name__)
 

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import substance_painter as sp
 
-from pipe.substance_painter.export_types import ExportEventSnapshot
+from dcc.substance_painter.export.types import ExportEventSnapshot
 
 
 def planned_export_count(exports_by_stack: dict[tuple[str, str], list[str]]) -> int:

@@ -7,15 +7,15 @@ from typing import TYPE_CHECKING
 import maya.cmds as mc
 from mayacapture.capture import capture  # type: ignore[import-not-found]
 
-from pipe.maya.playblast.hud import applied_hud
-from pipe.maya.playblast.shot.config import MPlayblastConfig
-from pipe.maya.util import maintain_selection
-from pipe.playblast import Playblaster
+from dcc.maya.playblast.hud import applied_hud
+from dcc.maya.playblast.shot.config import MPlayblastConfig
+from dcc.maya.util.util import maintain_selection
+from core.playblast import Playblaster
 
 if TYPE_CHECKING:
     from typing import Any
 
-    from pipe.shotgrid import Shot
+    from core.shotgrid import Shot
 
 log = logging.getLogger(__name__)
 

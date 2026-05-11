@@ -3,7 +3,7 @@
 import substance_painter as sp
 from env_sg import DB_Config
 
-from pipe.shotgrid import ShotGrid
+from core.shotgrid import ShotGrid
 
 conn = ShotGrid.connect(DB_Config)
 

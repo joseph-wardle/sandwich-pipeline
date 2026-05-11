@@ -18,7 +18,7 @@ from maya.api.OpenMaya import (
     MVector,
 )
 
-from pipe.maya.command import maya_command
+from dcc.maya.command import maya_command
 
 from .color import lch_to_lab, oklab_to_linear_srgb
 from .gradient import (

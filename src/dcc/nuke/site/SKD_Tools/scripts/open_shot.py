@@ -1,7 +1,7 @@
 import os
 
 import nuke
-from shared.util import get_production_path
+from core.util.util import get_production_path
 from Qt import QtCore, QtWidgets
 from Qt.QtWidgets import QComboBox
 
@@ -104,7 +104,7 @@ class MyWindow(QtWidgets.QWidget):
     def get_shots(self):
         from env_sg import DB_Config
 
-        from pipe.shotgrid import ShotGrid
+        from core.shotgrid import ShotGrid
 
         conn = ShotGrid.connect(DB_Config)
         return [shot.code for shot in conn.find_shots() if shot.code]

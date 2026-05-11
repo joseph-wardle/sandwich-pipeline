@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from pipe.asset import paths_for_asset
-from pipe.shotgrid import Asset
+from core.asset import paths_for_asset
+from core.shotgrid import Asset
 
 
 def get_rig_filepath_from_asset(asset: Asset) -> Path:

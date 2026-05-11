@@ -103,7 +103,7 @@ def build_shot_path(shot_code: str | None) -> str:
 def split_csv_set(value: str | None) -> set[str]:
     """Parse a comma-separated ShotGrid string into normalized variant tokens.
 
-    Used by the entity classes in `pipe.shotgrid.entities` to convert
+    Used by the entity classes in `core.shotgrid.entities` to convert
     ShotGrid's CSV string fields (`sg_material_variants`, etc.) into Python
     sets.  Public because it's straightforward and a reader looking for
     "how does the pipeline parse SG variant strings" should find it here.

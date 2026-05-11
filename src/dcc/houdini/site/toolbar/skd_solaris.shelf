@@ -38,65 +38,65 @@
   </toolshelf>
 
   <tool name="open_asset" label="Open Asset" icon="OBJ_geo">
-    <script scriptType="python"><![CDATA[from pipe.houdini.hipfile import HAssetFileManager
+    <script scriptType="python"><![CDATA[from dcc.houdini.hipfile import HAssetFileManager
 fm = HAssetFileManager()
 fm.open_file()]]></script>
   </tool>
 
   <tool name="save_asset_version" label="Save Version" icon="BUTTONS_save">
-    <script scriptType="python"><![CDATA[from pipe.houdini.hipfile import HAssetFileManager
+    <script scriptType="python"><![CDATA[from dcc.houdini.hipfile import HAssetFileManager
 fm = HAssetFileManager()
 fm.save_version()]]></script>
   </tool>
 
   <tool name="asset_version_history" label="Version History" icon="BUTTONS_history">
-    <script scriptType="python"><![CDATA[from pipe.houdini.hipfile import HAssetFileManager
+    <script scriptType="python"><![CDATA[from dcc.houdini.hipfile import HAssetFileManager
 fm = HAssetFileManager()
 fm.open_version_browser()]]></script>
   </tool>
 
   <tool name="open_set" label="Open Set" icon="LOP_layout">
-    <script scriptType="python"><![CDATA[from pipe.houdini.hipfile import HEnvFileManager
+    <script scriptType="python"><![CDATA[from dcc.houdini.hipfile import HEnvFileManager
 fm = HEnvFileManager()
 fm.open_file()]]></script>
   </tool>
 
   <tool name="save_set_version" label="Save Set Version" icon="BUTTONS_save">
-    <script scriptType="python"><![CDATA[from pipe.houdini.hipfile import HEnvFileManager
+    <script scriptType="python"><![CDATA[from dcc.houdini.hipfile import HEnvFileManager
 fm = HEnvFileManager()
 fm.save_version()]]></script>
   </tool>
 
   <tool name="set_version_history" label="Set Version History" icon="BUTTONS_history">
-    <script scriptType="python"><![CDATA[from pipe.houdini.hipfile import HEnvFileManager
+    <script scriptType="python"><![CDATA[from dcc.houdini.hipfile import HEnvFileManager
 fm = HEnvFileManager()
 fm.open_version_browser()]]></script>
   </tool>
 
   <tool name="open_shot" label="Open Shot" icon="NETWORKS_scene">
-    <script scriptType="python"><![CDATA[from pipe.houdini.hipfile import HShotFileManager
+    <script scriptType="python"><![CDATA[from dcc.houdini.hipfile import HShotFileManager
 HShotFileManager().open_file()]]></script>
   </tool>
 
   <tool name="save_shot_version" label="Save Shot Version" icon="BUTTONS_save">
-    <script scriptType="python"><![CDATA[from pipe.houdini.hipfile import HShotFileManager
+    <script scriptType="python"><![CDATA[from dcc.houdini.hipfile import HShotFileManager
 fm = HShotFileManager(prompt_for_department=False)
 fm.save_version()]]></script>
   </tool>
 
   <tool name="shot_version_history" label="Shot Version History" icon="BUTTONS_history">
-    <script scriptType="python"><![CDATA[from pipe.houdini.hipfile import HShotFileManager
+    <script scriptType="python"><![CDATA[from dcc.houdini.hipfile import HShotFileManager
 fm = HShotFileManager(prompt_for_department=False)
 fm.open_version_browser()]]></script>
   </tool>
 
   <tool name="skd_playblast" label="Playblast" icon="TOOLS_view">
-    <script scriptType="python"><![CDATA[from pipe.houdini.playblast import launch_playblast
+    <script scriptType="python"><![CDATA[from dcc.houdini.playblast import launch_playblast
 launch_playblast()]]></script>
   </tool>
 
   <tool name="reload_pipe_houdini" label="Reload Pipe" icon="BUTTONS_reload">
-    <script scriptType="python"><![CDATA[from pipe.houdini.reload import reload_pipe
+    <script scriptType="python"><![CDATA[from dcc.houdini.util.reload import reload_pipe
 
 reload_pipe()
 

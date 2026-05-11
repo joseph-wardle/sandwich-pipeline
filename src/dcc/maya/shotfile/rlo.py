@@ -1,14 +1,14 @@
 import logging
 from pathlib import Path
 
-from pipe.glui.dialogs import MessageDialogCustomButtons
-from pipe.shot.version_adapter import (
+from core.glui.dialogs import MessageDialogCustomButtons
+from core.shot.version_adapter import (
     maya_rlo_stream,
     shot_owner_for,
 )
-from pipe.versioning import path_matches_stream
-from pipe.shotgrid import SGEntity, Shot
-from pipe.versioning import VersionStreamSpec
+from core.versioning import path_matches_stream
+from core.shotgrid import SGEntity, Shot
+from core.versioning import VersionStreamSpec
 
 from .shotfile_manager import MShotFileManager
 

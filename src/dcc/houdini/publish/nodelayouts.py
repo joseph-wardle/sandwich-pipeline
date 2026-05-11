@@ -667,7 +667,7 @@ def _discover_asset_variants_from_shotgrid() -> (
     try:
         from env_sg import DB_Config
 
-        from pipe.shotgrid import ShotGrid, ShotGridError
+        from core.shotgrid import ShotGrid, ShotGridError
     except Exception as exc:
         warnings.append(
             f"ShotGrid metadata unavailable for ASSET '{asset_name}': {exc}. Using filesystem-only variant discovery."

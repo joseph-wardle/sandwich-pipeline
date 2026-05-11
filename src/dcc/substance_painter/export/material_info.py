@@ -7,9 +7,9 @@ from pathlib import Path
 
 import substance_painter as sp
 
-from pipe.substance_painter.export_types import TexSetExportSettings
-from pipe.substance_painter.util import texture_set_name
-from pipe.struct.material import MaterialInfo, TexSetInfo
+from dcc.substance_painter.export.types import TexSetExportSettings
+from dcc.substance_painter.util.util import texture_set_name
+from core.struct.material import MaterialInfo, TexSetInfo
 
 
 def write_material_info(

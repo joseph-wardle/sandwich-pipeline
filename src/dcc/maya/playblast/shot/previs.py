@@ -12,16 +12,16 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.maya.playblast.hud import HudDefinition
-from pipe.maya.playblast.shot.config import (
+from dcc.maya.playblast.hud import HudDefinition
+from dcc.maya.playblast.shot.config import (
     MPlayblastConfig,
     MShotPlayblastConfig,
     SaveLocation,
     dummy_shot,
 )
-from pipe.maya.playblast.shot.dialog import MPlayblastDialog
-from pipe.playblast import FFmpegPreset
-from pipe.playblast.naming import build_edit_output_directory
+from dcc.maya.playblast.shot.dialog import MPlayblastDialog
+from core.playblast import FFmpegPreset
+from core.playblast.naming import build_edit_output_directory
 
 log = logging.getLogger(__name__)
 

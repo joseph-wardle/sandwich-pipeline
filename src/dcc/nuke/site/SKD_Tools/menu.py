@@ -1,5 +1,5 @@
 import nuke
-from shared.util import get_pipe_path
+from core.util.util import get_pipe_path
 
 nuke.pluginAddPath("./gizmos")
 nuke.pluginAddPath("./icons")

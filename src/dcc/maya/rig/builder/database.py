@@ -1,7 +1,7 @@
 from env_sg import DB_Config
 from Qt import QtCore
 
-from pipe.shotgrid import ShotGrid
+from core.shotgrid import ShotGrid
 
 
 class DBWorker(QtCore.QObject):

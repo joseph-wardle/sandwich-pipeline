@@ -163,7 +163,7 @@ def preflight(node: hou.Node) -> dict[str, Any]:
 
 
 def publish(node: hou.Node) -> Mapping[str, Any]:
-    """Publish using the shared pipe.houdini.publish service."""
+    """Publish using the shared dcc.houdini.publish.main service."""
     _repair_broken_output_paths(node)
 
     options = _collect_publish_options(node)

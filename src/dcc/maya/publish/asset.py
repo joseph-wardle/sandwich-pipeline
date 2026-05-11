@@ -25,26 +25,26 @@ from Qt.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from dcc.houdini.launch import HoudiniLauncher as HoudiniDCC
+from dcc.houdini.launch import HoudiniLauncher
 
-from pipe import telemetry
-from pipe.asset.paths import AssetPaths, paths_for_asset
-from pipe.asset.version_adapter import asset_owner_for, maya_model_stream
-from pipe.glui.dialogs import (
+from core import telemetry
+from core.asset.paths import AssetPaths, paths_for_asset
+from core.asset.version_adapter import asset_owner_for, maya_model_stream
+from core.glui.dialogs import (
     FilteredListDialog,
     MessageDialog,
     MessageDialogCustomButtons,
 )
-from pipe.glui.progress import progress_scope
-from pipe.maya.assetfile import (
+from core.glui.progress import progress_scope
+from dcc.maya.assetfile import (
     read_asset_metadata,
     resolve_asset_from_scene_path,
     write_asset_metadata,
 )
-from pipe.maya.util import maintain_selection
-from pipe.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
-from pipe.versioning import BackupResult
-from pipe.versioning.store import backup_if_changed
+from dcc.maya.util.util import maintain_selection
+from core.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
+from core.versioning import BackupResult
+from core.versioning.store import backup_if_changed
 
 from .publisher import PublishCopyError, Publisher, USDExportError
 
@@ -962,7 +962,7 @@ class AssetPublisher(Publisher):
         scope_kwargs = self._publish_scope_kwargs()
         scope_kwargs.setdefault("asset", asset_name.strip())
 
-        dcc = HoudiniDCC(is_python_shell=True)
+        dcc = HoudiniLauncher(is_python_shell=True)
         env = dcc._get_env_vars()
         env["PIPE_LOG_LEVEL"] = str(log.getEffectiveLevel())
 
@@ -1010,7 +1010,7 @@ class AssetPublisher(Publisher):
         command = [
             str(Executables.hython),
             "-m",
-            "pipe.houdini.assetbuilder",
+            "dcc.houdini.publish.assetbuilder",
             "--asset-root",
             str(asset_paths.root),
             "--asset-name",

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hou
 from env_sg import DB_Config
 
-from pipe.shotgrid import ShotGrid
+from core.shotgrid import ShotGrid
 
 
 class AnimPostProcessor:

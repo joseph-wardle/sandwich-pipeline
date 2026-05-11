@@ -6,10 +6,10 @@ from typing import Callable, Iterable
 from env_sg import DB_Config
 from maya import cmds
 
-from pipe.asset.paths import paths_for_asset
-from pipe.maya.util import maintain_selection
-from pipe.shotgrid import ShotGrid
-from pipe.versioning.store import next_version, versioned_filename
+from core.asset.paths import paths_for_asset
+from dcc.maya.util.util import maintain_selection
+from core.shotgrid import ShotGrid
+from core.versioning.store import next_version, versioned_filename
 
 from .build import RigBuilder, RigDefinition
 from .progress import ProgressStep, TestProgressManager
@@ -70,7 +70,7 @@ class RigPublisher:
         return test_runner.run_tests()
 
     def _publish_rig_model(self, rig: RigDefinition):
-        from pipe.maya.publish.usdchaser.export import ExportChaser, ExportChaserMode
+        from dcc.maya.publish.usdchaser.export import ExportChaser, ExportChaserMode
 
         publish_asset = self._conn.get_asset(name=rig.name)
         publish_asset_paths = paths_for_asset(publish_asset)

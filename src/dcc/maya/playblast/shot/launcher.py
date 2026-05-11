@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pipe.maya.playblast.shot.config import MPlayblastConfig, MShotPlayblastConfig
-from pipe.playblast import FFmpegPreset
+from dcc.maya.playblast.shot.config import MPlayblastConfig, MShotPlayblastConfig
+from core.playblast import FFmpegPreset
 
 
 def final_movie_path_for_base(

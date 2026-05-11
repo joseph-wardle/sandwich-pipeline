@@ -7,23 +7,23 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import hou
 from Qt import QtCore, QtWidgets
-from shared.util import get_edit_path
+from core.util.util import get_edit_path
 
-from pipe.glui.dialogs import DialogButtons
-from pipe.playblast.naming import (
+from core.glui.dialogs import DialogButtons
+from core.playblast.naming import (
     build_edit_output_directory,
     next_versioned_basename,
 )
-from pipe.playblast.shotgrid import (
+from core.playblast.shotgrid import (
     PlayblastReviewPlaylistOption,
     UploadTarget,
     list_recent_review_playlists,
 )
-from pipe.playblast.ui import ReviewPlaylistCombo
-from pipe.shotgrid import ShotGridError
+from core.playblast.ui import ReviewPlaylistCombo
+from core.shotgrid import ShotGridError
 
 if TYPE_CHECKING:
-    from pipe.shotgrid import Shot, ShotGrid
+    from core.shotgrid import Shot, ShotGrid
 
 log = logging.getLogger(__name__)
 

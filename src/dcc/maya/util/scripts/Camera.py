@@ -1,7 +1,7 @@
 import re
 
 import maya.cmds as cmds
-from shared.util import get_previs_path
+from core.util.util import get_previs_path
 
 # Global variable to store the camera file path (cross-platform)
 cameraFilePath = str(get_previs_path() / "Rigs/boboShotCam_v01.mb")

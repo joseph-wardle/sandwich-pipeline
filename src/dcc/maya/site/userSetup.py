@@ -13,7 +13,7 @@ def main():
         if plugin not in pluginInfo:
             mc.loadPlugin(plugin)
 
-    from shared.util import get_production_path
+    from core.util.util import get_production_path
 
     # set workspace
     mc.workspace(str(get_production_path().parent), openWorkspace=True)
@@ -25,13 +25,13 @@ def main():
 
     # register USD Export chaser
     import mayaUsd.lib as mayaUsdLib  # type: ignore[import-not-found]
-    from pipe.maya.publish import ExportChaser
+    from dcc.maya.publish import ExportChaser
 
     mayaUsdLib.ExportChaser.Register(ExportChaser, ExportChaser.ID)
 
     # Optional pipeline menu entries
     if os.getenv("PIPE_MAYA_ASSET_MENU", "0") == "1":
-        from pipe.maya.assetfile import install_asset_menu
+        from dcc.maya.assetfile import install_asset_menu
 
         install_asset_menu(create_menu=os.getenv("PIPE_MAYA_CREATE_MENU", "0") == "1")
 

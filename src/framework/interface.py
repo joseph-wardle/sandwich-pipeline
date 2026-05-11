@@ -36,15 +36,8 @@ class DCCRuntime(metaclass=ABCMeta):
     """In-DCC runtime contract — implemented per DCC in `dcc.<name>.runtime`."""
 
     @abstractmethod
-    def __init__(self, id: str | None = None) -> None:
-        """Initialize the runtime.
-
-        The `id` parameter is accepted for compatibility with the legacy
-        `DCCLocalizer` concrete base, where per-DCC subclasses passed the
-        DCC name via `super().__init__("<name>")`. The argument is unused;
-        Phase 5 of the structural refactor drops it from per-DCC runtime
-        classes when they move under `dcc/<name>/runtime.py`.
-        """
+    def __init__(self) -> None:
+        """Initialize the runtime."""
         raise NotImplementedError
 
     @abstractmethod

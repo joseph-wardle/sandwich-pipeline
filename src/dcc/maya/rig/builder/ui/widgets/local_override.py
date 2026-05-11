@@ -3,7 +3,7 @@ from pathlib import Path
 from Qt.QtCore import Signal
 from Qt.QtWidgets import QVBoxLayout, QWidget
 
-from pipe.maya.rig.builder.ui.widgets import DirectorySelect
+from dcc.maya.rig.builder.ui.widgets import DirectorySelect
 
 from ..styling import LOCAL_OVERRIDE_COLOR
 from .switch import SwitchWithLabel

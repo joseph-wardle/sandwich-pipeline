@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 
 class ShotGridError(Exception):
-    """Base class for every ShotGrid-related error raised by `pipe.shotgrid`.
+    """Base class for every ShotGrid-related error raised by `core.shotgrid`.
 
     Catch this to handle any ShotGrid failure uniformly.  Catch a subclass to
     react to a specific failure mode.

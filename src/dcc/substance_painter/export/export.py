@@ -13,36 +13,36 @@ from Qt import QtWidgets
 if TYPE_CHECKING:
     import typing
 
-from shared.util import resolve_mapped_path
+from core.util.util import resolve_mapped_path
 from substance_painter.exception import ProjectError
 
-from pipe.asset.paths import paths_for_asset
-from pipe.shotgrid import Asset
-from pipe.substance_painter.export_config import (
+from core.asset.paths import paths_for_asset
+from core.shotgrid import Asset
+from dcc.substance_painter.export.config import (
     count_udim_sets,
     generate_export_config,
     resolve_export_targets,
 )
-from pipe.substance_painter.export_material_info import write_material_info
-from pipe.substance_painter.export_results import (
+from dcc.substance_painter.export.material_info import write_material_info
+from dcc.substance_painter.export.results import (
     capture_export_events,
     existing_source_file_count,
     normalize_texture_export_map,
     planned_export_count,
     resolve_exported_files,
 )
-from pipe.substance_painter.export_types import (
+from dcc.substance_painter.export.types import (
     ResolvedExportTarget,
     TargetExportOutcome,
     TexSetExportSettings,
 )
-from pipe.substance_painter.progress import (
+from dcc.substance_painter.util.progress import (
     PublishProgressCallback,
     PublishProgressUpdate,
     PublishStage,
 )
-from pipe import telemetry
-from pipe.texconverter import TexConversionError, TexConverter
+from core import telemetry
+from core.texconverter import TexConversionError, TexConverter
 
 log = logging.getLogger(__name__)
 

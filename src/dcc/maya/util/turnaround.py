@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pipe.maya.command import maya_command
-from pipe.maya.local import get_main_qt_window
-from pipe.maya.playblast.turnaround import AssetTurnaroundDialog
+from dcc.maya.command import maya_command
+from dcc.maya.runtime import get_main_qt_window
+from dcc.maya.playblast.turnaround import AssetTurnaroundDialog
 
 _dialog: AssetTurnaroundDialog | None = None
 

@@ -9,11 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import typing
 
-# NOTE: Phase 5 of the structural refactor rewrites these to
-# `from core import telemetry` and `from core.util import fix_launcher_metadata`.
-# Until then, both import via the shared/pipe shim packages.
-from pipe import telemetry
-from shared.util import fix_launcher_metadata
+from core import telemetry
+from core.util.util import fix_launcher_metadata
 
 from .interface import DCCLauncher
 

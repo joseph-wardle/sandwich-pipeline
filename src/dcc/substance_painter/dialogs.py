@@ -20,13 +20,13 @@ from pathlib import Path
 
 import substance_painter as sp
 from Qt import QtCore, QtWidgets
-from shared.util import get_production_path, resolve_mapped_path
+from core.util.util import get_production_path, resolve_mapped_path
 from substance_painter.project import NormalMapFormat, ProjectWorkflow, TangentSpace
 
-from pipe.asset.paths import AssetPaths, paths_for_asset
-from pipe.glui.dialogs import DialogFilteredList, FilteredListDialog
-from pipe.shotgrid import Asset, ShotGrid
-from pipe.substance_painter.util import docs_link_html
+from core.asset.paths import AssetPaths, paths_for_asset
+from core.glui.dialogs import DialogFilteredList, FilteredListDialog
+from core.shotgrid import Asset, ShotGrid
+from dcc.substance_painter.util.util import docs_link_html
 
 # ---------------------------------------------------------------------------
 # Constants

@@ -10,9 +10,6 @@ from Qt import QtWidgets
 
 class SubstancePainterRuntime(DCCRuntime):
     def __init__(self) -> None:
-        # The legacy `DCCLocalizer` base accepted a DCC-name string; the
-        # `DCCRuntime` ABC keeps an optional `id` parameter for that
-        # compatibility, but new per-DCC subclasses no longer need to pass it.
         super().__init__()
 
     def get_main_qt_window(self) -> QtWidgets.QWidget | None:

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from env import Executables
 
 from core import telemetry
-from pipe.substance_painter.progress import (
+from dcc.substance_painter.util.progress import (
     PublishProgressCallback,
     PublishProgressUpdate,
     PublishStage,

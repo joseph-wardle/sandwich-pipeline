@@ -1,5 +1,5 @@
 import substance_painter_plugins as spp
-from pipe.util import reload_pipe as _reload_pipe
+from core.util import reload_pipeline
 
 
 def reload_pipe() -> None:
@@ -7,7 +7,7 @@ def reload_pipe() -> None:
         spp.plugins["export"],
         spp.plugins["shelf"],
     ]
-    _reload_pipe(sp_plugins)
+    reload_pipeline(sp_plugins)
 
     for plugin in sp_plugins:
         plugin.close_plugin()

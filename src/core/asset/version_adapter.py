@@ -1,7 +1,7 @@
 """Asset-specific adapters for the shared versioning core.
 
 This module is the single place that translates canonical asset layout rules
-into :mod:`pipe.versioning` owners and stream specs.
+into :mod:`core.versioning` owners and stream specs.
 """
 
 from __future__ import annotations

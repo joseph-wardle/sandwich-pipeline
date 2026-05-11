@@ -18,10 +18,10 @@ if TYPE_CHECKING:
         def GetNumTimeSamples(self) -> int: ...
 
 
-from shared.util import get_production_path
+from core.util.util import get_production_path
 
-from pipe.shotgrid import Asset
-from pipe.struct.timeline import Timeline
+from core.shotgrid import Asset
+from core.struct.timeline import Timeline
 
 
 def get_frames_from_attr(attr: TimeSampleble) -> Iterable[Usd.TimeCode]:

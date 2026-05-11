@@ -10,7 +10,7 @@ import attrs
 import mayaUsd.lib as mayaUsdLib
 from pxr import Sdf, Usd
 
-from pipe.asset import paths_for_asset
+from core.asset import paths_for_asset
 
 from .utils import (
     find_and_move_prim,
@@ -33,9 +33,9 @@ if TYPE_CHECKING:
 
 from env_sg import DB_Config
 
-from pipe.shotgrid import ShotGrid
-from pipe.struct.timeline import Timeline
-from pipe.util import log_errors
+from core.shotgrid import ShotGrid
+from core.struct.timeline import Timeline
+from core.util import log_errors
 
 log = logging.getLogger(__name__)
 

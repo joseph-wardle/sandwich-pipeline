@@ -10,24 +10,24 @@ import maya.cmds as mc
 import maya.mel as mel
 from env_sg import DB_Config
 from Qt import QtCore, QtWidgets
-from pipe.maya.command import maya_command
-from shared.util import get_production_path
+from dcc.maya.command import maya_command
+from core.util.util import get_production_path
 
-from pipe.asset.paths import BACKUP_DIRNAME, paths_for_asset
-from pipe.asset.version_adapter import asset_owner_for, maya_model_stream
-from pipe.glui.dialogs import FilteredListDialog, MessageDialog
-from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
-from pipe.glui.version_browser import VersionBrowserWidget
-from pipe.maya.local import get_main_qt_window
-from pipe.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
-from pipe.util import FileManager
-from pipe.versioning import (
+from core.asset.paths import BACKUP_DIRNAME, paths_for_asset
+from core.asset.version_adapter import asset_owner_for, maya_model_stream
+from core.glui.dialogs import FilteredListDialog, MessageDialog
+from core.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
+from core.glui.version_browser import VersionBrowserWidget
+from dcc.maya.runtime import get_main_qt_window
+from core.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
+from core.util import FileManager
+from core.versioning import (
     list_version_records,
     promote_version,
     save_version,
     version_label,
 )
-from pipe.versioning.store import current_record, get_manifest_path, load_manifest
+from core.versioning.store import current_record, get_manifest_path, load_manifest
 
 log = logging.getLogger(__name__)
 

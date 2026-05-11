@@ -6,22 +6,22 @@ from typing import TYPE_CHECKING
 
 import hou
 
-from pipe.shot.version_adapter import houdini_department_stream, shot_owner_for
-from pipe.versioning import (
+from core.shot.version_adapter import houdini_department_stream, shot_owner_for
+from core.versioning import (
     list_version_records,
     path_matches_stream,
     version_label as _format_version_label,
 )
 
-import pipe.playblast as _playblast_pkg
+import core.playblast as _playblast_pkg
 
-from pipe.houdini.hipfile.departments import DEPARTMENT_OPTIONS
+from dcc.houdini.hipfile.departments import DEPARTMENT_OPTIONS
 
 if TYPE_CHECKING:
-    from pipe.shotgrid import Shot
+    from core.shotgrid import Shot
 
 # Vendored TTF lives under `pipe/playblast/resources/fonts/`. Anchor on the
-# `pipe.playblast` package itself so future moves of either module don't
+# `core.playblast` package itself so future moves of either module don't
 # silently desync the relative jump.
 _PLAYBLAST_PACKAGE_DIR = Path(_playblast_pkg.__file__).resolve().parent
 HUD_FONT_PATH = (
@@ -162,7 +162,7 @@ def resolve_current_hip_version(shot: Shot | None) -> tuple[str | None, str | No
 
 def _resolve_current_hip_path() -> Path | None:
     # Mirror of HFileManager._current_hip_path; duplicated here to avoid
-    # importing pipe.houdini.hipfile.filemanager (which pulls in Qt dialogs).
+    # importing dcc.houdini.hipfile.filemanager (which pulls in Qt dialogs).
     hip_raw = (hou.hipFile.path() or "").strip()
     if not hip_raw:
         return None

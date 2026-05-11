@@ -4,13 +4,13 @@ import logging
 
 from maya import cmds
 from maya.api.OpenMaya import MObject
-from pipe.maya.command import (
+from dcc.maya.command import (
     add_named_command,
     get_decorated_commands,
     register_command_from_description,
 )
 
-log = logging.getLogger("pipe.maya.plugin")
+log = logging.getLogger("dcc.maya.plugin")
 
 PLUGIN_DISPLAY_NAME = "Sandwich Pipeline"
 PLUGIN_NAME = "pipeline.py"

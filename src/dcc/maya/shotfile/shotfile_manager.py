@@ -10,30 +10,30 @@ import maya.cmds as mc
 import mayaUsd  # type: ignore[import-not-found]
 from env_sg import DB_Config
 from pxr import Sdf, Usd, UsdGeom
-from shared.util import get_production_path
+from core.util.util import get_production_path
 from timeline_marker.ui import TimelineMarker  # type: ignore[import-not-found]
 
-from pipe.glui.dialogs import MessageDialog
-from pipe.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
-from pipe.glui.version_browser import VersionBrowserWidget
-from pipe.maya.local import get_main_qt_window
-from pipe.shotgrid import (
+from core.glui.dialogs import MessageDialog
+from core.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
+from core.glui.version_browser import VersionBrowserWidget
+from dcc.maya.runtime import get_main_qt_window
+from core.shotgrid import (
     SGEntity,
     Shot,
     ShotGrid,
     build_shot_path,
     validate_shot_code_token,
 )
-from pipe.util import FileManager, log_errors
-from pipe.versioning import (
+from core.util import FileManager, log_errors
+from core.versioning import (
     VersionStreamSpec,
     list_version_records,
     version_label,
 )
-from pipe.versioning import (
+from core.versioning import (
     promote_version as _promote_version,
 )
-from pipe.versioning import (
+from core.versioning import (
     save_version as _save_version,
 )
 
@@ -314,7 +314,7 @@ class MShotFileManager(FileManager):
         classname = self.__class__.__name__
         mc.scriptNode(
             beforeScript=(
-                f"from pipe.maya.shotfile import {classname};"
+                f"from dcc.maya.shotfile import {classname};"
                 f"{classname}.{self.__class__.run_on_open.__name__}()"
             ),
             name=ON_OPEN_SCRIPT,

@@ -9,7 +9,7 @@ import nuke
 from env_sg import DB_Config
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.shotgrid import ShotGrid
+from core.shotgrid import ShotGrid
 
 simple_window = None
 

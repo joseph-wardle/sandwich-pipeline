@@ -3,7 +3,7 @@ import os
 import nuke
 from env_sg import DB_Config
 
-from pipe.shotgrid import ShotGrid
+from core.shotgrid import ShotGrid
 
 project_file = nuke.root()["name"].value()
 

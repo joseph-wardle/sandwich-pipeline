@@ -7,7 +7,7 @@ from typing import Iterable
 
 import maya.cmds as mc
 
-from pipe.playblast import FFmpegPreset, Playblaster
+from core.playblast import FFmpegPreset, Playblaster
 
 log = logging.getLogger(__name__)
 

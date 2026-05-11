@@ -1,4 +1,4 @@
-from pipe.maya.command import maya_command
+from dcc.maya.command import maya_command
 
 
 @maya_command(
@@ -12,15 +12,15 @@ def reload_pipe() -> None:
     """
     Unloads the pipeline python modules for testing modifications during development.
     """
-    from pipe.util import reload_pipe as _reload_pipe
+    from core.util import reload_pipeline
 
-    _reload_pipe()
+    reload_pipeline()
 
     # wrap this in a try block because it will fail in headless mode
     try:
         import mayaUsd.lib as mayaUsdLib  # type: ignore[import-not-found]
 
-        from pipe.maya.publish import ExportChaser
+        from dcc.maya.publish import ExportChaser
 
         mayaUsdLib.ExportChaser.Unregister(ExportChaser, ExportChaser.ID)
         mayaUsdLib.ExportChaser.Register(ExportChaser, ExportChaser.ID)

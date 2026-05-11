@@ -1,7 +1,7 @@
 """Hook resolution and execution for Houdini component publish.
 
 Design goals:
-1. Keep hook behavior decoupled from `pipe.houdini.publish`.
+1. Keep hook behavior decoupled from `dcc.houdini.publish.main`.
 2. Support both named hooks and import-path specs.
 3. Keep unresolved or failed hooks explicit and machine-readable.
 
@@ -27,8 +27,8 @@ _VALID_STATUSES = frozenset(
 
 # Backward-compatible aliases for pre-existing hook specs.
 _LEGACY_SPEC_ALIASES = {
-    "pipe.houdini.publish_hooks.turnaround:run": "turnaround",
-    "pipe.houdini.publish_hooks.turnaround_shotgrid:run": "turnaround_shotgrid",
+    "dcc.houdini.publish.hooks.turnaround:run": "turnaround",
+    "dcc.houdini.publish.hooks.turnaround_shotgrid:run": "turnaround_shotgrid",
 }
 
 
