@@ -1,67 +1,11 @@
-import logging
-from contextlib import contextmanager
-from pathlib import Path
-from typing import Any, cast
+"""Compatibility shim — real implementation lives in `dcc.maya.util.picker`."""
 
-from shared.util import get_production_path
+from __future__ import annotations
 
-from pipe.maya.command import maya_command
+import sys as _sys
 
-log = logging.getLogger(__name__)
+import dcc.maya.util.picker as _real
 
-CUSTOM_PICKER_TITLE = "SKD Picker"
+_sys.modules[__name__] = _real
 
-
-@contextmanager
-def custom_picker_title(custom_title: str):
-    import dwpicker.main
-
-    main_module = cast(Any, dwpicker.main)
-    original_title = main_module.WINDOW_TITLE
-    try:
-        main_module.WINDOW_TITLE = custom_title
-        yield
-    finally:
-        main_module.WINDOW_TITLE = original_title
-
-
-@maya_command(
-    name="picker",
-    label="Picker",
-    icon="picker.svg",
-    hotkey="ctrl+alt+p",
-    category="animation",
-)
-def run():
-    """
-    Load the pipeline picker UI.
-    """
-    picker_folder_path = get_production_path() / "pickers"
-    if not picker_folder_path.exists():
-        log.warning(
-            f"No picker folder found at {picker_folder_path}. Skipping picker file loading."
-        )
-        open_picker()
-        return
-
-    picker_filepaths = [
-        picker_file
-        for picker_file in picker_folder_path.iterdir()
-        if picker_file.suffix == ".json"
-    ]
-    log.info(
-        f"Loading Picker with files: {[str(picker) for picker in picker_filepaths]}"
-    )
-
-    open_picker(picker_files=picker_filepaths)
-
-
-def open_picker(picker_files: list[Path] | None = None):
-    import dwpicker
-
-    with custom_picker_title(CUSTOM_PICKER_TITLE):
-        if picker_files:
-            picker_filepath_strings = [str(picker_file) for picker_file in picker_files]
-            dwpicker.show(pickers=picker_filepath_strings)
-        else:
-            dwpicker.show()
+from dcc.maya.util.picker import *  # noqa: E402, F401, F403

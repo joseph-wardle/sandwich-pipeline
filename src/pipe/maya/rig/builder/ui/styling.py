@@ -1,5 +1,11 @@
-from Qt.QtGui import QColor
+"""Compatibility shim — real implementation lives in `dcc.maya.rig.builder.ui.styling`."""
 
-LOCAL_OVERRIDE_COLOR = QColor("#eb9b34")
-PASSED_COLOR = QColor(0, 94, 75)
-FAILED_COLOR = QColor(130, 42, 50)
+from __future__ import annotations
+
+import sys as _sys
+
+import dcc.maya.rig.builder.ui.styling as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.maya.rig.builder.ui.styling import *  # noqa: E402, F401, F403

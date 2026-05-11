@@ -1,24 +1,11 @@
-from .chip_bar import ChipBar
-from .directory_select import DirectorySelect
-from .expander import Expander
-from .local_override import LocalOverrideOptions
-from .logbox import RigBuildLogBox
-from .progress_bar import RigBuildProgressBar
-from .rig_select import RigSelect
-from .rig_type_tabs import RigTypeTabWidget
-from .switch import Switch, SwitchWithLabel
-from .test_select import TestSelectList
+"""Compatibility shim — real implementation lives in `dcc.maya.rig.builder.ui.widgets`."""
 
-__all__ = [
-    "ChipBar",
-    "DirectorySelect",
-    "Expander",
-    "LocalOverrideOptions",
-    "RigBuildLogBox",
-    "RigBuildProgressBar",
-    "RigSelect",
-    "RigTypeTabWidget",
-    "Switch",
-    "SwitchWithLabel",
-    "TestSelectList",
-]
+from __future__ import annotations
+
+import sys as _sys
+
+import dcc.maya.rig.builder.ui.widgets as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.maya.rig.builder.ui.widgets import *  # noqa: E402, F401, F403

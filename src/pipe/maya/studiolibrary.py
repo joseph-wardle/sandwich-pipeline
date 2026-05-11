@@ -1,20 +1,11 @@
-from typing import Any, cast
+"""Compatibility shim — real implementation lives in `dcc.maya.util.studiolibrary`."""
 
-import studiolibrary  # type: ignore[import-not-found]
-from shared.util import get_anim_path
+from __future__ import annotations
 
+import sys as _sys
 
-def run():
-    studio_module = cast(Any, studiolibrary)
-    libraries = [
-        {
-            "name": "Bobo Poses",
-            "path": str(get_anim_path() / "studiolibrary/bobo-poses"),
-            "default": True,
-            "theme": {
-                "accentColor": "rgb(97, 30, 10)",
-            },
-        },
-    ]
-    studio_module.setLibraries(libraries)
-    studio_module.main()
+import dcc.maya.util.studiolibrary as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.maya.util.studiolibrary import *  # noqa: E402, F401, F403

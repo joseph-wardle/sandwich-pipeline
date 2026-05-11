@@ -1,10 +1,11 @@
-from . import core
-from .core import RigBuildTest, TestRunner
-from .tests import RIG_BUILD_TESTS
+"""Compatibility shim — real implementation lives in `dcc.maya.rig.builder.test`."""
 
-__all__ = [
-    "core",
-    "RIG_BUILD_TESTS",
-    "RigBuildTest",
-    "TestRunner",
-]
+from __future__ import annotations
+
+import sys as _sys
+
+import dcc.maya.rig.builder.test as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.maya.rig.builder.test import *  # noqa: E402, F401, F403

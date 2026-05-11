@@ -1,19 +1,11 @@
+"""Compatibility shim — real implementation lives in `dcc.houdini.util.reload`."""
+
 from __future__ import annotations
 
-import logging
+import sys as _sys
 
-import hou
+import dcc.houdini.util.reload as _real
 
-from pipe.util import reload_pipe as _reload_pipe
+_sys.modules[__name__] = _real
 
-log = logging.getLogger(__name__)
-
-
-def reload_pipe() -> None:
-    """Reload pipeline Python modules and refresh Houdini HDA libraries."""
-    _reload_pipe()
-
-    try:
-        hou.hda.reloadAllFiles()
-    except Exception as exc:
-        log.warning("Failed to reload Houdini HDA libraries: %s", exc)
+from dcc.houdini.util.reload import *  # noqa: E402, F401, F403

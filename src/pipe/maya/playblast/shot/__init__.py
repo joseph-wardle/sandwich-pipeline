@@ -1,6 +1,11 @@
-"""Shot-playblast subsystem (anim + previs).
+"""Compatibility shim — real implementation lives in `dcc.maya.playblast.shot`."""
 
-The base `MPlayblastDialog` lives in `dialog.py` and is shared by
-`anim.AnimPlayblastDialog` and `previs.PrevisPlayblastDialog`. The
-`MPlayblaster` engine in `playblaster.py` drives the underlying capture.
-"""
+from __future__ import annotations
+
+import sys as _sys
+
+import dcc.maya.playblast.shot as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.maya.playblast.shot import *  # noqa: E402, F401, F403

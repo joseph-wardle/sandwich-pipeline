@@ -1,12 +1,11 @@
-from Qt import QtCore
-from Qt.QtWidgets import QProgressBar
+"""Compatibility shim — real implementation lives in `dcc.maya.rig.builder.ui.widgets.progress_bar`."""
 
+from __future__ import annotations
 
-class RigBuildProgressBar(QProgressBar):
-    def __init__(self):
-        super().__init__()
-        pass
+import sys as _sys
 
-    @QtCore.Slot(float)
-    def update_progress(self, progress: float):
-        self.setValue(int(progress * 100))
+import dcc.maya.rig.builder.ui.widgets.progress_bar as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.maya.rig.builder.ui.widgets.progress_bar import *  # noqa: E402, F401, F403

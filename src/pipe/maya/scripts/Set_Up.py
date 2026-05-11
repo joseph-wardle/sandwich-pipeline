@@ -1,29 +1,11 @@
-import maya.cmds as cmds
+"""Compatibility shim — real implementation lives in `dcc.maya.util.scripts.Set_Up`."""
 
+from __future__ import annotations
 
-def setup():
-    # Define the main group name and child group names
-    main_group = "WORLD"
-    child_groups = [
-        "CAM",
-        "ENVIRONMENT",
-        "CHARACTER_RIGS",
-        "PROPS",
-        "FX",
-        "LIGHTING",
-        "OTHER",
-    ]
+import sys as _sys
 
-    # Create the main WORLD group if it doesn't exist
-    if not cmds.objExists(main_group):
-        cmds.group(empty=True, name=main_group)
-    else:
-        print(f"{main_group} already exists.")
+import dcc.maya.util.scripts.Set_Up as _real
 
-    # Create child groups and parent them to WORLD
-    for grp in child_groups:
-        if not cmds.objExists(grp):
-            new_grp = cmds.group(empty=True, name=grp)
-            cmds.parent(new_grp, main_group)
-        else:
-            print(f"{grp} already exists.")
+_sys.modules[__name__] = _real
+
+from dcc.maya.util.scripts.Set_Up import *  # noqa: E402, F401, F403

@@ -1,4 +1,11 @@
-from .anim import MAnimShotFileManager as MAnimShotFileManager
-from .rlo import MRLOShotFileManager as MRLOShotFileManager
-from .timeline import shot_timeline_generator as shot_timeline_generator
-from .timeline import timeline_generator as timeline_generator
+"""Compatibility shim — real implementation lives in `dcc.maya.shotfile`."""
+
+from __future__ import annotations
+
+import sys as _sys
+
+import dcc.maya.shotfile as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.maya.shotfile import *  # noqa: E402, F401, F403

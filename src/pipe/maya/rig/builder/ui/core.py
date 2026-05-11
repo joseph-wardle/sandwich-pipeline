@@ -1,32 +1,11 @@
-from maya import cmds
-from maya.OpenMayaUI import MQtUtil
-from Qt.QtCompat import wrapInstance
-from Qt.QtGui import QColor
-from Qt.QtWidgets import QMainWindow
+"""Compatibility shim — real implementation lives in `dcc.maya.rig.builder.ui.core`."""
 
+from __future__ import annotations
 
-def blend_color(color1: QColor, color2: QColor, blend: float) -> QColor:
-    t = min(1, max(0, blend))
-    r = int(color1.red() + t * (color2.red() - color1.red()))
-    g = int(color1.green() + t * (color2.green() - color1.green()))
-    b = int(color1.blue() + t * (color2.blue() - color1.blue()))
-    return QColor(r, g, b)
+import sys as _sys
 
+import dcc.maya.rig.builder.ui.core as _real
 
-def get_maya_main_window():
-    mw_ptr = MQtUtil.mainWindow()
-    return wrapInstance(int(mw_ptr), QMainWindow)
+_sys.modules[__name__] = _real
 
-
-def delete_workspace_control(control: str):
-    if cmds.workspaceControl(control, query=True, exists=True):
-        cmds.workspaceControl(control, edit=True, close=True)
-        cmds.deleteUI(control, control=True)
-
-
-def check_and_restore_workspace_control(control: str) -> bool:
-    """Checks if a workspaceControl exists, and if so it restores it and returns True, else False"""
-    if cmds.workspaceControl(control, exists=True):
-        cmds.workspaceControl(control, edit=True, restore=True)
-        return True
-    return False
+from dcc.maya.rig.builder.ui.core import *  # noqa: E402, F401, F403

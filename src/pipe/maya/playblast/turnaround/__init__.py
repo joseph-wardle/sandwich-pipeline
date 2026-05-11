@@ -1,13 +1,11 @@
-"""Asset turnaround subsystem.
+"""Compatibility shim — real implementation lives in `dcc.maya.playblast.turnaround`."""
 
-`AssetTurnaroundDialog` (in `dialog.py`) drives an orbit-around-an-asset
-playblast captured by `MTurnaroundPlayblaster` (in `playblaster.py`). The
-`TurnaroundPlayblastConfig` shape and `resolve_turnaround_review_roots()`
-geometry resolver live in `config.py`.
-"""
+from __future__ import annotations
 
-from pipe.maya.playblast.turnaround.dialog import (
-    AssetTurnaroundDialog as AssetTurnaroundDialog,
-)
+import sys as _sys
 
-__all__ = ["AssetTurnaroundDialog"]
+import dcc.maya.playblast.turnaround as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.maya.playblast.turnaround import *  # noqa: E402, F401, F403

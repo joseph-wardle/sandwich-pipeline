@@ -1,4 +1,11 @@
-from . import utils
-from .export import ExportChaser, ExportChaserMode
+"""Compatibility shim — real implementation lives in `dcc.maya.publish.usdchaser`."""
 
-__all__ = ["ExportChaser", "ExportChaserMode", "utils"]
+from __future__ import annotations
+
+import sys as _sys
+
+import dcc.maya.publish.usdchaser as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.maya.publish.usdchaser import *  # noqa: E402, F401, F403

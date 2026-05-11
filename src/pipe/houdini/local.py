@@ -1,33 +1,11 @@
+"""Compatibility shim — real implementation lives in `dcc.houdini.runtime`."""
+
 from __future__ import annotations
 
-import re
-import sys
+import sys as _sys
 
-import hou
-from Qt import QtWidgets
-from software.baseclass import DCCLocalizer
+import dcc.houdini.runtime as _real
 
+_sys.modules[__name__] = _real
 
-class _HoudiniLocalizer(DCCLocalizer):
-    def __init__(self) -> None:
-        super().__init__("houdini")
-
-    def get_main_qt_window(self) -> QtWidgets.QWidget | None:
-        if not self.is_headless():
-            return hou.qt.mainWindow()
-        return None
-
-    def is_headless(self) -> bool:
-        try:
-            if hasattr(hou, "isUIAvailable"):
-                return not hou.isUIAvailable()
-        except Exception:
-            pass
-
-        return bool(re.match(r"^.*ython(?:\.exe)?3?", sys.executable))
-
-
-_l = _HoudiniLocalizer()
-
-get_main_qt_window = _l.get_main_qt_window
-is_headless = _l.is_headless
+from dcc.houdini.runtime import *  # noqa: E402, F401, F403

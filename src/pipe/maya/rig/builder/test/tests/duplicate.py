@@ -1,39 +1,11 @@
-from collections import Counter, defaultdict
+"""Compatibility shim — real implementation lives in `dcc.maya.rig.builder.test.tests.duplicate`."""
 
-from maya.api.OpenMaya import MItDag
+from __future__ import annotations
 
-from .. import RigBuildTest
-from ..common import format_max_items, iter_dag_nodes
+import sys as _sys
 
+import dcc.maya.rig.builder.test.tests.duplicate as _real
 
-class TestDuplicateDagNames(RigBuildTest):
-    """
-    Checks that the scene has no duplicate DAG names (these types of nodes may cause problems for third party tools).
-    """
+_sys.modules[__name__] = _real
 
-    def __init__(self):
-        super().__init__("No duplicate DAG names")
-
-    def run(self) -> bool:
-        dag_iterator = MItDag(MItDag.kDepthFirst)
-        short_name_counter: Counter[str] = Counter()
-        name_to_paths: defaultdict[str, list[str]] = defaultdict(list)
-        for dag_fn in iter_dag_nodes(dag_iterator):
-            short_name = dag_fn.name()
-            full_path = dag_fn.fullPathName()
-            short_name_counter[short_name] += 1
-            name_to_paths[short_name].append(full_path)
-
-        duplicates: list[list[str]] = [
-            name_to_paths[name]
-            for name, count in short_name_counter.items()
-            if count > 1
-        ]
-        if duplicates:
-            self.log_warn(
-                f"Scene has duplicate DAG node names: {format_max_items(duplicates, 'duplicate(s)')}"
-            )
-            return False
-        else:
-            self.log_success()
-            return True
+from dcc.maya.rig.builder.test.tests.duplicate import *  # noqa: E402, F401, F403

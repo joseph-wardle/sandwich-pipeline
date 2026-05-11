@@ -1,33 +1,11 @@
-"""Maya asset file helpers and UI."""
+"""Compatibility shim — real implementation lives in `dcc.maya.assetfile`."""
 
-from .assetfile_manager import (
-    FILEINFO_ASSET_DISPLAY_NAME,
-    FILEINFO_ASSET_ID,
-    FILEINFO_ASSET_NAME,
-    FILEINFO_ASSET_PATH,
-    FILEINFO_ASSET_SUBDIRECTORY,
-    FILEINFO_PREFIX,
-    AssetMetadata,
-    AssetOpenDialog,
-    MAssetFileManager,
-    install_asset_menu,
-    read_asset_metadata,
-    resolve_asset_from_scene_path,
-    write_asset_metadata,
-)
+from __future__ import annotations
 
-__all__ = [
-    "FILEINFO_PREFIX",
-    "FILEINFO_ASSET_ID",
-    "FILEINFO_ASSET_NAME",
-    "FILEINFO_ASSET_DISPLAY_NAME",
-    "FILEINFO_ASSET_PATH",
-    "FILEINFO_ASSET_SUBDIRECTORY",
-    "AssetMetadata",
-    "write_asset_metadata",
-    "read_asset_metadata",
-    "resolve_asset_from_scene_path",
-    "AssetOpenDialog",
-    "MAssetFileManager",
-    "install_asset_menu",
-]
+import sys as _sys
+
+import dcc.maya.assetfile as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.maya.assetfile import *  # noqa: E402, F401, F403

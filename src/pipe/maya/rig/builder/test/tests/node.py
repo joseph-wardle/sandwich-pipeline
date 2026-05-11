@@ -1,24 +1,11 @@
-from maya import cmds
+"""Compatibility shim — real implementation lives in `dcc.maya.rig.builder.test.tests.node`."""
 
-from .. import RigBuildTest
-from ..common import format_max_items
+from __future__ import annotations
 
+import sys as _sys
 
-class TestUnknownNodes(RigBuildTest):
-    """
-    Checks that the scene has no nodes of an unknown type (due to a missing plugin or otherwise).
-    """
+import dcc.maya.rig.builder.test.tests.node as _real
 
-    def __init__(self):
-        super().__init__("No unknown nodes")
+_sys.modules[__name__] = _real
 
-    def run(self) -> bool:
-        unknown_nodes = cmds.ls(type="unknown")
-        if unknown_nodes:
-            self.log_warn(
-                f"Scene has unknown nodes: {format_max_items(unknown_nodes, 'node(s)')}"
-            )
-            return False
-        else:
-            self.log_success()
-            return True
+from dcc.maya.rig.builder.test.tests.node import *  # noqa: E402, F401, F403

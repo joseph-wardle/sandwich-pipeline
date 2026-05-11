@@ -62,7 +62,7 @@ exclude = [
     'y-rig',
     "studiolibrary",
     "timeline_marker",
-    "src/software/maya/scripts/**"
+    "src/dcc/maya/third_party/**"
 ]
 
 [tool.ty.rules]
@@ -89,8 +89,8 @@ replace-imports-with-any = [
 
 [tool.ty.environment]
 extra-paths = [
-    "src/software/maya/scripts/",
-    "src/software/nuke/tools/SKD_Tools/scripts",
+    "src/dcc/maya/third_party/",
+    "src/dcc/nuke/site/SKD_Tools/scripts",
     "src/",
 ]
 
@@ -99,25 +99,25 @@ include = ["src"]
 respect-ignore-files = false
 exclude = [
     ".git",
-    "src/lib/MOPS/**",
-    "src/software/nuke/tools/NukeSurvivalToolkit_publicRelease",
-    "src/lib/VFX-LYNX/**",
-    "src/lib/ae_SVG/**",
+    "src/dcc/houdini/third_party/MOPS/**",
+    "src/dcc/nuke/third_party/NukeSurvivalToolkit_publicRelease",
+    "src/dcc/houdini/third_party/VFX-LYNX/**",
+    "src/dcc/houdini/third_party/ae_SVG/**",
     "src/lib/python/**",
     "src/**/mayacapture/**",
     "src/**/maya-timeline-marker_git/**",
-    "src/lib/y-rig/**",
+    "src/dcc/maya/third_party/y-rig/**",
     "src/**/studiolibrary/**",
     "src/**/timeline_marker/**",
-    "src/**/houdini/scripts/**",
-    "src/**/maya/scripts/**",
-    "src/software/houdini/hsite/**/scripts/"
+    "src/**/houdini/site/scripts/**",
+    "src/dcc/maya/third_party/**",
+    "src/dcc/houdini/site/**/scripts/"
 ]
 
 
 [tool.pyright]
 extraPaths = [
-    "src/software/maya/scripts/",
+    "src/dcc/maya/third_party/",
     "src/",
 ]
 typeCheckingMode = "standard"

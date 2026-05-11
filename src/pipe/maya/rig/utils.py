@@ -1,9 +1,11 @@
-from pathlib import Path
+"""Compatibility shim — real implementation lives in `dcc.maya.rig.utils`."""
 
-from pipe.asset import paths_for_asset
-from pipe.shotgrid import Asset
+from __future__ import annotations
 
+import sys as _sys
 
-def get_rig_filepath_from_asset(asset: Asset) -> Path:
-    asset_paths = paths_for_asset(asset)
-    return (asset_paths.rig_path / asset.name).with_suffix(".mb")
+import dcc.maya.rig.utils as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.maya.rig.utils import *  # noqa: E402, F401, F403

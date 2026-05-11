@@ -1,41 +1,41 @@
 [submodule "pipeline/software/maya/scripts/dwpicker_git"]
-	path = src/software/maya/scripts/dwpicker_git
+	path = src/dcc/maya/third_party/dwpicker_git
 	url = https://github.com/DreamWall-Animation/dwpicker.git
 [submodule "pipeline/lib/MOPS"]
-	path = src/lib/MOPS
+	path = src/dcc/houdini/third_party/MOPS
 	url = https://github.com/toadstorm/MOPS.git
 	ignore = dirty
 [submodule "pipeline/lib/VFX-LYNX"]
-	path = src/lib/VFX-LYNX
+	path = src/dcc/houdini/third_party/VFX-LYNX
 	url = https://github.com/LucaScheller/VFX-LYNX.git
 [submodule "pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease"]
-	path = src/software/nuke/tools/NukeSurvivalToolkit_publicRelease
+	path = src/dcc/nuke/third_party/NukeSurvivalToolkit_publicRelease
 	url = https://github.com/CreativeLyons/NukeSurvivalToolkit_publicRelease.git
 [submodule "pipeline/software/maya/scripts/studiolibrary"]
-	path = src/software/maya/scripts/studiolibrary
+	path = src/dcc/maya/third_party/studiolibrary
 	url = https://github.com/krathjen/studiolibrary.git
 [submodule "pipeline/software/maya/scripts/modelChecker_git"]
-	path = src/software/maya/scripts/modelChecker_git
+	path = src/dcc/maya/third_party/modelChecker_git
 	url = https://github.com/JakobJK/modelChecker.git
 [submodule "pipeline/software/maya/scripts/maya-timeline-marker_git"]
-	path = src/software/maya/scripts/maya-timeline-marker_git
+	path = src/dcc/maya/third_party/maya-timeline-marker_git
 	url = https://github.com/scottdmilner/maya-timeline-marker.git
 [submodule "pipeline/software/maya/scripts/maya-capture"]
-	path = src/software/maya/scripts/mayacapture
+	path = src/dcc/maya/third_party/mayacapture
 	url = https://github.com/abstractfactory/maya-capture.git
 [submodule "pipeline/software/maya/scripts/mayacapture"]
 	url = https://github.com/scottdmilner/maya-capture.git
 [submodule "pipeline/lib/tractor-lops"]
-	path = src/lib/tractor-lops
+	path = src/dcc/houdini/third_party/tractor-lops
 	url = git@github.com:joseph-wardle/tractor-lops.git
 	branch = prod
 [submodule "pipeline/software/maya/scripts/aperture_git"]
-	path = src/software/maya/scripts/aperture_git
+	path = src/dcc/maya/third_party/aperture_git
 	url = git@github.com:michaelharmonart/aperture.git
 	branch = main
 [submodule "pipeline/lib/y-rig"]
-	path = src/lib/y-rig
+	path = src/dcc/maya/third_party/y-rig
 	url = git@github.com:michaelharmonart/y-rig.git
 [submodule "pipeline/lib/ae_SVG"]
-	path = src/lib/ae_SVG
+	path = src/dcc/houdini/third_party/ae_SVG
 	url = https://github.com/Aeoll/ae_SVG.git

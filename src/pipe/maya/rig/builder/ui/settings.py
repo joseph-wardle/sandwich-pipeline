@@ -1,14 +1,11 @@
-from pipe.maya.optionvar import BoolOptionVar, IntOptionVar, StringOptionVar
+"""Compatibility shim — real implementation lives in `dcc.maya.rig.builder.ui.settings`."""
 
+from __future__ import annotations
 
-class RigBuilderSettings:
-    DEV_BUILD = BoolOptionVar("rigBuilder.devBuild", False)
-    LAST_TAB = IntOptionVar("rigBuilder.lastTab", 0)
-    LAST_CHARACTER_RIG = StringOptionVar("rigBuilder.lastCharacterRig", "")
-    LAST_CHARACTER_VARIANT = StringOptionVar("rigBuilder.lastCharacterVariant", "")
-    LAST_PROP_RIG = StringOptionVar("rigBuilder.lastPropRig", "")
-    LAST_PROP_VARIANT = StringOptionVar("rigBuilder.lastPropVariant", "")
-    LAST_CHARACTER_SCOPE = StringOptionVar("rigBuilder.lastCharacterScope", "")
-    LAST_PROP_SCOPE = StringOptionVar("rigBuilder.lastPropScope", "")
-    LOCAL_OVERRIDE = BoolOptionVar("rigBuilder.localOverride", False)
-    LAST_OVERRIDE_DIR = StringOptionVar("rigBuilder.lastOverrideDir", "")
+import sys as _sys
+
+import dcc.maya.rig.builder.ui.settings as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.maya.rig.builder.ui.settings import *  # noqa: E402, F401, F403

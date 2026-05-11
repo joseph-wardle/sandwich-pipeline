@@ -1,40 +1,11 @@
-from maya import cmds
+"""Compatibility shim — real implementation lives in `dcc.maya.rig.builder.test.tests.visibility`."""
 
-from .. import RigBuildTest
-from ..common import (
-    format_max_items,
-    is_visible,
-)
+from __future__ import annotations
 
-HIDDEN_NODE_TYPES = {"ikHandle", "locator", "clusterHandle", "follicle", "lattice"}
+import sys as _sys
 
+import dcc.maya.rig.builder.test.tests.visibility as _real
 
-class TestHiddenRigNodes(RigBuildTest):
-    """
-    Checks that the scene has no visible rig nodes (ikHandles, locators, etc.).
-    These nodes don't hide in the viewport when disabling NURBS curves with alt+1 which is annoying for animators.
-    """
+_sys.modules[__name__] = _real
 
-    def __init__(self):
-        super().__init__("No visible rig nodes")
-
-    def run(self) -> bool:
-        rig_nodes: list[tuple[str, str]] = []
-        for node_type in HIDDEN_NODE_TYPES:
-            shapes = cmds.ls(exactType=node_type) or []
-            rig_nodes.extend((shape, node_type) for shape in shapes)
-        rig_nodes_set: set[tuple[str, str]] = set(rig_nodes)
-        problem_rig_nodes: list[str] = [
-            f"{rig_node[0]}: {rig_node[1]}"
-            for rig_node in rig_nodes_set
-            if is_visible(rig_node[0])
-        ]
-
-        if problem_rig_nodes:
-            self.log_warn(
-                f"Scene has visible rig nodes: {format_max_items(problem_rig_nodes, 'node(s)')}"
-            )
-            return False
-        else:
-            self.log_success()
-            return True
+from dcc.maya.rig.builder.test.tests.visibility import *  # noqa: E402, F401, F403

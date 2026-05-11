@@ -1,15 +1,11 @@
-def remap(
-    input: float,
-    input_range: tuple[float, float],
-    output_range: tuple[float, float],
-) -> float:
-    """
-    Remaps a value from the input to the output range.
-    """
-    input_range_size = input_range[1] - input_range[0]
-    output_range_size = output_range[1] - output_range[0]
-    output_value = (
-        ((input - input_range[0]) * output_range_size) / input_range_size
-    ) + output_range[0]
+"""Compatibility shim — real implementation lives in `dcc.maya.symmetry.math`."""
 
-    return output_value
+from __future__ import annotations
+
+import sys as _sys
+
+import dcc.maya.symmetry.math as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.maya.symmetry.math import *  # noqa: E402, F401, F403

@@ -1,18 +1,11 @@
+"""Compatibility shim — real implementation lives in `dcc.maya.util.util`."""
+
 from __future__ import annotations
 
-from contextlib import contextmanager
-from typing import TYPE_CHECKING
+import sys as _sys
 
-from maya import cmds
+import dcc.maya.util.util as _real
 
-if TYPE_CHECKING:
-    from typing import Generator
+_sys.modules[__name__] = _real
 
-
-@contextmanager
-def maintain_selection() -> Generator[None, None, None]:
-    selection = cmds.ls(selection=True, long=True, ufeObjects=True, absoluteName=True)
-    try:
-        yield
-    finally:
-        cmds.select(*selection, replace=True)
+from dcc.maya.util.util import *  # noqa: E402, F401, F403

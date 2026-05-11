@@ -1,2 +1,11 @@
-from .parmdata import parmfield as parmfield
-from .parmdata import ParmData as ParmData
+"""Compatibility shim — real implementation lives in `dcc.houdini.util`."""
+
+from __future__ import annotations
+
+import sys as _sys
+
+import dcc.houdini.util as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.houdini.util import *  # noqa: E402, F401, F403

@@ -1,24 +1,11 @@
+"""Compatibility shim — real implementation lives in `dcc.substance_painter.runtime`."""
+
 from __future__ import annotations
 
-from substance_painter import ui
+import sys as _sys
 
-from Qt import QtWidgets
+import dcc.substance_painter.runtime as _real
 
-from software.baseclass import DCCLocalizer
+_sys.modules[__name__] = _real
 
-
-class _SubstancePainterLocalizer(DCCLocalizer):
-    def __init__(self) -> None:
-        super().__init__("substance_painter")
-
-    def get_main_qt_window(self) -> QtWidgets.QWidget | None:
-        return ui.get_main_window()
-
-    def is_headless(self) -> bool:
-        return False
-
-
-_l = _SubstancePainterLocalizer()
-
-get_main_qt_window = _l.get_main_qt_window
-is_headless = _l.is_headless
+from dcc.substance_painter.runtime import *  # noqa: E402, F401, F403

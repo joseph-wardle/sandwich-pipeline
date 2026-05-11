@@ -1,11 +1,11 @@
-from . import core, widgets, window, window_ui
-from .window import close, launch
+"""Compatibility shim — real implementation lives in `dcc.maya.rig.builder.ui`."""
 
-__all__ = [
-    "widgets",
-    "window",
-    "window_ui",
-    "core",
-    "launch",
-    "close",
-]
+from __future__ import annotations
+
+import sys as _sys
+
+import dcc.maya.rig.builder.ui as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.maya.rig.builder.ui import *  # noqa: E402, F401, F403

@@ -37,10 +37,7 @@ def launch(
     is_python_shell: bool = False,
     extra_args: list[str] | None = None,
 ) -> None:
-    # The dispatch string still points at `software.<name>` while Phase 4 of
-    # the structural refactor moves per-DCC launchers to `dcc.<name>`. Phase 4
-    # rewrites this to `f"dcc.{software_name}"`.
-    launcher_cls = find_implementation(DCCLauncher, f"software.{software_name}")
+    launcher_cls = find_implementation(DCCLauncher, f"dcc.{software_name}")
     launcher_cls(is_python_shell, extra_args).launch()
 
 

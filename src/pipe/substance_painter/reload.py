@@ -1,14 +1,11 @@
-import substance_painter_plugins as spp
-from pipe.util import reload_pipe as _reload_pipe
+"""Compatibility shim — real implementation lives in `dcc.substance_painter.util.reload`."""
 
+from __future__ import annotations
 
-def reload_pipe() -> None:
-    sp_plugins = [
-        spp.plugins["export"],
-        spp.plugins["shelf"],
-    ]
-    _reload_pipe(sp_plugins)
+import sys as _sys
 
-    for plugin in sp_plugins:
-        plugin.close_plugin()
-        plugin.start_plugin()
+import dcc.substance_painter.util.reload as _real
+
+_sys.modules[__name__] = _real
+
+from dcc.substance_painter.util.reload import *  # noqa: E402, F401, F403
