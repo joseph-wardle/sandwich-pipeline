@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 import maya.cmds as mc
 from core.util.paths import get_production_path
 
-from core.ui.dialogs import MessageDialog
+from core.ui import MessageDialog
 from core.struct.timeline import Timeline
 
 from .anim_lock import confirm_anim_republish_allowed

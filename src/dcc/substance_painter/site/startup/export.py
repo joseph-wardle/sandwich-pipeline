@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import substance_painter as sp
-from core.ui.dialogs import MessageDialog
+from core.ui import MessageDialog
 from dcc.substance_painter import runtime as sp_runtime
 from dcc.substance_painter.ui import SubstanceExportWindow
 from Qt import QtWidgets

@@ -9,7 +9,7 @@ import hou
 from Qt import QtCore, QtWidgets
 from core.util.paths import get_edit_path
 
-from core.ui.dialogs import DialogButtons
+from core.ui import DialogButtons
 from core.playblast.naming import (
     build_edit_output_directory,
     next_versioned_basename,

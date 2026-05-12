@@ -14,8 +14,12 @@ from pathlib import Path
 from core.util.paths import get_production_path
 
 from core.shotgrid import Asset
-from core.versioning import DCC_HOUDINI, DCC_MAYA, DCC_SUBSTANCE
-from core.versioning.store import VERSION_MANIFEST_FILENAME
+from core.versioning import (
+    DCC_HOUDINI,
+    DCC_MAYA,
+    DCC_SUBSTANCE,
+    VERSION_MANIFEST_FILENAME,
+)
 
 log = logging.getLogger(__name__)
 

@@ -9,7 +9,7 @@ from maya import cmds
 from core.asset import paths_for_asset
 from dcc.maya.util.selection import maintain_selection
 from core.shotgrid import ShotGrid
-from core.versioning.store import next_version, versioned_filename
+from core.versioning import next_version, versioned_filename
 
 from .build import RigBuilder, RigDefinition
 from .progress import ProgressStep, TestProgressManager

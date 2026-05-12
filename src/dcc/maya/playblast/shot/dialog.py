@@ -26,7 +26,7 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from core.ui.dialogs import ButtonPair, MessageDialog
+from core.ui import ButtonPair, MessageDialog
 from dcc.maya.playblast.hud import HudDefinition
 from dcc.maya.playblast.shot.config import (
     MShotPlayblastConfig,

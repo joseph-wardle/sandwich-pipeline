@@ -15,19 +15,21 @@ from core.util.paths import get_production_path
 
 from core.asset import asset_owner_for, maya_model_stream, paths_for_asset
 from core.asset.paths import BACKUP_DIRNAME
-from core.ui.dialogs import FilteredListDialog, MessageDialog
+from core.ui import FilteredListDialog, MessageDialog
 from core.ui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
 from core.ui.version_browser import VersionBrowserWidget
 from dcc.maya.runtime import get_main_qt_window
 from core.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
 from core.util import FileManager
 from core.versioning import (
+    current_record,
+    get_manifest_path,
     list_version_records,
+    load_manifest,
     promote_version,
     save_version,
     version_label,
 )
-from core.versioning.store import current_record, get_manifest_path, load_manifest
 
 log = logging.getLogger(__name__)
 

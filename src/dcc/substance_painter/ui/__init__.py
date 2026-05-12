@@ -25,7 +25,7 @@ from env_sg import DB_Config
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
 from core.asset import asset_owner_for, paths_for_asset, substance_project_stream
-from core.ui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButtons
+from core.ui import ButtonPair, MessageDialog, MessageDialogCustomButtons
 from core.ui.progress import ProgressDialog
 from core.shotgrid import Asset, ShotGrid
 from dcc.substance_painter.publish.export import Exporter, TexSetExportSettings
@@ -46,7 +46,7 @@ from dcc.substance_painter.util.progress import (
 from core.struct.material import DisplacementSource, NormalSource, NormalType
 from core.util import checkbox_callback_helper, dict_index
 from core.util.paths import get_repo_root
-from core.versioning.store import backup_if_changed
+from core.versioning import backup_if_changed
 
 log = logging.getLogger(__name__)
 

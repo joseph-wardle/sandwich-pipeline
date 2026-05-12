@@ -9,7 +9,7 @@ from core.util.paths import get_production_path
 
 from core.asset import asset_owner_for, houdini_asset_builder_stream, paths_for_asset
 from core.asset.paths import BACKUP_DIRNAME
-from core.ui.dialogs import FilteredListDialog, MessageDialog
+from core.ui import FilteredListDialog, MessageDialog
 from core.shotgrid import Asset, SGEntity
 from core.versioning import VersionStreamSpec
 

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import hou
 from env_sg import DB_Config
 
-from core.ui.dialogs import MessageDialog
+from core.ui import MessageDialog
 from dcc.houdini import runtime
 from dcc.houdini.playblast.config import (
     HoudiniPlayblastExportConfig,

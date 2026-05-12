@@ -10,7 +10,7 @@ from Qt import QtWidgets
 from Qt.QtCompat import wrapInstance
 from core.util.paths import get_production_path
 
-from core.ui.dialogs import FilteredListDialog
+from core.ui import FilteredListDialog
 from core.shotgrid import ShotGrid
 
 from .file_manager import HOUDINI_TO_MAYA_SCALE

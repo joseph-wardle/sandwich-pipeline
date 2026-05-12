@@ -13,14 +13,17 @@ from core.util.paths import get_production_path
 
 from core.shotgrid import Shot
 from core.versioning import (
+    DCC_HOUDINI,
+    DCC_MAYA,
+    VERSION_MANIFEST_FILENAME,
     VersionOwner,
     VersionSnapshotMember,
     VersionStreamSpec,
+    get_manifest_path,
+    normalize_text,
     stream_dirname,
     stream_key_for,
 )
-from core.versioning.model import DCC_HOUDINI, DCC_MAYA, _normalize_text
-from core.versioning.store import VERSION_MANIFEST_FILENAME, get_manifest_path
 
 
 def shot_root_path(shot: Shot) -> Path:
@@ -49,11 +52,11 @@ def shot_stream(
     label: str | None = None,
     snapshot_members: tuple[VersionSnapshotMember, ...] = (),
 ) -> VersionStreamSpec:
-    resolved_dcc = _normalize_text(dcc) or "unknown"
-    resolved_stream_name = _normalize_text(stream_name) or stem
-    resolved_subpath = _normalize_text(subpath) or ""
-    resolved_stem = _normalize_text(stem) or shot.code or ""
-    resolved_ext = (_normalize_text(ext) or "").lstrip(".") or "dat"
+    resolved_dcc = normalize_text(dcc) or "unknown"
+    resolved_stream_name = normalize_text(stream_name) or stem
+    resolved_subpath = normalize_text(subpath) or ""
+    resolved_stem = normalize_text(stem) or shot.code or ""
+    resolved_ext = (normalize_text(ext) or "").lstrip(".") or "dat"
     root_path = shot_root_path(shot)
     stream_key = stream_key_for(resolved_dcc, resolved_stream_name, resolved_ext)
     working_path = root_path / resolved_subpath / f"{resolved_stem}.{resolved_ext}"
@@ -68,7 +71,7 @@ def shot_stream(
         stem=resolved_stem,
         ext=resolved_ext,
         owner=owner,
-        label=_normalize_text(label) or working_path.name,
+        label=normalize_text(label) or working_path.name,
         stream_key=stream_key,
         working_path=working_path,
         snapshot_members=snapshot_members,
@@ -131,7 +134,7 @@ def houdini_department_stream(
     *,
     owner: VersionOwner | None = None,
 ) -> VersionStreamSpec:
-    resolved_department = _normalize_text(department) or "unknown"
+    resolved_department = normalize_text(department) or "unknown"
     return shot_stream(
         shot,
         DCC_HOUDINI,

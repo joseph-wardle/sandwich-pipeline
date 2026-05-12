@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-from core.ui.dialogs import MessageDialogCustomButtons
+from core.ui import MessageDialogCustomButtons
 from core.shot import maya_rlo_stream, shot_owner_for
 from core.versioning import path_matches_stream
 from core.shotgrid import SGEntity, Shot

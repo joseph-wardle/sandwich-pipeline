@@ -16,7 +16,7 @@ import maya.cmds as mc
 from core.util.paths import get_production_path
 from dcc.houdini.launch import HoudiniLauncher
 
-from core.ui.dialogs import MessageDialog
+from core.ui import MessageDialog
 from dcc.maya.util.selection import maintain_selection
 from core.struct.timeline import Timeline
 

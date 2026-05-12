@@ -29,7 +29,7 @@ from dcc.houdini.launch import HoudiniLauncher
 
 from core import telemetry
 from core.asset import AssetPaths, asset_owner_for, maya_model_stream, paths_for_asset
-from core.ui.dialogs import (
+from core.ui import (
     FilteredListDialog,
     MessageDialog,
     MessageDialogCustomButtons,
@@ -42,8 +42,7 @@ from dcc.maya.assetfile import (
 )
 from dcc.maya.util.selection import maintain_selection
 from core.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
-from core.versioning import BackupResult
-from core.versioning.store import backup_if_changed
+from core.versioning import BackupResult, backup_if_changed
 
 from .publisher import PublishCopyError, Publisher, USDExportError
 

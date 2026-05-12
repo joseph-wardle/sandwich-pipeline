@@ -34,7 +34,7 @@ DCC_SUBSTANCE = "substance_painter"
 _STREAM_DIRNAME_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
-def _normalize_text(value: object | None) -> Optional[str]:
+def normalize_text(value: object | None) -> Optional[str]:
     """Strip *value* to a non-empty string, or return ``None``.
 
     Shared by all domain adapters when normalising ``VersionOwner`` fields from

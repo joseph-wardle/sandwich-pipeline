@@ -19,7 +19,7 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from core.ui.dialogs import ButtonPair, MessageDialog
+from core.ui import ButtonPair, MessageDialog
 from dcc.maya.assetfile import read_asset_metadata
 from dcc.maya.playblast.shot.config import SaveLocation
 from dcc.maya.playblast.turnaround.config import (

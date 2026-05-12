@@ -26,13 +26,14 @@ from Qt import QtWidgets
 
 from core.asset import asset_owner_from_metadata
 from core.ui.progress import progress_scope
-from core.versioning import DCC_HOUDINI, stream_key_for
-from core.versioning.store import (
+from core.versioning import (
+    DCC_HOUDINI,
     VERSION_MANIFEST_FILENAME,
     backup_file,
     get_manifest_path,
     next_version,
     record_publish,
+    stream_key_for,
 )
 
 from . import hooks as publish_hooks

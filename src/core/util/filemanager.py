@@ -6,11 +6,7 @@ from pathlib import Path
 
 from Qt import QtWidgets
 
-from core.ui.dialogs import (
-    FilteredListDialog,
-    MessageDialog,
-    MessageDialogCustomButtons,
-)
+from core.ui import FilteredListDialog, MessageDialog, MessageDialogCustomButtons
 from core.shotgrid import (
     Asset,
     Environment,

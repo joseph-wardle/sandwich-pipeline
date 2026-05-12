@@ -10,19 +10,22 @@ from pathlib import Path
 
 from core.shotgrid import Asset
 from core.versioning import (
+    DCC_HOUDINI,
+    DCC_MAYA,
+    DCC_SUBSTANCE,
     VersionOwner,
     VersionStreamSpec,
+    normalize_text,
     stream_key_for,
 )
-from core.versioning.model import DCC_HOUDINI, DCC_MAYA, DCC_SUBSTANCE, _normalize_text
 
 from .paths import AssetPaths
 
 
 def asset_owner_for(asset: Asset) -> VersionOwner:
-    display_name = _normalize_text(asset.display_name)
-    asset_name = _normalize_text(asset.name)
-    asset_path = _normalize_text(asset.asset_path)
+    display_name = normalize_text(asset.display_name)
+    asset_name = normalize_text(asset.name)
+    asset_path = normalize_text(asset.asset_path)
     return VersionOwner(
         kind="asset",
         code=display_name or asset_name or asset_path or "asset",
@@ -38,8 +41,8 @@ def asset_owner_from_metadata(
     asset_path: str | None = None,
     asset_id: int | None = None,
 ) -> VersionOwner | None:
-    normalized_display_name = _normalize_text(display_name)
-    normalized_asset_path = _normalize_text(asset_path)
+    normalized_display_name = normalize_text(display_name)
+    normalized_asset_path = normalize_text(asset_path)
     if (
         normalized_display_name is None
         and normalized_asset_path is None
@@ -103,7 +106,7 @@ def substance_project_stream(
     *,
     owner: VersionOwner | None = None,
 ) -> VersionStreamSpec:
-    normalized_variant = _normalize_text(variant) or "main"
+    normalized_variant = normalize_text(variant) or "main"
     return asset_stream(
         asset_paths,
         DCC_SUBSTANCE,

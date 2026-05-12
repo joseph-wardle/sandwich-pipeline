@@ -6,13 +6,15 @@ from pathlib import Path
 
 from core.shotgrid import Environment
 from core.versioning import (
+    DCC_HOUDINI,
+    VERSION_MANIFEST_FILENAME,
     VersionOwner,
     VersionStreamSpec,
+    get_manifest_path,
+    normalize_text,
     stream_dirname,
     stream_key_for,
 )
-from core.versioning.model import DCC_HOUDINI, _normalize_text
-from core.versioning.store import VERSION_MANIFEST_FILENAME, get_manifest_path
 from core.util.paths import get_production_path
 
 SET_STREAM_NAME = "set"
@@ -23,8 +25,8 @@ def environment_root_path(environment: Environment) -> Path:
 
 
 def environment_owner_for(environment: Environment) -> VersionOwner:
-    display_name = _normalize_text(environment.display_name)
-    normalized_name = _normalize_text(environment.name)
+    display_name = normalize_text(environment.display_name)
+    normalized_name = normalize_text(environment.name)
     environment_path = environment.environment_path
     return VersionOwner(
         kind="environment",
@@ -46,12 +48,12 @@ def environment_stream(
     label: str | None = None,
 ) -> VersionStreamSpec:
     root_path = environment_root_path(environment)
-    resolved_dcc = _normalize_text(dcc) or "unknown"
-    resolved_stream_name = _normalize_text(stream_name) or SET_STREAM_NAME
+    resolved_dcc = normalize_text(dcc) or "unknown"
+    resolved_stream_name = normalize_text(stream_name) or SET_STREAM_NAME
     resolved_stem = (
-        _normalize_text(stem) or _normalize_text(environment.name) or SET_STREAM_NAME
+        normalize_text(stem) or normalize_text(environment.name) or SET_STREAM_NAME
     )
-    resolved_ext = (_normalize_text(ext) or "").lstrip(".") or "dat"
+    resolved_ext = (normalize_text(ext) or "").lstrip(".") or "dat"
     stream_key = stream_key_for(resolved_dcc, resolved_stream_name, resolved_ext)
     working_path = root_path / f"{resolved_stem}.{resolved_ext}"
     return VersionStreamSpec(
@@ -62,7 +64,7 @@ def environment_stream(
         stem=resolved_stem,
         ext=resolved_ext,
         owner=owner,
-        label=_normalize_text(label) or working_path.name,
+        label=normalize_text(label) or working_path.name,
         stream_key=stream_key,
         working_path=working_path,
     )

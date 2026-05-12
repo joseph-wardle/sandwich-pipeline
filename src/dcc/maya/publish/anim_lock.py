@@ -8,7 +8,7 @@ from typing import Iterable
 from Qt import QtWidgets
 from core.util.paths import get_production_path
 
-from core.ui.dialogs import MessageDialog
+from core.ui import MessageDialog
 
 log = logging.getLogger(__name__)
 
