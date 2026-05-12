@@ -13,7 +13,7 @@ def main():
         if plugin not in pluginInfo:
             mc.loadPlugin(plugin)
 
-    from core.util.util import get_production_path
+    from core.util.paths import get_production_path
 
     # set workspace
     mc.workspace(str(get_production_path().parent), openWorkspace=True)

@@ -19,7 +19,7 @@ from core.shotgrid import (
     Shot,
     ShotGrid,
 )
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 
 def _find_entities_for_type(

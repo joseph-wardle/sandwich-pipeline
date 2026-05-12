@@ -1,7 +1,7 @@
 import os
 
 import nuke
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 from Qt import QtCore, QtWidgets
 from Qt.QtWidgets import QComboBox
 

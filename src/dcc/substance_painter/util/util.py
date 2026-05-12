@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import substance_painter as sp
 from Qt import QtCore
-from core.util.util import get_documentation_path
+from core.util.paths import get_documentation_path
 
 # Documentation page reference
 PIPE_SP_DOCS_PAGE = "Asset-Pipeline#substance-painter"

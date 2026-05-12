@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from core.util.util import (
+from core.util.paths import (
     get_production_path,
     get_shared_telemetry_backend_dir,
 )

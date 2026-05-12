@@ -20,7 +20,7 @@ from pathlib import Path
 
 import substance_painter as sp
 from Qt import QtCore, QtWidgets
-from core.util.util import get_production_path, resolve_mapped_path
+from core.util.paths import get_production_path, resolve_mapped_path
 from substance_painter.project import NormalMapFormat, ProjectWorkflow, TangentSpace
 
 from core.asset.paths import AssetPaths, paths_for_asset

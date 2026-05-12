@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable
 
 from maya import cmds
-from core.util.util import get_rig_build_path
+from core.util.paths import get_rig_build_path
 
 from .progress import RigBuildProgressManager
 

@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 from dcc.maya.command import maya_command
 

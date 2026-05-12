@@ -4,7 +4,7 @@ import logging
 import platform
 from pathlib import Path
 
-from core.util.util import get_shared_telemetry_spool_dir
+from core.util.paths import get_shared_telemetry_spool_dir
 from env import Executables
 from framework.launcher import Launcher
 

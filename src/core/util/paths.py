@@ -65,12 +65,12 @@ def get_edit_path() -> Path:
 
 
 def get_src_path() -> Path:
-    # __file__ is `src/core/util/util.py`; parents[2] is `src/`.
+    # __file__ is `src/core/util/paths.py`; parents[2] is `src/`.
     return Path(__file__).resolve().parents[2]
 
 
 def get_repo_root() -> Path:
-    # __file__ is `src/core/util/util.py`; parents[3] is the repository root.
+    # __file__ is `src/core/util/paths.py`; parents[3] is the repository root.
     return Path(__file__).resolve().parents[3]
 
 

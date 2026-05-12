@@ -5,7 +5,7 @@ from typing import Any
 
 import nuke
 from env_sg import DB_Config
-from core.util.util import get_edit_path, get_production_path
+from core.util.paths import get_edit_path, get_production_path
 
 from core.shotgrid import Playlist, ShotGrid, ShotGridError, ShotGridNotFound
 

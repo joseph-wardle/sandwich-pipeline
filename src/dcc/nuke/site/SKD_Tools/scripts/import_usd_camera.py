@@ -8,7 +8,7 @@ from typing import Any, cast
 import nuke
 from env_sg import DB_Config
 from Qt import QtCore, QtGui, QtWidgets
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 from core.shotgrid import ShotGrid
 

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import typing
 
-from core.util.util import get_shared_telemetry_spool_dir, resolve_mapped_path
+from core.util.paths import get_shared_telemetry_spool_dir, resolve_mapped_path
 from env import Executables
 from framework.launcher import Launcher
 

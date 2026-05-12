@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, cast
 from random import randint
 
 from Qt import QtCore, QtGui, QtWidgets
-from core.util.util import get_repo_root
+from core.util.paths import get_repo_root
 
 if TYPE_CHECKING:
     import typing

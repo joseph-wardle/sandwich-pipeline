@@ -8,7 +8,7 @@ from env_sg import DB_Config
 from pxr import Kind, Usd, UsdGeom
 from Qt import QtWidgets
 from Qt.QtCompat import wrapInstance
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 from core.ui.dialogs import FilteredListDialog
 from core.shotgrid import ShotGrid

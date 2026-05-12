@@ -10,7 +10,7 @@ import maya.cmds as mc
 import mayaUsd  # type: ignore[import-not-found]
 from env_sg import DB_Config
 from pxr import Sdf, Usd, UsdGeom
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 from timeline_marker.ui import TimelineMarker  # type: ignore[import-not-found]
 
 from core.ui.dialogs import MessageDialog

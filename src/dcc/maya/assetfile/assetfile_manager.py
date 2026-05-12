@@ -11,7 +11,7 @@ import maya.mel as mel
 from env_sg import DB_Config
 from Qt import QtCore, QtWidgets
 from dcc.maya.command import maya_command
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 from core.asset.paths import BACKUP_DIRNAME, paths_for_asset
 from core.asset.version_adapter import asset_owner_for, maya_model_stream

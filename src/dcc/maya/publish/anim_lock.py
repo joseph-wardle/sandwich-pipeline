@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 from Qt import QtWidgets
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 from core.ui.dialogs import MessageDialog
 

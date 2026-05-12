@@ -18,7 +18,7 @@ sandwich-pipeline/
 │   ├── framework         # DCCLauncher / DCCRuntime ABCs + dispatch + concrete launcher base
 │   ├── core              # Cross-DCC platform code (asset, shot, versioning, telemetry, etc.)
 │   └── dcc               # Per-DCC integrations (launch.py + runtime.py + site/ + third_party/)
-├── telemetry-backend      # Postgres/Grafana tarball install notes for the shared telemetry stack
+├── telemetry-backend     # Postgres/Grafana configuration
 ├── pyproject.toml
 └── README.md
 ```

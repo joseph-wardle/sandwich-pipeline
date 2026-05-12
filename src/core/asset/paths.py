@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 from core.shotgrid import Asset
 from core.versioning.model import DCC_HOUDINI, DCC_MAYA, DCC_SUBSTANCE

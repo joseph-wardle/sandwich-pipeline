@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import substance_painter as sp
 
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 _SHELF_NAME = "lnd-resources"
 

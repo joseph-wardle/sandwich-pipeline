@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
-from core.util.util import get_edit_path
+from core.util.paths import get_edit_path
 
 log = logging.getLogger(__name__)
 

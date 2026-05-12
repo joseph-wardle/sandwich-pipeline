@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import typing
 
-from core.util.util import (
+from core.util.paths import (
     get_production_path,
     get_rig_build_path,
     get_shared_telemetry_spool_dir,

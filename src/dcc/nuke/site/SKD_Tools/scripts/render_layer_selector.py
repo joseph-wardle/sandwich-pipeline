@@ -10,7 +10,7 @@ from env_sg import DB_Config
 from Qt import QtCore, QtGui, QtWidgets
 
 from core.shotgrid import ShotGrid
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 simple_window = None
 

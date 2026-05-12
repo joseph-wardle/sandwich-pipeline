@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from core.shotgrid import Shot
 
 import maya.cmds as mc
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 from core.ui.dialogs import MessageDialog
 from core.struct.timeline import Timeline

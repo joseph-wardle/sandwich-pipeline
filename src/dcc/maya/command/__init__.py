@@ -8,7 +8,7 @@ from types import FunctionType
 from typing import Any
 
 from maya import cmds
-from core.util.util import get_function_source_code_url
+from core.util.paths import get_function_source_code_url
 
 decorated_commands: set[CommandDescription] = set()
 registered_commands: list[str] = []

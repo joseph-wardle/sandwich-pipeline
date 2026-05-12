@@ -20,7 +20,7 @@ import substance_painter as sp
 from env_sg import DB_Config
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 from Qt import QtWidgets
-from core.util.util import resolve_mapped_path
+from core.util.paths import resolve_mapped_path
 
 from core.asset.paths import paths_for_asset
 from core.asset.version_adapter import asset_owner_for, substance_project_stream

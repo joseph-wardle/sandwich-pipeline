@@ -2,7 +2,7 @@ import hou
 
 from pathlib import Path
 
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 """This OnCreated hook runs whenever an Asset Reference node is created and 
    ensures that the filepath is always relative to $JOB"""

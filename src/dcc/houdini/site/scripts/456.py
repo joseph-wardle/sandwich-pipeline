@@ -1,7 +1,7 @@
 import hou
 import os
 
-from core.util.util import get_production_path, resolve_mapped_path
+from core.util.paths import get_production_path, resolve_mapped_path
 
 # create embedded $ASSET variable if needed
 hip_path = resolve_mapped_path(hou.hscriptStringExpression("$HIP"))

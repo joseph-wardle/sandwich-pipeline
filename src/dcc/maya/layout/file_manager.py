@@ -9,7 +9,7 @@ import mayaUsd.lib as mayaUsdLib  # type: ignore[import-not-found]
 from env_sg import DB_Config
 from mayaUsd.lib import proxyAccessor as pa
 from pxr import Gf, Usd, UsdGeom
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 from dcc.maya.runtime import get_main_qt_window
 from core.shotgrid import Environment, SGEntity, ShotGrid

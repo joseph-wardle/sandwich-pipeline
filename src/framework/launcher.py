@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     import typing
 
 from core import telemetry
-from core.util.util import fix_launcher_metadata
+from core.util.paths import fix_launcher_metadata
 
 from .interface import DCCLauncher
 

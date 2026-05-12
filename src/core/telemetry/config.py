@@ -4,7 +4,7 @@ Defaults work without any env vars set. The knob that matters most:
 `PIPE_TELEMETRY_ENABLED=0` disables emit entirely (returns a no-op writer).
 
 The spool directory defaults to the shared production path
-(`get_shared_telemetry_spool_dir()` in `core/util/util.py`). Override
+(`get_shared_telemetry_spool_dir()` in `core/util/paths.py`). Override
 with `PIPE_TELEMETRY_SPOOL_DIR` for tests or for the laptop POC.
 
 `PIPE_TELEMETRY_RETENTION_DAYS=0` (the default) disables the spool retention
@@ -19,7 +19,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.util.util import get_shared_telemetry_spool_dir
+from core.util.paths import get_shared_telemetry_spool_dir
 
 
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})

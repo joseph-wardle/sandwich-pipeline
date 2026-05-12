@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import hou
 from Qt import QtCore, QtWidgets
-from core.util.util import get_edit_path
+from core.util.paths import get_edit_path
 
 from core.ui.dialogs import DialogButtons
 from core.playblast.naming import (

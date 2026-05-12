@@ -13,7 +13,7 @@ from core.versioning import (
 )
 from core.versioning.model import DCC_HOUDINI, _normalize_text
 from core.versioning.store import VERSION_MANIFEST_FILENAME, get_manifest_path
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 SET_STREAM_NAME = "set"
 

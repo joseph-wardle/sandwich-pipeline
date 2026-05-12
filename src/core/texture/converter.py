@@ -23,7 +23,7 @@ from dcc.substance_painter.util.progress import (
     PublishStage,
 )
 from core.util import silent_startupinfo
-from core.util.util import get_repo_root
+from core.util.paths import get_repo_root
 
 log = logging.getLogger(__name__)
 

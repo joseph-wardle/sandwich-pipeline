@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import cast
 
 import hou
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 from core.environment.version_adapter import (
     environment_owner_for,

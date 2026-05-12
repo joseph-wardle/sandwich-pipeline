@@ -14,7 +14,7 @@ from core.shotgrid import Asset, SGEntity, ShotGrid
 
 if TYPE_CHECKING:
     from typing import Any, Sequence
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 from core.ui.dialogs import FilteredListDialog, MessageDialog
 

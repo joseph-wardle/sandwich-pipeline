@@ -18,7 +18,7 @@ if TYPE_CHECKING:
         def GetNumTimeSamples(self) -> int: ...
 
 
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 from core.shotgrid import Asset
 from core.struct.timeline import Timeline

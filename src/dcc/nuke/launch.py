@@ -5,7 +5,7 @@ import os
 import platform
 from pathlib import Path
 
-from core.util.util import (
+from core.util.paths import (
     get_shared_telemetry_spool_dir,
     resolve_mapped_path,
 )

@@ -1,5 +1,5 @@
 import hou
-from core.util.util import get_production_path
+from core.util.paths import get_production_path
 
 
 try:

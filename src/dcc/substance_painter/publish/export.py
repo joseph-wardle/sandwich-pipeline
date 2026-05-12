@@ -13,7 +13,7 @@ from Qt import QtWidgets
 if TYPE_CHECKING:
     import typing
 
-from core.util.util import resolve_mapped_path
+from core.util.paths import resolve_mapped_path
 from substance_painter.exception import ProjectError
 
 from core.asset.paths import paths_for_asset

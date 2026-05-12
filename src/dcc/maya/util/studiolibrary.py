@@ -1,7 +1,7 @@
 from typing import Any, cast
 
 import studiolibrary  # type: ignore[import-not-found]
-from core.util.util import get_anim_path
+from core.util.paths import get_anim_path
 
 
 def run():
