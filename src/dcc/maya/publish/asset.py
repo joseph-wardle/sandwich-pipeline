@@ -41,7 +41,7 @@ from dcc.maya.assetfile import (
     resolve_asset_from_scene_path,
     write_asset_metadata,
 )
-from dcc.maya.util.util import maintain_selection
+from dcc.maya.util.selection import maintain_selection
 from core.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
 from core.versioning import BackupResult
 from core.versioning.store import backup_if_changed

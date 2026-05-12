@@ -37,7 +37,7 @@ from substance_painter.exception import ProjectError, ServiceNotFoundError
 
 from core.asset.paths import DCC_SUBSTANCE
 from core.shotgrid import Asset, ShotGrid, build_asset_path
-from dcc.substance_painter.util.util import texture_set_name
+from dcc.substance_painter.util.texture_set import texture_set_name
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ PIPE_SP_METADATA_SCHEMA_VERSION = 1
 # Shared utilities
 # ---------------------------------------------------------------------------
 
-# texture_set_name is imported from dcc.substance_painter.util.util
+# texture_set_name is imported from dcc.substance_painter.util.texture_set
 
 
 def current_project_path() -> Path | None:

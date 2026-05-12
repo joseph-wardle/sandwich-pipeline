@@ -4,7 +4,7 @@ import attrs
 
 from enum import IntEnum
 
-from core.struct.util import JsonSerializable
+from core.struct.json_serializable import JsonSerializable
 
 
 class DisplacementSource(IntEnum):

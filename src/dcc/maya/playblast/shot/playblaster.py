@@ -9,7 +9,7 @@ from mayacapture.capture import capture  # type: ignore[import-not-found]
 
 from dcc.maya.playblast.hud import applied_hud
 from dcc.maya.playblast.shot.config import MPlayblastConfig
-from dcc.maya.util.util import maintain_selection
+from dcc.maya.util.selection import maintain_selection
 from core.playblast import Playblaster
 
 if TYPE_CHECKING:

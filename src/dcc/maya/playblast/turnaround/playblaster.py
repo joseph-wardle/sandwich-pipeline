@@ -19,7 +19,7 @@ from dcc.maya.playblast.turnaround.config import (
     _first_parent,
     _node_uuid,
 )
-from dcc.maya.util.util import maintain_selection
+from dcc.maya.util.selection import maintain_selection
 from core.playblast.encoding import build_image_input_chain, encode_movie
 from core.util.users import resolve_artist_display_name
 

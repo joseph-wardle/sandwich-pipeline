@@ -7,7 +7,7 @@ import attrs
 if TYPE_CHECKING:
     from core.shotgrid import Shot
 
-from .util import JsonSerializable
+from .json_serializable import JsonSerializable
 
 PREROLL_DURATION = 55
 

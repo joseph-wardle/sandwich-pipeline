@@ -1,9 +1,9 @@
+from . import json_serializable
 from . import material
 from . import timeline
-from . import util
 
 __all__ = [
+    "json_serializable",
     "material",
     "timeline",
-    "util",
 ]

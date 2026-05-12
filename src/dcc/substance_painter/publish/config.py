@@ -13,7 +13,7 @@ from dcc.substance_painter.publish.types import (
     ResolvedExportTarget,
     TexSetExportSettings,
 )
-from dcc.substance_painter.util.util import texture_set_name
+from dcc.substance_painter.util.texture_set import texture_set_name
 from core.struct.material import DisplacementSource, NormalSource, NormalType
 
 

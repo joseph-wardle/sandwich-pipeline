@@ -37,7 +37,8 @@ from dcc.substance_painter.util.houdini_bridge import (
 )
 from dcc.substance_painter.runtime import get_main_qt_window
 from dcc.substance_painter.util.metadata import get_active_asset_from_project
-from dcc.substance_painter.util.util import docs_link_html, texture_set_name
+from dcc.substance_painter.util.docs import docs_link_html
+from dcc.substance_painter.util.texture_set import texture_set_name
 from dcc.substance_painter.util.progress import (
     DEFAULT_PUBLISH_STAGE_SEQUENCE,
     PublishProgressUpdate,

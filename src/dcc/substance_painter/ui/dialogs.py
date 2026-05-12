@@ -26,7 +26,7 @@ from substance_painter.project import NormalMapFormat, ProjectWorkflow, TangentS
 from core.asset.paths import AssetPaths, paths_for_asset
 from core.ui.dialogs import DialogFilteredList, FilteredListDialog
 from core.shotgrid import Asset, ShotGrid
-from dcc.substance_painter.util.util import docs_link_html
+from dcc.substance_painter.util.docs import docs_link_html
 
 # ---------------------------------------------------------------------------
 # Constants
