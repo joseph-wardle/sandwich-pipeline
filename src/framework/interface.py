@@ -19,12 +19,12 @@ inside the DCC's interpreter.
 
 
 class DCCLauncher(metaclass=ABCMeta):
-    """Outer-process launcher contract — implemented per DCC in `dcc.<name>.launch`."""
+    """Outer-process launcher contract — implemented per DCC in `dcc.<name>.launch`.
 
-    @abstractmethod
-    def __init__(self):
-        """Initialize the launcher."""
-        raise NotImplementedError
+    Subclasses define their own `__init__` (signatures vary per DCC — Maya
+    takes `is_python_shell`/`extra_args`; Substance Painter refuses
+    `is_python_shell=True`; etc.). The only enforced contract is `launch()`.
+    """
 
     @abstractmethod
     def launch(self) -> None:
@@ -33,12 +33,12 @@ class DCCLauncher(metaclass=ABCMeta):
 
 
 class DCCRuntime(metaclass=ABCMeta):
-    """In-DCC runtime contract — implemented per DCC in `dcc.<name>.runtime`."""
+    """In-DCC runtime contract — implemented per DCC in `dcc.<name>.runtime`.
 
-    @abstractmethod
-    def __init__(self) -> None:
-        """Initialize the runtime."""
-        raise NotImplementedError
+    Subclasses are typically instantiated once at module load
+    (`_runtime = <Dcc>Runtime()`) so their per-DCC API imports happen exactly
+    when the module is first imported from inside the DCC interpreter.
+    """
 
     @abstractmethod
     def get_main_qt_window(self) -> typing.Any:

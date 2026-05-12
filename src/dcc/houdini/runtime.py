@@ -11,9 +11,6 @@ from Qt import QtWidgets
 
 
 class HoudiniRuntime(DCCRuntime):
-    def __init__(self) -> None:
-        super().__init__()
-
     def get_main_qt_window(self) -> QtWidgets.QWidget | None:
         if not self.is_headless():
             return hou.qt.mainWindow()

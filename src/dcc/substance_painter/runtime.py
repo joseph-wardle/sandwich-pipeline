@@ -9,9 +9,6 @@ from Qt import QtWidgets
 
 
 class SubstancePainterRuntime(DCCRuntime):
-    def __init__(self) -> None:
-        super().__init__()
-
     def get_main_qt_window(self) -> QtWidgets.QWidget | None:
         return ui.get_main_window()
 

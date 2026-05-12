@@ -12,9 +12,6 @@ from Qt import QtCompat, QtWidgets
 
 
 class MayaRuntime(DCCRuntime):
-    def __init__(self) -> None:
-        super().__init__()
-
     def get_main_qt_window(self) -> QtWidgets.QWidget | None:
         if not self.is_headless():
             ptr = omUI.MQtUtil.mainWindow()

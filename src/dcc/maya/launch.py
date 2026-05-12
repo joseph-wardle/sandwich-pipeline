@@ -70,12 +70,16 @@ class MayaLauncher(Launcher):
             # PYTHONPATH:
             #   1. src/ — so framework, core, dcc, env, env_sg are importable
             #   2. site/ — Maya scans sys.path literally for `userSetup.py`
-            #   3. third_party/studiolibrary/src — studiolibrary's vendored
-            #      layout expects its `src/` directory on sys.path
+            #   3. third_party/ — flat vendored libs (mayacapture, dwpicker,
+            #      modelChecker, yrig, aperture, rjg, timeline_marker, skinner)
+            #      are imported by their top-level package name
+            #   4. third_party/studiolibrary/src — studiolibrary's vendored
+            #      layout nests its package under an extra src/ directory
             "PYTHONPATH": os.pathsep.join(
                 [
                     str(src_path),
                     str(site_path),
+                    str(third_party),
                     str(third_party / "studiolibrary/src"),
                 ]
             ),
