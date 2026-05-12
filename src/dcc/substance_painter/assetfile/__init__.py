@@ -22,8 +22,7 @@ from substance_painter.exception import ProjectError, ServiceNotFoundError
 from Qt import QtWidgets
 from core.util.paths import resolve_mapped_path
 
-from core.asset.paths import paths_for_asset
-from core.asset.version_adapter import asset_owner_for, substance_project_stream
+from core.asset import asset_owner_for, paths_for_asset, substance_project_stream
 from core.shotgrid import Asset, ShotGrid
 from core.ui.dialogs import MessageDialog, MessageDialogCustomButtons
 from core.ui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog

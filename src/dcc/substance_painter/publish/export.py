@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 from core.util.paths import resolve_mapped_path
 from substance_painter.exception import ProjectError
 
-from core.asset.paths import paths_for_asset
+from core.asset import paths_for_asset
 from core.shotgrid import Asset
 from dcc.substance_painter.publish.config import (
     count_udim_sets,

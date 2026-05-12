@@ -24,8 +24,7 @@ import substance_painter as sp
 from env_sg import DB_Config
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
-from core.asset.paths import paths_for_asset
-from core.asset.version_adapter import asset_owner_for, substance_project_stream
+from core.asset import asset_owner_for, paths_for_asset, substance_project_stream
 from core.ui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButtons
 from core.ui.progress import ProgressDialog
 from core.shotgrid import Asset, ShotGrid

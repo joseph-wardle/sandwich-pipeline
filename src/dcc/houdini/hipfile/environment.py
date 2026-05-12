@@ -7,10 +7,7 @@ from typing import cast
 import hou
 from core.util.paths import get_production_path
 
-from core.environment.version_adapter import (
-    environment_owner_for,
-    houdini_set_stream,
-)
+from core.environment import environment_owner_for, houdini_set_stream
 from core.versioning import path_matches_stream
 from core.ui.dialogs import MessageDialog
 from core.shotgrid import (

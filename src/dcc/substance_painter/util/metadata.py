@@ -35,7 +35,7 @@ import substance_painter as sp
 from core.util.paths import get_production_path
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
-from core.asset.paths import DCC_SUBSTANCE
+from core.versioning import DCC_SUBSTANCE
 from core.shotgrid import Asset, ShotGrid, build_asset_path
 from dcc.substance_painter.util.texture_set import texture_set_name
 

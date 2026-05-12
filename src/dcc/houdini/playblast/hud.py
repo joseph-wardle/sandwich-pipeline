@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import hou
 
-from core.shot.version_adapter import houdini_department_stream, shot_owner_for
+from core.shot import houdini_department_stream, shot_owner_for
 from core.versioning import (
     list_version_records,
     path_matches_stream,

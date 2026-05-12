@@ -24,10 +24,9 @@ from typing import Any, Mapping, NotRequired, TypedDict, cast
 import hou
 from Qt import QtWidgets
 
-from core.asset.version_adapter import asset_owner_from_metadata
+from core.asset import asset_owner_from_metadata
 from core.ui.progress import progress_scope
-from core.versioning import stream_key_for
-from core.versioning.model import DCC_HOUDINI
+from core.versioning import DCC_HOUDINI, stream_key_for
 from core.versioning.store import (
     VERSION_MANIFEST_FILENAME,
     backup_file,

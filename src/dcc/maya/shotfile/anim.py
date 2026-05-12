@@ -6,10 +6,7 @@ import maya.cmds as mc
 from pxr import Usd, UsdGeom
 
 from dcc.maya.rig.utils import get_rig_filepath_from_asset
-from core.shot.version_adapter import (
-    maya_anim_stream,
-    shot_owner_for,
-)
+from core.shot import maya_anim_stream, shot_owner_for
 from core.shotgrid import Shot
 from core.versioning import VersionStreamSpec, path_matches_stream
 

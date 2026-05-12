@@ -15,7 +15,7 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from core.asset.paths import paths_for_asset
+from core.asset import paths_for_asset
 from core.ui.dialogs import ButtonPair, MessageDialog
 from core.shotgrid import ShotGrid
 from dcc.maya.command import maya_command

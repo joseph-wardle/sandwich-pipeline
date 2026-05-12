@@ -28,8 +28,7 @@ from Qt.QtWidgets import (
 from dcc.houdini.launch import HoudiniLauncher
 
 from core import telemetry
-from core.asset.paths import AssetPaths, paths_for_asset
-from core.asset.version_adapter import asset_owner_for, maya_model_stream
+from core.asset import AssetPaths, asset_owner_for, maya_model_stream, paths_for_asset
 from core.ui.dialogs import (
     FilteredListDialog,
     MessageDialog,

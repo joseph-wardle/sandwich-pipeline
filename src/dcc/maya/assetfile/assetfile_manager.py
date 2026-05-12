@@ -13,8 +13,8 @@ from Qt import QtCore, QtWidgets
 from dcc.maya.command import maya_command
 from core.util.paths import get_production_path
 
-from core.asset.paths import BACKUP_DIRNAME, paths_for_asset
-from core.asset.version_adapter import asset_owner_for, maya_model_stream
+from core.asset import asset_owner_for, maya_model_stream, paths_for_asset
+from core.asset.paths import BACKUP_DIRNAME
 from core.ui.dialogs import FilteredListDialog, MessageDialog
 from core.ui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
 from core.ui.version_browser import VersionBrowserWidget

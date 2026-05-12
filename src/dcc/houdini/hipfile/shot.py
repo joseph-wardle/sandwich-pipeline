@@ -11,10 +11,7 @@ import hou
 from dcc.houdini import runtime as houdini_runtime
 from core.ui.dialogs import FilteredListDialog, MessageDialog
 from dcc.houdini.hipfile.departments import DEPARTMENT_OPTIONS, Department
-from core.shot.version_adapter import (
-    houdini_department_stream,
-    shot_owner_for,
-)
+from core.shot import houdini_department_stream, shot_owner_for
 from core.shotgrid import (
     Environment,
     SGEntity,

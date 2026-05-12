@@ -22,7 +22,7 @@ from typing import Any
 from env import Executables
 from dcc.houdini.launch import HoudiniLauncher
 
-from core.asset.paths import paths_for_asset
+from core.asset import paths_for_asset
 from core.shotgrid import Asset
 
 log = logging.getLogger(__name__)
