@@ -28,7 +28,7 @@ from core.shotgrid import Asset, ShotGrid
 from core.ui.dialogs import MessageDialog, MessageDialogCustomButtons
 from core.ui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
 from core.ui.version_browser import VersionBrowserWidget
-from dcc.substance_painter.dialogs import (
+from dcc.substance_painter.ui.dialogs import (
     SubstanceAssetCreateModeDialog,
     SubstanceAssetDefaultProjectDialog,
     SubstanceAssetSelectDialog,

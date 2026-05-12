@@ -29,8 +29,8 @@ from core.asset.version_adapter import asset_owner_for, substance_project_stream
 from core.ui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButtons
 from core.ui.progress import ProgressDialog
 from core.shotgrid import Asset, ShotGrid
-from dcc.substance_painter.export.export import Exporter, TexSetExportSettings
-from dcc.substance_painter.houdini_bridge import (
+from dcc.substance_painter.publish.export import Exporter, TexSetExportSettings
+from dcc.substance_painter.util.houdini_bridge import (
     HoudiniPublishError,
     run_asset_builder,
     summarize_result,

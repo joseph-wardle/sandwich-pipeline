@@ -7,7 +7,7 @@ from pathlib import Path
 
 import substance_painter as sp
 
-from dcc.substance_painter.export.types import TexSetExportSettings
+from dcc.substance_painter.publish.types import TexSetExportSettings
 from dcc.substance_painter.util.util import texture_set_name
 from core.struct.material import MaterialInfo, TexSetInfo
 

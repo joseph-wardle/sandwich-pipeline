@@ -18,20 +18,20 @@ from substance_painter.exception import ProjectError
 
 from core.asset.paths import paths_for_asset
 from core.shotgrid import Asset
-from dcc.substance_painter.export.config import (
+from dcc.substance_painter.publish.config import (
     count_udim_sets,
     generate_export_config,
     resolve_export_targets,
 )
-from dcc.substance_painter.export.material_info import write_material_info
-from dcc.substance_painter.export.results import (
+from dcc.substance_painter.publish.material_info import write_material_info
+from dcc.substance_painter.publish.results import (
     capture_export_events,
     existing_source_file_count,
     normalize_texture_export_map,
     planned_export_count,
     resolve_exported_files,
 )
-from dcc.substance_painter.export.types import (
+from dcc.substance_painter.publish.types import (
     ResolvedExportTarget,
     TargetExportOutcome,
     TexSetExportSettings,

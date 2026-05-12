@@ -9,7 +9,7 @@ from pathlib import Path
 import substance_painter as sp
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
-from dcc.substance_painter.export.types import (
+from dcc.substance_painter.publish.types import (
     ResolvedExportTarget,
     TexSetExportSettings,
 )
