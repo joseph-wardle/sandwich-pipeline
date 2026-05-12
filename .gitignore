@@ -38,7 +38,3 @@ resources/splash/users
 
 # Ignore flashbangs
 resources/flashbang
-
-agents
-.codex
-.claude
