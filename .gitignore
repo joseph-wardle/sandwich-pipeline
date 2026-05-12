@@ -36,7 +36,7 @@ src/dcc/maya/third_party/rjg
 resources/splash/users
 
 # Ignore flashbangs
-src/lib/flashbang
+resources/flashbang
 
 agents
 .codex

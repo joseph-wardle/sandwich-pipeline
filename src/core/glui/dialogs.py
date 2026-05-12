@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, cast
 from random import randint
 
 from Qt import QtCore, QtGui, QtWidgets
-from core.util.util import get_src_path
+from core.util.util import get_repo_root
 
 if TYPE_CHECKING:
     import typing
@@ -154,7 +154,7 @@ class DialogFilteredList:
         return None
 
 
-FLASHBANG_DIR = get_src_path() / "lib/flashbang"
+FLASHBANG_DIR = get_repo_root() / "resources/flashbang"
 
 
 class MessageDialog(QtWidgets.QDialog, DialogButtons):

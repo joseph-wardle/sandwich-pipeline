@@ -1,0 +1,119 @@
+{
+    "env": [
+        {
+            "AXIOM_4_0": "$DCC_HOUDINI_THIRD_PARTY/axiom/axiom4.0.133"
+        },
+        {
+            "AXIOM_4_0_VERSION": "4.0.133"
+        },
+        {
+            "AXIOM_4_0_CONDITIONAL_TOOLS": [
+                {
+                    "method": "replace",
+                    "process_order": 1,
+                    "value": "$AXIOM_4_0/houdini_fallback"
+                },
+                {
+                    "(houdini_version == '21.0.631' and houdini_os == 'macos' and houdini_platform_build == 'clang.15.0') or (houdini_version == '21.0.631' and houdini_os == 'linux' and houdini_platform_build == 'gcc.11.2') or (houdini_version == '21.0.631' and houdini_os == 'windows') or (houdini_version == '21.0.596' and houdini_os == 'macos' and houdini_platform_build == 'clang.15.0') or (houdini_version == '21.0.596' and houdini_os == 'linux' and houdini_platform_build == 'gcc.11.2') or (houdini_version == '21.0.596' and houdini_os == 'windows') or (houdini_version == '21.0.559' and houdini_os == 'macos' and houdini_platform_build == 'clang.15.0') or (houdini_version == '21.0.559' and houdini_os == 'linux' and houdini_platform_build == 'gcc.11.2') or (houdini_version == '21.0.559' and houdini_os == 'windows') or (houdini_version == '20.5.684' and houdini_os == 'macos' and houdini_platform_build == 'clang.15.0') or (houdini_version == '20.5.684' and houdini_os == 'linux' and houdini_platform_build == 'gcc.11.2') or (houdini_version == '20.5.684' and houdini_os == 'linux' and houdini_platform_build == 'gcc.9.3') or (houdini_version == '20.5.684' and houdini_os == 'windows') or (houdini_version == '20.5.654' and houdini_os == 'macos' and houdini_platform_build == 'clang.15.0') or (houdini_version == '20.5.654' and houdini_os == 'linux' and houdini_platform_build == 'gcc.11.2') or (houdini_version == '20.5.654' and houdini_os == 'linux' and houdini_platform_build == 'gcc.9.3') or (houdini_version == '20.5.654' and houdini_os == 'windows') or (houdini_version == '20.0.896' and houdini_os == 'macos' and houdini_platform_build == 'clang.14.0') or (houdini_version == '20.0.896' and houdini_os == 'linux' and houdini_platform_build == 'gcc.11.2') or (houdini_version == '20.0.896' and houdini_os == 'linux' and houdini_platform_build == 'gcc.9.3') or (houdini_version == '20.0.896' and houdini_os == 'windows')": "$AXIOM_4_0/houdini_functional",
+                    "method": "replace",
+                    "process_order": 2
+                }
+            ]
+        },
+        {
+            "HOUDINI_PATH": [
+                {
+                    "houdini_version == '21.0.631' and houdini_os == 'macos' and houdini_platform_build == 'clang.15.0'": "$AXIOM_4_0/houdini21.0.631_macOS_universal_clang15.0",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '21.0.631' and houdini_os == 'linux' and houdini_platform_build == 'gcc.11.2'": "$AXIOM_4_0/houdini21.0.631_linux_x86_64_gcc11.2",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '21.0.631' and houdini_os == 'windows'": "$AXIOM_4_0/houdini21.0.631_windows_x86_64_cl19.42",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '21.0.596' and houdini_os == 'macos' and houdini_platform_build == 'clang.15.0'": "$AXIOM_4_0/houdini21.0.596_macOS_universal_clang15.0",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '21.0.596' and houdini_os == 'linux' and houdini_platform_build == 'gcc.11.2'": "$AXIOM_4_0/houdini21.0.596_linux_x86_64_gcc11.2",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '21.0.596' and houdini_os == 'windows'": "$AXIOM_4_0/houdini21.0.596_windows_x86_64_cl19.42",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '21.0.559' and houdini_os == 'macos' and houdini_platform_build == 'clang.15.0'": "$AXIOM_4_0/houdini21.0.559_macOS_universal_clang15.0",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '21.0.559' and houdini_os == 'linux' and houdini_platform_build == 'gcc.11.2'": "$AXIOM_4_0/houdini21.0.559_linux_x86_64_gcc11.2",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '21.0.559' and houdini_os == 'windows'": "$AXIOM_4_0/houdini21.0.559_windows_x86_64_cl19.42",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '20.5.684' and houdini_os == 'macos' and houdini_platform_build == 'clang.15.0'": "$AXIOM_4_0/houdini20.5.684_macOS_universal_clang15.0",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '20.5.684' and houdini_os == 'linux' and houdini_platform_build == 'gcc.11.2'": "$AXIOM_4_0/houdini20.5.684_linux_x86_64_gcc11.2",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '20.5.684' and houdini_os == 'linux' and houdini_platform_build == 'gcc.9.3'": "$AXIOM_4_0/houdini20.5.684_linux_x86_64_gcc9.3",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '20.5.684' and houdini_os == 'windows'": "$AXIOM_4_0/houdini20.5.684_windows_x86_64_cl19.35",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '20.5.654' and houdini_os == 'macos' and houdini_platform_build == 'clang.15.0'": "$AXIOM_4_0/houdini20.5.654_macOS_universal_clang15.0",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '20.5.654' and houdini_os == 'linux' and houdini_platform_build == 'gcc.11.2'": "$AXIOM_4_0/houdini20.5.654_linux_x86_64_gcc11.2",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '20.5.654' and houdini_os == 'linux' and houdini_platform_build == 'gcc.9.3'": "$AXIOM_4_0/houdini20.5.654_linux_x86_64_gcc9.3",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '20.5.654' and houdini_os == 'windows'": "$AXIOM_4_0/houdini20.5.654_windows_x86_64_cl19.35",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '20.0.896' and houdini_os == 'macos' and houdini_platform_build == 'clang.14.0'": "$AXIOM_4_0/houdini20.0.896_macOS_universal_clang14.0",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '20.0.896' and houdini_os == 'linux' and houdini_platform_build == 'gcc.11.2'": "$AXIOM_4_0/houdini20.0.896_linux_x86_64_gcc11.2",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '20.0.896' and houdini_os == 'linux' and houdini_platform_build == 'gcc.9.3'": "$AXIOM_4_0/houdini20.0.896_linux_x86_64_gcc9.3",
+                    "method": "append"
+                },
+                {
+                    "houdini_version == '20.0.896' and houdini_os == 'windows'": "$AXIOM_4_0/houdini20.0.896_windows_x86_64_cl19.22",
+                    "method": "append"
+                },
+                {
+                    "method": "append",
+                    "value": [
+                        "$AXIOM_4_0_CONDITIONAL_TOOLS",
+                        "$AXIOM_4_0/houdini"
+                    ]
+                }
+            ]
+        }
+    ]
+}
