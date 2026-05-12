@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from math import log2
 from pathlib import Path
@@ -46,6 +45,7 @@ from dcc.substance_painter.util.progress import (
 )
 from core.struct.material import DisplacementSource, NormalSource, NormalType
 from core.util import checkbox_callback_helper, dict_index
+from core.util.util import get_repo_root
 from core.versioning.store import backup_if_changed
 
 log = logging.getLogger(__name__)
@@ -849,7 +849,7 @@ class TexSetWidget(QtWidgets.QWidget):
         self._tex_set = tex_set
         self.extra_channels = set()
         self._help_icon = QIcon(
-            QPixmap(os.getenv("PIPE_PATH", "") + "/lib/icon/material-help.svg")
+            QPixmap(str(get_repo_root() / "resources/icon/material-help.svg"))
         )
 
         self._stack = None

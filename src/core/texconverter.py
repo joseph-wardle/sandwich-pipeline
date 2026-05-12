@@ -23,6 +23,7 @@ from dcc.substance_painter.util.progress import (
     PublishStage,
 )
 from core.util import silent_startupinfo
+from core.util.util import get_repo_root
 
 log = logging.getLogger(__name__)
 
@@ -190,7 +191,7 @@ class TexConverter:
                 "--exr-format-compression", "zip",
                 "--output-bit-depth", "16f",
                 "--output-format", "exr",
-                "--input", f"{os.getenv('PIPE_PATH', '')}/lib/sbs/normal2height.sbsar",
+                "--input", str(get_repo_root() / "resources/sbs/normal2height.sbsar"),
                 "--set-entry", f"input@{img}",
                 "--set-value", f"$outputsize@{','.join(img_dims)}",
                 "--output-path", str(Path(img).parent),
