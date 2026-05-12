@@ -26,14 +26,18 @@ env.py
 env_sg.py
 
 # Ignore proprietary plugins
-pipeline/lib/axiom
+src/dcc/houdini/third_party/axiom
 
 # Ignore third-party Python libraries
-pipeline/lib/python
-pipeline/software/maya/scripts/rjg
+src/lib/python
+src/dcc/maya/third_party/rjg
 
 # Ignore user specific splash screens
-pipeline/lib/splash/users
+resources/splash/users
 
 # Ignore flashbangs
-pipeline/lib/flashbang
+src/lib/flashbang
+
+agents
+.codex
+.claude

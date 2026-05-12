@@ -53,7 +53,7 @@ exclude = [
     "ae_SVG",
     "dwpicker",
     "dwpicker_git",
-    "lib/python",
+    "src/lib/python",
     "mayacapture",
     "maya-timeline-marker_git",
     "modelChecker",

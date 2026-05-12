@@ -1,10 +1,10 @@
 [Desktop Entry]
 Comment[en_US]=
 Comment=
-Exec=/groups/sandwich/.pipeline/.venv/bin/python /groups/sandwich/.pipeline/pipeline blender
+Exec=/groups/sandwich/.pipeline/.venv/bin/python /groups/sandwich/.pipeline/src blender
 GenericName[en_US]=Sandwich Kwon Do Blender Launcher\s
 GenericName=Sandwich Kwon Do Blender Launcher\s
-Icon=/groups/sandwich/.pipeline/pipeline/lib/icon/blender.png
+Icon=/groups/sandwich/.pipeline/resources/icon/blender.png
 MimeType=
 Name[en_US]=Toaster
 Name=Toaster

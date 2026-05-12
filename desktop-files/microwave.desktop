@@ -1,10 +1,10 @@
 [Desktop Entry]
 Comment[en_US]=
 Comment=
-Exec=/groups/sandwich/.pipeline/.venv/bin/python /groups/sandwich/.pipeline/pipeline nuke
+Exec=/groups/sandwich/.pipeline/.venv/bin/python /groups/sandwich/.pipeline/src nuke
 GenericName[en_US]=Sandwich Kwon Do Nuke Launcher\s
 GenericName=Sandwich Kwon Do Nuke Launcher\s
-Icon=/groups/sandwich/.pipeline/pipeline/lib/icon/nuke.png
+Icon=/groups/sandwich/.pipeline/resources/icon/nuke.png
 MimeType=
 Name[en_US]=Microwave
 Name=Microwave

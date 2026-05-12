@@ -1,10 +1,10 @@
 # `telemetry-backend/` — server-side stack for the sandwich pipeline
 
-The pipeline's API for emitting telemetry lives in `pipeline/pipe/telemetry/`
+The pipeline's API for emitting telemetry lives in `src/core/telemetry/`
 and runs on artist workstations. This directory holds the receive side: the
 Postgres schema, Grafana provisioning, and the dashboard JSON. The
 **orchestrator** that boots Postgres and Grafana lives at
-`pipeline/pipe/telemetry/local_stack.py`.
+`src/core/telemetry/local_stack.py`.
 
 The whole stack is designed to run from any lab machine, with all state on
 the production share. It is not a long-running service; you boot it
@@ -58,17 +58,17 @@ State on the production share, owned by the orchestrator:
 ## Day-to-day workflow
 
 Run from the pipeline checkout root. The repo isn't declared as an
-installable package, so `pipe` has to be put on `PYTHONPATH` explicitly:
+installable package, so `src/` has to be put on `PYTHONPATH` explicitly:
 
 ```sh
 # Bring the stack up. Foreground; ^C when done.
-PYTHONPATH=pipeline uv run python -m pipe.telemetry up
+PYTHONPATH=src uv run python -m core.telemetry up
 
 # One-shot ingest (no Grafana). Useful for a quick catch-up.
-PYTHONPATH=pipeline uv run python -m pipe.telemetry catch-up
+PYTHONPATH=src uv run python -m core.telemetry catch-up
 
 # Find out whether the stack is up and on which host.
-PYTHONPATH=pipeline uv run python -m pipe.telemetry status
+PYTHONPATH=src uv run python -m core.telemetry status
 ```
 
 `up` prints something like:

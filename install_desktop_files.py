@@ -25,5 +25,5 @@ def sync_launchers(desktop_file_path: Path):
 
 
 if __name__ == "__main__":
-    pipline_path = Path(__file__).resolve().parent
-    sync_launchers(pipline_path / "desktop-files")
+    repo_root = Path(__file__).resolve().parent
+    sync_launchers(repo_root / "desktop-files")

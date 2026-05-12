@@ -6,17 +6,17 @@ PROD_DIR=/groups/sandwich/.pipeline
 LOCAL_DIR=$(git rev-parse --show-toplevel)
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-AXIOM_TARGET="${PROD_DIR}/pipeline/lib/axiom"
-AXIOM_LINK="${LOCAL_DIR}/pipeline/lib/axiom"
+AXIOM_TARGET="${PROD_DIR}/src/dcc/houdini/third_party/axiom"
+AXIOM_LINK="${LOCAL_DIR}/src/dcc/houdini/third_party/axiom"
 # Create symlink if Axiom isn't present in local directory
 if [[ -d "$AXIOM_TARGET" && ! -e "$AXIOM_LINK" && ! -L "$AXIOM_LINK" ]]; then
-    ln -s "${PROD_DIR}/pipeline/lib/axiom" "$AXIOM_LINK"
+    ln -s "$AXIOM_TARGET" "$AXIOM_LINK"
 fi
 
 # Update the env file
 if [[ "${PROD_DIR}" != "${LOCAL_DIR}" ]]; then
-    cp "${PROD_DIR}/pipeline/env.py" "${LOCAL_DIR}/pipeline/env.py"
-    cp "${PROD_DIR}/pipeline/env_sg.py" "${LOCAL_DIR}/pipeline/env_sg.py"
+    cp "${PROD_DIR}/src/env.py" "${LOCAL_DIR}/src/env.py"
+    cp "${PROD_DIR}/src/env_sg.py" "${LOCAL_DIR}/src/env_sg.py"
 fi
 
 # Update the venv and set it up if it doesn't exist
