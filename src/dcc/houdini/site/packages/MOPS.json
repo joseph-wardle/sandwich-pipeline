@@ -1,7 +1,7 @@
 {
 	"env": [
 		{
-			"MOPS": "$PIPE_PATH/lib/MOPS"
+			"MOPS": "$DCC_HOUDINI_THIRD_PARTY/MOPS"
 		},
 		{
 			"HOUDINI_PYTHONWARNINGS": "ignore"

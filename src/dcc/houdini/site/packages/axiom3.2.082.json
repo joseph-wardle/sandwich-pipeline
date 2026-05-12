@@ -1,7 +1,7 @@
 {
     "env": [
         {
-            "AXIOM_3_2": "$PIPE_PATH/lib/axiom/axiom3.2.082"
+            "AXIOM_3_2": "$DCC_HOUDINI_THIRD_PARTY/axiom/axiom3.2.082"
         },
         {
             "AXIOM_3_2_METAL_LIBRARY_16": "$AXIOM_3_2/metal/axiom3.2_16.metallib"

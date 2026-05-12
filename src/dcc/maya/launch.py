@@ -31,7 +31,11 @@ class MayaLauncher(Launcher):
         self, is_python_shell: bool = False, extra_args: list[str] | None = None
     ) -> None:
         this_path = Path(__file__).resolve()
-        pipe_path = this_path.parents[2]
+        # this_path = `<repo>/src/dcc/maya/launch.py`
+        src_path = this_path.parents[2]
+        repo_root = src_path.parent
+        third_party = this_path.parent / "third_party"
+        site_path = this_path.parent / "site"
         rig_build_path = get_rig_build_path()
         system = platform.system()
 
@@ -43,12 +47,12 @@ class MayaLauncher(Launcher):
             / "maya_splash"
         )
 
-        env_vars: typing.Mapping[str, int | str | None] | None  #############
+        env_vars: typing.Mapping[str, int | str | None] | None
 
         module_paths = []  # Initialize an empty list for module paths
         # add the production path plus the folders where we put our modules
         module_paths.append(str(get_production_path() / "maya/module"))
-        module_paths.append(str(pipe_path / "lib/y-rig/third_party/mgear/release"))
+        module_paths.append(str(third_party / "y-rig/third_party/mgear/release"))
         # adding the preexisting path, if it exists
         existing_module_path = os.environ.get("MAYA_MODULE_PATH")
         if existing_module_path:
@@ -61,17 +65,21 @@ class MayaLauncher(Launcher):
             "MAYAUSD_EXPORT_MAP1_AS_PRIMARY_UV_SET": 1,
             "MAYAUSD_IMPORT_PRIMARY_UV_SET_AS_MAP1": 1,
             "MAYA_MODULE_PATH": os.pathsep.join(module_paths),
-            "MAYA_PLUG_IN_PATH": str(this_path.parent / "plugins"),
+            "MAYA_PLUG_IN_PATH": str(site_path),
             "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
+            # PYTHONPATH:
+            #   1. src/ — so framework, core, dcc, env, env_sg are importable
+            #   2. site/ — Maya scans sys.path literally for `userSetup.py`
+            #   3. third_party/studiolibrary/src — studiolibrary's vendored
+            #      layout expects its `src/` directory on sys.path
             "PYTHONPATH": os.pathsep.join(
                 [
-                    str(pipe_path),
-                    str(this_path.parent / "scripts"),
-                    str(this_path.parent / "userSetup"),
-                    str(this_path.parent / "scripts/studiolibrary/src"),
+                    str(src_path),
+                    str(site_path),
+                    str(third_party / "studiolibrary/src"),
                 ]
             ),
-            "OCIO": str(pipe_path / "lib/ocio/sandwich-v01/config.ocio"),
+            "OCIO": str(repo_root / "resources/ocio/sandwich-v01/config.ocio"),
             "QT_FONT_DPI": os.getenv("MAYA_FONT_DPI") if system == "Linux" else None,
             "QT_PLUGIN_PATH": None,
             # Configure Asset Resolver
@@ -83,7 +91,7 @@ class MayaLauncher(Launcher):
             # USD Plugins
             "PXR_PLUGINPATH_NAME": os.pathsep.join(
                 [
-                    str(pipe_path / "lib/usd/kinds"),
+                    str(repo_root / "resources/usd/kinds"),
                     os.environ.get("PXR_PLUGINPATH_NAME", ""),
                 ]
             ),
@@ -93,16 +101,15 @@ class MayaLauncher(Launcher):
                     str(pth) + ("/%B" if system == "Linux" else "")
                     for pth in [
                         Path(self.splash_path),
-                        this_path.parent
-                        / "scripts/studiolibrary/src/studiolibrary/resource/icons",
-                        pipe_path / "lib/icon",
-                        pipe_path / "lib/splash",
+                        third_party / "studiolibrary/src/studiolibrary/resource/icons",
+                        repo_root / "resources/icon",
+                        repo_root / "resources/splash",
                     ]
                 ]
             ),
             # Y-Rig Custom Components and Root Build Directory
             "MGEAR_SHIFTER_COMPONENT_PATH": str(
-                pipe_path / "lib/y-rig/shifter/components/"
+                third_party / "y-rig/shifter/components/"
             ),
             "MGEAR_SHIFTER_CUSTOMSTEP_PATH": str(rig_build_path),
         }
@@ -166,7 +173,7 @@ class MayaLauncher(Launcher):
         self.set_up_splash_path()
 
     def set_up_shelf_path(self) -> None:
-        prod_dir = str(Path(__file__).parent / "shelves")
+        prod_dir = str(Path(__file__).parent / "site/shelves")
         local_dir = self.shelf_path
 
         shutil.copytree(prod_dir, local_dir, dirs_exist_ok=True)
@@ -175,7 +182,8 @@ class MayaLauncher(Launcher):
         splash_dir = Path(self.splash_path)
         splash_dir.mkdir(parents=True, exist_ok=True)
 
-        src = Path(__file__).resolve().parents[2] / "lib/splash/mayo_splash.png"
+        repo_root = Path(__file__).resolve().parents[3]
+        src = repo_root / "resources/splash/mayo_splash.png"
         if not src.exists():
             log.warning("Missing Maya splash image at %s", src)
             return

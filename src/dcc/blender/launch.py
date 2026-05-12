@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 from env import Executables
@@ -17,17 +16,18 @@ class BlenderLauncher(Launcher):
         self, is_python_shell: bool = False, extra_args: list[str] | None = None
     ) -> None:
         this_path = Path(__file__).resolve()
-        # `this_path` is `src/dcc/blender/launch.py`; `parents[2]` is `src/`.
-        # Phase 6 renames the variable and routes resources via
-        # `<repo>/resources/`.
-        pipe_path = this_path.parents[2]
+        # this_path = `<repo>/src/dcc/blender/launch.py`
+        src_path = this_path.parents[2]
+        repo_root = src_path.parent
 
         env_vars = {
-            "PYTHONPATH": os.pathsep.join([str(pipe_path)]),
-            "BLENDER_CUSTOM_SPLASH": str(pipe_path / "lib/splash/toaster_splash.png"),
+            "PYTHONPATH": str(src_path),
+            "BLENDER_CUSTOM_SPLASH": str(
+                repo_root / "resources/splash/toaster_splash.png"
+            ),
             "BLENDER_SYSTEM_EXTENSIONS": str(this_path.parent / "extensions"),
             "BLENDER_SYSTEM_SCRIPTS": str(this_path.parent / "site"),
-            "OCIO": str(pipe_path / "lib/ocio/sandwich-v01/config.ocio"),
+            "OCIO": str(repo_root / "resources/ocio/sandwich-v01/config.ocio"),
         }
 
         launch_command = str(Executables.blender)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import platform
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -23,7 +22,9 @@ class SubstancePainterLauncher(Launcher):
         self, is_python_shell: bool = False, extra_args: list[str] | None = None
     ) -> None:
         this_path = Path(__file__).resolve()
-        pipe_path = this_path.parents[2]
+        # this_path = `<repo>/src/dcc/substance_painter/launch.py`
+        src_path = this_path.parents[2]
+        repo_root = src_path.parent
 
         system = platform.system()
 
@@ -31,16 +32,13 @@ class SubstancePainterLauncher(Launcher):
         env_vars = {
             "DCC": str(this_path.parent.name),
             "OCIO": str(
-                resolve_mapped_path(pipe_path / "lib/ocio/sandwich-v01/config.ocio")
+                resolve_mapped_path(
+                    repo_root / "resources/ocio/sandwich-v01/config.ocio"
+                )
             ),
             "PIPE_LOG_LEVEL": log.getEffectiveLevel(),
-            "PIPE_PATH": str(pipe_path),
             "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
-            "PYTHONPATH": os.pathsep.join(
-                [
-                    str(pipe_path),
-                ]
-            ),
+            "PYTHONPATH": str(src_path),
             "QT_PLUGIN_PATH": "",
             "SUBSTANCE_PAINTER_PLUGINS_PATH": str(this_path.parent / "site"),
         }

@@ -1,7 +1,7 @@
 {
 	"env": [
 		{
-			"TLOPS": "$PIPE_PATH/lib/tractor-lops"
+			"TLOPS": "$DCC_HOUDINI_THIRD_PARTY/tractor-lops"
 		},
         {
             "HOUDINI_PATH": [

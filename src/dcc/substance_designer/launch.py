@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import platform
 from pathlib import Path
 
@@ -19,23 +18,17 @@ class SubstanceDesignerLauncher(Launcher):
         self, is_python_shell: bool = False, extra_args: list[str] | None = None
     ) -> None:
         this_path = Path(__file__).resolve()
-        # `this_path` is `src/dcc/substance_designer/launch.py`; `parents[2]`
-        # is `src/`. Phase 6 of the structural refactor renames the local
-        # variable `pipe_path` to `src_path` and routes resource lookups
-        # through `<repo>/resources/`; the value is unchanged for now.
-        pipe_path = this_path.parents[2]
+        # this_path = `<repo>/src/dcc/substance_designer/launch.py`
+        src_path = this_path.parents[2]
+        repo_root = src_path.parent
 
         system = platform.system()
 
         env_vars = {
             "DCC": str(this_path.parent.name),
-            "OCIO": str(pipe_path / "lib/ocio/sandwich-v01/config.ocio"),
+            "OCIO": str(repo_root / "resources/ocio/sandwich-v01/config.ocio"),
             "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
-            "PYTHONPATH": os.pathsep.join(
-                [
-                    str(pipe_path),
-                ]
-            ),
+            "PYTHONPATH": str(src_path),
             "QT_PLUGIN_PATH": "",
         }
 

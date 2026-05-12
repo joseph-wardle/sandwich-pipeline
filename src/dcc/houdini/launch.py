@@ -42,7 +42,10 @@ class HoudiniLauncher(Launcher):
         self, is_python_shell: bool = False, extra_args: list[str] | None = None
     ) -> None:
         this_path = Path(__file__).resolve()
-        pipe_path = this_path.parents[2]
+        # this_path = `<repo>/src/dcc/houdini/launch.py`
+        src_path = this_path.parents[2]
+        repo_root = src_path.parent
+        third_party = this_path.parent / "third_party"
 
         self._assetdb_path = str(_TMPDIR / "assetGallery.db")
         self._orig_assetdb_path = str(_TMPDIR / "assetGallery_orig.db")
@@ -83,14 +86,17 @@ class HoudiniLauncher(Launcher):
             # Houdini Path
             "HOUDINI_PATH": os.pathsep.join(
                 [
-                    str(pipe_path / "lib/usd/kinds"),
+                    str(repo_root / "resources/usd/kinds"),
                     "&",
                 ]
             ),
             # Splash file
-            "HOUDINI_SPLASH_FILE": str(pipe_path / "lib/splash/panini_splash.png"),
-            # Project-specific preference overrides
-            "HSITE": str(resolve_mapped_path(this_path.parent / "hsite")),
+            "HOUDINI_SPLASH_FILE": str(
+                repo_root / "resources/splash/panini_splash.png"
+            ),
+            # Project-specific preference overrides — Houdini reads $HSITE for
+            # otls/, packages/, python3.11libs/, scripts/, toolbar/, etc.
+            "HSITE": str(resolve_mapped_path(this_path.parent / "site")),
             # Job directory
             "JOB": str(resolve_mapped_path(get_production_path())),
             # Ensure LD_LIBRARY_PATH is unset to allow nesting pipe instances
@@ -100,11 +106,14 @@ class HoudiniLauncher(Launcher):
             # if platform.system() == "Linux"
             # else None,
             # Set project OCIO config
-            "OCIO": str(pipe_path / "lib/ocio/sandwich-v01/config.ocio"),
+            "OCIO": str(repo_root / "resources/ocio/sandwich-v01/config.ocio"),
             # Pass log level defined on commandline
             "PIPE_LOG_LEVEL": log.getEffectiveLevel(),
-            "PIPE_PATH": str(pipe_path),
             "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
+            # Root for vendored Houdini packages (MOPS, LYNX, axiom, tlops,
+            # ae_SVG). Referenced as $DCC_HOUDINI_THIRD_PARTY by the package
+            # JSONs in site/packages/.
+            "DCC_HOUDINI_THIRD_PARTY": str(third_party),
             # Configure Asset Resolver
             "PXR_AR_DEFAULT_SEARCH_PATH": os.pathsep.join(
                 [
@@ -114,20 +123,20 @@ class HoudiniLauncher(Launcher):
             # USD Plugins
             "PXR_PLUGINPATH_NAME": os.pathsep.join(
                 [
-                    str(pipe_path / "lib/usd/kinds"),
+                    str(repo_root / "resources/usd/kinds"),
                     os.environ.get("PXR_PLUGINPATH_NAME", ""),
                 ]
             ),
-            # Add pipe modules to Python path
+            # Add pipeline modules to Python path
             "PYTHONPATH": os.pathsep.join(
                 [
-                    str(resolve_mapped_path(pipe_path)),
+                    str(resolve_mapped_path(src_path)),
                     # Add $RMANTREE/bin to PYTHONPATH for the Tractor PDG scheduler
                     os.environ.get("RMANTREE", "") + "/bin",
                 ]
             ),
             # RenderMan color config json file
-            "RMAN_COLOR_CONFIG_DIR": str(pipe_path / "lib/ocio/sandwich-v01"),
+            "RMAN_COLOR_CONFIG_DIR": str(repo_root / "resources/ocio/sandwich-v01"),
             # Force Qt5 bindings in Houdini to avoid Qt6/PySide6 conflicts
             "QT_PREFERRED_BINDING": "PySide2",
             # Explicitly set Tractor location

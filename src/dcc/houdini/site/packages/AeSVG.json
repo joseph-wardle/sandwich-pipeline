@@ -1,7 +1,7 @@
 {
     "env": [
         {
-            "AESVG": "${HSITE}/ae_SVG"
+            "AESVG": "$DCC_HOUDINI_THIRD_PARTY/ae_SVG"
         }
     ],
     "path": [
