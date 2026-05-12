@@ -295,7 +295,7 @@ def _validate(request: PlayblastVersionUploadRequest) -> _NormalizedUploadReques
 def _resolve_connection(conn: ShotGrid | None) -> ShotGrid:
     if conn is not None:
         return conn
-    from core.playblast.shotgrid._connection import default_db_connection
+    from core.playblast.review._connection import default_db_connection
 
     return default_db_connection()
 

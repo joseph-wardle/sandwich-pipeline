@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import hou
 from env_sg import DB_Config
 
-from core.glui.dialogs import MessageDialog
+from core.ui.dialogs import MessageDialog
 from dcc.houdini import runtime
 from dcc.houdini.playblast.config import (
     HoudiniPlayblastExportConfig,
@@ -18,14 +18,14 @@ from dcc.houdini.playblast.config import (
 from dcc.houdini.playblast.dialog import HPlayblastDialog
 from dcc.houdini.playblast.playblaster import HPlayblaster
 from core.playblast import FFmpegPreset
-from core.playblast.shotgrid import (
+from core.playblast.review import (
     PlayblastEntity,
     PlayblastUploadIntent,
     UploadTarget,
     run_playblast_upload,
 )
 from core.shotgrid import Shot, ShotGrid
-from core.users import resolve_artist_display_name
+from core.util.users import resolve_artist_display_name
 
 log = logging.getLogger(__name__)
 

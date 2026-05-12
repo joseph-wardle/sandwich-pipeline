@@ -15,9 +15,9 @@ from core.util.util import get_production_path
 
 from core.asset.paths import BACKUP_DIRNAME, paths_for_asset
 from core.asset.version_adapter import asset_owner_for, maya_model_stream
-from core.glui.dialogs import FilteredListDialog, MessageDialog
-from core.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
-from core.glui.version_browser import VersionBrowserWidget
+from core.ui.dialogs import FilteredListDialog, MessageDialog
+from core.ui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
+from core.ui.version_browser import VersionBrowserWidget
 from dcc.maya.runtime import get_main_qt_window
 from core.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
 from core.util import FileManager

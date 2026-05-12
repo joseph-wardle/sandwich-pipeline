@@ -1,16 +1,16 @@
-from core.playblast.shotgrid.paths import (
+from core.playblast.review.paths import (
     default_version_name_from_movie_path,
     resolve_preferred_upload_movie_path,
 )
-from core.playblast.shotgrid.playlists import (
+from core.playblast.review.playlists import (
     PlayblastReviewPlaylistOption,
     list_recent_review_playlists,
 )
-from core.playblast.shotgrid.upload_flow import (
+from core.playblast.review.upload_flow import (
     PlayblastUploadIntent,
     run_playblast_upload,
 )
-from core.playblast.shotgrid.versions import (
+from core.playblast.review.versions import (
     PlayblastEntity,
     PlayblastVersionUploadRequest,
     PlayblastVersionUploadResult,

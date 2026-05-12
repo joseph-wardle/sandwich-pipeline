@@ -25,9 +25,9 @@ from core.util.util import resolve_mapped_path
 from core.asset.paths import paths_for_asset
 from core.asset.version_adapter import asset_owner_for, substance_project_stream
 from core.shotgrid import Asset, ShotGrid
-from core.glui.dialogs import MessageDialog, MessageDialogCustomButtons
-from core.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
-from core.glui.version_browser import VersionBrowserWidget
+from core.ui.dialogs import MessageDialog, MessageDialogCustomButtons
+from core.ui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
+from core.ui.version_browser import VersionBrowserWidget
 from dcc.substance_painter.dialogs import (
     SubstanceAssetCreateModeDialog,
     SubstanceAssetDefaultProjectDialog,

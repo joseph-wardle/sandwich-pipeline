@@ -12,7 +12,7 @@ from core.asset.version_adapter import (
     asset_owner_for,
     houdini_asset_builder_stream,
 )
-from core.glui.dialogs import FilteredListDialog, MessageDialog
+from core.ui.dialogs import FilteredListDialog, MessageDialog
 from core.shotgrid import Asset, SGEntity
 from core.versioning import VersionStreamSpec
 

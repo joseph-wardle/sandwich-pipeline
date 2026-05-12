@@ -26,7 +26,7 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from core.glui.dialogs import ButtonPair, MessageDialog
+from core.ui.dialogs import ButtonPair, MessageDialog
 from dcc.maya.playblast.hud import HudDefinition
 from dcc.maya.playblast.shot.config import (
     MShotPlayblastConfig,
@@ -43,14 +43,14 @@ from dcc.maya.playblast.shot.playblaster import MPlayblaster
 from core.playblast import FFmpegPreset
 from core.playblast.naming import next_versioned_basename
 from core.playblast.tempdir import resolve_playblast_tempdir
-from core.playblast.shotgrid import (
+from core.playblast.review import (
     PlayblastEntity,
     PlayblastUploadIntent,
     run_playblast_upload,
 )
 from core.playblast.ui import ReviewPlaylistCombo
 from core.shotgrid import ShotGrid, ShotGridError
-from core.users import resolve_artist_display_name
+from core.util.users import resolve_artist_display_name
 
 if TYPE_CHECKING:
     from dcc.maya.playblast.shot.config import MPlayblastConfig

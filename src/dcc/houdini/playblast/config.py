@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 from core.playblast import FFmpegPreset
-from core.playblast.shotgrid import UploadTarget
+from core.playblast.review import UploadTarget
 from core.shotgrid import Shot
 
 DEFAULT_RESOLUTION = (1280, 720)

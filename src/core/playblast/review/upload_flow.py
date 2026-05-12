@@ -14,11 +14,11 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.playblast.shotgrid.paths import (
+from core.playblast.review.paths import (
     default_version_name_from_movie_path,
     resolve_preferred_upload_movie_path,
 )
-from core.playblast.shotgrid.versions import (
+from core.playblast.review.versions import (
     PlayblastEntity,
     PlayblastVersionUploadRequest,
     PlayblastVersionUploadResult,

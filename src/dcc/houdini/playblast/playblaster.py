@@ -14,7 +14,7 @@ from dcc.houdini.playblast.hud import (
     resolve_current_hip_version,
 )
 from core.playblast import FFmpegPreset, Playblaster
-from core.users import resolve_artist_display_name
+from core.util.users import resolve_artist_display_name
 
 if TYPE_CHECKING:
     from core.shotgrid import Shot

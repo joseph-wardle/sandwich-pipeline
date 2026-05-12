@@ -24,7 +24,7 @@ from core.util.util import get_production_path, resolve_mapped_path
 from substance_painter.project import NormalMapFormat, ProjectWorkflow, TangentSpace
 
 from core.asset.paths import AssetPaths, paths_for_asset
-from core.glui.dialogs import DialogFilteredList, FilteredListDialog
+from core.ui.dialogs import DialogFilteredList, FilteredListDialog
 from core.shotgrid import Asset, ShotGrid
 from dcc.substance_painter.util.util import docs_link_html
 

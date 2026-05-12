@@ -7,9 +7,9 @@ import hou
 from env_sg import DB_Config
 
 from dcc.houdini import runtime as houdini_runtime
-from core.glui.dialogs import MessageDialog
-from core.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
-from core.glui.version_browser import VersionBrowserWidget
+from core.ui.dialogs import MessageDialog
+from core.ui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
+from core.ui.version_browser import VersionBrowserWidget
 from core.shotgrid import SGEntity, ShotGrid
 from core.util import FileManager
 from core.versioning import (

@@ -10,7 +10,7 @@ from typing import Any, Callable, Iterable
 
 from Qt import QtCore, QtWidgets
 
-from core.playblast.shotgrid.playlists import (
+from core.playblast.review.playlists import (
     PlayblastReviewPlaylistOption,
     list_recent_review_playlists,
 )

@@ -42,7 +42,7 @@ from dcc.substance_painter.util.progress import (
     PublishStage,
 )
 from core import telemetry
-from core.texconverter import TexConversionError, TexConverter
+from core.texture import TexConversionError, TexConverter
 
 log = logging.getLogger(__name__)
 

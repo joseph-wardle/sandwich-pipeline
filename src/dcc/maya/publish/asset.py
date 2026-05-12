@@ -30,12 +30,12 @@ from dcc.houdini.launch import HoudiniLauncher
 from core import telemetry
 from core.asset.paths import AssetPaths, paths_for_asset
 from core.asset.version_adapter import asset_owner_for, maya_model_stream
-from core.glui.dialogs import (
+from core.ui.dialogs import (
     FilteredListDialog,
     MessageDialog,
     MessageDialogCustomButtons,
 )
-from core.glui.progress import progress_scope
+from core.ui.progress import progress_scope
 from dcc.maya.assetfile import (
     read_asset_metadata,
     resolve_asset_from_scene_path,

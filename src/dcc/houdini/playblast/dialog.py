@@ -9,12 +9,12 @@ import hou
 from Qt import QtCore, QtWidgets
 from core.util.util import get_edit_path
 
-from core.glui.dialogs import DialogButtons
+from core.ui.dialogs import DialogButtons
 from core.playblast.naming import (
     build_edit_output_directory,
     next_versioned_basename,
 )
-from core.playblast.shotgrid import (
+from core.playblast.review import (
     PlayblastReviewPlaylistOption,
     UploadTarget,
     list_recent_review_playlists,

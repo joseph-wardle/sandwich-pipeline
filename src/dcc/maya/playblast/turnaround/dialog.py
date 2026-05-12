@@ -19,7 +19,7 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from core.glui.dialogs import ButtonPair, MessageDialog
+from core.ui.dialogs import ButtonPair, MessageDialog
 from dcc.maya.assetfile import read_asset_metadata
 from dcc.maya.playblast.shot.config import SaveLocation
 from dcc.maya.playblast.turnaround.config import (
@@ -31,14 +31,14 @@ from dcc.maya.playblast.turnaround.playblaster import MTurnaroundPlayblaster
 from core.playblast import FFmpegPreset
 from core.playblast.naming import next_versioned_basename
 from core.playblast.tempdir import resolve_playblast_tempdir
-from core.playblast.shotgrid import (
+from core.playblast.review import (
     PlayblastEntity,
     PlayblastUploadIntent,
     run_playblast_upload,
 )
 from core.playblast.ui import ReviewPlaylistCombo
 from core.shotgrid import normalize_display_name
-from core.users import resolve_artist_display_name
+from core.util.users import resolve_artist_display_name
 
 log = logging.getLogger(__name__)
 

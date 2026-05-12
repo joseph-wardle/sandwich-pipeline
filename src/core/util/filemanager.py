@@ -6,7 +6,7 @@ from pathlib import Path
 
 from Qt import QtWidgets
 
-from core.glui.dialogs import (
+from core.ui.dialogs import (
     FilteredListDialog,
     MessageDialog,
     MessageDialogCustomButtons,

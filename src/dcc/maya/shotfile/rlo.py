@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-from core.glui.dialogs import MessageDialogCustomButtons
+from core.ui.dialogs import MessageDialogCustomButtons
 from core.shot.version_adapter import (
     maya_rlo_stream,
     shot_owner_for,

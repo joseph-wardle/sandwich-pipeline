@@ -26,8 +26,8 @@ from substance_painter.exception import ProjectError, ServiceNotFoundError
 
 from core.asset.paths import paths_for_asset
 from core.asset.version_adapter import asset_owner_for, substance_project_stream
-from core.glui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButtons
-from core.glui.progress import ProgressDialog
+from core.ui.dialogs import ButtonPair, MessageDialog, MessageDialogCustomButtons
+from core.ui.progress import ProgressDialog
 from core.shotgrid import Asset, ShotGrid
 from dcc.substance_painter.export.export import Exporter, TexSetExportSettings
 from dcc.substance_painter.houdini_bridge import (

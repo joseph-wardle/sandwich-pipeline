@@ -12,7 +12,7 @@ import maya.cmds as mc
 from mayacapture.capture import capture  # type: ignore[import-not-found]
 from Qt import QtWidgets
 
-from core.glui.progress import progress_scope
+from core.ui.progress import progress_scope
 from dcc.maya.playblast.hud import HudDefinition, applied_hud
 from dcc.maya.playblast.turnaround.config import (
     TurnaroundPlayblastConfig,
@@ -21,7 +21,7 @@ from dcc.maya.playblast.turnaround.config import (
 )
 from dcc.maya.util.util import maintain_selection
 from core.playblast.encoding import build_image_input_chain, encode_movie
-from core.users import resolve_artist_display_name
+from core.util.users import resolve_artist_display_name
 
 log = logging.getLogger(__name__)
 

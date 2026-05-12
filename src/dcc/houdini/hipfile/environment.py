@@ -12,7 +12,7 @@ from core.environment.version_adapter import (
     houdini_set_stream,
 )
 from core.versioning import path_matches_stream
-from core.glui.dialogs import MessageDialog
+from core.ui.dialogs import MessageDialog
 from core.shotgrid import (
     Environment,
     SGEntity,

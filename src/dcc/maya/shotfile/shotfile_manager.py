@@ -13,9 +13,9 @@ from pxr import Sdf, Usd, UsdGeom
 from core.util.util import get_production_path
 from timeline_marker.ui import TimelineMarker  # type: ignore[import-not-found]
 
-from core.glui.dialogs import MessageDialog
-from core.glui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
-from core.glui.version_browser import VersionBrowserWidget
+from core.ui.dialogs import MessageDialog
+from core.ui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
+from core.ui.version_browser import VersionBrowserWidget
 from dcc.maya.runtime import get_main_qt_window
 from core.shotgrid import (
     SGEntity,

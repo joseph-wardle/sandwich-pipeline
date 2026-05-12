@@ -13,7 +13,7 @@ from env_sg import DB_Config
 
 from dcc.maya import runtime as maya_runtime
 from core import telemetry
-from core.glui.dialogs import FilteredListDialog, MessageDialog
+from core.ui.dialogs import FilteredListDialog, MessageDialog
 from dcc.maya.util.util import maintain_selection
 from core.shotgrid import Asset, SGEntity, Shot, ShotGrid
 
