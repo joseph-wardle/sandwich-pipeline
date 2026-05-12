@@ -12,6 +12,8 @@
 *.pyc
 *.swp
 *.bak
+*~
+\#*\#
 *_bak*.hdanc
 
 # Ignore large binary files

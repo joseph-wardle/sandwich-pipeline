@@ -26,4 +26,4 @@ def sync_launchers(desktop_file_path: Path):
 
 if __name__ == "__main__":
     repo_root = Path(__file__).resolve().parent
-    sync_launchers(repo_root / "desktop-files")
+    sync_launchers(repo_root / "desktop_launchers")
