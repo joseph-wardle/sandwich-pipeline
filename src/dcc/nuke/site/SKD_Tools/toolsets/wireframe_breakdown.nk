@@ -17,8 +17,8 @@ addUserKnob {41 white_1 l "Wire Color (Shot 0)" T Grade7.white}
 addUserKnob {26 text_2 l "" +STARTLINE}
 addUserKnob {41 white l "Wire Color (Shot 1)" T Grade5.white}
 addUserKnob {26 text l "" +STARTLINE}
-addUserKnob {22 python_button l "Render Both!" T "import os\n\n# Get the group node (thisNode is the group)\ngrp = nuke.thisNode()\n\n# Get the shot name from the current Nuke script filename\nscript_name = os.path.basename(nuke.root().name())\nshot_name = os.path.splitext(script_name)\[0]\n\n# Define the output folder\noutput_folder = \"/groups/dungeons/environment\"\n\n# Try updating and rendering both write nodes\ntry:\n    albedo = grp.node(\"albedo_wire_write\")\n    ao = grp.node(\"AO_wire_write\")\n\n    # Update file paths\n    albedo_file = os.path.join(output_folder, f\"\{shot_name\}_wireframe_albedo.mov\")\n    ao_file = os.path.join(output_folder, f\"\{shot_name\}_wireframe_AO.mov\")\n\n    albedo\[\"file\"].setValue(albedo_file)\n    ao\[\"file\"].setValue(ao_file)\n\n    # Get frame range\n    first = nuke.root().firstFrame()\n    last = nuke.root().lastFrame()\n\n    # Execute renders\n    nuke.execute(albedo, first, last)\n    nuke.execute(ao, first, last)\n\nexcept NameError as e:\n    nuke.message(\"One or both write nodes not found:\\n\" + str(e))\n" +STARTLINE}
-addUserKnob {22 python_button_1 l "Open Folder" T "import os\nimport subprocess\nfolder_path = \"/groups/dungeons/environment\"\n\nif os.path.exists(folder_path):\n    subprocess.Popen(\[\"xdg-open\", folder_path])\nelse:\n    nuke.message(\"Folder does not exist:\\n\" + folder_path)\n" +STARTLINE}
+addUserKnob {22 python_button l "Render Both!" T "import os\n\n# Get the group node (thisNode is the group)\ngrp = nuke.thisNode()\n\n# Get the shot name from the current Nuke script filename\nscript_name = os.path.basename(nuke.root().name())\nshot_name = os.path.splitext(script_name)\[0]\n\n# Define the output folder\noutput_folder = \"/groups/sandwich/environment\"\n\n# Try updating and rendering both write nodes\ntry:\n    albedo = grp.node(\"albedo_wire_write\")\n    ao = grp.node(\"AO_wire_write\")\n\n    # Update file paths\n    albedo_file = os.path.join(output_folder, f\"\{shot_name\}_wireframe_albedo.mov\")\n    ao_file = os.path.join(output_folder, f\"\{shot_name\}_wireframe_AO.mov\")\n\n    albedo\[\"file\"].setValue(albedo_file)\n    ao\[\"file\"].setValue(ao_file)\n\n    # Get frame range\n    first = nuke.root().firstFrame()\n    last = nuke.root().lastFrame()\n\n    # Execute renders\n    nuke.execute(albedo, first, last)\n    nuke.execute(ao, first, last)\n\nexcept NameError as e:\n    nuke.message(\"One or both write nodes not found:\\n\" + str(e))\n" +STARTLINE}
+addUserKnob {22 python_button_1 l "Open Folder" T "import os\nimport subprocess\nfolder_path = \"/groups/sandwich/environment\"\n\nif os.path.exists(folder_path):\n    subprocess.Popen(\[\"xdg-open\", folder_path])\nelse:\n    nuke.message(\"Folder does not exist:\\n\" + folder_path)\n" +STARTLINE}
 }
 Input {
 inputs 0
@@ -95,7 +95,7 @@ Vignette 0
 Grain 0
 }
 Write {
-file /groups/dungeons/environment/B_020_wireframe_albedo.mov
+file /groups/sandwich/environment/B_020_wireframe_albedo.mov
 file_type mov
 mov64_format "mov (QuickTime / MOV)"
 mov64_codec appr
@@ -187,7 +187,7 @@ Vignette 0
 Grain 0
 }
 Write {
-file /groups/dungeons/environment/B_020_wireframe_AO.mov
+file /groups/sandwich/environment/B_020_wireframe_AO.mov
 file_type mov
 mov64_format "mov (QuickTime / MOV)"
 mov64_codec appr

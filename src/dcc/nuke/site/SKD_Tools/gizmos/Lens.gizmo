@@ -1198,7 +1198,7 @@ push $N1a31a590
  Read {
   inputs 0
   file_type jpeg
-  file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NungeonTools/images/lensdirt.jpg
+  file ""
   format "2048 1024 0 0 2048 1024 1 2K_LatLong"
   origset true
   name Read6
@@ -5830,7 +5830,7 @@ set N1b7374f0 [stack 0]
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/dodecagon.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/dodecagon.png
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read19
@@ -5850,7 +5850,7 @@ set N1b790a40 [stack 0]
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/undecagon.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/undecagon.png
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read26
@@ -5870,7 +5870,7 @@ set N1b7c4af0 [stack 0]
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/decagon.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/decagon.png
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read3
@@ -5890,7 +5890,7 @@ set N1b7f8f00 [stack 0]
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/nonagon.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/nonagon.png
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read22
@@ -5910,7 +5910,7 @@ set N1b82d310 [stack 0]
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/octogon.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/octogon.png
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read23
@@ -5930,7 +5930,7 @@ set N1b861720 [stack 0]
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/heptagon.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/heptagon.png
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read20
@@ -5950,7 +5950,7 @@ set N1b895b30 [stack 0]
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/hexagon.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/hexagon.png
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read21
@@ -5970,7 +5970,7 @@ set N1b8ca280 [stack 0]
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/pentagon.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/pentagon.png
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read24
@@ -6028,7 +6028,7 @@ set N1b8fe9d0 [stack 0]
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/twoCircle2.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/twoCircle2.png
    format "256 256 0 0 256 256 1 square_256"
    origset true
    name Read12
@@ -6336,7 +6336,7 @@ push $N1b8fe9d0
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleNoise1.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleNoise1.png
    format "256 256 0 0 256 256 1 square_256"
    origset true
    name Read7
@@ -6521,7 +6521,7 @@ push $N1b8fe9d0
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleHard1.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleHard1.png
    format "256 256 0 0 256 256 1 square_256"
    origset true
    name Read14
@@ -6729,7 +6729,7 @@ push $N1b8fe9d0
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleBlur1.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleBlur1.png
    format "256 256 0 0 256 256 1 square_256"
    origset true
    name Read9
@@ -7562,7 +7562,7 @@ push $N1b8fe9d0
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/twoCircle1.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/twoCircle1.png
    format "256 256 0 0 256 256 1 square_256"
    origset true
    name Read11
@@ -8054,7 +8054,7 @@ push $N1b8fe9d0
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleHard3.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleHard3.png
    format "256 256 0 0 256 256 1 square_256"
    origset true
    name Read6
@@ -8215,7 +8215,7 @@ push $N1b8fe9d0
   Read {
    inputs 0
    file_type png
-   file /groups/sandwich/.pipeline/pipeline/software/nuke/tools/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleHard2.png
+   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleHard2.png
    format "256 256 0 0 256 256 1 square_256"
    origset true
    name Read5

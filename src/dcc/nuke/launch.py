@@ -29,6 +29,10 @@ class NukeLauncher(Launcher):
         system = platform.system()
 
         env_vars = {
+            # Root for vendored Nuke third-party (NukeSurvivalToolkit). Referenced
+            # via [getenv DCC_NUKE_THIRD_PARTY] inside gizmo file knobs so paths
+            # survive the repo's location moving.
+            "DCC_NUKE_THIRD_PARTY": str(this_path.parent / "third_party"),
             "NUKE_PATH": str(resolve_mapped_path(this_path.parent / "site")),
             "OCIO": str(repo_root / "resources/ocio/sandwich-v01/config.ocio"),
             "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),

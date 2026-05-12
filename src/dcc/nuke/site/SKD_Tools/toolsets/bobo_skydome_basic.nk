@@ -3,7 +3,7 @@ version 15.0 v4
 Read {
  inputs 0
  file_type hdr
- file /groups/dungeons/lighting/HDRs/G_HDR_1.exr
+ file /groups/sandwich/lighting/HDRs/G_HDR_1.exr
  format "4096 2048 0 0 4096 2048 1 4K_LatLong"
  origset true
  name Read2

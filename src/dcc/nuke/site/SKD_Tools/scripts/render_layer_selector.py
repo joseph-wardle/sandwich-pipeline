@@ -10,6 +10,7 @@ from env_sg import DB_Config
 from Qt import QtCore, QtGui, QtWidgets
 
 from core.shotgrid import ShotGrid
+from core.util.util import get_production_path
 
 simple_window = None
 
@@ -180,10 +181,10 @@ class CascadingComboBox(QtWidgets.QWidget):
         Any folders named '.backup' are ignored.
         """
         self.thumbnail_list.clear()
-        base_path = r"/groups/dungeons/production/shot"
+        base_path = str(get_production_path() / "shot")
         shot_path = os.path.join(base_path, shot_num, "render")
         items_list = []  # Will store tuples of (creation_time, list_item)
-        default_thumb = r"/groups/dungeons/pipeline/pipeline/software/nuke/tools/NungeonTools/images/noThumbnailIcon.jpg"
+        default_thumb = ""
 
         if os.path.exists(shot_path):
             for folder_name in os.listdir(shot_path):
@@ -296,7 +297,7 @@ class CascadingComboBox(QtWidgets.QWidget):
         render_folder = selected_items[0].text().split("\n")[0]
         self.current_render = render_folder
 
-        base_path = r"/groups/dungeons/production/shot"
+        base_path = str(get_production_path() / "shot")
         shot_path = os.path.join(base_path, self.default_shot, "render", render_folder)
 
         # Now update the thumbnail list with render layers (subfolders).
@@ -316,7 +317,7 @@ class CascadingComboBox(QtWidgets.QWidget):
 
                 layer_path = os.path.join(shot_path, layer_name)
                 if os.path.isdir(layer_path):
-                    default_thumb = r"/groups/dungeons/pipeline/pipeline/software/nuke/tools/NungeonTools/images/noThumbnailIcon.jpg"
+                    default_thumb = ""
                     thumbnail_path = default_thumb
 
                     # Check for a thumb folder inside the layer folder.
@@ -399,7 +400,7 @@ class CascadingComboBox(QtWidgets.QWidget):
             )
             return
 
-        base_path = r"/groups/dungeons/production/shot"
+        base_path = str(get_production_path() / "shot")
         for item in selected_items:
             layer_folder = (
                 item.text()

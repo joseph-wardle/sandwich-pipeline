@@ -338,7 +338,7 @@ class CascadingComboBox(QtWidgets.QWidget):
             )
             return
 
-        base_path = "/groups/dungeons/production/shot"
+        base_path = str(get_production_path() / "shot")
         for item in selected_items:
             layer_folder = item.text()
             images_dn_path = os.path.join(
