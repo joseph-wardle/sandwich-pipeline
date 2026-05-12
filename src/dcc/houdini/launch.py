@@ -83,9 +83,14 @@ class HoudiniLauncher(Launcher):
             ),
             # Package loading debug logging
             "HOUDINI_PACKAGE_VERBOSE": 1 if log.isEnabledFor(logging.DEBUG) else None,
-            # Houdini Path
+            # Houdini Path — Houdini auto-scans each entry for otls/,
+            # toolbar/, packages/, scripts/, python3.11libs/, etc. We put
+            # site/ on the path directly; the legacy $HSITE/houdiniXX.Y/
+            # convention is bypassed because Phase 4 flattened the
+            # version-subdir wrapper out of the tree.
             "HOUDINI_PATH": os.pathsep.join(
                 [
+                    str(resolve_mapped_path(this_path.parent / "site")),
                     str(repo_root / "resources/usd/kinds"),
                     "&",
                 ]
@@ -94,8 +99,8 @@ class HoudiniLauncher(Launcher):
             "HOUDINI_SPLASH_FILE": str(
                 repo_root / "resources/splash/panini_splash.png"
             ),
-            # Project-specific preference overrides — Houdini reads $HSITE for
-            # otls/, packages/, python3.11libs/, scripts/, toolbar/, etc.
+            # Kept for any HSCRIPT that still references $HSITE; not load-bearing
+            # for pipeline shelves / HDAs / packages — those resolve via HOUDINI_PATH.
             "HSITE": str(resolve_mapped_path(this_path.parent / "site")),
             # Job directory
             "JOB": str(resolve_mapped_path(get_production_path())),
