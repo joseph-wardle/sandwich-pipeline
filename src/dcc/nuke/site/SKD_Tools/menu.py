@@ -1,5 +1,8 @@
+from pathlib import Path
+
 import nuke
-from core.util.util import get_pipe_path
+
+_TOOLSETS = Path(__file__).resolve().parent / "toolsets"
 
 nuke.pluginAddPath("./gizmos")
 nuke.pluginAddPath("./icons")
@@ -67,39 +70,39 @@ m = toolbar.addMenu("SKD", icon="MicrowaveIcon.png")
 
 m.addCommand(
     "Template",
-    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/SKD_Tools/toolsets/shotTemplate.nk")}")',
+    f'nuke.nodePaste("{str(_TOOLSETS / "shotTemplate.nk")}")',
     icon="MicrowaveIcon.png",
 )
 m.addCommand(
     "Depth Fog",
-    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/SKD_Tools/toolsets/depth_fog.nk")}")',
+    f'nuke.nodePaste("{str(_TOOLSETS / "depth_fog.nk")}")',
     icon="MicrowaveIcon.png",
 )
 m.addCommand(
     "Deep Fog",
-    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/SKD_Tools/toolsets/deep_fog.nk")}")',
+    f'nuke.nodePaste("{str(_TOOLSETS / "deep_fog.nk")}")',
     icon="MicrowaveIcon.png",
 )
 
 m.addCommand(
     "Lightwrap (upper matrix)",
-    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/SKD_Tools/toolsets/bobo_lightwrap.nk")}")',
+    f'nuke.nodePaste("{str(_TOOLSETS / "bobo_lightwrap.nk")}")',
     icon="MicrowaveIcon.png",
 )
 m.addCommand(
     "Relight",
-    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/SKD_Tools/toolsets/relight_template.nk")}")',
+    f'nuke.nodePaste("{str(_TOOLSETS / "relight_template.nk")}")',
     icon="MicrowaveIcon.png",
 )
 
 m.addCommand(
     "Eye Light",
-    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/SKD_Tools/toolsets/eyelights.nk")}")',
+    f'nuke.nodePaste("{str(_TOOLSETS / "eyelights.nk")}")',
     icon="MicrowaveIcon.png",
 )
 m.addCommand(
     "Sky Dome (Basic)",
-    f'nuke.nodePaste("{str(get_pipe_path() / "software/nuke/tools/SKD_Tools/toolsets/bobo_skydome_basic.nk")}")',
+    f'nuke.nodePaste("{str(_TOOLSETS / "bobo_skydome_basic.nk")}")',
     icon="MicrowaveIcon.png",
 )
 
@@ -110,9 +113,7 @@ m.addCommand("luma Distort", "nuke.createNode('lumaDistort')", icon="MicrowaveIc
 # m.addCommand("Roughen Edges", "nuke.createNode('roughenEdges')", icon="MicrowaveIcon.png") #broken but worked on previous films
 # lens node
 m.addCommand("Lens", "nuke.createNode('Lens')", icon="MicrowaveIcon.png")
-print(
-    f"nuke.nodePaste({str(get_pipe_path() / 'software/nuke/tools/SKD_Tools/toolsets/shotTemplate.nk')})"
-)
+print(f"nuke.nodePaste({_TOOLSETS / 'shotTemplate.nk'})")
 m.addCommand("SKD Write Node", "make_bobo_write_node()", icon="MicrowaveIcon.png")
 m.addCommand("SKD Open Shot", "choose_shot()", icon="MicrowaveIcon.png")
 m.addCommand("SKD Read Node", "make_bobo_read_node()", icon="MicrowaveIcon.png")

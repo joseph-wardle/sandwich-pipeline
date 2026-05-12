@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, cast
 from random import randint
 
 from Qt import QtCore, QtGui, QtWidgets
-from core.util.util import get_lib_path
+from core.util.util import get_src_path
 
 if TYPE_CHECKING:
     import typing
@@ -154,7 +154,7 @@ class DialogFilteredList:
         return None
 
 
-FLASHBANG_DIR = get_lib_path() / "flashbang"
+FLASHBANG_DIR = get_src_path() / "lib/flashbang"
 
 
 class MessageDialog(QtWidgets.QDialog, DialogButtons):
@@ -361,7 +361,7 @@ class FilteredListDialog(QtWidgets.QDialog, DialogButtons, DialogFilteredList):
 
 #     def choose_file(
 #         self,
-#         dir: str = str(get_pipe_path()),
+#         dir: str = str(get_src_path()),
 #         filter: str = "All Files (*)",
 #         caption=None,
 #         parent=None,
@@ -454,7 +454,7 @@ class FilteredListDialog(QtWidgets.QDialog, DialogButtons, DialogFilteredList):
 #         '''
 #         print('comment input: ' + self.values + '\n')
 #         self.button.setText("Loading...")
-#         icon_path = str(get_pipe_path() / "lib/icon/loading.gif")
+#         icon_path = str(get_src_path() / "lib/icon/loading.gif")
 #         self.movie = QtGui.QMovie(icon_path)
 #         self.movie.frameChanged.connect(self.setButtonIcon)
 #         if not self.movie.loopCount() == -1:

@@ -34,7 +34,7 @@ def fix_launcher_metadata() -> None:
                     "true",
                 ]
             )
-            for item in get_pipe_path().parent.iterdir()
+            for item in get_src_path().parent.iterdir()
             if item.suffix == ".desktop"
         ]
         for p in procs:
@@ -64,20 +64,14 @@ def get_edit_path() -> Path:
     return get_production_path().parent / "edit/shots"
 
 
-def get_pipe_path() -> Path:
-    # __file__ is `src/core/util/util.py`; parents[2] is `src/`. The function
-    # keeps its legacy name through Phase 3-4 of the structural refactor;
-    # Phase 8 renames it to `get_src_path()` and updates callers.
+def get_src_path() -> Path:
+    # __file__ is `src/core/util/util.py`; parents[2] is `src/`.
     return Path(__file__).resolve().parents[2]
 
 
 def get_repo_root() -> Path:
     # __file__ is `src/core/util/util.py`; parents[3] is the repository root.
     return Path(__file__).resolve().parents[3]
-
-
-def get_lib_path() -> Path:
-    return get_pipe_path() / "lib"
 
 
 def get_function_source_code_url(func: FunctionType) -> str | None:
@@ -194,5 +188,5 @@ def _normalize_documentation_root(value: str) -> str:
 
     doc_path = Path(value).expanduser()
     if not doc_path.is_absolute():
-        doc_path = get_pipe_path().parent / doc_path
+        doc_path = get_repo_root() / doc_path
     return str(doc_path.resolve())
