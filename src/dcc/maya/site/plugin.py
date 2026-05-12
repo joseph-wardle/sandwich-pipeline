@@ -13,7 +13,6 @@ from dcc.maya.command import (
 log = logging.getLogger("dcc.maya.plugin")
 
 PLUGIN_DISPLAY_NAME = "Sandwich Pipeline"
-PLUGIN_NAME = "pipeline.py"
 COMMAND_PREFIX = "SKD_"
 HOTKEY_SET_NAME = "Sandwich_Pipeline"
 

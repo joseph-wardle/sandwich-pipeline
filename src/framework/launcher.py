@@ -18,20 +18,18 @@ from .interface import DCCLauncher
 
 log = logging.getLogger(__name__)
 
-# DCC launch failures are tagged on the telemetry event but never raised as a
-# typed exception — the original exception (e.g. FileNotFoundError) is allowed
-# to propagate so the caller sees the real cause, and `telemetry_event.fail()`
-# carries the classification on the side.
+# DCC launch failures are tagged on the telemetry event but never raised as a typed exception
 _DCC_LAUNCH_FAILED_CODE = "DCC_LAUNCH_FAILED"
 
 
 class Launcher(DCCLauncher):
-    """Concrete launcher base.
-
-    Provides shared subprocess launch machinery: env-var snapshot, telemetry
-    instrumentation, and pre-launch hooks. Per-DCC launchers inherit from
-    this and override `__init__` to construct the appropriate command, args,
-    and env vars; the inherited `launch()` does the rest.
+    """
+    Provides shared subprocess launch machinery:
+        - env-var snapshot
+        - telemetry instrumentation
+        - and pre-launch hooks.
+    Per-DCC launchers inherit from this and override `__init__`
+    to construct the appropriate command, args, and env vars
     """
 
     command: str
@@ -155,7 +153,7 @@ class Launcher(DCCLauncher):
 
             if return_code != 0:
                 # Non-zero DCC exit is recorded as an error event, but is
-                # not raised — DCCs exit non-zero for many recoverable
+                # not raised because DCCs exit non-zero for many recoverable
                 # reasons (artist closed without saving, etc.).
                 telemetry_event.fail(
                     _DCC_LAUNCH_FAILED_CODE,

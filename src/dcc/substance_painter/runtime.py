@@ -1,11 +1,8 @@
-"""Substance Painter in-DCC runtime — main Qt window + headless detection."""
-
 from __future__ import annotations
-
-from substance_painter import ui
 
 from framework.interface import DCCRuntime
 from Qt import QtWidgets
+from substance_painter import ui
 
 
 class SubstancePainterRuntime(DCCRuntime):

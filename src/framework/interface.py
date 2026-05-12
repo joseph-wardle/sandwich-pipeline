@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 `DCCLauncher` is the outer-process side: per-DCC implementations build env
 vars and command lines and call `subprocess`. `framework.launcher.Launcher`
-provides the concrete subprocess+telemetry machinery that subclasses inherit.
+provides the concrete subprocess machinery that subclasses inherit.
 
 `DCCRuntime` is the in-DCC side: per-DCC implementations expose runtime
 context (main Qt window, headless detection) to feature code that runs
@@ -19,11 +19,8 @@ inside the DCC's interpreter.
 
 
 class DCCLauncher(metaclass=ABCMeta):
-    """Outer-process launcher contract — implemented per DCC in `dcc.<name>.launch`.
-
-    Subclasses define their own `__init__` (signatures vary per DCC — Maya
-    takes `is_python_shell`/`extra_args`; Substance Painter refuses
-    `is_python_shell=True`; etc.). The only enforced contract is `launch()`.
+    """
+    Subclasses define their own `__init__` (signatures vary per DCC)
     """
 
     @abstractmethod
@@ -33,11 +30,10 @@ class DCCLauncher(metaclass=ABCMeta):
 
 
 class DCCRuntime(metaclass=ABCMeta):
-    """In-DCC runtime contract — implemented per DCC in `dcc.<name>.runtime`.
-
+    """
     Subclasses are typically instantiated once at module load
-    (`_runtime = <Dcc>Runtime()`) so their per-DCC API imports happen exactly
-    when the module is first imported from inside the DCC interpreter.
+    so their per-DCC API imports happen exactly when the module
+    is first imported from inside the DCC interpreter.
     """
 
     @abstractmethod

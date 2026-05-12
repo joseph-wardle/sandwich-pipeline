@@ -1,5 +1,3 @@
-"""Maya in-DCC runtime — main Qt window + headless detection."""
-
 from __future__ import annotations
 
 import re

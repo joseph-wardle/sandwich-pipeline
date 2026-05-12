@@ -1,8 +1,8 @@
 """`python -m core.telemetry` dispatches to the local-stack orchestrator.
 
-Run from the pipeline checkout root with `pipe` on PYTHONPATH:
+Run from the repo root with `src/` on PYTHONPATH:
 
-    PYTHONPATH=pipeline uv run python -m core.telemetry <subcommand>
+    PYTHONPATH=src uv run python -m core.telemetry <subcommand>
 
 Subcommands: `up`, `catch-up`, `status` (see `local_stack.py`).
 """

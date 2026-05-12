@@ -7,7 +7,7 @@ import maya.cmds as mc
 
 def main():
     # Enable required plugins
-    plugins = ["mayaUsdPlugin", "pipeline.py"]
+    plugins = ["mayaUsdPlugin", "plugin.py"]
     pluginInfo: str = mc.pluginInfo(q=True, listPlugins=True)  # type: ignore
     for plugin in plugins:
         if plugin not in pluginInfo:

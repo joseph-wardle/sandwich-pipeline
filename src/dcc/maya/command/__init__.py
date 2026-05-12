@@ -272,7 +272,7 @@ def register_command_from_description(
         label=command.label,
         commandLanguage="python",
         command=command_string,  # type: ignore
-        plugin="pipeline",
+        plugin="plugin",
         default=default,
         **runtime_command_optional_args,
     )

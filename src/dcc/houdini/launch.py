@@ -55,23 +55,15 @@ class HoudiniLauncher(Launcher):
             "DCC": str(this_path.parent.name),
             # Asset Gallery: Houdini writes to a per-session temp copy so the
             # prod DB is never held open by Houdini. Changes are merged back to
-            # prod on clean exit via _merge_asset_gallery_changes(). The internal
-            # ASSETGALLERY_DATA_SOURCE hscript variable is propagated in 456.py.
+            # prod on clean exit via _merge_asset_gallery_changes().
             "HOUDINI_ASSETGALLERY_DATA_SOURCE": self._assetdb_path,
             "HOUDINI_ASSETGALLERY_DB_FILE": self._assetdb_path,
-            # Backup directory
             "HOUDINI_BACKUP_DIR": "./.backup",
-            # Dump the core on crash to help debugging
             "HOUDINI_COREDUMP": 1,
-            # Compiled Houdini files debug
             "HOUDINI_DSO_ERROR": 2 if log.isEnabledFor(logging.DEBUG) else None,
-            # Max backup files
             "HOUDINI_MAX_BACKUP_FILES": 20,
-            # Prevent user envs from overriding existing values
             "HOUDINI_NO_ENV_FILE_OVERRIDES": 1,
-            # Disable start page splash
             "HOUDINI_NO_START_PAGE_SPLASH": 1,
-            # Configure additional HDA locations outside of the pipeline
             "HOUDINI_OTLSCAN_PATH": os.pathsep.join(
                 [
                     str(p)
@@ -85,9 +77,7 @@ class HoudiniLauncher(Launcher):
             "HOUDINI_PACKAGE_VERBOSE": 1 if log.isEnabledFor(logging.DEBUG) else None,
             # Houdini Path — Houdini auto-scans each entry for otls/,
             # toolbar/, packages/, scripts/, python3.11libs/, etc. We put
-            # site/ on the path directly; the legacy $HSITE/houdiniXX.Y/
-            # convention is bypassed because Phase 4 flattened the
-            # version-subdir wrapper out of the tree.
+            # site/ on the path directly
             "HOUDINI_PATH": os.pathsep.join(
                 [
                     str(resolve_mapped_path(this_path.parent / "site")),
@@ -95,31 +85,19 @@ class HoudiniLauncher(Launcher):
                     "&",
                 ]
             ),
-            # Splash file
             "HOUDINI_SPLASH_FILE": str(
                 repo_root / "resources/splash/panini_splash.png"
             ),
             # Kept for any HSCRIPT that still references $HSITE; not load-bearing
-            # for pipeline shelves / HDAs / packages — those resolve via HOUDINI_PATH.
             "HSITE": str(resolve_mapped_path(this_path.parent / "site")),
-            # Job directory
             "JOB": str(resolve_mapped_path(get_production_path())),
             # Ensure LD_LIBRARY_PATH is unset to allow nesting pipe instances
             "LD_LIBRARY_PATH": None,
-            # Manually set LD_LIBRARY_PATH to integrated Houdini libraries (for Axiom)
-            # "LD_LIBRARY_PATH": str(Executables.hfs / "dsolib")
-            # if platform.system() == "Linux"
-            # else None,
-            # Set project OCIO config
             "OCIO": str(repo_root / "resources/ocio/sandwich-v01/config.ocio"),
-            # Pass log level defined on commandline
             "PIPE_LOG_LEVEL": log.getEffectiveLevel(),
             "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
-            # Root for vendored Houdini packages (MOPS, LYNX, axiom, tlops,
-            # ae_SVG). Referenced as $DCC_HOUDINI_THIRD_PARTY by the package
-            # JSONs in site/packages/.
+            # Root for vendored Houdini packages (MOPS, LYNX, axiom, tlops, ae_SVG)
             "DCC_HOUDINI_THIRD_PARTY": str(third_party),
-            # Configure Asset Resolver
             "PXR_AR_DEFAULT_SEARCH_PATH": os.pathsep.join(
                 [
                     str(get_production_path()),
@@ -140,7 +118,6 @@ class HoudiniLauncher(Launcher):
                     os.environ.get("RMANTREE", "") + "/bin",
                 ]
             ),
-            # RenderMan color config json file
             "RMAN_COLOR_CONFIG_DIR": str(repo_root / "resources/ocio/sandwich-v01"),
             # Force Qt5 bindings in Houdini to avoid Qt6/PySide6 conflicts
             "QT_PREFERRED_BINDING": "PySide2",
@@ -183,10 +160,6 @@ class HoudiniLauncher(Launcher):
             )
             return
 
-        # Flush any pending WAL into the main DB file before comparing.
-        # hou.AssetGalleryDataSource writes via SQLite WAL mode, so session
-        # changes live in assetGallery.db-wal until checkpointed — the main
-        # .db file bytes are unchanged and filecmp would falsely see no diff.
         with closing(sqlite3.connect(self._assetdb_path)) as conn:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 

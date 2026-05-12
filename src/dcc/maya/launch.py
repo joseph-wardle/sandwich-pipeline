@@ -10,12 +10,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import typing
 
-from env import Executables
 from core.util.util import (
     get_production_path,
     get_rig_build_path,
     get_shared_telemetry_spool_dir,
 )
+from env import Executables
 from framework.launcher import Launcher
 
 log = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ class MayaLauncher(Launcher):
 
         env_vars: typing.Mapping[str, int | str | None] | None
 
-        module_paths = []  # Initialize an empty list for module paths
+        module_paths = []
         # add the production path plus the folders where we put our modules
         module_paths.append(str(get_production_path() / "maya/module"))
         module_paths.append(str(third_party / "y-rig/third_party/mgear/release"))
@@ -71,8 +71,7 @@ class MayaLauncher(Launcher):
             #   1. src/ — so framework, core, dcc, env, env_sg are importable
             #   2. site/ — Maya scans sys.path literally for `userSetup.py`
             #   3. third_party/ — flat vendored libs (mayacapture, dwpicker,
-            #      modelChecker, yrig, aperture, rjg, timeline_marker, skinner)
-            #      are imported by their top-level package name
+            #      etc) are imported by their top-level package name
             #   4. third_party/studiolibrary/src — studiolibrary's vendored
             #      layout nests its package under an extra src/ directory
             "PYTHONPATH": os.pathsep.join(

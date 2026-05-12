@@ -7,7 +7,7 @@ import sys
 from functools import wraps
 from typing import TYPE_CHECKING
 
-from .struct import dict_index, dotdict
+from .dataclass_helpers import dict_index, dotdict
 
 if TYPE_CHECKING:
     from types import ModuleType

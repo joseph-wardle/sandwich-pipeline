@@ -5,12 +5,12 @@ the production share, with all state living on the share. State is durable
 across boots: any machine that brings the stack up next ingests events that
 arrived in the spool since the last shutdown.
 
-Run from the pipeline checkout root (the repo isn't declared as an
-installable package, so `pipe` has to go on `PYTHONPATH`):
+Run from the repo root (the repo isn't declared as an installable package,
+so `src/` has to go on `PYTHONPATH`):
 
-    PYTHONPATH=pipeline uv run python -m core.telemetry up        # ^C to stop
-    PYTHONPATH=pipeline uv run python -m core.telemetry catch-up  # one-shot ingest
-    PYTHONPATH=pipeline uv run python -m core.telemetry status    # who holds the lock
+    PYTHONPATH=src uv run python -m core.telemetry up        # ^C to stop
+    PYTHONPATH=src uv run python -m core.telemetry catch-up  # one-shot ingest
+    PYTHONPATH=src uv run python -m core.telemetry status    # who holds the lock
 
 Concurrency: the orchestrator holds an exclusive `flock` on
 ``<production>/.telemetry/locks/orchestrator.lock`` for its whole lifetime.

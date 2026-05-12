@@ -5,11 +5,11 @@ validates each event's payload shape against the registry in `events.py`, and
 inserts a row into the `events` table. Per-spool read offsets are persisted
 in `ingester_status` so the ingester resumes cleanly after a restart.
 
-The orchestrator (`pipe/telemetry/local_stack.py`) starts the ingester as a
-subprocess of `pipe telemetry up` and `pipe telemetry catch-up`. It can also
-be invoked directly for ad-hoc backfill or testing (run from the pipeline root):
+The orchestrator (`core/telemetry/local_stack.py`) starts the ingester as a
+subprocess of `python -m core.telemetry up` and `python -m core.telemetry catch-up`.
+It can also be invoked directly for ad-hoc backfill or testing (run from the repo root):
 
-    PYTHONPATH=pipeline uv run python -m core.telemetry.ingester \\
+    PYTHONPATH=src uv run python -m core.telemetry.ingester \\
         --spool-root /groups/sandwich/05_production/.telemetry/raw \\
         --db-dsn postgresql://sandwich-telemetry@127.0.0.1:55432/sandwich_telemetry \\
         --once
