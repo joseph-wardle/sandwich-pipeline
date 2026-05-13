@@ -73,11 +73,14 @@ class HoudiniLauncher(Launcher):
                 ]
                 + ["&"]
             ),
+            "HOUDINI_PACKAGE_PATH": str(
+                resolve_mapped_path(this_path.parent / "site" / "packages")
+            ),
             # Package loading debug logging
             "HOUDINI_PACKAGE_VERBOSE": 1 if log.isEnabledFor(logging.DEBUG) else None,
             # Houdini Path — Houdini auto-scans each entry for otls/,
-            # toolbar/, packages/, scripts/, python3.11libs/, etc. We put
-            # site/ on the path directly
+            # toolbar/, scripts/, python3.11libs/, etc. We put site/ on the
+            # path directly (packages are handled via HOUDINI_PACKAGE_PATH).
             "HOUDINI_PATH": os.pathsep.join(
                 [
                     str(resolve_mapped_path(this_path.parent / "site")),
