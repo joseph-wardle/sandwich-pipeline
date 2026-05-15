@@ -27,6 +27,7 @@ from .store import (
     next_bundle_version,
     next_version,
     record_publish,
+    version_label,
     versioned_filename,
 )
 
@@ -96,6 +97,28 @@ def list_version_records(stream: VersionStreamSpec) -> list[VersionRecord]:
     if _is_compound_stream(normalized_stream):
         return _list_compound_version_records(normalized_stream)
     return _list_single_file_version_records(normalized_stream)
+
+
+def current_version_label(
+    stream: VersionStreamSpec,
+    scene_path: Path,
+) -> tuple[str | None, str | None]:
+    """Return `(label, title)` for the latest record on `stream`, or
+    `(None, None)` if ``scene_path`` is outside it or the stream is empty.
+
+    TODO: Returns the latest record on the stream, not whatever version
+    `scene_path` itself happens to be, so opening an older backup still
+    shows the highest saved version
+    """
+    if not path_matches_stream(scene_path, stream):
+        return None, None
+    records = list_version_records(stream)
+    if not records:
+        return None, None
+    latest = records[0]
+    if latest.version is None:
+        return None, latest.title
+    return version_label(latest.version), latest.title
 
 
 def _save_single_file_version(
@@ -852,6 +875,7 @@ def path_matches_stream(path: Path, stream: VersionStreamSpec) -> bool:
 
 
 __all__ = [
+    "current_version_label",
     "list_version_records",
     "path_matches_stream",
     "promote_version",

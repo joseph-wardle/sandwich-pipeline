@@ -2,19 +2,24 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator, cast
+from typing import TYPE_CHECKING, Iterator, cast
 
 import hou
 
-from dcc.houdini.playblast.config import DEFAULT_RESOLUTION
-from dcc.houdini.playblast.hud import (
-    build_hud_filter_args,
-    resolve_current_hip_version,
+from core.hud import (
+    ARTIST,
+    HudContent,
+    TITLE,
+    labeled_line,
+    line_date,
+    line_shot,
 )
 from core.playblast import FFmpegPreset, Playblaster
+from core.shot import houdini_department_stream, shot_owner_for
 from core.util.users import resolve_artist_display_name
+from core.versioning import current_version_label
+from dcc.houdini.hipfile.paths import current_hip_path, department_from_hip_path
 
 if TYPE_CHECKING:
     from core.shotgrid import Shot
@@ -77,26 +82,38 @@ class HPlayblaster(Playblaster):
         self._camera_path = camera_path.strip() or None if camera_path else None
         return self
 
-    def _build_ffmpeg_input(
-        self, shot: Shot, tempdir: Path, basename: str, start_frame: int
-    ) -> Any:
-        # HUD bakes into the input filter chain so it propagates to every
-        # preset's encode in a single pass. Postprocessing would force a
-        # re-encode of every output and was the cause of the silent
-        # codec-rewrite bug fixed in the prior PR.
-        chain = super()._build_ffmpeg_input(shot, tempdir, basename, start_frame)
-        version_label, title = resolve_current_hip_version(shot)
-        for filter_kwargs in build_hud_filter_args(
-            shot_code=shot.code or "",
-            artist_display_name=resolve_artist_display_name(),
-            start_frame=start_frame,
-            resolution=DEFAULT_RESOLUTION,
-            now=datetime.now(),
-            version_label=version_label,
-            title=title,
-        ):
-            chain = chain.filter("drawtext", **filter_kwargs)
-        return chain
+    def _hud_content(self, shot: Shot, start_frame: int) -> HudContent:
+        version_label, title = self._resolve_current_version(shot)
+
+        left_lines: list[str] = [labeled_line(ARTIST, resolve_artist_display_name())]
+        if title:
+            left_lines.append(labeled_line(TITLE, title))
+        left_lines.append(
+            line_shot(
+                shot.code or "",
+                version=version_label,
+                unsaved=hou.hipFile.hasUnsavedChanges(),
+            )
+        )
+
+        return HudContent(
+            left_lines=tuple(left_lines),
+            right_lines=(line_date(),),
+            frame_start=start_frame,
+        )
+
+    @staticmethod
+    def _resolve_current_version(shot: Shot) -> tuple[str | None, str | None]:
+        hip_path = current_hip_path()
+        if hip_path is None:
+            return None, None
+        department = department_from_hip_path(hip_path)
+        if department is None:
+            return None, None
+        stream = houdini_department_stream(
+            shot, department, owner=shot_owner_for(shot)
+        )
+        return current_version_label(stream, hip_path)
 
     def _write_images(self, shot: Shot, path: str) -> None:
         cut_in, cut_out = shot.frame_range
@@ -105,7 +122,7 @@ class HPlayblaster(Playblaster):
 
         scene_viewer, viewport = _scene_viewer_and_viewport()
         flip = scene_viewer.flipbookSettings().stash()
-        _configure_flipbook(flip, path, start_frame, end_frame)
+        _configure_flipbook(flip, path, start_frame, end_frame, self.resolution)
 
         with (
             _applied_viewport_camera(viewport, self._camera_path),
@@ -145,13 +162,14 @@ def _configure_flipbook(
     path: str,
     start_frame: int,
     end_frame: int,
+    resolution: tuple[int, int],
 ) -> None:
     settings.output(f"{path}.$F4.png")
     settings.frameRange((start_frame, end_frame))
     settings.outputToMPlay(False)
 
     settings.useResolution(True)
-    settings.resolution(DEFAULT_RESOLUTION)
+    settings.resolution(resolution)
 
     # These are policy choices; keep them grouped.
     settings.outputZoom(100)

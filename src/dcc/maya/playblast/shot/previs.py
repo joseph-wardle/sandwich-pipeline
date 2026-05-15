@@ -12,7 +12,8 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from dcc.maya.playblast.hud import HudDefinition
+from pathlib import Path
+
 from dcc.maya.playblast.shot.config import (
     MPlayblastConfig,
     MShotPlayblastConfig,
@@ -22,6 +23,8 @@ from dcc.maya.playblast.shot.config import (
 from dcc.maya.playblast.shot.dialog import MPlayblastDialog
 from core.playblast import FFmpegPreset
 from core.playblast.naming import build_edit_output_directory
+from core.shot import maya_rlo_stream, shot_owner_for
+from core.versioning import current_version_label
 
 log = logging.getLogger(__name__)
 
@@ -272,31 +275,18 @@ class PrevisPlayblastDialog(MPlayblastDialog):
                 return shot_node
         return None
 
-    def _hud_shot_label(self) -> str:
-        mode = self._selected_source_mode()
-
-        if mode == "shot" and self._shot is not None:
-            return self._shot.code or "Custom"
-
-        if mode == "sequencer":
-            shot_context = self._resolve_current_sequencer_shot_context()
-            if shot_context is not None:
-                return shot_context.name
-
-        if self._shot is not None:
-            return self._shot.code or "Custom"
-
-        return "Custom"
-
     def _build_shot_playblast_config(self) -> MShotPlayblastConfig:
         if self._shot is None:
             raise ValueError("No pipeline shot context was found.")
 
         shot_camera = str(self._shot_camera.currentText()).strip()
         output_name = self._resolve_output_name(self._shot.code or "")
+        version_label, version_title = _resolve_rlo_version(self._shot)
         return MShotPlayblastConfig(
             camera=shot_camera,
             shot=self._shot,
+            version_label=version_label,
+            version_title=version_title,
             paths=self._paths_for_filename(output_name),
             use_sequencer=False,
         )
@@ -329,21 +319,6 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             shot_config = self._build_custom_playblast_config()
 
         return MPlayblastConfig(
-            builtin_huds=[
-                MPlayblastDialog.MAYA_HUDS.CAM_NAME,
-                MPlayblastDialog.MAYA_HUDS.CUR_FRAME,
-                MPlayblastDialog.MAYA_HUDS.FOCAL_LENGTH,
-            ],
-            custom_huds=[
-                MPlayblastDialog.CUSTOM_HUDS.FILENAME,
-                MPlayblastDialog.CUSTOM_HUDS.ARTIST,
-                HudDefinition(
-                    "SKD_shot",
-                    command=self._hud_shot_label,
-                    section=7,
-                    idle_refresh=True,
-                ),
-            ],
             dof=self.use_dof,
             hardware_fog=self.use_hardware_fog,
             lighting=self.use_lighting,
@@ -351,3 +326,12 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             shots=[shot_config],
             ssao=self.use_ssao,
         )
+
+
+def _resolve_rlo_version(shot) -> tuple[str | None, str | None]:
+    scene_raw = mc.file(query=True, sceneName=True)
+    if not isinstance(scene_raw, str) or not scene_raw:
+        return None, None
+    scene_path = Path(scene_raw).expanduser().resolve()
+    stream = maya_rlo_stream(shot, owner=shot_owner_for(shot))
+    return current_version_label(stream, scene_path)

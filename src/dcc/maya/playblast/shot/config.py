@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, cast
 
-from dcc.maya.playblast.hud import HudDefinition
 from core.playblast import FFmpegPreset
 from core.shotgrid import Shot
 
@@ -46,52 +45,26 @@ class MShotDialogConfig:
 
 @dataclass
 class MShotPlayblastConfig:
-    """Information needed to playblast a shot.
-    Attributes:
-        camera: str | None
-            Camera to use. Value ignored if `use_sequencer` is set
-        shot: Shot
-            Shot struct to hold shot code, cut in, cut out, and duration
-        paths: dict[FFmpegPreset, list[str | Path]]
-            Paths to output to
-        tails: tuple[int, int]
-            How many frames early/late to start playblasting
-        use_sequencer: bool = False
-            Whether to playblast from the sequencer. If set to True, `camera`
-            will be ignored
-    """
+    """`camera` is ignored when `use_sequencer=True`.
+    `pass_label` adds a `Pass: <label>` line to the HUD
+    (anim uses this for blocking/polish tags).
+    `version_label` / `version_title` are the resolved HUD strings for this
+    scene's latest saved version; both `None` when there's no version to show"""
 
     camera: str | None
     shot: Shot
     paths: dict[FFmpegPreset, list[str | Path]] = field(default_factory=dict)
     tails: tuple[int, int] = (0, 0)
     use_sequencer: bool = False
+    pass_label: str | None = None
+    version_label: str | None = None
+    version_title: str | None = None
 
 
 @dataclass
 class MPlayblastConfig:
-    """Information needed to configure a Maya playblast
-    Attributes:
-        builtin_huds: list[str]
-            List of valid Maya builtin HUD names
-        custom_huds: list[HudDefinition]
-            List of `HudDefinition`s
-        dof: bool
-            Toggle depth of field
-        hardware_fog: bool
-            Toggle hardware fog
-        lighting: bool
-            Toggle viewport lighting
-        shadows: bool
-            Toggle viewport shadows
-        shots: list[MShotPlayblastConfig]
-            List of shots to playblast
-        ssao: bool
-            Toggle viewport screen-space anti-aliasing
-    """
+    """Viewport flags + the shot configs to playblast."""
 
-    builtin_huds: list[str]
-    custom_huds: list[HudDefinition]
     dof: bool
     hardware_fog: bool
     lighting: bool

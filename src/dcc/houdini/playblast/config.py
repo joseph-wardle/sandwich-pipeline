@@ -8,8 +8,6 @@ from core.playblast import FFmpegPreset
 from core.playblast.review import UploadTarget
 from core.shotgrid import Shot
 
-DEFAULT_RESOLUTION = (1280, 720)
-
 
 @dataclass(frozen=True)
 class ResolvedOutputDestination:
@@ -47,7 +45,6 @@ class HoudiniPlayblastExportConfig:
 
 
 __all__ = [
-    "DEFAULT_RESOLUTION",
     "HoudiniPlayblastExportConfig",
     "HoudiniPlayblastLaunchContext",
     "ResolvedOutputDestination",

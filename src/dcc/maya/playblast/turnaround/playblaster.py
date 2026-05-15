@@ -12,8 +12,13 @@ import maya.cmds as mc
 from mayacapture.capture import capture  # type: ignore[import-not-found]
 from Qt import QtWidgets
 
+from core.hud import (
+    ARTIST,
+    HudContent,
+    apply_hud,
+    labeled_line,
+)
 from core.ui.progress import progress_scope
-from dcc.maya.playblast.hud import HudDefinition, applied_hud
 from dcc.maya.playblast.turnaround.config import (
     TurnaroundPlayblastConfig,
     _first_parent,
@@ -22,6 +27,11 @@ from dcc.maya.playblast.turnaround.config import (
 from dcc.maya.util.selection import maintain_selection
 from core.playblast.encoding import build_image_input_chain, encode_movie
 from core.util.users import resolve_artist_display_name
+
+# Turnaround-specific HUD labels. Cross-DCC labels (Artist, ...) live in
+# :mod:`core.hud`.
+_LABEL_ASSET = "Asset"
+_LABEL_POINTS = "Points"
 
 log = logging.getLogger(__name__)
 
@@ -61,9 +71,6 @@ class MTurnaroundPlayblaster:
                 steps=steps,
             ) as progress:
                 with (
-                    applied_hud(
-                        *_turnaround_huds(config.asset_label, config.review_roots)
-                    ),
                     maintain_selection(),
                     _preserved_current_time(),
                     _staged_turntable_roots(
@@ -122,10 +129,10 @@ class MTurnaroundPlayblaster:
         config = self._config
 
         viewport_options: dict[str, str | bool] = {
-            # The turnaround always uses a shaded view. Maya's documented
-            # topology overlay for that view is `wireframeOnShaded`.
+            # Shaded view's documented topology overlay is `wireframeOnShaded`.
             "displayAppearance": "smoothShaded",
-            "headsUpDisplay": True,
+            # HUD bakes during encode (apply_hud), so the viewport HUD is off.
+            "headsUpDisplay": False,
             "wireframeOnShaded": wireframe_on_shaded,
         }
         if config.use_default_material:
@@ -155,7 +162,7 @@ class MTurnaroundPlayblaster:
             # Maya's `offScreenViewportUpdate` flag, and the topology overlay
             # needs a live model panel draw to be reliable.
             off_screen=False,
-            show_ornaments=True,
+            show_ornaments=False,
             overwrite=True,
             maintain_aspect_ratio=False,
             viewer=False,
@@ -223,6 +230,8 @@ class MTurnaroundPlayblaster:
 
     def _encode_output_movies(self, *, combined_base: Path) -> None:
         image_pattern = str(combined_base) + ".%04d.png"
+        resolution = (self._config.width, self._config.height)
+        hud = self._hud_content()
 
         for preset, output_bases in self._config.output_paths.items():
             if not output_bases:
@@ -234,6 +243,7 @@ class MTurnaroundPlayblaster:
                 start_frame=1,
                 frame_rate=self._config.frame_rate,
             )
+            input_chain = apply_hud(input_chain, hud, resolution)
             encode_movie(
                 input_chain,
                 output_path=temp_movie_path,
@@ -247,6 +257,18 @@ class MTurnaroundPlayblaster:
                 output_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
                 shutil.copyfile(temp_movie_path, output_path)
                 QtWidgets.QApplication.processEvents()
+
+    def _hud_content(self) -> HudContent:
+        config = self._config
+        point_count = _polygon_point_count(config.review_roots)
+        return HudContent(
+            left_lines=(
+                labeled_line(ARTIST, resolve_artist_display_name()),
+                labeled_line(_LABEL_ASSET, config.asset_label),
+                labeled_line(_LABEL_POINTS, f"{point_count:,}"),
+            ),
+            frame_start=1,
+        )
 
 
 @contextmanager
@@ -374,39 +396,6 @@ def _temporary_turnaround_camera(
             mc.delete(aim_locator)
         if mc.objExists(camera_transform):
             mc.delete(camera_transform)
-
-
-def _turnaround_huds(
-    asset_label: str,
-    review_roots: tuple[str, ...],
-) -> tuple[list[str], list[HudDefinition]]:
-    point_count_label = str(_polygon_point_count(review_roots))
-    return (
-        [],
-        [
-            HudDefinition(
-                "SKD_turnaround_points",
-                command=lambda: point_count_label,
-                label="Points:",
-                section=9,
-                idle_refresh=True,
-            ),
-            HudDefinition(
-                "SKD_turnaround_artist",
-                command=resolve_artist_display_name,
-                label="Artist:",
-                section=5,
-                event="SceneOpened",
-            ),
-            HudDefinition(
-                "SKD_turnaround_asset",
-                command=lambda: asset_label,
-                label="Asset:",
-                section=7,
-                idle_refresh=True,
-            ),
-        ],
-    )
 
 
 def _polygon_point_count(review_roots: tuple[str, ...]) -> int:

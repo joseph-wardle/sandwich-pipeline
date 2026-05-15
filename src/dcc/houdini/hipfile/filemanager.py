@@ -7,6 +7,7 @@ import hou
 from env_sg import DB_Config
 
 from dcc.houdini import runtime as houdini_runtime
+from dcc.houdini.hipfile.paths import current_hip_path
 from core.ui import MessageDialog
 from core.ui.save_version_dialog import PromoteVersionDialog, SaveVersionDialog
 from core.ui.version_browser import VersionBrowserWidget
@@ -114,26 +115,13 @@ class HFileManager(FileManager):
         hou.hipFile.clear(suppress_save_prompt=True)
         hou.hipFile.save(str(path))
 
-    @staticmethod
-    def _current_hip_path() -> Path | None:
-        """Return the resolved, absolute path of the current HIP file, or None."""
-        hip_raw = (hou.hipFile.path() or "").strip()
-        if not hip_raw:
-            return None
-        hip_path = Path(hou.expandString(hip_raw)).expanduser()
-        if not hip_path.is_absolute():
-            hip_path = (Path(hou.hscriptStringExpression("$HIP")) / hip_path).resolve()
-        else:
-            hip_path = hip_path.resolve()
-        return hip_path
-
     def _ensure_hip_saved(self) -> Path | None:
         """Prompt the artist to save unsaved changes, then return the HIP path.
 
         Returns None if the HIP has no path, the artist cancels, or the save
         fails.  Also validates that the file exists on disk before returning.
         """
-        hip_path = self._current_hip_path()
+        hip_path = current_hip_path()
         if hip_path is None:
             MessageDialog(
                 self._main_window,
@@ -162,7 +150,7 @@ class HFileManager(FileManager):
                     "Save Failed",
                 ).exec_()
                 return None
-            hip_path = self._current_hip_path()
+            hip_path = current_hip_path()
             if hip_path is None:
                 MessageDialog(
                     self._main_window,
@@ -187,7 +175,7 @@ class HFileManager(FileManager):
 
     def open_version_browser(self) -> None:
         kind = self._entity_label()
-        hip_path = self._current_hip_path()
+        hip_path = current_hip_path()
         if hip_path is None:
             MessageDialog(
                 self._main_window,

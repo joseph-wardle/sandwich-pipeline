@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from abc import abstractmethod
 from collections import defaultdict
 from pathlib import Path
@@ -27,7 +26,6 @@ from Qt.QtWidgets import (
 )
 
 from core.ui import ButtonPair, MessageDialog
-from dcc.maya.playblast.hud import HudDefinition
 from dcc.maya.playblast.shot.config import (
     MShotPlayblastConfig,
     SaveLocation,
@@ -118,29 +116,6 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             "Current Folder",
             lambda: Path(str(mc.file(query=True, sceneName=True) or ".")).parent,
             FFmpegPreset.WEB,
-        )
-
-    class MAYA_HUDS:
-        CAM_NAME = "HUDCameraNames"
-        CUR_FRAME = "HUDCurrentFrame"
-        FOCAL_LENGTH = "HUDFocalLength"
-
-    class CUSTOM_HUDS:
-        FILENAME = HudDefinition(
-            "LnDfilename",
-            command=lambda: os.path.splitext(
-                os.path.basename(str(mc.file(query=True, sceneName=True) or ""))
-            )[0],
-            event="SceneSaved",
-            label="File:",
-            section=5,
-        )
-        ARTIST = HudDefinition(
-            "LnDartist",
-            command=resolve_artist_display_name,
-            event="SceneOpened",
-            label="Artist:",
-            section=5,
         )
 
     def __init__(

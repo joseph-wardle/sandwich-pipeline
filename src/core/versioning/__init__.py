@@ -15,6 +15,7 @@ from .model import (
     stream_key_for,
 )
 from .service import (
+    current_version_label,
     list_version_records,
     path_matches_stream,
     promote_version,
@@ -46,6 +47,7 @@ __all__ = [
     "backup_file",
     "backup_if_changed",
     "current_record",
+    "current_version_label",
     "get_manifest_path",
     "list_version_records",
     "load_manifest",

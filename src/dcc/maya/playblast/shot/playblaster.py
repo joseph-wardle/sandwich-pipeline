@@ -1,31 +1,43 @@
 from __future__ import annotations
 
 import copy
-import logging
 from typing import TYPE_CHECKING
 
 import maya.cmds as mc
 from mayacapture.capture import capture  # type: ignore[import-not-found]
 
-from dcc.maya.playblast.hud import applied_hud
-from dcc.maya.playblast.shot.config import MPlayblastConfig
-from dcc.maya.util.selection import maintain_selection
+from core.hud import (
+    ARTIST,
+    TITLE,
+    HudContent,
+    labeled_line,
+    line_date,
+    line_shot,
+)
 from core.playblast import Playblaster
+from core.util.users import resolve_artist_display_name
+from dcc.maya.playblast.shot.config import MPlayblastConfig, MShotPlayblastConfig
+from dcc.maya.util.selection import maintain_selection
 
 if TYPE_CHECKING:
     from typing import Any
 
     from core.shotgrid import Shot
 
-log = logging.getLogger(__name__)
+# Anim/previs-specific labels.
+_LABEL_PASS = "Pass"
+_LABEL_CAMERA = "Camera"
+_LABEL_FOCAL = "Focal"
 
 
 class MPlayblaster(Playblaster):
     _config: MPlayblastConfig
+    _current_shot_config: MShotPlayblastConfig | None
     _extra_kwargs: dict[str, Any]
 
     def __init__(self) -> None:
         self._extra_kwargs = {}
+        self._current_shot_config = None
 
     def configure(self, config: MPlayblastConfig) -> MPlayblaster:
         self._config = config
@@ -43,7 +55,6 @@ class MPlayblaster(Playblaster):
         return ""
 
     def _write_images(self, shot: Shot, path: str) -> None:
-        """Maya implementation of playblasting image frames"""
         cut_in, cut_out = shot.frame_range
         active_editor = self._resolve_active_editor()
         if active_editor:
@@ -76,30 +87,54 @@ class MPlayblaster(Playblaster):
             }
         )
 
+        width, height = self.resolution
         capture(
-            width=1280,
-            height=720,
+            width=width,
+            height=height,
             filename=path,
             start_frame=(cut_in - 5),
             end_frame=(cut_out + 5),
             format="image",
             compression="png",
             off_screen=True,
-            show_ornaments=True,
+            # HUD bakes during encode (apply_hud in the base), not during capture.
+            show_ornaments=False,
             overwrite=True,
             maintain_aspect_ratio=False,
             viewer=0,
             **self._extra_kwargs,
         )
 
+    def _hud_content(self, shot: Shot, start_frame: int) -> HudContent:
+        shot_config = self._current_shot_config
+
+        left_lines: list[str] = [labeled_line(ARTIST, resolve_artist_display_name())]
+        if shot_config is not None and shot_config.version_title:
+            left_lines.append(labeled_line(TITLE, shot_config.version_title))
+        if shot_config is not None and shot_config.pass_label:
+            left_lines.append(labeled_line(_LABEL_PASS, shot_config.pass_label))
+        left_lines.append(
+            line_shot(
+                shot.code or "",
+                version=shot_config.version_label if shot_config else None,
+                unsaved=bool(mc.file(query=True, modified=True)),
+            )
+        )
+
+        right_lines: list[str] = [line_date()]
+        camera_line = _camera_focal_lines(shot_config)
+        right_lines.extend(camera_line)
+
+        return HudContent(
+            left_lines=tuple(left_lines),
+            right_lines=tuple(right_lines),
+            frame_start=start_frame,
+        )
+
     def playblast(self) -> None:
-        with (
-            applied_hud(self._config.builtin_huds, self._config.custom_huds),
-            maintain_selection(),
-        ):
+        with maintain_selection():
             mc.select(clear=True)
 
-            # assemble kwargs from config options
             global_kwargs: dict[str, Any] = {
                 "viewport_options": {},
                 "viewport2_options": {},
@@ -122,20 +157,46 @@ class MPlayblaster(Playblaster):
             if self._config.ssao:
                 global_kwargs["viewport2_options"].update({"ssaoEnable": True})
 
-            # iterate over shots and playblast
             for shot_config in self._config.shots:
-                # assemble shot-specific kwargs
                 self._extra_kwargs = copy.deepcopy(global_kwargs)
                 if shot_config.use_sequencer:
                     self._extra_kwargs["use_camera_sequencer"] = True
                 else:
                     self._extra_kwargs["camera"] = shot_config.camera
 
-                super()._do_playblast(
-                    shot_config.shot,
-                    shot_config.paths,
-                    shot_config.tails,
-                )
+                # Stashed so `_hud_content` can read per-shot inputs when the
+                # base calls it back up the stack.
+                self._current_shot_config = shot_config
+                try:
+                    super()._do_playblast(
+                        shot_config.shot,
+                        shot_config.paths,
+                        shot_config.tails,
+                    )
+                finally:
+                    self._current_shot_config = None
+
+
+def _camera_focal_lines(shot_config: MShotPlayblastConfig | None) -> list[str]:
+    if shot_config is None or not shot_config.camera or shot_config.use_sequencer:
+        return []
+    camera_path = str(shot_config.camera)
+    lines = [labeled_line(_LABEL_CAMERA, _short_camera_name(camera_path))]
+    focal = _camera_focal_length(camera_path)
+    if focal is not None:
+        lines.append(labeled_line(_LABEL_FOCAL, f"{focal:.0f}mm"))
+    return lines
+
+
+def _short_camera_name(camera_path: str) -> str:
+    return camera_path.rsplit("|", 1)[-1] or camera_path
+
+
+def _camera_focal_length(camera_path: str) -> float | None:
+    try:
+        return float(mc.camera(camera_path, query=True, focalLength=True))
+    except Exception:
+        return None
 
 
 __all__ = ["MPlayblaster"]

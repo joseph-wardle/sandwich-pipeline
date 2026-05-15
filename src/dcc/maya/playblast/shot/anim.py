@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import replace
+from pathlib import Path
 
+import maya.cmds as mc
 from Qt.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -10,7 +13,10 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from dcc.maya.playblast.hud import HudDefinition
+from core.playblast import FFmpegPreset
+from core.playblast.naming import build_edit_output_directory
+from core.shot import maya_anim_stream, shot_owner_for
+from core.versioning import current_version_label
 from dcc.maya.playblast.shot.config import (
     MPlayblastConfig,
     MShotPlayblastConfig,
@@ -18,8 +24,6 @@ from dcc.maya.playblast.shot.config import (
 )
 from dcc.maya.playblast.shot.dialog import MPlayblastDialog
 from dcc.maya.shotfile.anim import _find_usd_shotcam
-from core.playblast import FFmpegPreset
-from core.playblast.naming import build_edit_output_directory
 
 log = logging.getLogger(__name__)
 
@@ -88,22 +92,20 @@ class AnimPlayblastDialog(MPlayblastDialog):
         log.warning("No USD shot camera found; falling back to legacy path.")
         return "|__mayaUsd__|shotCamParent|shotCam"
 
-    def _hud_shot_label(self) -> str:
-        if self._shot is not None:
-            return self._shot.code or "No shot code found"
-        return "No shot code found"
-
     def _build_shot_playblast_config(self) -> MShotPlayblastConfig:
         if self._shot is None:
             raise ValueError("No pipeline shot context is available.")
 
         shot_output_name = self._resolve_output_name(self._shot.code or "")
+        version_label, version_title = _resolve_anim_version(self._shot)
         return MShotPlayblastConfig(
             camera=self._get_shot_camera_path(),
             shot=self._shot,
             paths=self._paths_for_filename(shot_output_name),
             tails=(5, 5),
             use_sequencer=False,
+            version_label=version_label,
+            version_title=version_title,
         )
 
     def _generate_config(self) -> MPlayblastConfig:
@@ -113,29 +115,10 @@ class AnimPlayblastDialog(MPlayblastDialog):
         else:
             shot_config = self._build_custom_playblast_config()
 
+        pass_label = str(self._shot_pass.currentText()).strip() or None
+        shot_config = replace(shot_config, pass_label=pass_label)
+
         return MPlayblastConfig(
-            builtin_huds=[
-                MPlayblastDialog.MAYA_HUDS.CAM_NAME,
-                MPlayblastDialog.MAYA_HUDS.CUR_FRAME,
-                MPlayblastDialog.MAYA_HUDS.FOCAL_LENGTH,
-            ],
-            custom_huds=[
-                MPlayblastDialog.CUSTOM_HUDS.FILENAME,
-                MPlayblastDialog.CUSTOM_HUDS.ARTIST,
-                HudDefinition(
-                    "SKD_shot",
-                    command=self._hud_shot_label,
-                    section=7,
-                    event="SceneSaved",
-                ),
-                HudDefinition(
-                    "SKD_pass",
-                    command=lambda: self._shot_pass.currentText(),
-                    label="Pass:",
-                    section=5,
-                    event="SceneSaved",
-                ),
-            ],
             dof=self.use_dof,
             hardware_fog=self.use_hardware_fog,
             lighting=self.use_lighting,
@@ -143,3 +126,12 @@ class AnimPlayblastDialog(MPlayblastDialog):
             shots=[shot_config],
             ssao=self.use_ssao,
         )
+
+
+def _resolve_anim_version(shot) -> tuple[str | None, str | None]:
+    scene_raw = mc.file(query=True, sceneName=True)
+    if not isinstance(scene_raw, str) or not scene_raw:
+        return None, None
+    scene_path = Path(scene_raw).expanduser().resolve()
+    stream = maya_anim_stream(shot, owner=shot_owner_for(shot))
+    return current_version_label(stream, scene_path)

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from core import telemetry
+from core.hud import HudContent, apply_hud
 from core.playblast.encoding import build_image_input_chain, encode_movie
 from core.playblast.presets import FFmpegPreset
 from core.playblast.tempdir import resolve_playblast_tempdir
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+DEFAULT_RESOLUTION: tuple[int, int] = (1280, 720)
 
 
 class PlayblastError(Exception):
@@ -30,18 +33,20 @@ class PlayblastError(Exception):
 
 
 class Playblaster(metaclass=ABCMeta):
-    """Cross-DCC base for playblasters. Uses FFmpeg to encode videos.
-
-    Subclasses implement `_write_images` to dump a PNG sequence; this base
-    handles encoding via FFmpeg, copying to multiple output paths, post-
-    processing for VLC compatibility, and emitting telemetry.
-    """
+    """Cross-DCC playblast base. Subclasses implement `_write_images` to dump
+    a PNG sequence. This base encodes via FFmpeg, copies to multiple outputs,
+    post-processes, and emits telemetry. Override `_hud_content` to bake in a HUD"""
 
     fps: int = 24
+    resolution: tuple[int, int] = DEFAULT_RESOLUTION
 
     @abstractmethod
     def _write_images(self, shot: Shot, path: str) -> None:
         pass
+
+    def _hud_content(self, shot: Shot, start_frame: int) -> HudContent:
+        del shot, start_frame
+        return HudContent()
 
     def _run_postprocess(self, video_path: Path) -> None:
         """Optional post-encode pass on each final output path.
@@ -102,8 +107,15 @@ class Playblaster(metaclass=ABCMeta):
                             str(exc) or exc.__class__.__name__
                         ) from exc
                     self._normalize_frame_filenames(tempdir, image_basename)
-                    encoded_input = self._build_ffmpeg_input(
-                        shot, tempdir, image_basename, frame_start
+                    image_chain = build_image_input_chain(
+                        str(tempdir / image_basename) + ".%04d.png",
+                        start_frame=frame_start,
+                        frame_rate=self.fps,
+                    )
+                    encoded_input = apply_hud(
+                        image_chain,
+                        self._hud_content(shot, frame_start),
+                        self.resolution,
                     )
 
                 final_paths = self._encode_and_publish_preset(
@@ -155,16 +167,6 @@ class Playblaster(metaclass=ABCMeta):
                 continue
             new_name = f"{basename}.{_padded_signed_int(int(match.group(1)))}.png"
             path.rename(path.with_name(new_name))
-
-    def _build_ffmpeg_input(
-        self, shot: Shot, tempdir: Path, basename: str, start_frame: int
-    ) -> Any:
-        del shot  # base impl ignores shot context; HPlayblaster's HUD uses it
-        return build_image_input_chain(
-            str(tempdir / basename) + ".%04d.png",
-            start_frame=start_frame,
-            frame_rate=self.fps,
-        )
 
     def _encode_preset(
         self,
