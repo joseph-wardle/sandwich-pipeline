@@ -62,14 +62,6 @@ def set_frameRange_and_aspectRatio():
 
     set_frameRange_and_aspectRatio.run()
 
-def build_light_comp():
-    import build_light_comp as _blc
-    _blc.run()
-
-def export_lights():
-    import export_lights as _el
-    _el.run()
-
 
 ################################### Nungeon buttons (Sidebar) ###################################
 toolbar = nuke.menu("Nodes")
@@ -128,9 +120,6 @@ m.addCommand("SKD Read Node", "make_bobo_read_node()", icon="MicrowaveIcon.png")
 
 m.addCommand("SKD FX Read", "make_bobo_fx_read_node()", icon="MicrowaveIcon.png")
 m.addCommand("SKD CFX Read", "make_bobo_cfx_read_node()", icon="MicrowaveIcon.png")
-
-m.addCommand("Build LPE Grade", "build_light_comp()", icon="MicrowaveIcon.png")
-m.addCommand("Export Light Grades", "export_lights()", icon="MicrowaveIcon.png")
 
 ################################### Nungeon Shelf Tool Buttons ###################################
 menu = nuke.menu("Nuke")
