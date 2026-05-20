@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import maya.cmds as mc
 from mayacapture.capture import capture  # type: ignore[import-not-found]
@@ -194,7 +194,10 @@ def _short_camera_name(camera_path: str) -> str:
 
 def _camera_focal_length(camera_path: str) -> float | None:
     try:
-        return float(mc.camera(camera_path, query=True, focalLength=True))
+        # mc.camera query is typed as a broad union; focalLength always returns a scalar.
+        return float(
+            cast("float", mc.camera(camera_path, query=True, focalLength=True))
+        )
     except Exception:
         return None
 
