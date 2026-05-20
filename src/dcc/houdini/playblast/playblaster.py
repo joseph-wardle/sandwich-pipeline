@@ -110,9 +110,7 @@ class HPlayblaster(Playblaster):
         department = department_from_hip_path(hip_path)
         if department is None:
             return None, None
-        stream = houdini_department_stream(
-            shot, department, owner=shot_owner_for(shot)
-        )
+        stream = houdini_department_stream(shot, department, owner=shot_owner_for(shot))
         return current_version_label(stream, hip_path)
 
     def _write_images(self, shot: Shot, path: str) -> None:
