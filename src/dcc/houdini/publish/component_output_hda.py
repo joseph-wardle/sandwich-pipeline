@@ -167,6 +167,7 @@ def publish(node: hou.Node) -> Mapping[str, Any]:
     _repair_broken_output_paths(node)
 
     options = _collect_publish_options(node)
+    _clear_publish_notes(node)
     try:
         parent = hou.qt.mainWindow()
     except Exception:
@@ -209,6 +210,11 @@ def _collect_publish_options(node: hou.Node) -> PublishOptions:
         hooks=tuple(_collect_hook_specs(node)),
         fail_on_hook_error=_eval_bool(node, "fail_on_hook_error", False),
     )
+
+
+def _clear_publish_notes(node: hou.Node) -> None:
+    _set_if_exists(node, "publish_title", "")
+    _set_if_exists(node, "publish_note", "")
 
 
 def _collect_hook_specs(node: hou.Node) -> list[str]:
