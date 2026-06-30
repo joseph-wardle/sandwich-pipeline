@@ -26,6 +26,9 @@ from env import Executables
 
 log = logging.getLogger(__name__)
 
+_COLOR_SOURCE_COLORSPACE = "sRGB - Texture"
+_RENDERING_COLORSPACE = "ACEScg"
+
 
 def _process_qt_events() -> None:
     """Flush pending Qt events so progress dialogs can repaint.
@@ -137,18 +140,18 @@ class TexConverter:
 
         @self._debug_out
         def tex_cmd(img: str, is_color: bool) -> list[str]:
-            # Colorspace is set by the `pxrtexture` node (`filename_colorspace`)
             # fmt: off
             return [
                 str(Executables.oiiotool),
                 img,
                 *(
                     [
-                        "-d", "uint8",
-                        "--dither",
+                        "--colorconvert",
+                        _COLOR_SOURCE_COLORSPACE, _RENDERING_COLORSPACE,
+                        "-d", "half",
                     ] if is_color else []
                 ),
-                "--compression", "lzw" if is_color else "lossless",
+                "--compression", "zip" if is_color else "lossless",
                 "--planarconfig", "separate",
                 "-otex:fileformatname=tx:wrap=clamp:resize=1:prman_options=1",
                 f"{str(self.tex_path / Path(img).stem)}.tex",
