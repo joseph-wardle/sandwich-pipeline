@@ -140,5 +140,107 @@ global proc shelf_SKD_Previs () {
         -commandRepeatable 1
         -flat 1
     ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 38
+        -enable 1
+        -width 41
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "Camera"
+        -enableBackground 0
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Camera"
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "Camera"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "camera.open.svg"
+        -image1 "camera.open.svg"
+        -style "iconOnly"
+        -marginWidth 0
+        -marginHeight 1
+        -command "from dcc.maya.util.scripts.Camera import show_camera_reference_ui; show_camera_reference_ui();\n"
+        -sourceType "python"
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "FX Card Rig"
+        -enableBackground 0
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "FX Card Rig"
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "FX Card Rig"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "radialField.svg"
+        -image1 "radialField.svg"
+        -style "iconOnly"
+        -marginWidth 0
+        -marginHeight 1
+        -command "from dcc.maya.util.scripts.FX_Card_Rig import open_reference_ui; open_reference_ui();\n"
+        -sourceType "python"
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "FX Card"
+        -enableBackground 0
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "FX Card"
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -imageOverlayLabel "FX Card"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "colorPresetSpectrum.png"
+        -image1 "colorPresetSpectrum.png"
+        -style "iconOnly"
+        -marginWidth 0
+        -marginHeight 1
+        -command "from dcc.maya.util.scripts.FX_Card import FXCard; FXCard();\n"
+        -sourceType "python"
+        -commandRepeatable 1
+        -flat 1
+    ;
 
 }

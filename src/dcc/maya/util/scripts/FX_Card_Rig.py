@@ -4,7 +4,7 @@ import maya.cmds as cmds
 from core.util.paths import get_previs_path
 
 # Cross-platform rig path (get_previs_path handles OS detection)
-RIG_PATH = str(get_previs_path() / "Rigs/FX_card_rig_v02.ma")
+RIG_PATH = str(get_previs_path() / "rigs/FX_card_rig_v02.ma")
 
 
 def reference_rig_with_namespace(rig_path, base_namespace):
