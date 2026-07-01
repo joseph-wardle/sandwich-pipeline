@@ -5,7 +5,7 @@ Because the previs sequencer lays shots out contiguously starting at frame
 1001, the per-cut PNGs land at non-overlapping frame numbers and together
 form one continuous sequence — one encode pass produces one MP4.
 
-HUD lines are burned in by `core.hud.apply_hud` during encode (called by the
+HUD lines are burned in by `pipe.core.hud.apply_hud` during encode (called by the
 `Playblaster` base after `_write_images`), not by Maya during capture.
 `show_ornaments=False` keeps Maya from drawing its own HUD on top.
 """

@@ -690,7 +690,7 @@ def _write_named_version(
 # ---------------------------------------------------------------------------
 
 # These symbols were historically imported from this module by other code.
-# They now live in dcc.substance_painter.util.metadata but are re-exported here so that
+# They now live in pipe.dcc.substance_painter.util.metadata but are re-exported here so that
 # existing import paths continue to work.
 from pipe.dcc.substance_painter.util.metadata import (  # noqa: E402, F401
     PIPE_SP_METADATA_CONTEXT,

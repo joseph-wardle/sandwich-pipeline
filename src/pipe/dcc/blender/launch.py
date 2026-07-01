@@ -17,7 +17,7 @@ class BlenderLauncher(Launcher):
         self, is_python_shell: bool = False, extra_args: list[str] | None = None
     ) -> None:
         this_path = Path(__file__).resolve()
-        # this_path = `<repo>/src/dcc/blender/launch.py`
+        # this_path = `<repo>/src/pipe/dcc/blender/launch.py`
         src_path = this_path.parents[3]
         repo_root = src_path.parent
 

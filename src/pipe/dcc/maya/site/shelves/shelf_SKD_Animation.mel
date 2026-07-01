@@ -34,7 +34,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.shotfile import MAnimShotFileManager; fm = MAnimShotFileManager(); fm.open_file()"
+        -command "from pipe.dcc.maya.shotfile import MAnimShotFileManager; fm = MAnimShotFileManager(); fm.open_file()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -69,7 +69,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.shotfile import MAnimShotFileManager; MAnimShotFileManager().save_version_for_current_scene()"
+        -command "from pipe.dcc.maya.shotfile import MAnimShotFileManager; MAnimShotFileManager().save_version_for_current_scene()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -104,7 +104,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.shotfile import MAnimShotFileManager; MAnimShotFileManager().open_version_browser()"
+        -command "from pipe.dcc.maya.shotfile import MAnimShotFileManager; MAnimShotFileManager().open_version_browser()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -138,7 +138,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import dcc.maya.util.picker; dcc.maya.util.picker.run()"
+        -command "import pipe.dcc.maya.util.picker; pipe.dcc.maya.util.picker.run()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -173,7 +173,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import dcc.maya.util.studiolibrary; dcc.maya.util.studiolibrary.run()"
+        -command "import pipe.dcc.maya.util.studiolibrary; pipe.dcc.maya.util.studiolibrary.run()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -208,7 +208,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import dcc.maya.util.space_switch as spsw; spsw.run()"
+        -command "import pipe.dcc.maya.util.space_switch as spsw; spsw.run()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -278,7 +278,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.playblast import AnimPlayblastDialog; from dcc.maya.runtime import get_main_qt_window; AnimPlayblastDialog(get_main_qt_window()).show();"
+        -command "from pipe.dcc.maya.playblast import AnimPlayblastDialog; from pipe.dcc.maya.runtime import get_main_qt_window; AnimPlayblastDialog(get_main_qt_window()).show();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -313,7 +313,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.publish import AnimPublisher; AnimPublisher().publish();"
+        -command "from pipe.dcc.maya.publish import AnimPublisher; AnimPublisher().publish();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -348,7 +348,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.publish import AnimPublisher\nAnimPublisher(spline_publish=True).publish()"
+        -command "from pipe.dcc.maya.publish import AnimPublisher\nAnimPublisher(spline_publish=True).publish()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -383,7 +383,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import dcc.maya.wrangler; dcc.maya.wrangler.run()"
+        -command "import pipe.dcc.maya.wrangler; pipe.dcc.maya.wrangler.run()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -487,7 +487,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import dcc.maya.pin_shift; dcc.maya.pin_shift.run();"
+        -command "import pipe.dcc.maya.pin_shift; pipe.dcc.maya.pin_shift.run();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -521,7 +521,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.util.scripts.Assign_FX_Material import assign_texture_with_dropdown; assign_texture_with_dropdown();\n"
+        -command "from pipe.dcc.maya.util.scripts.Assign_FX_Material import assign_texture_with_dropdown; assign_texture_with_dropdown();\n"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -555,7 +555,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.util.scripts.FX_Card_Rig import open_reference_ui; open_reference_ui();\n"
+        -command "from pipe.dcc.maya.util.scripts.FX_Card_Rig import open_reference_ui; open_reference_ui();\n"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -589,7 +589,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.util.scripts.FX_Card import FXCard; FXCard();\n"
+        -command "from pipe.dcc.maya.util.scripts.FX_Card import FXCard; FXCard();\n"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -623,7 +623,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.util.scripts.Pointlight_Rig import create_point_light_control; create_point_light_control();\n"
+        -command "from pipe.dcc.maya.util.scripts.Pointlight_Rig import create_point_light_control; create_point_light_control();\n"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -657,7 +657,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.util.scripts.Set_Up import setup; setup();"
+        -command "from pipe.dcc.maya.util.scripts.Set_Up import setup; setup();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -691,7 +691,7 @@ global proc shelf_SKD_Animation () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.util.scripts.Spotlight_Rig import create_spotlight_rig_auto_index; create_spotlight_rig_auto_index();"
+        -command "from pipe.dcc.maya.util.scripts.Spotlight_Rig import create_spotlight_rig_auto_index; create_spotlight_rig_auto_index();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1

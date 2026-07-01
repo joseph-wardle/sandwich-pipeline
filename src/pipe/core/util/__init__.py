@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     # Qt is only used in type annotations below (which are deferred by
     # `from __future__ import annotations`). Keeping the import under
-    # TYPE_CHECKING lets `core.util` load in Qt-less contexts such as the
+    # TYPE_CHECKING lets `pipe.core.util` load in Qt-less contexts such as the
     # outer launcher venv before a DCC subprocess starts.
     from Qt import QtWidgets
 
@@ -91,13 +91,13 @@ except Exception:
 
 
 def __getattr__(name: str) -> object:
-    """Lazily expose `FileManager` so importing `core.util` stays light.
+    """Lazily expose `FileManager` so importing `pipe.core.util` stays light.
 
     `FileManager` pulls in Qt, ShotGrid, and the glui dialog suite — none of
     which are needed by callers that only want `silent_startupinfo`,
-    `log_errors`, etc. Resolving it through `__getattr__` keeps `core.util`
+    `log_errors`, etc. Resolving it through `__getattr__` keeps `pipe.core.util`
     importable in Qt-less contexts (the outer launcher venv, telemetry
-    backend tools) while still letting `from core.util import FileManager`
+    backend tools) while still letting `from pipe.core.util import FileManager`
     work where the heavy stack is available.
     """
     if name == "FileManager":

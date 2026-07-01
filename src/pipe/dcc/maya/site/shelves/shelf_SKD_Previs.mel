@@ -33,7 +33,7 @@ global proc shelf_SKD_Previs () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.previs.file_manager import MPrevisFileManager; MPrevisFileManager().open_file()"
+        -command "from pipe.dcc.maya.previs.file_manager import MPrevisFileManager; MPrevisFileManager().open_file()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -67,7 +67,7 @@ global proc shelf_SKD_Previs () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.previs import panel; panel.launch()"
+        -command "from pipe.dcc.maya.previs import panel; panel.launch()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -101,7 +101,7 @@ global proc shelf_SKD_Previs () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.playblast import PrevisPlayblastDialog; from dcc.maya.runtime import get_main_qt_window; PrevisPlayblastDialog(get_main_qt_window()).show();"
+        -command "from pipe.dcc.maya.playblast import PrevisPlayblastDialog; from pipe.dcc.maya.runtime import get_main_qt_window; PrevisPlayblastDialog(get_main_qt_window()).show();"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -135,7 +135,7 @@ global proc shelf_SKD_Previs () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.previs.publish import publish_all_shot_cameras_interactive; publish_all_shot_cameras_interactive()"
+        -command "from pipe.dcc.maya.previs.publish import publish_all_shot_cameras_interactive; publish_all_shot_cameras_interactive()"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -169,7 +169,7 @@ global proc shelf_SKD_Previs () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.util.scripts.Camera import show_camera_reference_ui; show_camera_reference_ui();\n"
+        -command "from pipe.dcc.maya.util.scripts.Camera import show_camera_reference_ui; show_camera_reference_ui();\n"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -203,7 +203,7 @@ global proc shelf_SKD_Previs () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.util.scripts.FX_Card_Rig import open_reference_ui; open_reference_ui();\n"
+        -command "from pipe.dcc.maya.util.scripts.FX_Card_Rig import open_reference_ui; open_reference_ui();\n"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1
@@ -237,7 +237,7 @@ global proc shelf_SKD_Previs () {
         -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from dcc.maya.util.scripts.FX_Card import FXCard; FXCard();\n"
+        -command "from pipe.dcc.maya.util.scripts.FX_Card import FXCard; FXCard();\n"
         -sourceType "python"
         -commandRepeatable 1
         -flat 1

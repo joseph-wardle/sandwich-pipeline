@@ -55,7 +55,7 @@ OUTPUT_WIDTH = 1280
 OUTPUT_HEIGHT = 720
 FPS = 24
 
-# Per-cell label sizing — ratios match `core.hud` so the cell label visually
+# Per-cell label sizing — ratios match `pipe.core.hud` so the cell label visually
 # reads as a sibling of the frame-level HUD lines. Each ratio is multiplied
 # by `max(cols, rows)` at render time so the post-`xstack` scale-down lands
 # the label at ~21px in the final 720-tall output, regardless of grid shape.
@@ -97,7 +97,7 @@ class MComparePlayblaster:
 
     Not a `Playblaster` subclass: the base's `_do_playblast` assumes a single
     PNG-sequence → single-encode shape, which doesn't fit the multi-camera
-    xstack pipeline. Reuses `core.playblast.encoding.encode_movie` and the
+    xstack pipeline. Reuses `pipe.core.playblast.encoding.encode_movie` and the
     shared FFmpeg-input helpers, but owns its own capture-and-compose loop.
     """
 
@@ -284,7 +284,7 @@ class MComparePlayblaster:
 
         Font size scales with `max(cols, rows)` so the post-`xstack` scale-
         down leaves the text at a constant output-resolution size regardless
-        of grid shape. Outline-only (no backing box) matches `core.hud`.
+        of grid shape. Outline-only (no backing box) matches `pipe.core.hud`.
         """
         text = _format_cell_label(
             camera=self._config.cameras[camera_index],

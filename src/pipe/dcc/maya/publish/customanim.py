@@ -128,7 +128,7 @@ class AnimPublisher(Publisher):
         """Launch a Houdini process to compute the anim post-process HDA"""
         post_script = ";".join(
             [
-                "from dcc.houdini.shot.animpostprocess import AnimPostProcessor",
+                "from pipe.dcc.houdini.shot.animpostprocess import AnimPostProcessor",
                 f"AnimPostProcessor().run('{self._shot.code}')",
                 "exit()",
             ]
