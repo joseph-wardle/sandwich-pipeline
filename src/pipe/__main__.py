@@ -49,7 +49,7 @@ def launch(
     launcher_cls(is_python_shell, extra_args).launch()
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = ArgumentParser(description="Launch pipeline software")
     parser.add_argument(
         "software",
@@ -84,3 +84,7 @@ if __name__ == "__main__":
     launch(args.software, args.python, extras)
 
     log.info("Exiting")
+
+
+if __name__ == "__main__":
+    main()
