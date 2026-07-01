@@ -17,6 +17,8 @@ VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
 SRC = REPO_ROOT / "src"
 ICONS = REPO_ROOT / "resources" / "icon"
 APPLICATIONS = Path.home() / ".local" / "share" / "applications"
+# The deploy lives at <share>/.pipeline; 06_software is its sibling on the share.
+SOFTWARE_DIR = REPO_ROOT.parent / "06_software"
 
 
 @dataclass(frozen=True)
@@ -52,17 +54,40 @@ def render(launcher: Launcher) -> str:
     )
 
 
-def install() -> None:
-    APPLICATIONS.mkdir(parents=True, exist_ok=True)
+def _write_launchers(dest_dir: Path, verb: str) -> None:
+    dest_dir.mkdir(parents=True, exist_ok=True)
     for launcher in LAUNCHERS:
-        target = APPLICATIONS / launcher.filename
-        # Replace any prior install, including the old symlink-based ones.
+        target = dest_dir / launcher.filename
+        # Replace any prior file or the old symlink-based launchers.
         if target.is_symlink() or target.exists():
             target.unlink()
         target.write_text(render(launcher), encoding="utf-8")
-        print(f"Installed {target}")
+        print(f"{verb} {target}")
+
+
+def install() -> None:
+    """Primary path: put the launchers in the user's application menu."""
+    _write_launchers(APPLICATIONS, "Installed")
     subprocess.run(["update-desktop-database", str(APPLICATIONS)], check=False)
     print("Updated desktop database")
+
+
+def publish_to_software() -> None:
+    """Deploy step: provision the shared 06_software folder.
+
+    Writes the per-DCC launchers so artists can double-click them straight
+    from the share, plus the installer entry that adds menu shortcuts. Run
+    once from the deploy after redeploying (`... --software`).
+    """
+    _write_launchers(SOFTWARE_DIR, "Published")
+    installer = SOFTWARE_DIR / "installer.desktop"
+    installer.write_text(
+        (REPO_ROOT / "desktop_launchers" / "installer.desktop").read_text(
+            encoding="utf-8"
+        ),
+        encoding="utf-8",
+    )
+    print(f"Published {installer}")
 
 
 if __name__ == "__main__":
@@ -70,4 +95,7 @@ if __name__ == "__main__":
         sys.exit(
             f"venv python not found at {VENV_PYTHON}; run `uv sync` in {REPO_ROOT} first"
         )
-    install()
+    if "--software" in sys.argv[1:]:
+        publish_to_software()
+    else:
+        install()
