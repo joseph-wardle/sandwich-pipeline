@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Install Sandwich DCCs
+GenericName=Install Sandwich Kwon Do Launchers
+Exec=/groups/sandwich/.pipeline/.venv/bin/python /groups/sandwich/.pipeline/install_desktop_launchers.py
+Icon=system-software-install
+Terminal=true
+StartupNotify=true
