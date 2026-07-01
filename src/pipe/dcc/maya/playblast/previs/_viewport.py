@@ -1,7 +1,7 @@
 """Shared helper for translating the dialog's viewport-options bools into the
 keyword dict Maya's `capture()` expects.
 
-Lives here (and not in `dcc.maya.playblast.shot.playblaster`) because both
+Lives here (and not in `pipe.dcc.maya.playblast.shot.playblaster`) because both
 `MComparePlayblaster` and `MSequencePlayblaster` need the same translation
 without inheriting the rest of `MPlayblaster`'s single-shot machinery.
 """

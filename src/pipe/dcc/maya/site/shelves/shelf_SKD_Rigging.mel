@@ -33,7 +33,7 @@ global proc shelf_SKD_Rigging () {
         -style "iconOnly" 
         -marginWidth 0
         -marginHeight 1
-        -command "import dcc.maya.rig.builder\ndcc.maya.rig.builder.ui.launch()" 
+        -command "import pipe.dcc.maya.rig.builder\npipe.dcc.maya.rig.builder.ui.launch()" 
         -sourceType "python" 
         -commandRepeatable 1
         -flat 1

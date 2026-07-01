@@ -40,7 +40,7 @@ from pipe.dcc.maya.playblast.turnaround.framing import (
 from pipe.dcc.maya.util.selection import maintain_selection
 
 # Turnaround-specific HUD labels. Cross-DCC labels (Artist, ...) live in
-# :mod:`core.hud`.
+# :mod:`pipe.core.hud`.
 _LABEL_ASSET = "Asset"
 _LABEL_POINTS = "Points"
 

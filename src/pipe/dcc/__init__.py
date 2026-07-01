@@ -7,10 +7,10 @@ that imports the DCC API at module level; the package `__init__.py`
 re-exports `<Dcc>Launcher` only (NOT `<Dcc>Runtime`), so this package
 stays import-safe in the outer launcher venv before any DCC subprocess
 exists. Feature code that runs inside the DCC reaches the runtime via
-`from dcc.<name>.runtime import ...` directly.
+`from pipe.dcc.<name>.runtime import ...` directly.
 
 Which `dcc.<name>` resolves depends on the current DCC context: inside
-Maya only `dcc.maya` is reachable; inside Houdini only `dcc.houdini`;
+Maya only `pipe.dcc.maya` is reachable; inside Houdini only `pipe.dcc.houdini`;
 outside any DCC (headless / farm / pipe-only Python), none. This
 prevents outer-venv tooling from accidentally loading a runtime module
 that would crash on import because its DCC API is unavailable.

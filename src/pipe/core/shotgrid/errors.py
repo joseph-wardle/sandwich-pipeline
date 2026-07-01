@@ -1,6 +1,6 @@
 """Exceptions raised by the ShotGrid client.
 
-Callers import these directly (`from core.shotgrid import ShotGridNotFound`)
+Callers import these directly (`from pipe.core.shotgrid import ShotGridNotFound`)
 and catch them by type.  The string forms are production-facing: they describe
 the problem in the pipeline's own terms and never leak `shotgun_api3` internals.
 
@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 
 class ShotGridError(Exception):
-    """Base class for every ShotGrid-related error raised by `core.shotgrid`.
+    """Base class for every ShotGrid-related error raised by `pipe.core.shotgrid`.
 
     Catch this to handle any ShotGrid failure uniformly.  Catch a subclass to
     react to a specific failure mode.

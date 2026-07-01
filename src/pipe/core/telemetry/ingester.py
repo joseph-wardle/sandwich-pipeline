@@ -6,10 +6,10 @@ inserts a row into the `events` table. Per-spool read offsets are persisted
 in `ingester_status` so the ingester resumes cleanly after a restart.
 
 The orchestrator (`core/telemetry/local_stack.py`) starts the ingester as a
-subprocess of `python -m core.telemetry up` and `python -m core.telemetry catch-up`.
+subprocess of `python -m pipe.core.telemetry up` and `python -m pipe.core.telemetry catch-up`.
 It can also be invoked directly for ad-hoc backfill or testing (run from the repo root):
 
-    PYTHONPATH=src uv run python -m core.telemetry.ingester \\
+    PYTHONPATH=src uv run python -m pipe.core.telemetry.ingester \\
         --spool-root /groups/sandwich/05_production/.telemetry/raw \\
         --db-dsn postgresql://sandwich-telemetry@127.0.0.1:55432/sandwich_telemetry \\
         --once
@@ -393,7 +393,7 @@ def _coerce_naive_to_utc(value: datetime) -> datetime:
 
 
 # ---------------------------------------------------------------------------
-# CLI entrypoint — invoked via `python -m core.telemetry.ingester`, either by
+# CLI entrypoint — invoked via `python -m pipe.core.telemetry.ingester`, either by
 # the local-stack orchestrator or by hand for backfill
 # ---------------------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 """Hook resolution and execution for Houdini component publish.
 
 Design goals:
-1. Keep hook behavior decoupled from `dcc.houdini.publish.main`.
+1. Keep hook behavior decoupled from `pipe.dcc.houdini.publish.main`.
 2. Support both named hooks and import-path specs.
 3. Keep unresolved or failed hooks explicit and machine-readable.
 

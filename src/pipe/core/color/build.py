@@ -1,6 +1,6 @@
 """Generate the sandwich OCIO config + RenderMan JSON + README.
 
-Run via `hython src/core/color/build.py`. Outputs land in
+Run via `hython src/pipe/core/color/build.py`. Outputs land in
 `/groups/sandwich/05_production/color_configuration/<version>/`.
 """
 
@@ -159,11 +159,11 @@ def _build_readme(source_uri: str, script_path: Path) -> str:
     return (
         f"# sandwich-pipeline OCIO config — {CONFIG_VERSION}\n\n"
         f"**Generated:** {datetime.datetime.now().isoformat(timespec='seconds')} "
-        f"by `src/core/color/build.py` @ commit `{_git_sha(script_path)}`\n"
+        f"by `src/pipe/core/color/build.py` @ commit `{_git_sha(script_path)}`\n"
         f"**Source URI:** `{source_uri}`\n"
         f"**Working space:** ACEScg (ACES 1.3 CG)\n"
         f"**Default display / view:** {DISPLAY} / {DEFAULT_VIEW}\n\n"
-        f"Do not edit by hand. Regenerate via `hython src/core/color/build.py`.\n"
+        f"Do not edit by hand. Regenerate via `hython src/pipe/core/color/build.py`.\n"
     )
 
 

@@ -19,7 +19,7 @@ class SubstanceDesignerLauncher(Launcher):
         self, is_python_shell: bool = False, extra_args: list[str] | None = None
     ) -> None:
         this_path = Path(__file__).resolve()
-        # this_path = `<repo>/src/dcc/substance_designer/launch.py`
+        # this_path = `<repo>/src/pipe/dcc/substance_designer/launch.py`
         src_path = this_path.parents[3]
 
         system = platform.system()

@@ -59,7 +59,7 @@ PIPE_SP_METADATA_SCHEMA_VERSION = 1
 # Shared utilities
 # ---------------------------------------------------------------------------
 
-# texture_set_name is imported from dcc.substance_painter.util.texture_set
+# texture_set_name is imported from pipe.dcc.substance_painter.util.texture_set
 
 
 def current_project_path() -> Path | None:

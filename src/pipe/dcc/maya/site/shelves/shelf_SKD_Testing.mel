@@ -33,7 +33,7 @@ global proc shelf_SKD_Testing () {
         -style "iconOnly" 
         -marginWidth 0
         -marginHeight 1
-        -command "from core.ui.dialogs import MessageDialog\nmd = MessageDialog(None, \"Flashbang\", \"KACHOW\", include_flashbang = True)\nmd.exec()" 
+        -command "from pipe.core.ui.dialogs import MessageDialog\nmd = MessageDialog(None, \"Flashbang\", \"KACHOW\", include_flashbang = True)\nmd.exec()" 
         -sourceType "python" 
         -commandRepeatable 1
         -flat 1

@@ -3,7 +3,7 @@
 Re-exports `HoudiniLauncher` so `framework.dispatch.find_implementation` can
 locate the concrete launcher from the outer venv. `HoudiniRuntime` and the
 publish/shading/shot feature modules import `hou` at module level and are
-reachable only via `from dcc.houdini.<sub> import ...` once inside the
+reachable only via `from pipe.dcc.houdini.<sub> import ...` once inside the
 Houdini interpreter.
 """
 

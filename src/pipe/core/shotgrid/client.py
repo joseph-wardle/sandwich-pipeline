@@ -190,7 +190,7 @@ class ShotGrid:
     same project. Direct `__init__` usage is possible but bypasses the cache.
 
     Every read method returns a fully-typed entity from
-    `core.shotgrid.entities` or raises a subclass of
+    `pipe.core.shotgrid.entities` or raises a subclass of
     `ShotGridError`. Every write verb returns the refreshed entity so
     callers do not have to re-fetch.
     """
@@ -903,7 +903,7 @@ class ShotGrid:
             description: Optional artist-authored description.
             playlist: If given, the created Version is linked to this playlist.
             extra_fields: Escape hatch for one-off SG field writes. Prefer
-                extending `core.shotgrid.entities.Version` over using
+                extending `pipe.core.shotgrid.entities.Version` over using
                 this.
 
         Raises:
