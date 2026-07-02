@@ -10,9 +10,6 @@ CONFIG_VERSION = "sandwich-v02"
 
 DISPLAY = "sRGB - Display"
 DEFAULT_VIEW = "OpenDRT - Standard"
-# Menu order for the sRGB - Display view menu. OpenDRT (the show look) first,
-# then its B&W lighting view, then ACES 2.0 and its B&W, then the retained
-# legacy ACES 1.0 view and the technical views. See context/color.md.
 ACTIVE_VIEWS = (
     "OpenDRT - Standard, OpenDRT - Standard B&W, "
     "ACES 2.0 - SDR 100 nits (Rec.709), ACES 2.0 - SDR B&W (Rec.709), "
