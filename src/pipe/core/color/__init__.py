@@ -6,11 +6,15 @@ from pathlib import Path
 
 from pipe.core.util.paths import get_production_path
 
-CONFIG_VERSION = "sandwich-v01"
+CONFIG_VERSION = "sandwich-v02"
 
 DISPLAY = "sRGB - Display"
-DEFAULT_VIEW = "ACES 1.0 - SDR Video"
-ACTIVE_VIEWS = "ACES 1.0 - SDR Video, Un-tone-mapped, Raw"
+DEFAULT_VIEW = "OpenDRT - Standard"
+ACTIVE_VIEWS = (
+    "OpenDRT - Standard, OpenDRT - Standard B&W, "
+    "ACES 2.0 - SDR 100 nits (Rec.709), ACES 2.0 - SDR B&W (Rec.709), "
+    "ACES 1.0 - SDR Video, Un-tone-mapped, Raw"
+)
 
 
 def config_dir() -> Path:

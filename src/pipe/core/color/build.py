@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +23,51 @@ from pipe.core.color import (
 )
 
 DEFAULT_SOURCE_URI = "ocio://cg-config-v1.0.0_aces-v1.3_ocio-v2.1"
+
+# Pre-baked display-rendering LUTs grafted onto sRGB - Display. Neither OpenDRT
+# nor the ACES 2.0 DRT can be evaluated by OCIO 2.3 (the DCC fleet), so each is
+# a 3D LUT sampled once by bake.py (ACEScct-encoded input -> display-linear
+# Rec.709). See context/color.md and context/adr/0003-opendrt-show-look.md.
+LUTS_DIRNAME = "luts"
+OPENDRT_LUT = "opendrt_standard.cube"
+ACES2_LUT = "aces2_sdr_rec709.cube"
+
+# (view name, backing colorspace, LUT, monochrome?, encode). View names are the
+# menu strings and must match ACTIVE_VIEWS in pipe.core.color verbatim.
+_SHOW_VIEWS = (
+    (
+        "OpenDRT - Standard",
+        "OpenDRT Standard - Display",
+        OPENDRT_LUT,
+        False,
+        "power2.2",
+    ),
+    (
+        "OpenDRT - Standard B&W",
+        "OpenDRT Standard B&W - Display",
+        OPENDRT_LUT,
+        True,
+        "power2.2",
+    ),
+    (
+        "ACES 2.0 - SDR 100 nits (Rec.709)",
+        "ACES 2.0 SDR - Display",
+        ACES2_LUT,
+        False,
+        "srgb",
+    ),
+    (
+        "ACES 2.0 - SDR B&W (Rec.709)",
+        "ACES 2.0 SDR B&W - Display",
+        ACES2_LUT,
+        True,
+        "srgb",
+    ),
+)
+
+# Rec.709 luminance weights; a saturation-0 matrix built from these collapses a
+# display-linear image to its luma (the B&W lighting views).
+_REC709_LUMA = (0.2126, 0.7152, 0.0722)
 
 # Pixar's stock keys for RfH's pxrtexture `filename_colorspace` dropdown.
 _RMAN_OCIO_ALIASES = {
@@ -68,6 +114,54 @@ def _resolve_core_spaces(config) -> tuple[str, str, str, str, str, str]:
         _resolve_colorspace(config, ("ACEScct", "ACES - ACEScct")),
         _resolve_colorspace(config, ("ACES2065-1", "ACES - ACES2065-1")),
     )
+
+
+def _display_encode(ocio, style: str):
+    # display-linear -> code values. OpenDRT's canonical sRGB output is a pure
+    # 2.2 power (matches the reviewed look); ACES 2.0's is the piecewise sRGB
+    # curve of its own config.
+    if style == "power2.2":
+        t = ocio.ExponentTransform()
+        t.setValue([2.2, 2.2, 2.2, 1.0])
+        t.setNegativeStyle(ocio.NEGATIVE_CLAMP)
+        t.setDirection(ocio.TRANSFORM_DIR_INVERSE)
+        return t
+    t = ocio.ExponentWithLinearTransform()
+    t.setGamma([2.4, 2.4, 2.4, 1.0])
+    t.setOffset([0.055, 0.055, 0.055, 0.0])
+    t.setNegativeStyle(ocio.NEGATIVE_LINEAR)
+    t.setDirection(ocio.TRANSFORM_DIR_INVERSE)
+    return t
+
+
+def _saturation_zero_matrix(ocio):
+    r, g, b = _REC709_LUMA
+    mt = ocio.MatrixTransform()
+    mt.setMatrix([r, g, b, 0, r, g, b, 0, r, g, b, 0, 0, 0, 0, 1])
+    return mt
+
+
+def _add_show_views(ocio, config, reference: str, acescct: str) -> None:
+    # Each view is a display colorspace whose from_reference chain is
+    # ACEScct-encode (the LUT's input shaper) -> 3D LUT (-> display-linear) ->
+    # [saturation-0 for B&W] -> display encode.
+    for view_name, cs_name, lut, mono, encode in _SHOW_VIEWS:
+        group = ocio.GroupTransform()
+        group.appendTransform(ocio.ColorSpaceTransform(src=reference, dst=acescct))
+        group.appendTransform(
+            ocio.FileTransform(
+                src=f"{LUTS_DIRNAME}/{lut}", interpolation=ocio.INTERP_TETRAHEDRAL
+            )
+        )
+        if mono:
+            group.appendTransform(_saturation_zero_matrix(ocio))
+        group.appendTransform(_display_encode(ocio, encode))
+
+        cs = ocio.ColorSpace(ocio.REFERENCE_SPACE_SCENE, cs_name)
+        cs.setFamily("Display")
+        cs.setTransform(group, ocio.COLORSPACE_DIR_FROM_REFERENCE)
+        config.addColorSpace(cs)
+        config.addDisplayView(DISPLAY, view_name, cs_name)
 
 
 def build_config(ocio, source_uri: str):
@@ -137,6 +231,11 @@ def build_config(ocio, source_uri: str):
     rules.insertRule(10, "hdr", linear_srgb, "*", "hdr")
     rules.setDefaultRuleColorSpace(raw)
 
+    # Graft the OpenDRT + ACES 2.0 views (and their B&W variants). The LUTs they
+    # reference (luts/*.cube) are copied next to config.ocio by main().
+    _add_show_views(ocio, config, aces2065_1, acescct)
+
+    config.setSearchPath(".")
     config.setActiveDisplays(DISPLAY)
     config.setActiveViews(ACTIVE_VIEWS)
 
@@ -162,7 +261,9 @@ def _build_readme(source_uri: str, script_path: Path) -> str:
         f"by `src/pipe/core/color/build.py` @ commit `{_git_sha(script_path)}`\n"
         f"**Source URI:** `{source_uri}`\n"
         f"**Working space:** ACEScg (ACES 1.3 CG)\n"
-        f"**Default display / view:** {DISPLAY} / {DEFAULT_VIEW}\n\n"
+        f"**Default display / view:** {DISPLAY} / {DEFAULT_VIEW}\n"
+        f"**Grafted views:** OpenDRT Standard + ACES 2.0 SDR (and B&W) via "
+        f"`{LUTS_DIRNAME}/`; regenerate LUTs with `python src/pipe/core/color/bake.py`.\n\n"
         f"Do not edit by hand. Regenerate via `hython src/pipe/core/color/build.py`.\n"
     )
 
@@ -190,6 +291,12 @@ def main() -> int:
 
     config = build_config(ocio, args.source)
     (output_dir / "config.ocio").write_text(config.serialize(), encoding="utf-8")
+    # Ship the committed display LUTs alongside config.ocio (search path ".").
+    lut_src = Path(__file__).resolve().parent / LUTS_DIRNAME
+    lut_dst = output_dir / LUTS_DIRNAME
+    lut_dst.mkdir(exist_ok=True)
+    for lut in (OPENDRT_LUT, ACES2_LUT):
+        shutil.copyfile(lut_src / lut, lut_dst / lut)
     # RfH looks up this file by the config dir's name
     (output_dir / f"rman_color_config_{CONFIG_VERSION}.json").write_text(
         json.dumps({"ocio_aliases": _RMAN_OCIO_ALIASES}, indent=2) + "\n",
