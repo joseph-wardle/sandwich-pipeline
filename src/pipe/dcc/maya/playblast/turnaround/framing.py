@@ -43,6 +43,8 @@ class SweptProfile:
 def sample_review_surface(roots: tuple[str, ...]) -> SurfaceSamples:
     """Read every review mesh's world-space points and per-triangle centroids."""
 
+    to_ui = om.MDistance.internalToUI(1.0)
+
     points: list[Vec3] = []
     centroids: list[Vec3] = []
     areas: list[float] = []
@@ -50,7 +52,7 @@ def sample_review_surface(roots: tuple[str, ...]) -> SurfaceSamples:
     for mesh_path in _review_mesh_shapes(roots):
         mesh = om.MFnMesh(_dag_path(mesh_path))
         world_points = mesh.getPoints(om.MSpace.kWorld)
-        points.extend((p.x, p.y, p.z) for p in world_points)
+        points.extend((p.x * to_ui, p.y * to_ui, p.z * to_ui) for p in world_points)
 
         _, triangle_vertices = mesh.getTriangles()
         for i in range(0, len(triangle_vertices), 3):
@@ -59,12 +61,12 @@ def sample_review_surface(roots: tuple[str, ...]) -> SurfaceSamples:
             c = world_points[triangle_vertices[i + 2]]
             centroids.append(
                 (
-                    (a.x + b.x + c.x) / 3.0,
-                    (a.y + b.y + c.y) / 3.0,
-                    (a.z + b.z + c.z) / 3.0,
+                    (a.x + b.x + c.x) / 3.0 * to_ui,
+                    (a.y + b.y + c.y) / 3.0 * to_ui,
+                    (a.z + b.z + c.z) / 3.0 * to_ui,
                 )
             )
-            areas.append(0.5 * ((b - a) ^ (c - a)).length())
+            areas.append(0.5 * ((b - a) ^ (c - a)).length() * to_ui * to_ui)
 
     if not points:
         raise ValueError("No reviewable mesh geometry was found to frame.")
