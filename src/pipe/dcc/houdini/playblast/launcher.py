@@ -63,6 +63,8 @@ def launch_playblast() -> None:
     if not _run_local_playblast_or_report(export_config, parent):
         return
 
+    dialog.remember_custom_folder()
+
     try:
         post_export_messages = _run_post_export_actions(export_config)
     except Exception as exc:

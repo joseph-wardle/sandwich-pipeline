@@ -10,6 +10,10 @@ from Qt import QtCore, QtWidgets
 from pipe.core.util.paths import get_edit_path
 
 from pipe.core.ui import DialogButtons
+from pipe.core.playblast.custom_folder import (
+    load_last_custom_folder,
+    save_last_custom_folder,
+)
 from pipe.core.playblast.naming import (
     build_edit_output_directory,
     next_versioned_basename,
@@ -471,7 +475,9 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
 
         custom_folder_layout.addWidget(QtWidgets.QLabel("Custom Folder Path"))
         self._custom_folder_field = QtWidgets.QLineEdit()
-        self._custom_folder_field.setText(str(get_edit_path()))
+        self._custom_folder_field.setText(
+            str(load_last_custom_folder() or get_edit_path())
+        )
         self._custom_folder_field.setToolTip(
             "Directory used when Custom Folder destination is enabled."
         )
@@ -818,6 +824,15 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         if not custom_path_text:
             return None
         return Path(custom_path_text).expanduser()
+
+    def remember_custom_folder(self) -> None:
+        """Called by the launcher once the export succeeds, so the next
+        playblast dialog seeds the Custom Folder field with this path."""
+        if not self._is_destination_selected(self.DESTINATION_CUSTOM):
+            return
+        custom_directory = self._custom_directory()
+        if custom_directory is not None:
+            save_last_custom_folder(custom_directory)
 
     def _browse_custom_folder(self) -> None:
         start_directory = str(self._custom_directory() or get_edit_path())

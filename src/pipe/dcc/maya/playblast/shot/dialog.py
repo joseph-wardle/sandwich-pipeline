@@ -39,6 +39,10 @@ from pipe.dcc.maya.playblast.shot.launcher import (
 )
 from pipe.dcc.maya.playblast.shot.playblaster import MPlayblaster
 from pipe.core.playblast import FFmpegPreset
+from pipe.core.playblast.custom_folder import (
+    load_last_custom_folder,
+    save_last_custom_folder,
+)
 from pipe.core.playblast.naming import next_versioned_basename
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.playblast.review import (
@@ -479,7 +483,11 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
 
     @staticmethod
     def _default_custom_folder_path() -> str:
-        return str(resolve_playblast_tempdir())
+        return str(load_last_custom_folder() or resolve_playblast_tempdir())
+
+    def _remember_custom_folder(self) -> None:
+        if self._is_custom_destination_selected():
+            save_last_custom_folder(self._custom_folder_field.text())
 
     def _build_buttons(self) -> None:
         self._init_buttons(has_cancel_button=True, ok_name="Playblast Shot")
@@ -1015,6 +1023,8 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
                 "Playblast Error",
             ).exec_()
             return
+
+        self._remember_custom_folder()
 
         post_playblast_messages: list[str] = []
         try:
