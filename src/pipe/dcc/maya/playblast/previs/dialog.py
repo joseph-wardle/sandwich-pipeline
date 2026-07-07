@@ -330,7 +330,7 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         if not has_alts and self._compare_alts_checkbox.isChecked():
             self._compare_alts_checkbox.setChecked(False)
         self._compare_alts_checkbox.setToolTip(
-            "Render the primary and all alternates side-by-side into one grid " "video."
+            "Render the primary and all alternates side-by-side into one grid video."
             if has_alts
             else "This shot has no alternates to compare."
         )
@@ -688,6 +688,7 @@ class PrevisPlayblastDialog(MPlayblastDialog):
                 self, f"Compare playblast failed.\n\n{exc}", "Playblast Error"
             ).exec_()
             return
+        self._remember_custom_folder()
         MessageDialog(self, self._format_compare_success(config)).exec_()
         self.close()
 
@@ -706,6 +707,7 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             ).exec_()
             return
 
+        self._remember_custom_folder()
         post_messages: list[str] = []
         if self._is_shotgrid_upload_requested():
             post_messages = self._upload_sequence_playblast(config)
