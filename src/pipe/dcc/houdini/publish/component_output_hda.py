@@ -52,8 +52,6 @@ def on_created(node: hou.Node) -> None:
 
     comp = _find_component_output(node)
     if comp is not None:
-        _set_if_exists(comp, "addtogallery", 0)
-        # Also apply defaults directly for non-promoted or non-referenced setups.
         for parm_name, value in core_defaults.items():
             if node.parm(parm_name) is None:
                 _set_if_exists(comp, parm_name, value)
