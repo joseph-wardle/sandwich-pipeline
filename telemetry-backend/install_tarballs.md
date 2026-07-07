@@ -108,11 +108,11 @@ want a different version. The version string is `MAJOR.MINOR.PATCH`
 ```sh
 cd <pipeline-checkout>
 uv sync --dev
-PYTHONPATH=src uv run python -m core.telemetry up
+PYTHONPATH=src uv run python -m pipe.core.telemetry up
 ```
 
 `PYTHONPATH=src` is required because the repo isn't declared as an
-installable package — `core.telemetry` lives at `src/core/telemetry/`
+installable package — `pipe.core.telemetry` lives at `src/pipe/core/telemetry/`
 and can't be found on `sys.path` without it.
 
 On first boot the orchestrator runs `initdb` against

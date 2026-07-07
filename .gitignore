@@ -52,10 +52,10 @@ env.py
 env_sg.py
 
 # Ignore proprietary plugins
-src/dcc/houdini/third_party/axiom
+src/pipe/dcc/houdini/third_party/axiom
 
 # Ignore third-party Python libraries
-src/dcc/maya/third_party/rjg
+src/pipe/dcc/maya/third_party/rjg
 
 # Ignore user specific splash screens
 resources/splash/users
