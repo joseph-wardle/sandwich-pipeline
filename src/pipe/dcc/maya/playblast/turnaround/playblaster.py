@@ -31,9 +31,9 @@ from pipe.dcc.maya.playblast.turnaround.config import (
 from pipe.dcc.maya.playblast.turnaround.framing import (
     SweptProfile,
     area_weighted_centroid,
-    fit_distance,
+    bounding_radius,
+    fit_camera,
     pivot_override,
-    projected_frame,
     sample_review_surface,
     swept_profile,
 )
@@ -347,7 +347,7 @@ def _temporary_turnaround_camera(*, focal_length: float):
     try:
         mc.setAttr(f"{camera_shape}.focalLength", focal_length)  # type: ignore
         # Vertical film fit: the rendered height tracks the vertical aperture,
-        # so `fit_distance` can frame purely from the vertical field of view.
+        # so `fit_camera` can frame purely from the vertical field of view.
         mc.setAttr(f"{camera_shape}.filmFit", 2)  # type: ignore
         yield str(camera_transform), str(camera_shape)
     finally:
@@ -366,28 +366,27 @@ def _frame_camera_for_pass(
     padding: float,
 ) -> None:
     phi = math.radians(float(elevation))
-    width, height = projected_frame(profile, phi)
-    distance = fit_distance(
-        width,
-        height,
+    fit = fit_camera(
+        profile,
+        elevation=phi,
         vertical_fov=_vertical_fov(camera_shape),
         aspect=aspect,
         padding=padding,
     )
 
-    aim = (pivot[0], profile.center_y, pivot[1])
+    aim = (pivot[0], fit.aim_y, pivot[1])
     position = (
         aim[0],
-        aim[1] + distance * math.sin(phi),
-        aim[2] - distance * math.cos(phi),
+        aim[1] + fit.distance * math.sin(phi),
+        aim[2] - fit.distance * math.cos(phi),
     )
     # At the top, the camera looks straight down, so a Y up vector is degenerate;
     # face the front of the asset toward the top of frame instead.
     world_up = (0.0, 0.0, -1.0) if elevation is Elevation.TOP else (0.0, 1.0, 0.0)
 
-    reach = max(width, height) * 0.5
-    mc.setAttr(f"{camera_shape}.nearClipPlane", max(0.1, distance - 2.0 * reach))  # type: ignore
-    mc.setAttr(f"{camera_shape}.farClipPlane", max(distance + 4.0 * reach, 1000.0))  # type: ignore
+    reach = bounding_radius(profile, fit.aim_y)
+    mc.setAttr(f"{camera_shape}.nearClipPlane", max(0.1, fit.distance - 2.0 * reach))  # type: ignore
+    mc.setAttr(f"{camera_shape}.farClipPlane", max(fit.distance + 4.0 * reach, 1000.0))  # type: ignore
 
     _aim_camera(camera_transform, position=position, aim=aim, world_up=world_up)
 
