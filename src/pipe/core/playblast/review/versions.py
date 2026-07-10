@@ -20,9 +20,10 @@ class UploadTarget(StrEnum):
 
 @dataclass(frozen=True)
 class PlayblastEntity:
-    """Identifies the ShotGrid entity (Shot or Asset) a playblast belongs to."""
+    """Identifies what a playblast belongs to: a ShotGrid Shot or Asset, or a
+    scratch scene with no entity to attach to (Version is created project-level)."""
 
-    kind: Literal["shot", "asset"]
+    kind: Literal["shot", "asset", "scratch"]
     value: str
 
     @classmethod
@@ -32,6 +33,16 @@ class PlayblastEntity:
     @classmethod
     def asset(cls, display_name: str) -> PlayblastEntity:
         return cls(kind="asset", value=str(display_name).strip())
+
+    @classmethod
+    def scratch(cls, scene_label: str) -> PlayblastEntity:
+        return cls(kind="scratch", value=str(scene_label).strip())
+
+    @property
+    def describe(self) -> str:
+        if self.kind == "scratch":
+            return f"scratch scene '{self.value}'"
+        return f"{self.kind} '{self.value}'"
 
 
 @dataclass(frozen=True)
@@ -146,6 +157,12 @@ def _asset_lookup(connection: ShotGrid, value: str) -> Any:
     return connection.get_asset(display_name=value)
 
 
+def _scratch_lookup(connection: ShotGrid, value: str) -> Any:
+    # Scratch scenes have no ShotGrid entity to resolve; the Version is
+    # created at the project level.
+    return None
+
+
 def _create_shot_version(connection: ShotGrid, entity: Any, **kwargs: Any) -> Any:
     return connection.create_shot_version(entity, **kwargs)
 
@@ -154,9 +171,14 @@ def _create_asset_version(connection: ShotGrid, entity: Any, **kwargs: Any) -> A
     return connection.create_asset_version(entity, **kwargs)
 
 
+def _create_scratch_version(connection: ShotGrid, entity: Any, **kwargs: Any) -> Any:
+    return connection.create_project_version(**kwargs)
+
+
 _ENTITY_DISPATCH: dict[str, tuple[_EntityLookup, _VersionCreator]] = {
     "shot": (_shot_lookup, _create_shot_version),
     "asset": (_asset_lookup, _create_asset_version),
+    "scratch": (_scratch_lookup, _create_scratch_version),
 }
 
 

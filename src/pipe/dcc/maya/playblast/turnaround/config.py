@@ -75,6 +75,7 @@ class TurnaroundPlayblastConfig:
     asset_label: str
     output_paths: dict[FFmpegPreset, list[str | Path]]
     review_roots: tuple[str, ...]
+    hud_asset_details: bool = True
     passes: tuple[TurnaroundPass, ...] = DEFAULT_PASSES
     width: int = DEFAULT_WIDTH
     height: int = DEFAULT_HEIGHT

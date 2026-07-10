@@ -160,7 +160,7 @@ def _build_message_lines(
     if upload_result.ok:
         success_message = (
             f"ShotGrid Upload: Success - {upload_result.version_name}"
-            f" ({upload_result.entity.kind} {upload_result.entity.value})."
+            f" ({upload_result.entity.describe})."
         )
         if upload_result.version_id is not None:
             success_message = (

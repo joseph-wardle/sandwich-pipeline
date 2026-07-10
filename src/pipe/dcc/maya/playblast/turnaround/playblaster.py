@@ -6,7 +6,7 @@ import shutil
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterable
+from typing import Iterator
 
 import maya.cmds as mc
 from pipe.core.hud import (
@@ -25,7 +25,6 @@ from pipe.dcc.maya.playblast.turnaround.config import (
     Elevation,
     TurnaroundPass,
     TurnaroundPlayblastConfig,
-    _first_parent,
     _node_uuid,
 )
 from pipe.dcc.maya.playblast.turnaround.framing import (
@@ -83,12 +82,9 @@ class MTurnaroundPlayblaster:
                 with (
                     maintain_selection(),
                     _preserved_current_time(),
-                    _staged_turntable_roots(
-                        config.review_roots,
+                    _orbiting_turnaround_camera(
                         pivot=pivot,
                         frames_per_pass=config.frames_per_pass,
-                    ) as staged_roots,
-                    _temporary_turnaround_camera(
                         focal_length=config.focal_length,
                     ) as (camera_transform, camera_shape),
                 ):
@@ -111,7 +107,7 @@ class MTurnaroundPlayblaster:
                         self._capture_pass(
                             output_base=pass_base,
                             camera_shape=camera_shape,
-                            review_roots=staged_roots,
+                            review_roots=config.review_roots,
                             wireframe_on_shaded=turnaround_pass.wireframe_on_shaded,
                         )
                         pass_bases.append(pass_base)
@@ -245,15 +241,12 @@ class MTurnaroundPlayblaster:
 
     def _hud_content(self) -> HudContent:
         config = self._config
-        point_count = _polygon_point_count(config.review_roots)
-        return HudContent(
-            left_lines=(
-                labeled_line(ARTIST, resolve_artist_display_name()),
-                labeled_line(_LABEL_ASSET, config.asset_label),
-                labeled_line(_LABEL_POINTS, f"{point_count:,}"),
-            ),
-            frame_start=1,
-        )
+        left_lines = [labeled_line(ARTIST, resolve_artist_display_name())]
+        if config.hud_asset_details:
+            point_count = _polygon_point_count(config.review_roots)
+            left_lines.append(labeled_line(_LABEL_ASSET, config.asset_label))
+            left_lines.append(labeled_line(_LABEL_POINTS, f"{point_count:,}"))
+        return HudContent(left_lines=tuple(left_lines), frame_start=1)
 
 
 def _pass_label(index: int, turnaround_pass: TurnaroundPass) -> str:
@@ -271,88 +264,41 @@ def _preserved_current_time():
 
 
 @contextmanager
-def _staged_turntable_roots(
-    review_roots: Iterable[str],
+def _orbiting_turnaround_camera(
     *,
     pivot: tuple[float, float],
     frames_per_pass: int,
-):
-    resolved_roots: list[str] = []
-    for root in review_roots:
-        current_root = _current_node_path(_node_uuid(root))
-        if current_root:
-            resolved_roots.append(current_root)
+    focal_length: float,
+) -> Iterator[tuple[str, str]]:
+    """Yield a temporary camera that orbits the pivot as the timeline plays.
 
-    resolved_root_paths = tuple(resolved_roots)
-    if not resolved_root_paths:
-        raise ValueError("No valid review roots were found in the scene.")
-
-    root_records: list[tuple[str, str | None]] = []
-    for root in resolved_root_paths:
-        parent = _first_parent(root)
-        parent_uuid = _node_uuid(parent) if parent else None
-        root_records.append((_node_uuid(root), parent_uuid))
-
-    turntable_group = str(
-        mc.createNode("transform", name=_unique_name("assetTurnaroundTurntable_GRP"))
+    The camera hangs under a scene-local group whose rotateY is keyed one
+    full revolution per pass. Orbiting the camera instead of spinning the
+    geometry leaves the scene untouched: referenced nodes (rigs) cannot be
+    reparented under a turntable group, and with the viewport headlight
+    following the camera the rendered movie is identical either way.
+    """
+    orbit_group = str(
+        mc.createNode("transform", name=_unique_name("assetTurnaroundOrbit_GRP"))
     )
-    mc.xform(
-        turntable_group,
-        worldSpace=True,
-        translation=(pivot[0], 0.0, pivot[1]),
-    )
-
     try:
-        for root_uuid, _ in root_records:
-            current_root = _current_node_path(root_uuid)
-            if not current_root:
-                raise RuntimeError("Could not resolve review root before staging.")
-            mc.parent(current_root, turntable_group, absolute=True)
-
-        _set_linear_turntable_animation(
-            turntable_group,
-            frames_per_pass=frames_per_pass,
+        mc.xform(
+            orbit_group,
+            worldSpace=True,
+            translation=(pivot[0], 0.0, pivot[1]),
         )
-        staged_roots = tuple(
-            path
-            for path in (_current_node_path(root_uuid) for root_uuid, _ in root_records)
-            if path
-        )
-        if len(staged_roots) != len(root_records):
-            raise RuntimeError("Could not resolve staged turnaround roots.")
-        yield staged_roots
-    finally:
-        for root_uuid, original_parent_uuid in root_records:
-            current_root = _current_node_path(root_uuid)
-            if not current_root:
-                continue
-
-            original_parent = (
-                _current_node_path(original_parent_uuid)
-                if original_parent_uuid is not None
-                else None
-            )
-            if original_parent and mc.objExists(original_parent):
-                mc.parent(current_root, original_parent, absolute=True)
-            else:
-                mc.parent(current_root, world=True, absolute=True)
-
-        if mc.objExists(turntable_group):
-            mc.delete(turntable_group)
-
-
-@contextmanager
-def _temporary_turnaround_camera(*, focal_length: float):
-    camera_transform, camera_shape = mc.camera(name=_unique_name("assetTurnaround_cam"))  # type: ignore
-    try:
+        camera_name = _unique_name("assetTurnaround_cam")
+        camera_transform, camera_shape = mc.camera(name=camera_name)  # type: ignore
         mc.setAttr(f"{camera_shape}.focalLength", focal_length)  # type: ignore
         # Vertical film fit: the rendered height tracks the vertical aperture,
         # so `fit_camera` can frame purely from the vertical field of view.
         mc.setAttr(f"{camera_shape}.filmFit", 2)  # type: ignore
-        yield str(camera_transform), str(camera_shape)
+        camera_transform = str(mc.parent(camera_transform, orbit_group)[0])
+        _set_linear_orbit_animation(orbit_group, frames_per_pass=frames_per_pass)
+        yield camera_transform, str(camera_shape)
     finally:
-        if mc.objExists(camera_transform):
-            mc.delete(camera_transform)
+        if mc.objExists(orbit_group):
+            mc.delete(orbit_group)
 
 
 def _frame_camera_for_pass(
@@ -443,32 +389,24 @@ def _polygon_point_count(review_roots: tuple[str, ...]) -> int:
     return point_count
 
 
-def _set_linear_turntable_animation(
-    turntable_group: str,
+def _set_linear_orbit_animation(
+    orbit_group: str,
     *,
     frames_per_pass: int,
 ) -> None:
     start_frame = 1
     end_key_frame = frames_per_pass + 1
-    mc.setAttr(f"{turntable_group}.rotateX", 0)  # type: ignore
-    mc.setAttr(f"{turntable_group}.rotateY", 0)  # type: ignore
-    mc.setAttr(f"{turntable_group}.rotateZ", 0)  # type: ignore
-    mc.setKeyframe(turntable_group, attribute="rotateY", t=start_frame, v=0.0)  # type: ignore
-    mc.setKeyframe(turntable_group, attribute="rotateY", t=end_key_frame, v=360.0)  # type: ignore
+    # -360: the camera orbits clockwise so the subject appears to spin the
+    # same counterclockwise direction the old turntable gave.
+    mc.setKeyframe(orbit_group, attribute="rotateY", t=start_frame, v=0.0)  # type: ignore
+    mc.setKeyframe(orbit_group, attribute="rotateY", t=end_key_frame, v=-360.0)  # type: ignore
     mc.keyTangent(
-        turntable_group,
+        orbit_group,
         attribute="rotateY",
         time=(start_frame, end_key_frame),
         inTangentType="linear",
         outTangentType="linear",
     )
-
-
-def _current_node_path(node_uuid: str) -> str | None:
-    matches = mc.ls(node_uuid, long=True) or []
-    if not matches:
-        return None
-    return str(matches[0])
 
 
 def _unique_name(base_name: str) -> str:
