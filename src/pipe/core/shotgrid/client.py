@@ -954,11 +954,43 @@ class ShotGrid:
             extra_fields=extra_fields,
         )
 
+    def create_project_version(
+        self,
+        *,
+        code: str,
+        user: User | None = None,
+        task: Task | None = None,
+        video: Path | str | None = None,
+        description: str | None = None,
+        playlist: Playlist | None = None,
+        extra_fields: dict[str, Any] | None = None,
+    ) -> Version:
+        """Create a ShotGrid `Version` linked only to the project.
+
+        For review movies with no Shot or Asset to attach to (e.g. turnarounds
+        from animation scratch scenes). See `create_shot_version` for argument
+        semantics — only the entity link is omitted.
+
+        Raises:
+            ShotGridWriteError: The create, upload, or link failed.
+        """
+        return self._create_version(
+            parent_type=None,
+            parent=None,
+            code=code,
+            user=user,
+            task=task,
+            video=video,
+            description=description,
+            playlist=playlist,
+            extra_fields=extra_fields,
+        )
+
     def _create_version(
         self,
         *,
-        parent_type: str,
-        parent: Shot | Asset,
+        parent_type: str | None,
+        parent: Shot | Asset | None,
         code: str,
         user: User | None,
         task: Task | None,
@@ -969,9 +1001,10 @@ class ShotGrid:
     ) -> Version:
         payload: dict[str, Any] = {
             "code": code,
-            "entity": {"type": parent_type, "id": parent.id},
             "project": {"type": "Project", "id": self._project_id},
         }
+        if parent_type is not None and parent is not None:
+            payload["entity"] = {"type": parent_type, "id": parent.id}
         if user is not None:
             payload["user"] = _entity_ref("HumanUser", user)
         if task is not None:

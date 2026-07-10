@@ -20,7 +20,7 @@ from Qt.QtWidgets import (
 )
 
 from pipe.core.ui import ButtonPair, MessageDialog
-from pipe.dcc.maya.assetfile import read_asset_metadata
+from pipe.dcc.maya.assetfile import AssetMetadata, read_asset_metadata
 from pipe.dcc.maya.playblast.shot.config import SaveLocation
 from pipe.dcc.maya.playblast.turnaround.config import (
     DEFAULT_FRAMES_PER_PASS,
@@ -64,9 +64,35 @@ def _scene_render_directory() -> str | Path:
 
 
 class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
-    """Small Maya UI for asset review turnarounds."""
+    """Small Maya UI for asset review turnarounds.
+
+    The class-level knobs below are the supported subclassing surface;
+    `AnimTurnaroundDialog` overrides them for animation scratch scenes.
+    """
 
     playblaster = MTurnaroundPlayblaster()
+
+    WINDOW_TITLE: str = "SKD Asset Turnaround"
+    SUBTITLE: str = "Capture an asset turnaround review movie"
+    SOURCE_VALUE: str = "Pipeline Asset File"
+    SOURCE_TOOLTIP: str = "Uses the current Maya asset scene and current selection."
+    SUBJECT_LABEL: str = "Asset"
+    UPLOAD_TOOLTIP: str = (
+        "Create a new Asset Version in ShotGrid and upload the turnaround movie."
+    )
+    # Burn the asset name and point count into the HUD (model-review info).
+    HUD_ASSET_DETAILS: bool = True
+    ELEVATIONS: tuple[Elevation, ...] = tuple(Elevation)
+    WIREFRAME_PASSES: bool = True
+    DEFAULT_UI_PASSES: tuple[TurnaroundPass, ...] = (
+        TurnaroundPass(Elevation.THREE_QUARTER, False),
+        TurnaroundPass(Elevation.THREE_QUARTER, True),
+    )
+    # When False the dialog offers review upload only: scratch scenes have no
+    # Asset to attach a Version to, so "upload as new asset version" is not a
+    # meaningful choice.
+    ALLOW_VERSION_UPLOAD: bool = True
+    REVIEW_DISABLE_HINT: str = "'Upload to review for dailies'"
 
     class SAVE_LOCS:
         CURRENT = SaveLocation(
@@ -78,7 +104,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
 
     def __init__(self, parent: QWidget | None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("SKD Asset Turnaround")
+        self.setWindowTitle(self.WINDOW_TITLE)
         self._asset_metadata = self._read_asset_metadata()
         self._review_roots = resolve_turnaround_review_roots()
         self._destination_checkboxes: dict[str, QCheckBox] = {}
@@ -108,7 +134,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         title.setStyleSheet("font-size: 24px; font-weight: 700;")
         title.setAlignment(QtCore.Qt.AlignCenter)
 
-        subtitle = QLabel("Capture an asset turnaround review movie")
+        subtitle = QLabel(self.SUBTITLE)
         subtitle.setAlignment(QtCore.Qt.AlignCenter)
 
         self._main_layout.addWidget(title)
@@ -133,15 +159,15 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         source_layout = QGridLayout(source_group)
 
         source_layout.addWidget(QLabel("Source"), 0, 0)
-        source_value = QLabel("Pipeline Asset File")
-        source_value.setToolTip(
-            "Uses the current Maya asset scene and current selection."
-        )
+        source_value = QLabel(self.SOURCE_VALUE)
+        source_value.setToolTip(self.SOURCE_TOOLTIP)
         source_layout.addWidget(source_value, 0, 1, 1, 2)
 
-        source_layout.addWidget(QLabel("Asset"), 1, 0)
+        source_layout.addWidget(QLabel(self.SUBJECT_LABEL), 1, 0)
         self._asset_value = QLabel("-")
-        self._asset_value.setToolTip("Resolved asset display name from scene metadata.")
+        self._asset_value.setToolTip(
+            f"Resolved {self.SUBJECT_LABEL.lower()} display name."
+        )
         source_layout.addWidget(self._asset_value, 1, 1, 1, 2)
 
         source_layout.addWidget(QLabel("Review Root"), 2, 0)
@@ -168,14 +194,14 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         source_layout.addWidget(QLabel("ShotGrid"), 4, 0)
         self._shotgrid_upload_checkbox = QCheckBox("Upload to ShotGrid")
         self._shotgrid_upload_checkbox.setChecked(False)
-        self._shotgrid_upload_checkbox.setToolTip(
-            "Create a new Asset Version in ShotGrid and upload the turnaround movie."
-        )
+        self._shotgrid_upload_checkbox.setToolTip(self.UPLOAD_TOOLTIP)
         self._shotgrid_upload_checkbox.toggled.connect(self._on_settings_changed)
         source_layout.addWidget(self._shotgrid_upload_checkbox, 4, 1, 1, 2)
 
-        self._shotgrid_upload_target_row = self._build_shotgrid_upload_target_row()
-        source_layout.addWidget(self._shotgrid_upload_target_row, 5, 0, 1, 3)
+        self._shotgrid_upload_target_row: QWidget | None = None
+        if self.ALLOW_VERSION_UPLOAD:
+            self._shotgrid_upload_target_row = self._build_shotgrid_upload_target_row()
+            source_layout.addWidget(self._shotgrid_upload_target_row, 5, 0, 1, 3)
 
         self._build_shotgrid_review_row()
         source_layout.addWidget(self._shotgrid_review_combo, 6, 0, 1, 3)
@@ -267,31 +293,37 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         custom_path_layout.addWidget(browse_button)
         return custom_path_row
 
+    def _pass_modes(self) -> tuple[bool, ...]:
+        """Wireframe-on-shaded values offered as pass columns."""
+        return (False, True) if self.WIREFRAME_PASSES else (False,)
+
     def _build_passes_section(self) -> None:
         passes_group = QGroupBox("2. Passes")
         passes_layout = QGridLayout(passes_group)
 
         passes_layout.addWidget(QLabel("Elevation"), 0, 0)
         passes_layout.addWidget(QLabel("Shaded"), 0, 1)
-        passes_layout.addWidget(QLabel("Wireframe"), 0, 2)
+        if self.WIREFRAME_PASSES:
+            passes_layout.addWidget(QLabel("Wireframe"), 0, 2)
 
         self._pass_checkboxes: dict[tuple[Elevation, bool], QCheckBox] = {}
-        for row, elevation in enumerate(Elevation, start=1):
+        for row, elevation in enumerate(self.ELEVATIONS, start=1):
             passes_layout.addWidget(QLabel(elevation.label), row, 0)
-            for column, wireframe_on_shaded in enumerate((False, True), start=1):
+            for column, wireframe_on_shaded in enumerate(self._pass_modes(), start=1):
                 checkbox = QCheckBox()
                 checkbox.toggled.connect(self._on_settings_changed)
                 self._pass_checkboxes[(elevation, wireframe_on_shaded)] = checkbox
                 passes_layout.addWidget(checkbox, row, column)
 
-        self._pass_checkboxes[(Elevation.THREE_QUARTER, False)].setChecked(True)
-        self._pass_checkboxes[(Elevation.THREE_QUARTER, True)].setChecked(True)
+        for default_pass in self.DEFAULT_UI_PASSES:
+            key = (default_pass.elevation, default_pass.wireframe_on_shaded)
+            self._pass_checkboxes[key].setChecked(True)
         self._main_layout.addWidget(passes_group)
 
     def _selected_passes(self) -> tuple[TurnaroundPass, ...]:
         selected: list[TurnaroundPass] = []
-        for elevation in Elevation:
-            for wireframe_on_shaded in (False, True):
+        for elevation in self.ELEVATIONS:
+            for wireframe_on_shaded in self._pass_modes():
                 if self._pass_checkboxes[(elevation, wireframe_on_shaded)].isChecked():
                     selected.append(TurnaroundPass(elevation, wireframe_on_shaded))
         return tuple(selected)
@@ -363,7 +395,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
             self._selected_destination_directories(),
         )
 
-    def _read_asset_metadata(self):
+    def _read_asset_metadata(self) -> AssetMetadata | None:
         try:
             return read_asset_metadata()
         except Exception:
@@ -388,6 +420,13 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         if self._asset_metadata and self._asset_metadata.display_name:
             return self._asset_metadata.display_name
         return None
+
+    def _upload_entity(self) -> PlayblastEntity | None:
+        """What the uploaded ShotGrid Version attaches to; None blocks upload."""
+        display_name = self._shotgrid_asset_display_name()
+        if not display_name:
+            return None
+        return PlayblastEntity.asset(display_name)
 
     def _asset_filename_token(self) -> str:
         if self._asset_metadata and self._asset_metadata.asset:
@@ -422,6 +461,8 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         self._custom_folder_field.setEnabled(is_visible)
 
     def _sync_shotgrid_upload_target_visibility(self) -> None:
+        if self._shotgrid_upload_target_row is None:
+            return
         show_target = self._is_shotgrid_upload_requested()
         self._shotgrid_upload_target_row.setVisible(show_target)
 
@@ -442,9 +483,15 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         return self._shotgrid_upload_checkbox.isChecked()
 
     def _is_shotgrid_version_upload_enabled(self) -> bool:
+        if not self.ALLOW_VERSION_UPLOAD:
+            return False
         return self._shotgrid_upload_version_checkbox.isChecked()
 
     def _is_shotgrid_review_upload_enabled(self) -> bool:
+        if not self.ALLOW_VERSION_UPLOAD:
+            # Review is the only upload mode; every caller combines this with
+            # `_is_shotgrid_upload_requested()`.
+            return True
         return self._shotgrid_upload_review_checkbox.isChecked()
 
     def _shotgrid_upload_description(self) -> str:
@@ -475,14 +522,12 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         ):
             return "Save the scene before exporting to Render Folder."
 
-        if (
-            self._is_shotgrid_upload_requested()
-            and not self._shotgrid_asset_display_name()
-        ):
+        if self._is_shotgrid_upload_requested() and self._upload_entity() is None:
             return "Could not resolve asset metadata for ShotGrid upload."
 
         if (
-            self._is_shotgrid_upload_requested()
+            self.ALLOW_VERSION_UPLOAD
+            and self._is_shotgrid_upload_requested()
             and not self._is_shotgrid_version_upload_enabled()
             and not self._is_shotgrid_review_upload_enabled()
         ):
@@ -501,11 +546,11 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
                     return None
                 return (
                     "Could not load ShotGrid reviews. Click Refresh, or disable "
-                    "'Upload to review for dailies'."
+                    f"{self.REVIEW_DISABLE_HINT}."
                 )
             return (
-                "Select a ShotGrid review before exporting, or disable 'Upload to "
-                "review for dailies'."
+                "Select a ShotGrid review before exporting, or disable "
+                f"{self.REVIEW_DISABLE_HINT}."
             )
 
         return None
@@ -577,6 +622,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
             asset_label=self._asset_display_name(),
             output_paths=self._paths_for_filename(output_name),
             review_roots=self._review_roots.roots,
+            hud_asset_details=self.HUD_ASSET_DETAILS,
             passes=self._selected_passes(),
         )
 
@@ -584,12 +630,12 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         if not self._is_shotgrid_upload_requested():
             return []
 
-        asset_display_name = self._shotgrid_asset_display_name()
-        if not asset_display_name:
+        entity = self._upload_entity()
+        if entity is None:
             return ["ShotGrid Upload: Skipped - asset metadata could not be resolved."]
 
         intent = PlayblastUploadIntent(
-            entity=PlayblastEntity.asset(asset_display_name),
+            entity=entity,
             output_paths=tuple(self._ordered_final_movie_paths(config)),
             preferred_paths=(),
             description=self._shotgrid_upload_description() or None,
