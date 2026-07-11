@@ -45,7 +45,7 @@ def fix_launcher_metadata() -> None:
 
 
 def get_anim_path() -> Path:
-    return get_production_path().parent / "anim"
+    return get_production_path() / "anim"
 
 
 def get_asset_path() -> Path:
