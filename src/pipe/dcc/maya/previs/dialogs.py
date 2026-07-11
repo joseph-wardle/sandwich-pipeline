@@ -65,6 +65,24 @@ def prompt_rename(parent: QWidget, current: str) -> str | None:
     return new_name
 
 
+def prompt_shot_code(parent: QWidget, *, current: str, suggestion: str) -> str | None:
+    """Prompt for a shot's sticky code, prefilled with `current` or `suggestion`.
+
+    Returns the raw entered text, or None on cancel, empty input, or an
+    unchanged value.
+    """
+    prefill = current or suggestion
+    text, ok = QInputDialog.getText(
+        parent, "Set shot code", "Shot code (e.g. A_010):", text=prefill
+    )
+    if not ok:
+        return None
+    text = text.strip()
+    if not text or text == current:
+        return None
+    return text
+
+
 def show_add_alternate_menu(
     anchor: QWidget,
     *,

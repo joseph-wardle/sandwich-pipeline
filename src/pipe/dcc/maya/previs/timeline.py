@@ -26,7 +26,7 @@ from .cam_block import BLOCK_HEIGHT, CamBlock
 from .playhead import Playhead
 from .ruler import RULER_HEIGHT, Ruler
 from .shot_header import HEADER_HEIGHT, ShotHeader
-from .state import PrevisShot, PrevisState, display_name
+from .state import PrevisShot, PrevisState
 
 if TYPE_CHECKING:
     from .panel import PrevisPanel
@@ -188,11 +188,9 @@ class PrevisTimeline(QWidget):
         )
         self._grid.addWidget(spacer, _ROW_HEADERS, 0)
         for index, shot in enumerate(shots):
-            label = shot.shotgrid_code or display_name(index)
             self._grid.addWidget(
                 ShotHeader(
                     shot=shot,
-                    display_name=label,
                     controller=self._controller,
                     parent=self._inner,
                 ),

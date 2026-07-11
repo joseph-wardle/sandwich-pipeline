@@ -21,6 +21,7 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
+from pipe.core.previs import codes
 from pipe.core.shotgrid import ShotGrid, is_previs_shot_code
 from pipe.core.ui import MessageDialog, MessageDialogCustomButtons
 from pipe.core.util.paths import get_production_path
@@ -217,11 +218,20 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         ns = cameras.add_new_rig_reference()
         new_shot = PrevisShot(
             id=state.next_shot_id(),
+            code=self._suggest_code(),
             primary=ns,
             durations={ns: state.DEFAULT_SHOT_DURATION},
         )
         self._state.shots.append(new_shot)
         self._persist()
+
+    def _suggest_code(self) -> str:
+        """Next free sticky code for this sequence, or "" if the letter can't resolve."""
+        seq = self._sequence_code()
+        if seq is None:
+            return ""
+        existing = [s.code for s in self._state.shots if s.code]
+        return codes.suggest_next(seq[0], existing)
 
     def remove_shot(self, shot_id: str) -> None:
         self._state.shots = [s for s in self._state.shots if s.id != shot_id]
@@ -339,32 +349,54 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             shot.durations[new_name] = shot.durations.pop(namespace)
         self._persist()
 
-    def assign_code(self, shot_id: str) -> None:
-        code = self._sequence_code()
-        if code is None:
-            MessageDialog(
-                self,
-                "Could not determine the sequence letter for this file.",
-                "Assign Code",
-            ).exec_()
-            return
-        letter = code[0]
-        codes = dialogs.shotgrid_codes_for_sequence(self._conn(), letter)
-        if not codes:
-            MessageDialog(
-                self,
-                f"No shots in ShotGrid for sequence {letter}. "
-                "Create the shot in ShotGrid first, then assign it here.",
-                "Assign Code",
-            ).exec_()
-            return
-        chosen = dialogs.pick_shotgrid_code(self, codes, letter)
-        if not chosen:
-            return
+    def declare_code(self, shot_id: str) -> None:
+        """Declare a shot's sticky code from free text
+
+        The artist owns the code; we only canonicalize it and reject the three ways
+        it can be wrong: malformed, wrong sequence letter, or already used in this file.
+        """
         shot = self._state.find_shot(shot_id)
         if shot is None:
             return
-        shot.shotgrid_code = chosen
+        seq = self._sequence_code()
+        if seq is None:
+            MessageDialog(
+                self,
+                "Could not determine the sequence letter for this file.",
+                "Set Shot Code",
+            ).exec_()
+            return
+        letter = seq[0]
+        raw = dialogs.prompt_shot_code(
+            self, current=shot.code, suggestion=self._suggest_code()
+        )
+        if raw is None:
+            return
+        try:
+            new_code = codes.normalize_code(raw)
+        except ValueError:
+            MessageDialog(
+                self,
+                f"'{raw}' is not a valid shot code. Use <LETTER>_<number>, e.g. A_010.",
+                "Set Shot Code",
+            ).exec_()
+            return
+        if new_code[0] != letter:
+            MessageDialog(
+                self,
+                f"Shot code {new_code} does not belong to sequence {letter}. "
+                f"Use a {letter}_ code.",
+                "Set Shot Code",
+            ).exec_()
+            return
+        if any(s.code == new_code for s in self._state.shots if s.id != shot_id):
+            MessageDialog(
+                self,
+                f"Shot code {new_code} is already used by another shot in this file.",
+                "Set Shot Code",
+            ).exec_()
+            return
+        shot.code = new_code
         self._persist()
 
     def move_shot(self, shot_id: str, delta: int) -> None:
