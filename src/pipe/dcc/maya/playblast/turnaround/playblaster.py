@@ -153,9 +153,6 @@ class MTurnaroundPlayblaster:
             },
             viewport_options={
                 "displayAppearance": "smoothShaded",
-                # Model review ignores scene shaders; materials are not authored
-                # in Maya, so there is nothing to look at but form.
-                "useDefaultMaterial": True,
                 "shadows": True,
                 # HUD bakes during encode (apply_hud), so the viewport HUD is off.
                 "headsUpDisplay": False,
