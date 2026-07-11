@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
-from pipe.core.util.paths import get_production_path
+from pipe.core.util.paths import get_anim_path
 
 from pipe.dcc.maya.command import maya_command
 
@@ -36,7 +36,7 @@ def run():
     """
     Load the pipeline picker UI.
     """
-    picker_folder_path = get_production_path() / "pickers"
+    picker_folder_path = get_anim_path() / "pickers"
     if not picker_folder_path.exists():
         log.warning(
             f"No picker folder found at {picker_folder_path}. Skipping picker file loading."
@@ -44,11 +44,20 @@ def run():
         open_picker()
         return
 
+    # Pickers live in per-character subfolders (pickers/<char>/<char>_Body.json),
+    # so recurse. Skip Versions/ folders, which hold numbered backups.
     picker_filepaths = [
         picker_file
-        for picker_file in picker_folder_path.iterdir()
-        if picker_file.suffix == ".json"
+        for picker_file in picker_folder_path.rglob("*.json")
+        if "Versions" not in picker_file.parts
     ]
+    if not picker_filepaths:
+        log.warning(
+            f"No picker files found under {picker_folder_path}. Opening an empty picker."
+        )
+        open_picker()
+        return
+
     log.info(
         f"Loading Picker with files: {[str(picker) for picker in picker_filepaths]}"
     )
