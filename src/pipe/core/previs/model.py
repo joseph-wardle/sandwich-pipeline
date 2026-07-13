@@ -1,9 +1,10 @@
 """Pure data model for a previs sequence manifest.
 
 The manifest is the durable source of truth for a previs sequence: an ordered
-list of shots keyed by sticky code. Reads are forward-tolerant (unknown keys
-ignored, malformed shot entries dropped); the write path in
-:meth:`SequenceManifest.ensure_shot` is strict, so bad codes can never enter
+list of shots keyed by sticky code, plus a map of the workspace files that make
+up the sequence (each file's lineage and its snapshot of shot membership). Reads
+are forward-tolerant: unknown keys are ignored and malformed entries dropped. The
+write path (SequenceManifest.ensure_shot) is strict, so bad codes can never enter
 a manifest through the tools.
 """
 
@@ -14,12 +15,19 @@ from typing import cast
 
 from .codes import normalize_code
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _KEY_SCHEMA_VERSION = "schema_version"
 _KEY_SEQUENCE_CODE = "sequence_code"
 _KEY_SHOTS = "shots"
 _KEY_CODE = "code"
+_KEY_FILES = "files"
+_KEY_LABEL = "label"
+_KEY_VERSION = "version"
+_KEY_PARENT_FILENAME = "parent_filename"
+_KEY_NOTE = "note"
+_KEY_CREATED_AT = "created_at"
+_KEY_SHOT_CODES = "shot_codes"
 
 
 @dataclass
@@ -33,10 +41,10 @@ class ManifestShot:
 
     @classmethod
     def from_dict(cls, raw: object) -> ManifestShot | None:
-        """Build a shot from a manifest entry, or ``None`` if it isn't one.
+        """Build a shot from a manifest entry, or None if it isn't one.
 
         Tolerant by design: anything that isn't a dict with a non-blank string
-        code is treated as garbage and dropped, not raised on
+        code is dropped, not treated as an error.
         """
         if not isinstance(raw, dict):
             return None
@@ -48,9 +56,79 @@ class ManifestShot:
 
 
 @dataclass
+class FileRecord:
+    """One workspace file's lineage and its snapshot of shot membership.
+
+    The filename is the record's identity and its map key. label and version are
+    denormalized from the filename.
+    """
+
+    filename: str
+    label: str
+    version: int
+    parent_filename: str | None  # lineage edge; None = fresh start (a "new file")
+    note: str = ""
+    created_at: str = ""
+    shot_codes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, object]:
+        # `filename` is the map key, so it is not repeated in the value.
+        return {
+            _KEY_LABEL: self.label,
+            _KEY_VERSION: self.version,
+            _KEY_PARENT_FILENAME: self.parent_filename,
+            _KEY_NOTE: self.note,
+            _KEY_CREATED_AT: self.created_at,
+            _KEY_SHOT_CODES: list(self.shot_codes),
+        }
+
+    @classmethod
+    def from_dict(cls, filename: str, raw: object) -> FileRecord | None:
+        """Build a file record from a manifest entry, or None if it is malformed.
+
+        filename comes from the map key (the on-disk identity), so any filename
+        stored inside the value is ignored. A record missing a label or an integer
+        version is dropped. The remaining fields fall back to defaults.
+        """
+        if not isinstance(raw, dict):
+            return None
+        # json.load yields `object`; past the dict guard, JSON keys are strings.
+        data = cast("dict[str, object]", raw)
+
+        label = data.get(_KEY_LABEL)
+        if not isinstance(label, str) or not label.strip():
+            return None
+        version = data.get(_KEY_VERSION)
+        # `bool` is an `int` subclass; a stray `true` is not a version.
+        if isinstance(version, bool) or not isinstance(version, int):
+            return None
+
+        parent = data.get(_KEY_PARENT_FILENAME)
+        parent_filename = parent if isinstance(parent, str) and parent.strip() else None
+        note = data.get(_KEY_NOTE)
+        created_at = data.get(_KEY_CREATED_AT)
+        codes_raw = data.get(_KEY_SHOT_CODES)
+        shot_codes = (
+            [c for c in codes_raw if isinstance(c, str) and c.strip()]
+            if isinstance(codes_raw, list)
+            else []
+        )
+        return cls(
+            filename=filename,
+            label=label,
+            version=version,
+            parent_filename=parent_filename,
+            note=note if isinstance(note, str) else "",
+            created_at=created_at if isinstance(created_at, str) else "",
+            shot_codes=shot_codes,
+        )
+
+
+@dataclass
 class SequenceManifest:
     sequence_code: str
     shots: list[ManifestShot] = field(default_factory=list)
+    files: dict[str, FileRecord] = field(default_factory=dict)
     schema_version: int = SCHEMA_VERSION
 
     @classmethod
@@ -59,9 +137,12 @@ class SequenceManifest:
 
     @classmethod
     def from_dict(cls, sequence_code: str, raw: object) -> SequenceManifest:
-        """Parse a manifest document. ``sequence_code`` (from the on-disk path)
-        is authoritative, so a copied or renamed file adopts its new location
-        rather than trusting a stale stored code.
+        """Parse a manifest document.
+
+        sequence_code comes from the on-disk path and is authoritative, so a
+        copied or renamed file adopts its new location instead of trusting a
+        stale stored code. A schema-v1 document (no files key) loads with an
+        empty file map.
         """
         if not isinstance(raw, dict):
             return cls.empty(sequence_code)
@@ -79,10 +160,21 @@ class SequenceManifest:
                 seen.add(shot.code)
                 shots.append(shot)
 
+        files: dict[str, FileRecord] = {}
+        files_raw = data.get(_KEY_FILES)
+        if isinstance(files_raw, dict):
+            for filename, entry in cast("dict[str, object]", files_raw).items():
+                if not isinstance(filename, str) or not filename.strip():
+                    continue
+                record = FileRecord.from_dict(filename, entry)
+                if record is not None:
+                    files[filename] = record
+
         version = data.get(_KEY_SCHEMA_VERSION)
         return cls(
             sequence_code=sequence_code,
             shots=shots,
+            files=files,
             schema_version=version if isinstance(version, int) else SCHEMA_VERSION,
         )
 
@@ -91,6 +183,7 @@ class SequenceManifest:
             _KEY_SCHEMA_VERSION: self.schema_version,
             _KEY_SEQUENCE_CODE: self.sequence_code,
             _KEY_SHOTS: [shot.to_dict() for shot in self.shots],
+            _KEY_FILES: {name: record.to_dict() for name, record in self.files.items()},
         }
 
     def find(self, code: str) -> ManifestShot | None:
@@ -117,5 +210,60 @@ class SequenceManifest:
         self.shots.append(shot)
         return shot
 
+    def file_record(self, filename: str) -> FileRecord | None:
+        return self.files.get(filename)
 
-__all__ = ["SCHEMA_VERSION", "ManifestShot", "SequenceManifest"]
+    def register_file(
+        self,
+        filename: str,
+        label: str,
+        version: int,
+        parent_filename: str | None,
+        *,
+        note: str = "",
+        created_at: str = "",
+    ) -> FileRecord:
+        """Record a workspace file's lineage; return the existing record if present.
+
+        A file's label, version, and parent are fixed by its filename, so
+        re-registering the same filename is a no-op that keeps the original
+        created_at. Membership is set separately by set_membership, so this
+        never touches shot_codes.
+        """
+        existing = self.files.get(filename)
+        if existing is not None:
+            return existing
+        record = FileRecord(
+            filename=filename,
+            label=label,
+            version=version,
+            parent_filename=parent_filename,
+            note=note,
+            created_at=created_at,
+        )
+        self.files[filename] = record
+        return record
+
+    def set_membership(self, filename: str, codes: list[str]) -> None:
+        """Replace a file's shot-membership snapshot.
+
+        No-op if the file is not registered; callers register lineage first.
+        """
+        record = self.files.get(filename)
+        if record is None:
+            return
+        record.shot_codes = list(codes)
+
+    def next_version(self, label: str) -> int:
+        """The next free version in label's stream: highest seen + 1, else 1.
+
+        Counted from the records in the manifest, not by scanning filenames on disk.
+        """
+        versions = [f.version for f in self.files.values() if f.label == label]
+        return (max(versions) + 1) if versions else 1
+
+    def has_label(self, label: str) -> bool:
+        return any(f.label == label for f in self.files.values())
+
+
+__all__ = ["SCHEMA_VERSION", "FileRecord", "ManifestShot", "SequenceManifest"]

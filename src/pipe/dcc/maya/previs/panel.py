@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import cast
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import maya.cmds as mc
 from env_sg import DB_Config
@@ -21,7 +22,7 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.core.previs import codes
+from pipe.core.previs import codes, mutate_manifest
 from pipe.core.shotgrid import ShotGrid, is_previs_shot_code
 from pipe.core.ui import MessageDialog, MessageDialogCustomButtons
 from pipe.core.util.paths import get_production_path
@@ -32,6 +33,7 @@ from . import (
     breakout,
     cameras,
     dialogs,
+    file_ops,
     monitor,
     playback,
     publish,
@@ -41,6 +43,9 @@ from . import (
 )
 from .state import PrevisShot, PrevisState
 from .timeline import PrevisTimeline
+
+if TYPE_CHECKING:
+    from pipe.core.previs.model import SequenceManifest
 
 log = logging.getLogger(__name__)
 
@@ -120,6 +125,14 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         add_btn.clicked.connect(self.add_shot)
         row.addWidget(add_btn)
 
+        self._branch_btn = QPushButton("branch", bar)
+        self._branch_btn.setStyleSheet(style.TOOLBAR_BUTTON)
+        self._branch_btn.setToolTip(
+            "Save a new version of this file (optionally starting a new stream)"
+        )
+        self._branch_btn.clicked.connect(self.branch_file)
+        row.addWidget(self._branch_btn)
+
         breakout_btn = QPushButton("break out all", bar)
         breakout_btn.setStyleSheet(style.TOOLBAR_BUTTON)
         breakout_btn.clicked.connect(self.break_out_all)
@@ -135,7 +148,12 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self._timeline.set_state(self._state)
         self._update_status_text()
         self._update_monitor_label()
+        self._update_branch_button()
         self._warn_orphans()
+
+    def _update_branch_button(self) -> None:
+        """Branch only makes sense on an open previs file."""
+        self._branch_btn.setEnabled(self._is_previs_file())
 
     def install_playhead_callback(self) -> None:
         """Resync the playhead on every scene time change, for the panel's lifetime.
@@ -150,7 +168,43 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
 
     def _persist(self) -> None:
         state.write_state(self._state)
+        self._sync_manifest()
         self.refresh()
+
+    def _sync_manifest(self) -> None:
+        """Push this file's shot codes and membership into the sequence manifest.
+
+        Runs on every _persist, so the manifest tracks each edit without scene
+        callbacks. When the scene is not a saved previs file there is nothing to
+        map membership onto, so this logs why and returns.
+        """
+        sequence_code = self._sequence_code()
+        if sequence_code is None:
+            log.debug("Manifest sync skipped: file has no previs sequence code.")
+            return
+        filename = self._current_filename()
+        if filename is None:
+            log.debug("Manifest sync skipped: scene has not been saved to disk.")
+            return
+
+        # Codes are already canonical (declare_code / suggest_next enforce it),
+        # so a file's membership snapshot joins the manifest's `shots` list on
+        # the same key.
+        file_codes = [s.code for s in self._state.shots if s.code]
+
+        def _apply(manifest: SequenceManifest) -> None:
+            for code in file_codes:
+                manifest.ensure_shot(code)
+            manifest.set_membership(filename, file_codes)
+
+        mutate_manifest(sequence_code, _apply)
+
+    def _current_filename(self) -> str | None:
+        """Basename of the open scene on disk, or None if it was never saved."""
+        scene = mc.file(query=True, sceneName=True)
+        if not isinstance(scene, str) or not scene:
+            return None
+        return Path(scene).name
 
     def _update_status_text(self) -> None:
         if not self._is_previs_file():
@@ -159,7 +213,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self._info.setText(self._compose_info_line())
 
     def _compose_info_line(self) -> str:
-        """`<seq_code>  ·  N shots  ·  Mf  ·  X.Xs @ 24fps` — matches the brief's top bar."""
+        """The panel's top-bar summary: `<seq_code> · N shots · Mf · X.Xs @ 24fps`."""
         seq = self._sequence_code() or "—"
         shots = self._state.shots
         if not shots:
@@ -232,6 +286,31 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             return ""
         existing = [s.code for s in self._state.shots if s.code]
         return codes.suggest_next(seq[0], existing)
+
+    def branch_file(self) -> None:
+        """Checkpoint the open file as its next version, optionally on a new stream."""
+        if not self._guard_previs_file():
+            return
+        request = dialogs.prompt_branch(self)
+        if request is None:
+            return
+        try:
+            new_filename = file_ops.branch_current(
+                request.note, new_label=request.new_label
+            )
+        except file_ops.PrevisFileError as exc:
+            MessageDialog(self, str(exc), "Cannot Branch File").exec_()
+            return
+        except Exception as exc:
+            log.exception("branch_file failed")
+            MessageDialog(self, str(exc), "Branch Failed").exec_()
+            return
+        self.refresh()
+        MessageDialog(
+            self,
+            f"Branched to {new_filename}. You are now working in the new file.",
+            "Branch Previs File",
+        ).exec_()
 
     def remove_shot(self, shot_id: str) -> None:
         self._state.shots = [s for s in self._state.shots if s.id != shot_id]

@@ -37,9 +37,10 @@ def test_mutate_writes_expected_path_and_shape(tmp_path: Path) -> None:
     assert path == tmp_path / SEQUENCE / MANIFEST_FILENAME
     on_disk = json.loads(path.read_text(encoding="utf-8"))
     assert on_disk == {
-        "schema_version": 1,
+        "schema_version": 2,
         "sequence_code": SEQUENCE,
         "shots": [{"code": "A_010"}],
+        "files": {},
     }
 
 
