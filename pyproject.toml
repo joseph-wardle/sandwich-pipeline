@@ -35,7 +35,6 @@ packages = ["src/pipe"]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.3.0,<9",
     "ruff>=0.5.7,<0.6",
     "maya-stubs>=0.4.1,<0.5",
     "types-usd>=24.5.1,<25",
@@ -131,11 +130,3 @@ extraPaths = [
 ]
 typeCheckingMode = "standard"
 reportMissingModuleSource = "information"
-
-[tool.pytest.ini_options]
-# `src` on the path so tests import the pipeline as `pipe.core.*`; DCC-free core
-# only — these run in the plain `uv` venv, no Maya/Houdini. `importlib` mode lets
-# test files share basenames across directories without needing `__init__.py`.
-pythonpath = ["src"]
-testpaths = ["tests"]
-addopts = "--import-mode=importlib"

@@ -1,11 +1,8 @@
 """Pure data model for a previs sequence manifest.
 
-The manifest is the durable source of truth for a previs sequence: an ordered
-list of shots keyed by sticky code (each carrying its delivered takes and a
-current-take pointer), plus a map of the workspace files that make up the sequence
-(each file's lineage and its snapshot of shot membership). Reads are
-forward-tolerant: unknown keys are ignored and malformed entries dropped. The
-write path (SequenceManifest.ensure_shot) is strict, so bad codes can never enter
+The manifest is an ordered list of shots keyed by code, plus a map of the workspace
+files that make up the sequence. Unknown keys are ignored and malformed entries
+dropped. The write path (SequenceManifest.ensure_shot) is strict, so bad codes can never enter
 a manifest through the tools.
 """
 
@@ -38,11 +35,10 @@ _KEY_SHOT_CODES = "shot_codes"
 
 @dataclass
 class Take:
-    """One immutable per-shot previs delivery: a rendered playblast and its record.
+    """A rendered playblast and its record.
 
-    ``version`` is the take's identity within its shot — its own per-shot counter,
-    independent of the workspace-file version. The record names the playblast on
-    disk and is never mutated once written; a re-render is a new take.
+    `version` holds its own per-shot counter. The record names
+    the playblast on disk and is never mutated once written.
     """
 
     version: int
@@ -64,10 +60,8 @@ class Take:
     def from_dict(cls, raw: object) -> Take | None:
         """Build a take from a manifest entry, or None if it is malformed.
 
-        ``version`` is the take's identity, so an entry without an integer version
-        is dropped. The remaining fields fall back to defaults; ``duration_frames``
-        reaches its 0 default only under corruption, since export always records a
-        real length.
+        `version` is the take's identity, so an entry without an integer version
+        is dropped. The remaining fields fall back to defaults.
         """
         if not isinstance(raw, dict):
             return None
@@ -99,11 +93,7 @@ class Take:
 
 @dataclass
 class ManifestShot:
-    """A shot's durable presence in a sequence, identified by its sticky code.
-
-    Carries the shot's delivered takes and a ``current_version`` pointer at the take
-    it currently delivers.
-    """
+    """A shot's durable presence in a sequence, identified by its sticky code."""
 
     code: str
     takes: list[Take] = field(default_factory=list)
@@ -120,9 +110,9 @@ class ManifestShot:
     def from_dict(cls, raw: object) -> ManifestShot | None:
         """Build a shot from a manifest entry, or None if it isn't one.
 
-        Tolerant by design: anything that isn't a dict with a non-blank string code
-        is dropped, not treated as an error. Malformed takes are dropped and
-        duplicate take versions collapse to the first seen. A current-take pointer
+        Anything that isn't a dict with a non-blank string code is dropped,
+        not treated as an error. Malformed takes are dropped and duplicate
+        take versions collapse to the first seen. A current-take pointer
         naming no surviving take reads as "no current take", not a dangling
         reference.
         """
@@ -240,13 +230,8 @@ class SequenceManifest:
 
     @classmethod
     def from_dict(cls, sequence_code: str, raw: object) -> SequenceManifest:
-        """Parse a manifest document.
+        """Parse a manifest document."""
 
-        sequence_code comes from the on-disk path and is authoritative, so a
-        copied or renamed file adopts its new location instead of trusting a
-        stale stored code. A schema-v1 document (no files key) loads with an
-        empty file map.
-        """
         if not isinstance(raw, dict):
             return cls.empty(sequence_code)
         # json.load yields `object`; past the dict guard, JSON keys are strings.
@@ -299,11 +284,11 @@ class SequenceManifest:
         return [shot.code for shot in self.shots]
 
     def ensure_shot(self, code: str) -> ManifestShot:
-        """Return the shot for ``code``, appending it if absent.
+        """Return the shot for `code`, appending it if absent.
 
-        Idempotent: assigning an existing code is a join ("this file also holds
-        A_040"), not a collision. The code is canonicalized first, so ``A_10``
-        and ``A_010`` resolve to the same shot.
+        Assigning an existing code is a join ("this file also holds A_040"),
+        not a collision. The code is canonicalized first, so `A_10` and
+        `A_010` resolve to the same shot.
         """
         canonical = normalize_code(code)
         existing = self.find(canonical)
@@ -330,8 +315,7 @@ class SequenceManifest:
 
         A file's label, version, and parent are fixed by its filename, so
         re-registering the same filename is a no-op that keeps the original
-        created_at. Membership is set separately by set_membership, so this
-        never touches shot_codes.
+        created_at.
         """
         existing = self.files.get(filename)
         if existing is not None:
@@ -350,7 +334,7 @@ class SequenceManifest:
     def set_membership(self, filename: str, codes: list[str]) -> None:
         """Replace a file's shot-membership snapshot.
 
-        No-op if the file is not registered; callers register lineage first.
+        No-op if the file is not registered.
         """
         record = self.files.get(filename)
         if record is None:
@@ -390,8 +374,7 @@ class SequenceManifest:
         """The take a shot currently delivers, or None if it has none.
 
         Resolves the current_version pointer to its take record; returns None for an
-        unknown shot, an unset pointer, or (defensively) a pointer with no take.
-        Callers pass a canonical code (a manifest shot's own code).
+        unknown shot, an unset pointer, or a pointer with no take.
         """
         shot = self.find(code)
         if shot is None or shot.current_version is None:

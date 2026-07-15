@@ -20,14 +20,7 @@ def capture_cut(
     end_frame: int,
     capture_kwargs: dict[str, Any],
 ) -> None:
-    """Capture one camera's `[start_frame, end_frame]` to PNGs under `filename`.
-
-    `capture_kwargs` is the resolved viewport-option dict from
-    `apply_viewport_options`. It is deep-copied here because `capture()` mutates
-    its nested option dicts in place, so a caller reusing one dict across cuts
-    (the sequence stitcher) would otherwise carry mutations from one cut into the
-    next.
-    """
+    """Capture one camera's `[start_frame, end_frame]` to PNGs under `filename`."""
     capture(
         width=CAPTURE_WIDTH,
         height=CAPTURE_HEIGHT,

@@ -1,9 +1,8 @@
 """Disk persistence for previs sequence manifests.
 
-The only module in ``core/previs`` that touches the filesystem. Every write goes
-through :func:`mutate_manifest`, which does the whole read-modify-write under an
-exclusive lock. That is what keeps two artists adding shots at once from losing
-each other's edits (last-writer-wins per key, not per file).
+Every write goes through `mutate_manifest`, which does the whole
+read-modify-write under an exclusive lock. That is what keeps two
+artists adding shots at once from losing each other's edits.
 """
 
 from __future__ import annotations
@@ -24,22 +23,13 @@ PLAYBLASTS_DIRNAME = "playblasts"
 
 
 def manifest_path(sequence_code: str, *, previs_root: Path | None = None) -> Path:
-    """Path to a sequence's manifest: ``<previs_root>/<sequence_code>/manifest.json``.
-
-    ``previs_root`` overrides the production previs directory (tests point it at a
-    temp dir).
-    """
+    """Path to a sequence's manifest: `<previs_root>/<sequence_code>/manifest.json`."""
     root = previs_root if previs_root is not None else get_previs_path()
     return root / sequence_code / MANIFEST_FILENAME
 
 
 def playblasts_dir(sequence_code: str, *, previs_root: Path | None = None) -> Path:
-    """Directory holding a sequence's take playblasts: ``<previs_root>/<seq>/playblasts``.
-
-    The immutable per-shot takes (``<code>_v###.mov``) live here, flat; the manifest's
-    ``current_version`` points at one. ``previs_root`` overrides the production previs
-    directory, as with :func:`manifest_path`.
-    """
+    """Directory holding a sequence's take playblasts: ``<previs_root>/<seq>/playblasts``."""
     root = previs_root if previs_root is not None else get_previs_path()
     return root / sequence_code / PLAYBLASTS_DIRNAME
 
@@ -47,11 +37,8 @@ def playblasts_dir(sequence_code: str, *, previs_root: Path | None = None) -> Pa
 def load_manifest(
     sequence_code: str, *, previs_root: Path | None = None
 ) -> SequenceManifest:
-    """Load a sequence manifest, returning an empty one if it is missing.
+    """Load a sequence manifest, returning an empty one if it is missing."""
 
-    Never raises to the caller: a corrupt or unreadable manifest is logged loudly
-    and treated as empty, so a bad file can't crash the sequencer panel.
-    """
     path = manifest_path(sequence_code, previs_root=previs_root)
     if not path.exists():
         return SequenceManifest.empty(sequence_code)
@@ -78,7 +65,7 @@ def mutate_manifest(
     *,
     previs_root: Path | None = None,
 ) -> SequenceManifest:
-    """Apply ``mutate`` to the sequence manifest and persist it atomically.
+    """Apply `mutate` to the sequence manifest and persist it atomically.
 
     The load, mutation, and write all happen under one lock so concurrent
     callers serialize instead of clobbering. Returns the persisted manifest.

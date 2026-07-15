@@ -1,9 +1,8 @@
 """Sticky shot codes
 
-A sticky code (``A_010``) is a shot's sequence-level identity. This module never
-allocates or assigns codes; artists declare them manually. It only parses codes,
-puts them in canonical padded form, and offers unused-number suggestions the UI
-can pre-fill.
+A sticky code (``A_010``) is a shot's sequence-level identity. Artists declare
+codes them manually. Our code parses, puts them in canonical padded form, and
+offers unused-number suggestions the UI can pre-fill.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Previs sequence manifest: the DCC-free source of truth for a sequence's shots."""
+"""Previs sequence manifest"""
 
 from __future__ import annotations
 

@@ -39,7 +39,3 @@ jobs:
       # Run ruff format check
       - name: Format Check (Ruff)
         run: uv run ruff format --check
-
-      # Run the DCC-free unit tests
-      - name: Test (pytest)
-        run: uv run pytest

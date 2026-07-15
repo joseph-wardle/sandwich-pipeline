@@ -1,9 +1,4 @@
-"""`MTakePlayblaster` renders one previs shot's primary into a take movie.
-
-The single-shot counterpart to `MSequencePlayblaster`: it drives the same
-`capture_cut()` primitive and `Playblaster` encode path, but over one shot's
-primary camera and frame range, producing one immutable take `.mov` per export.
-"""
+"""`MTakePlayblaster` renders one previs shot's primary into a take movie."""
 
 from __future__ import annotations
 
@@ -24,9 +19,11 @@ from pipe.dcc.maya.util.selection import maintain_selection
 class MTakeConfig:
     """Inputs for one take playblast.
 
-    `camera` is the shot's primary namespace; `code` labels the temp frames and the
-    virtual shot. `cut_in`/`cut_out` are the same frame range the dailies sequence
-    would render for this shot, so a take matches that shot's slice of the dailies.
+    `camera` is the shot's primary namespace
+    `code` labels the temp frames and the virtual shot.
+    `cut_in`/`cut_out` are the same frame range the dailies sequence would
+                       render for this shot, so a take matches that shot's
+                       slice of the dailies.
     """
 
     camera: str
