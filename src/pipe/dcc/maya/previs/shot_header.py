@@ -202,6 +202,9 @@ class ShotHeader(QFrame):
             "Publish shot camera",
             lambda: self._controller.publish_shot_camera(self._shot.id),
         )
+        menu.addAction(
+            "Export take", lambda: self._controller.export_take(self._shot.id)
+        )
         menu.addSeparator()
         menu.addAction(
             "Delete shot", lambda: self._controller.remove_shot(self._shot.id)

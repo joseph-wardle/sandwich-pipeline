@@ -1,24 +1,21 @@
 """`MSequencePlayblaster` — stitches every previs shot's primary into one MP4.
 
-Each cut runs as its own `capture()` call into a *shared* image basename.
+Each cut runs as its own `capture_cut()` call into a *shared* image basename.
 Because the previs sequencer lays shots out contiguously starting at frame
 1001, the per-cut PNGs land at non-overlapping frame numbers and together
 form one continuous sequence — one encode pass produces one MP4.
 
 HUD lines are burned in by `pipe.core.hud.apply_hud` during encode (called by the
 `Playblaster` base after `_write_images`), not by Maya during capture.
-`show_ornaments=False` keeps Maya from drawing its own HUD on top.
 """
 
 from __future__ import annotations
 
-import copy
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import maya.cmds as mc
-from mayacapture.capture import capture  # type: ignore[import-not-found]
 
 from pipe.core.hud import (
     ARTIST,
@@ -31,15 +28,11 @@ from pipe.core.playblast import FFmpegPreset, Playblaster
 from pipe.core.shotgrid import Shot
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.maya.playblast.previs._viewport import apply_viewport_options
+from pipe.dcc.maya.playblast.previs.capture import capture_cut
 from pipe.dcc.maya.playblast.shot.config import dummy_shot
-from pipe.dcc.maya.previs.cameras import resolve_camera_node
 from pipe.dcc.maya.util.selection import maintain_selection
 
 log = logging.getLogger(__name__)
-
-
-CAPTURE_WIDTH = 1280
-CAPTURE_HEIGHT = 720
 
 
 @dataclass
@@ -106,24 +99,10 @@ class MSequencePlayblaster(Playblaster):
 
     def _write_images(self, shot: Shot, path: str) -> None:  # type: ignore[override]
         del shot  # we drive frame ranges off `_config.cuts`, not the virtual shot
+        # Resolve viewport options once; capture_cut deep-copies per cut.
         capture_kwargs = apply_viewport_options({}, self._config.viewport_options)
         for camera, cut_in, cut_out in self._config.cuts:
-            capture(
-                width=CAPTURE_WIDTH,
-                height=CAPTURE_HEIGHT,
-                filename=path,
-                start_frame=cut_in,
-                end_frame=cut_out,
-                camera=resolve_camera_node(camera),
-                format="image",
-                compression="png",
-                off_screen=True,
-                show_ornaments=False,
-                overwrite=True,
-                maintain_aspect_ratio=False,
-                viewer=0,
-                **copy.deepcopy(capture_kwargs),
-            )
+            capture_cut(path, camera, cut_in, cut_out, capture_kwargs)
 
 
 __all__ = [

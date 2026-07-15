@@ -104,3 +104,25 @@ def test_workspace_filename_uses_bare_letter_of_split_sequence() -> None:
 def test_workspace_filename_rejects_non_sequence_code() -> None:
     with pytest.raises(ValueError):
         naming.workspace_filename("A_010", "blocking", 1)
+
+
+# --- take_filename -----------------------------------------------------------
+
+
+def test_take_filename_pads_version_and_uses_mov_suffix() -> None:
+    assert naming.take_filename("A_010", 3) == "A_010_v003.mov"
+
+
+def test_take_filename_canonicalizes_code() -> None:
+    # A_10 and A_010 name the same shot, so they must name the same take file.
+    assert naming.take_filename("A_10", 3) == "A_010_v003.mov"
+
+
+def test_take_filename_does_not_truncate_large_versions() -> None:
+    assert naming.take_filename("A_010", 1234) == "A_010_v1234.mov"
+
+
+@pytest.mark.parametrize("bad", ["A_previs", "not-a-code", "A010", "", "010"])
+def test_take_filename_rejects_malformed_code(bad: str) -> None:
+    with pytest.raises(ValueError):
+        naming.take_filename(bad, 1)

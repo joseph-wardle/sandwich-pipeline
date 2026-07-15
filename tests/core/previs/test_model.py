@@ -4,7 +4,23 @@ from typing import cast
 
 import pytest
 
-from pipe.core.previs.model import SCHEMA_VERSION, FileRecord, SequenceManifest
+from pipe.core.previs.model import (
+    SCHEMA_VERSION,
+    FileRecord,
+    ManifestShot,
+    SequenceManifest,
+    Take,
+)
+
+
+def _take(version: int, duration_frames: int = 100) -> Take:
+    return Take(
+        version=version,
+        source_filename=f"A_blocking_v{version:03d}.mb",
+        camera="skdShotCam",
+        created_at="2026-07-14T00:00:00+00:00",
+        duration_frames=duration_frames,
+    )
 
 
 def test_to_dict_from_dict_roundtrip() -> None:
@@ -274,3 +290,162 @@ def test_has_label() -> None:
     manifest.register_file("A_blocking_v001.mb", "blocking", 1, None)
     assert manifest.has_label("blocking")
     assert not manifest.has_label("acting")
+
+
+# --- takes (schema v3) -------------------------------------------------------
+
+
+def test_takes_roundtrip() -> None:
+    manifest = SequenceManifest.empty("A_previs")
+    manifest.add_take("A_010", _take(1, duration_frames=100))
+    manifest.add_take("A_010", _take(2, duration_frames=120))
+
+    restored = SequenceManifest.from_dict("A_previs", manifest.to_dict())
+
+    shot = restored.find("A_010")
+    assert shot is not None
+    assert shot.takes == [_take(1, duration_frames=100), _take(2, duration_frames=120)]
+    assert shot.current_version == 2
+
+
+def test_v2_shot_reads_with_no_takes() -> None:
+    # A schema-v2 shot (code only) upgrades to an empty take list, no current take.
+    raw = {"schema_version": 2, "shots": [{"code": "A_010"}]}
+    shot = SequenceManifest.from_dict("A_previs", raw).find("A_010")
+    assert shot == ManifestShot(code="A_010", takes=[], current_version=None)
+
+
+def test_add_take_creates_shot_and_sets_current() -> None:
+    manifest = SequenceManifest.empty("A_previs")
+    manifest.add_take("A_010", _take(1))
+    assert manifest.codes() == ["A_010"]
+    assert manifest.current_take("A_010") == _take(1)
+
+
+def test_add_take_canonicalizes_code() -> None:
+    manifest = SequenceManifest.empty("A_previs")
+    manifest.add_take("A_10", _take(1))
+    assert manifest.codes() == ["A_010"]
+
+
+def test_add_take_points_current_at_newest() -> None:
+    manifest = SequenceManifest.empty("A_previs")
+    manifest.add_take("A_010", _take(1))
+    manifest.add_take("A_010", _take(2))
+    shot = manifest.find("A_010")
+    assert shot is not None
+    assert shot.current_version == 2
+
+
+def test_next_take_version_unknown_shot_is_one() -> None:
+    assert SequenceManifest.empty("A_previs").next_take_version("A_010") == 1
+
+
+def test_next_take_version_counts_from_takes() -> None:
+    manifest = SequenceManifest.empty("A_previs")
+    manifest.add_take("A_010", _take(1))
+    manifest.add_take("A_010", _take(2))
+    assert manifest.next_take_version("A_010") == 3
+    # A shot that exists but has no takes still starts at 1.
+    manifest.ensure_shot("A_020")
+    assert manifest.next_take_version("A_020") == 1
+
+
+def test_current_take_none_when_unset_or_unknown() -> None:
+    manifest = SequenceManifest.empty("A_previs")
+    assert manifest.current_take("A_010") is None
+    manifest.ensure_shot("A_010")
+    assert manifest.current_take("A_010") is None
+
+
+def test_from_dict_drops_malformed_takes() -> None:
+    raw = {
+        "shots": [
+            {
+                "code": "A_010",
+                "takes": [
+                    {"version": 1, "duration_frames": 100},
+                    {"version": True, "duration_frames": 100},  # bool is not a version
+                    {"duration_frames": 100},  # no version
+                    "not-a-dict",
+                    {"version": 2, "duration_frames": 120},
+                ],
+            }
+        ]
+    }
+    shot = SequenceManifest.from_dict("A_previs", raw).find("A_010")
+    assert shot is not None
+    assert [take.version for take in shot.takes] == [1, 2]
+
+
+def test_from_dict_dedups_repeated_take_versions() -> None:
+    raw = {
+        "shots": [
+            {
+                "code": "A_010",
+                "takes": [
+                    {"version": 1, "duration_frames": 100},
+                    {"version": 1, "duration_frames": 999},
+                ],
+            }
+        ]
+    }
+    shot = SequenceManifest.from_dict("A_previs", raw).find("A_010")
+    assert shot is not None
+    assert [take.duration_frames for take in shot.takes] == [100]
+
+
+def test_from_dict_take_payload_falls_back_to_defaults() -> None:
+    raw = {
+        "shots": [
+            {
+                "code": "A_010",
+                "takes": [{"version": 1, "source_filename": 5, "camera": None}],
+            }
+        ]
+    }
+    shot = SequenceManifest.from_dict("A_previs", raw).find("A_010")
+    assert shot is not None
+    assert shot.takes == [
+        Take(
+            version=1,
+            source_filename="",
+            camera="",
+            created_at="",
+            duration_frames=0,
+        )
+    ]
+
+
+def test_from_dict_dangling_current_version_becomes_none() -> None:
+    # A pointer at a version with no surviving take is not a current take.
+    raw = {
+        "shots": [
+            {
+                "code": "A_010",
+                "takes": [{"version": 1, "duration_frames": 100}],
+                "current_version": 7,
+            }
+        ]
+    }
+    shot = SequenceManifest.from_dict("A_previs", raw).find("A_010")
+    assert shot is not None
+    assert shot.current_version is None
+    assert shot.takes and shot.takes[0].version == 1
+
+
+def test_from_dict_current_version_survives_dropped_take() -> None:
+    # If the take a pointer names is dropped as malformed, the pointer clears too.
+    raw = {
+        "shots": [
+            {
+                "code": "A_010",
+                "takes": [{"version": "bad"}],
+                "current_version": 1,
+            }
+        ]
+    }
+    shot = SequenceManifest.from_dict("A_previs", raw).find("A_010")
+    assert shot is not None
+    assert shot.takes == []
+    assert shot.current_version is None

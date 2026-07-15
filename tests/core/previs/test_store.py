@@ -8,9 +8,11 @@ from pipe.core.previs import codes
 from pipe.core.previs.model import SequenceManifest
 from pipe.core.previs.store import (
     MANIFEST_FILENAME,
+    PLAYBLASTS_DIRNAME,
     load_manifest,
     manifest_path,
     mutate_manifest,
+    playblasts_dir,
 )
 
 SEQUENCE = "A_previs"
@@ -37,11 +39,17 @@ def test_mutate_writes_expected_path_and_shape(tmp_path: Path) -> None:
     assert path == tmp_path / SEQUENCE / MANIFEST_FILENAME
     on_disk = json.loads(path.read_text(encoding="utf-8"))
     assert on_disk == {
-        "schema_version": 2,
+        "schema_version": 3,
         "sequence_code": SEQUENCE,
-        "shots": [{"code": "A_010"}],
+        "shots": [{"code": "A_010", "takes": [], "current_version": None}],
         "files": {},
     }
+
+
+def test_playblasts_dir_is_sibling_of_manifest(tmp_path: Path) -> None:
+    directory = playblasts_dir(SEQUENCE, previs_root=tmp_path)
+    assert directory == tmp_path / SEQUENCE / PLAYBLASTS_DIRNAME
+    assert directory.parent == manifest_path(SEQUENCE, previs_root=tmp_path).parent
 
 
 def test_load_corrupt_returns_empty(tmp_path: Path) -> None:

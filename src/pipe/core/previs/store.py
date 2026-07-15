@@ -20,6 +20,7 @@ from .model import SequenceManifest
 log = logging.getLogger(__name__)
 
 MANIFEST_FILENAME = "manifest.json"
+PLAYBLASTS_DIRNAME = "playblasts"
 
 
 def manifest_path(sequence_code: str, *, previs_root: Path | None = None) -> Path:
@@ -30,6 +31,17 @@ def manifest_path(sequence_code: str, *, previs_root: Path | None = None) -> Pat
     """
     root = previs_root if previs_root is not None else get_previs_path()
     return root / sequence_code / MANIFEST_FILENAME
+
+
+def playblasts_dir(sequence_code: str, *, previs_root: Path | None = None) -> Path:
+    """Directory holding a sequence's take playblasts: ``<previs_root>/<seq>/playblasts``.
+
+    The immutable per-shot takes (``<code>_v###.mov``) live here, flat; the manifest's
+    ``current_version`` points at one. ``previs_root`` overrides the production previs
+    directory, as with :func:`manifest_path`.
+    """
+    root = previs_root if previs_root is not None else get_previs_path()
+    return root / sequence_code / PLAYBLASTS_DIRNAME
 
 
 def load_manifest(
@@ -79,4 +91,11 @@ def mutate_manifest(
     return manifest
 
 
-__all__ = ["MANIFEST_FILENAME", "manifest_path", "load_manifest", "mutate_manifest"]
+__all__ = [
+    "MANIFEST_FILENAME",
+    "PLAYBLASTS_DIRNAME",
+    "manifest_path",
+    "playblasts_dir",
+    "load_manifest",
+    "mutate_manifest",
+]
