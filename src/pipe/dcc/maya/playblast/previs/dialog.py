@@ -264,13 +264,13 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             "current frame is inside."
         )
         assert self._previs_state is not None
-        for index, shot in enumerate(self._previs_state.shots):
-            combo.addItem(self._previs_shot_label(index, shot), userData=shot.id)
+        for shot in self._previs_state.shots:
+            combo.addItem(self._previs_shot_label(shot), userData=shot.id)
         return combo
 
     @staticmethod
-    def _previs_shot_label(index: int, shot: PrevisShot) -> str:
-        display = previs_state.display_name(index)
+    def _previs_shot_label(shot: PrevisShot) -> str:
+        display = shot.code or "—"
         if shot.shotgrid_code:
             return f"{display} — {shot.shotgrid_code}"
         return f"{display} {_UNASSIGNED_SUFFIX}"
@@ -483,9 +483,9 @@ class PrevisPlayblastDialog(MPlayblastDialog):
     def _validate_sequence(self) -> str | None:
         if self._previs_state is None or not self._previs_state.shots:
             return "This previs file has no shots."
-        for index, shot in enumerate(self._previs_state.shots):
+        for shot in self._previs_state.shots:
             if not shot.primary or not is_live(shot.primary):
-                label = self._previs_shot_label(index, shot)
+                label = self._previs_shot_label(shot)
                 return (
                     f"{label} has an orphan primary '{shot.primary or '(none)'}'. "
                     "Fix or remove the shot before playblasting the sequence."
