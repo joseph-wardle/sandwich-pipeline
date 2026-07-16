@@ -82,6 +82,7 @@ class MTurnaroundPlayblaster:
                 with (
                     maintain_selection(),
                     _preserved_current_time(),
+                    _held_animation(),
                     _orbiting_turnaround_camera(
                         pivot=pivot,
                         frames_per_pass=config.frames_per_pass,
@@ -258,6 +259,25 @@ def _preserved_current_time():
         yield
     finally:
         mc.currentTime(current_time, edit=True)
+
+
+@contextmanager
+def _held_animation() -> Iterator[None]:
+    """Freeze the scene's existing animation on the current pose."""
+    blocked = [
+        curve
+        for curve in (mc.ls(type="animCurve") or [])
+        if mc.getAttr(f"{curve}.nodeState") == 0
+    ]
+    for curve in blocked:
+        # Blocking: the curve stops driving, holding its last-evaluated value.
+        mc.setAttr(f"{curve}.nodeState", 2)  # type: ignore
+    try:
+        yield
+    finally:
+        for curve in blocked:
+            if mc.objExists(curve):
+                mc.setAttr(f"{curve}.nodeState", 0)  # type: ignore
 
 
 @contextmanager
