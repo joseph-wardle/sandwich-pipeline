@@ -16,7 +16,7 @@ import maya.cmds as mc
 log = logging.getLogger(__name__)
 
 FILEINFO_KEY = "previs_sequencer_state"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_SHOT_DURATION = 72  # frames; 3 seconds @ 24fps
 
 
@@ -28,13 +28,12 @@ def utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def display_name(index: int) -> str:
-    return f"SHOT_{(index + 1) * 10:03d}"
-
-
 @dataclass
 class PrevisShot:
     id: str
+    # Sticky sequence code (`A_010`). Distinct from `shotgrid_code`,
+    # the dormant link to an official SG Shot.
+    code: str = ""
     primary: str = ""
     alternates: list[str] = field(default_factory=list)
     durations: dict[str, int] = field(default_factory=dict)
@@ -92,6 +91,7 @@ class PrevisState:
             "shots": [
                 {
                     "id": s.id,
+                    "code": s.code,
                     "primary": s.primary,
                     "alternates": list(s.alternates),
                     "durations": dict(s.durations),
@@ -119,6 +119,7 @@ def _load_shot_fields(s: dict[str, Any]) -> dict[str, Any]:
         durations = {primary: legacy} if primary else {}
     return dict(
         id=str(s.get("id") or next_shot_id()),
+        code=str(s.get("code") or ""),
         primary=primary,
         alternates=list(s.get("alternates") or []),
         durations=durations,

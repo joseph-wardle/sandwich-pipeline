@@ -1,4 +1,4 @@
-"""Shot header strip: ID label + break-out dot / cam pip + per-shot menu."""
+"""Shot header strip: sticky-code label + break-out dot / cam pip + per-shot menu."""
 
 from __future__ import annotations
 
@@ -36,8 +36,8 @@ _CAM_LABEL: dict[str, str] = {
     status.CAM_IN_SYNC: "in sync",
 }
 
-# Dot/pip fill colors. `no_code` is absent — it renders as a dashed outline, the
-# only clickable state, so it has no fill.
+# Dot/pip fill colors. `no_code` is absent — it renders as a dashed outline (see
+# `_build_dot`), so it has no fill.
 _RLO_COLOR: dict[str, str] = {
     status.RLO_READY: style.RLO_READY,
     status.RLO_DRIFTED: style.RLO_DRIFTED,
@@ -54,14 +54,12 @@ class ShotHeader(QFrame):
         self,
         *,
         shot: PrevisShot,
-        display_name: str,
         controller: PrevisPanel,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._shot = shot
         self._controller = controller
-        self._display_name = display_name
 
         prod_root = get_production_path()
         self._rlo = status.rlo_state(shot, prod_root)
@@ -80,14 +78,14 @@ class ShotHeader(QFrame):
         layout.setContentsMargins(10, 0, 4, 0)
         layout.setSpacing(6)
 
-        self._id_label = self._build_id_label()
-        layout.addWidget(self._id_label, 1)
+        self._code_label = self._build_code_label()
+        layout.addWidget(self._code_label, 1)
         self._dot = self._build_dot()
         layout.addWidget(self._dot)
         self._pip = self._build_pip()
         layout.addWidget(self._pip)
-        self._code_label = self._build_code_label()
-        layout.addWidget(self._code_label)
+        self._shotgrid_label = self._build_shotgrid_label()
+        layout.addWidget(self._shotgrid_label)
         self._menu_btn = self._build_menu_button()
         layout.addWidget(self._menu_btn)
 
@@ -102,14 +100,10 @@ class ShotHeader(QFrame):
         return QtCore.QSize(1, HEADER_HEIGHT)
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
-        # An unpaired shot's badge is a shortcut to assign a code; anywhere else
-        # on the strip jumps the playhead to this shot. The dot is the left edge
-        # of the badge cluster, and the menu button eats its own clicks.
+        # Clicking anywhere on the strip jumps the playhead to this shot; the menu
+        # button eats its own clicks. Code editing lives in the hamburger menu, not here.
         if event.button() == _qt.LEFT_BUTTON:
-            if self._rlo == status.RLO_NO_CODE and event.pos().x() >= self._dot.x():
-                self._controller.assign_code(self._shot.id)
-            else:
-                self._controller.jump_to_shot(self._shot.id)
+            self._controller.jump_to_shot(self._shot.id)
         super().mousePressEvent(event)
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
@@ -117,15 +111,15 @@ class ShotHeader(QFrame):
         w = self.width()
         full = w >= style.TIER_COMPACT
         compact = w >= style.TIER_NARROW
-        self._id_label.setVisible(full)
         self._code_label.setVisible(full)
+        self._shotgrid_label.setVisible(full)
         self._pip.setVisible(compact)
         self._menu_btn.setVisible(compact)
         # Dot is the load-bearing state signal — always show it.
         self._dot.setVisible(True)
 
-    def _build_id_label(self) -> QLabel:
-        label = QLabel(self._display_name, self)
+    def _build_code_label(self) -> QLabel:
+        label = QLabel(self._shot.code or "—", self)
         label.setStyleSheet(
             f"color: {style.PANEL_TEXT}; font-size: 12px; "
             f"font-weight: 500; letter-spacing: 1px;"
@@ -154,9 +148,9 @@ class ShotHeader(QFrame):
         pip.setStyleSheet(f"QFrame {{ background: {color}; border-radius: 3px; }}")
         return pip
 
-    def _build_code_label(self) -> QLabel:
+    def _build_shotgrid_label(self) -> QLabel:
         if self._rlo == status.RLO_NO_CODE:
-            label = QLabel("no code", self)
+            label = QLabel("unlinked", self)
             label.setStyleSheet(
                 f"color: {style.RLO_NO_CODE}; font-size: 11px; font-style: italic;"
             )
@@ -167,12 +161,12 @@ class ShotHeader(QFrame):
         return label
 
     def _tooltip_text(self) -> str:
-        code = self._shot.shotgrid_code or "no code — click to assign"
+        shotgrid = self._shot.shotgrid_code or "unlinked"
         rlo_label = _RLO_LABEL[self._rlo]
         cam_label = _CAM_LABEL[self._cam]
         return (
-            f"{self._display_name}\n"
-            f"code: {code}\n"
+            f"code: {self._shot.code or '—'}\n"
+            f"shotgrid: {shotgrid}\n"
             f"break-out: {rlo_label}\n"
             f"cam: {cam_label}"
         )
@@ -191,7 +185,7 @@ class ShotHeader(QFrame):
     def _open_menu(self) -> None:
         menu = QMenu(self)
         menu.addAction(
-            "Assign code…", lambda: self._controller.assign_code(self._shot.id)
+            "Set code…", lambda: self._controller.declare_code(self._shot.id)
         )
         menu.addSeparator()
         menu.addAction(
@@ -207,6 +201,9 @@ class ShotHeader(QFrame):
         menu.addAction(
             "Publish shot camera",
             lambda: self._controller.publish_shot_camera(self._shot.id),
+        )
+        menu.addAction(
+            "Export take", lambda: self._controller.export_take(self._shot.id)
         )
         menu.addSeparator()
         menu.addAction(

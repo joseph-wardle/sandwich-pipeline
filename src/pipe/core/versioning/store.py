@@ -51,11 +51,10 @@ import os
 import platform
 import re
 import shutil
-from contextlib import contextmanager
 from pathlib import Path
-from types import ModuleType
-from typing import Any, Iterator, Optional
+from typing import Any, Optional
 
+from ..util.atomic_json import json_write_lock, write_json_atomic
 from .model import (
     BackupResult,
     VersionOwner,
@@ -63,14 +62,6 @@ from .model import (
     stream_filename,
     stream_key_for,
 )
-
-_fcntl: ModuleType | None
-try:
-    import fcntl as _fcntl_mod
-
-    _fcntl = _fcntl_mod
-except Exception:  # pragma: no cover - platform dependent
-    _fcntl = None
 
 log = logging.getLogger(__name__)
 
@@ -221,29 +212,8 @@ def load_manifest(manifest_path: Path) -> dict[str, Any]:
 
 
 def save_manifest(manifest_path: Path, manifest: dict[str, Any]) -> None:
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    with _manifest_write_lock(manifest_path):
-        temp_path = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
-        with temp_path.open("w", encoding="utf-8") as handle:
-            json.dump(manifest, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-        os.replace(temp_path, manifest_path)
-
-
-@contextmanager
-def _manifest_write_lock(manifest_path: Path) -> Iterator[None]:
-    if _fcntl is None:
-        yield
-        return
-
-    lock_path = manifest_path.with_suffix(manifest_path.suffix + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+", encoding="utf-8") as lock_handle:
-        _fcntl.flock(lock_handle.fileno(), _fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            _fcntl.flock(lock_handle.fileno(), _fcntl.LOCK_UN)
+    with json_write_lock(manifest_path):
+        write_json_atomic(manifest_path, manifest)
 
 
 def _parse_version_from_name(*, stem: str, ext: str, name: str) -> Optional[int]:
