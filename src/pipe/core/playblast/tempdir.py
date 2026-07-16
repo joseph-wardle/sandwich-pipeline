@@ -5,6 +5,7 @@ playblast dialogs to seed the Custom Folder field."""
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 
@@ -18,4 +19,14 @@ def resolve_playblast_tempdir() -> Path:
     return Path(os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))).resolve()
 
 
-__all__ = ["resolve_playblast_tempdir"]
+def create_preview_dir() -> Path:
+    """Create a uniquely-named directory for one preview render."""
+    root = resolve_playblast_tempdir()
+    root.mkdir(mode=0o770, parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix="playblast_preview.", dir=root))
+
+
+__all__ = [
+    "create_preview_dir",
+    "resolve_playblast_tempdir",
+]

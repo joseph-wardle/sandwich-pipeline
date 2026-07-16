@@ -5,8 +5,8 @@ Because the previs sequencer lays shots out contiguously starting at frame
 1001, the per-cut PNGs land at non-overlapping frame numbers and together
 form one continuous sequence — one encode pass produces one MP4.
 
-HUD lines are burned in by `pipe.core.hud.apply_hud` during encode (called by the
-`Playblaster` base after `_write_images`), not by Maya during capture.
+HUD lines are burned onto the frames by the `Playblaster` base after
+`_write_images`, not by Maya during capture.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from pipe.core.hud import (
     line_date,
     line_shot,
 )
-from pipe.core.playblast import FFmpegPreset, Playblaster
+from pipe.core.playblast import FFmpegPreset, Playblaster, PreviewClip
 from pipe.core.shotgrid import Shot
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.maya.playblast.previs._viewport import apply_viewport_options
@@ -69,7 +69,7 @@ class MSequencePlayblaster(Playblaster):
         self._config = config
         return self
 
-    def playblast(self) -> None:
+    def playblast(self) -> list[PreviewClip]:
         with maintain_selection():
             mc.select(clear=True)
             cut_in, cut_out = self._config.frame_range()
@@ -79,7 +79,9 @@ class MSequencePlayblaster(Playblaster):
                 cut_out=cut_out,
                 cut_duration=max(0, cut_out - cut_in + 1),
             )
-            super()._do_playblast(virtual_shot, self._config.paths, tails=(0, 0))
+            return [
+                super()._do_playblast(virtual_shot, self._config.paths, tails=(0, 0))
+            ]
 
     def _hud_content(self, shot: Shot, start_frame: int) -> HudContent:
         # Per-cut camera labels can't sit in a single static drawtext line

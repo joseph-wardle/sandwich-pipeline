@@ -14,7 +14,7 @@ from pipe.core.hud import (
     line_date,
     line_shot,
 )
-from pipe.core.playblast import Playblaster
+from pipe.core.playblast import Playblaster, PreviewClip
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.maya.playblast.shot.config import MPlayblastConfig, MShotPlayblastConfig
 from pipe.dcc.maya.util.selection import maintain_selection
@@ -97,7 +97,7 @@ class MPlayblaster(Playblaster):
             format="image",
             compression="png",
             off_screen=True,
-            # HUD bakes during encode (apply_hud in the base), not during capture.
+            # HUD burns onto the frames afterward (in the base), not during capture.
             show_ornaments=False,
             overwrite=True,
             maintain_aspect_ratio=False,
@@ -131,7 +131,7 @@ class MPlayblaster(Playblaster):
             frame_start=start_frame,
         )
 
-    def playblast(self) -> None:
+    def playblast(self) -> list[PreviewClip]:
         with maintain_selection():
             mc.select(clear=True)
 
@@ -157,6 +157,7 @@ class MPlayblaster(Playblaster):
             if self._config.ssao:
                 global_kwargs["viewport2_options"].update({"ssaoEnable": True})
 
+            clips: list[PreviewClip] = []
             for shot_config in self._config.shots:
                 self._extra_kwargs = copy.deepcopy(global_kwargs)
                 if shot_config.use_sequencer:
@@ -168,13 +169,15 @@ class MPlayblaster(Playblaster):
                 # base calls it back up the stack.
                 self._current_shot_config = shot_config
                 try:
-                    super()._do_playblast(
+                    clip = super()._do_playblast(
                         shot_config.shot,
                         shot_config.paths,
                         shot_config.tails,
                     )
                 finally:
                     self._current_shot_config = None
+                clips.append(clip)
+            return clips
 
 
 def _camera_focal_lines(shot_config: MShotPlayblastConfig | None) -> list[str]:

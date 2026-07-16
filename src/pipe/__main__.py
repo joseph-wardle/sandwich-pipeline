@@ -81,6 +81,12 @@ def main() -> None:
     # Windows Python explicitly needs site.main to be called
     site.main()
 
+    if args.software == "view":
+        # The playblast viewer is not a DCC
+        from pipe.viewer.cli import view_main
+
+        sys.exit(view_main(extras))
+
     launch(args.software, args.python, extras)
 
     log.info("Exiting")

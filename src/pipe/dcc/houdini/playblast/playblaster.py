@@ -15,7 +15,7 @@ from pipe.core.hud import (
     line_date,
     line_shot,
 )
-from pipe.core.playblast import FFmpegPreset, Playblaster
+from pipe.core.playblast import FFmpegPreset, Playblaster, PreviewClip
 from pipe.core.shot import houdini_department_stream, shot_owner_for
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.core.versioning import current_version_label
@@ -128,8 +128,8 @@ class HPlayblaster(Playblaster):
         ):
             _run_flipbook(scene_viewer, viewport, flip)
 
-    def playblast(self) -> None:
-        super()._do_playblast(self._shot, self._out_paths, self._tails)
+    def playblast(self) -> list[PreviewClip]:
+        return [super()._do_playblast(self._shot, self._out_paths, self._tails)]
 
 
 def _scene_viewer_and_viewport() -> tuple[hou.SceneViewer, hou.GeometryViewport]:

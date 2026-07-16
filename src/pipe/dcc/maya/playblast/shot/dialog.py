@@ -38,7 +38,12 @@ from pipe.dcc.maya.playblast.shot.launcher import (
     ordered_final_movie_paths_for_upload,
 )
 from pipe.dcc.maya.playblast.shot.playblaster import MPlayblaster
-from pipe.core.playblast import FFmpegPreset
+from pipe.core.playblast import (
+    PREVIEW_SPEC_FILENAME,
+    FFmpegPreset,
+    PreviewSpec,
+    save_preview_spec,
+)
 from pipe.core.playblast.custom_folder import (
     load_last_custom_folder,
     save_last_custom_folder,
@@ -53,9 +58,11 @@ from pipe.core.playblast.review import (
 from pipe.core.playblast.ui import ReviewPlaylistCombo
 from pipe.core.shotgrid import ShotGrid, ShotGridError
 from pipe.core.util.users import resolve_artist_display_name
+from pipe.viewer.spawn import spawn_viewer
 
 if TYPE_CHECKING:
     from pipe.dcc.maya.playblast.shot.config import MPlayblastConfig
+    from pipe.core.playblast import PreviewClip
     from pipe.core.shotgrid import Shot
 
 log = logging.getLogger(__name__)
@@ -996,6 +1003,25 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             return []
         return self._upload_shot_playblast_to_shotgrid(config)
 
+    def _open_preview_viewer(self, clips: list[PreviewClip]) -> str | None:
+        """Spawn the standalone viewer on this run's previews."""
+        if not clips:
+            return "Preview viewer: skipped (nothing was rendered)."
+
+        spec = PreviewSpec(
+            fps=self.playblaster.fps,
+            resolution=self.playblaster.resolution,
+            clips=clips,
+        )
+        spec_path = clips[0].frames_dir / PREVIEW_SPEC_FILENAME
+        try:
+            save_preview_spec(spec, spec_path)
+            spawn_viewer(spec_path)
+        except Exception as exc:
+            log.exception("Could not open the playblast viewer")
+            return f"Preview viewer could not open: {exc}"
+        return None
+
     def do_export(self) -> None:
         try:
             config = self._generate_config()
@@ -1014,7 +1040,7 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             return
 
         try:
-            self.playblaster.configure(config).playblast()
+            clips = self.playblaster.configure(config).playblast()
         except Exception as exc:
             log.exception("Playblast export failed")
             MessageDialog(
@@ -1026,6 +1052,10 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
 
         self._remember_custom_folder()
 
+        # Opened before the (slow) ShotGrid upload so the artist can review
+        # while it runs.
+        viewer_message = self._open_preview_viewer(clips)
+
         post_playblast_messages: list[str] = []
         try:
             post_playblast_messages = self._after_local_playblast(config)
@@ -1035,6 +1065,8 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
                 "Post-export actions failed. Local playblast files were still written.",
                 f"Reason: {exc}",
             ]
+        if viewer_message:
+            post_playblast_messages.append(viewer_message)
 
         output_paths = collect_output_paths(config)
         success_msg = build_success_message(output_paths, post_playblast_messages)

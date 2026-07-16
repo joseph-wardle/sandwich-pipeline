@@ -9,10 +9,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pipe.core import telemetry
-from pipe.core.hud import HudContent, apply_hud
-from pipe.core.playblast.encoding import build_image_input_chain, encode_movie
+from pipe.core.hud import HudContent
+from pipe.core.playblast.encoding import (
+    build_image_input_chain,
+    burn_hud_frames,
+    encode_movie,
+)
 from pipe.core.playblast.presets import FFmpegPreset
-from pipe.core.playblast.tempdir import resolve_playblast_tempdir
+from pipe.core.playblast.preview_spec import PreviewClip, padded_frame_number
+from pipe.core.playblast.tempdir import create_preview_dir
 
 if TYPE_CHECKING:
     from pipe.core.shotgrid import Shot
@@ -34,8 +39,9 @@ class PlayblastError(Exception):
 
 class Playblaster(metaclass=ABCMeta):
     """Cross-DCC playblast base. Subclasses implement `_write_images` to dump
-    a PNG sequence. This base encodes via FFmpeg, copies to multiple outputs,
-    post-processes, and emits telemetry. Override `_hud_content` to bake in a HUD"""
+    a PNG sequence. This base burns the HUD onto those frames, encodes each
+    requested preset via FFmpeg, copies to multiple outputs, post-processes,
+    and emits telemetry. Override `_hud_content` to bake in a HUD"""
 
     fps: int = 24
     resolution: tuple[int, int] = DEFAULT_RESOLUTION
@@ -67,28 +73,46 @@ class Playblaster(metaclass=ABCMeta):
         shot: Shot,
         out_paths: dict[FFmpegPreset, list[Path | str]] | None = None,
         tails: tuple[int, int] = (0, 0),
-    ) -> None:
+    ) -> PreviewClip:
+        """Render one shot's playblast: dump PNG frames, burn the HUD onto
+        them, then encode and copy each preset in `out_paths`."""
         out_paths = out_paths or {}
 
-        tempdir = self._resolve_tempdir()
+        # Each render gets its own directory
+        tempdir = create_preview_dir()
         image_basename = self._image_basename(shot)
-        self._cleanup_temp_files(tempdir, image_basename)
 
         cut_in, cut_out = shot.frame_range
         frame_start = cut_in - tails[0]
         frame_end = cut_out + tails[1]
+        hud_content = self._hud_content(shot, frame_start)
         common_payload: dict[str, object] = {
             "frame_start": frame_start,
             "frame_end": frame_end,
             "fps": max(1, int(self.fps)),
         }
 
-        # Image write / frame normalize / ffmpeg input-chain build is shared
-        # work for every preset in this call, so it runs once on the first
-        # preset's telemetry event. A failure there is recorded against that
-        # preset (the one the artist actually triggered) and the propagating
-        # PlayblastError skips the remaining presets in out_paths.
-        encoded_input: Any = None
+        # The frame render + HUD burn feed the viewer and every preset, so
+        # they get their own telemetry event.
+        with telemetry.record(
+            telemetry.EVENT_PLAYBLAST_CREATE,
+            payload={**common_payload, "preset": "frames", "output_count": 0},
+            shot=shot,
+        ):
+            try:
+                self._write_images(shot, str(tempdir / image_basename))
+            except Exception as exc:
+                raise PlayblastError(str(exc) or exc.__class__.__name__) from exc
+            self._normalize_frame_filenames(tempdir, image_basename)
+            frames_basename = self._burn_hud(
+                tempdir, image_basename, hud_content, frame_start
+            )
+
+        encoded_input = build_image_input_chain(
+            str(tempdir / frames_basename) + ".%04d.png",
+            start_frame=frame_start,
+            frame_rate=self.fps,
+        )
         for preset, paths in out_paths.items():
             with telemetry.record(
                 telemetry.EVENT_PLAYBLAST_CREATE,
@@ -99,43 +123,36 @@ class Playblaster(metaclass=ABCMeta):
                 },
                 shot=shot,
             ) as telemetry_event:
-                if encoded_input is None:
-                    try:
-                        self._write_images(shot, str(tempdir / image_basename))
-                    except Exception as exc:
-                        raise PlayblastError(
-                            str(exc) or exc.__class__.__name__
-                        ) from exc
-                    self._normalize_frame_filenames(tempdir, image_basename)
-                    image_chain = build_image_input_chain(
-                        str(tempdir / image_basename) + ".%04d.png",
-                        start_frame=frame_start,
-                        frame_rate=self.fps,
-                    )
-                    encoded_input = apply_hud(
-                        image_chain,
-                        self._hud_content(shot, frame_start),
-                        self.resolution,
-                    )
-
                 final_paths = self._encode_and_publish_preset(
                     shot=shot,
                     preset=preset,
                     paths=paths,
                     encoded_input=encoded_input,
                     tempdir=tempdir,
-                    image_basename=image_basename,
+                    image_basename=frames_basename,
                     start_frame=frame_start,
                 )
                 telemetry_event.update(output_count=len(final_paths))
 
-        if not log.isEnabledFor(logging.DEBUG):
-            self._cleanup_temp_files(tempdir, image_basename)
+        return PreviewClip(
+            label=shot.code or "playblast",
+            frames_dir=tempdir,
+            frames_basename=frames_basename,
+            frame_start=frame_start,
+            frame_end=frame_end,
+            destinations={
+                preset: [Path(str(raw)) for raw in paths]
+                for preset, paths in out_paths.items()
+            },
+        )
 
     @abstractmethod
-    def playblast(self) -> None:
+    def playblast(self) -> list[PreviewClip]:
         """Trigger a playblast. Concrete implementations build inputs from
-        configured state and call `super()._do_playblast(shot, out_paths, tails)`."""
+        configured state and call `super()._do_playblast(shot, out_paths, tails)`.
+
+        Returns one `PreviewClip` per rendered shot, for the caller to hand
+        to the viewer."""
         pass
 
     # ------------------------------------------------------------------
@@ -143,17 +160,8 @@ class Playblaster(metaclass=ABCMeta):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _resolve_tempdir() -> Path:
-        return resolve_playblast_tempdir()
-
-    @staticmethod
     def _image_basename(shot: Shot) -> str:
         return "playblast_temp." + (shot.code or "")
-
-    @staticmethod
-    def _cleanup_temp_files(tempdir: Path, basename: str) -> None:
-        for path in tempdir.glob(basename + "*"):
-            path.unlink()
 
     @staticmethod
     def _normalize_frame_filenames(tempdir: Path, basename: str) -> None:
@@ -165,8 +173,32 @@ class Playblaster(metaclass=ABCMeta):
             match = pattern.match(path.name)
             if not match:
                 continue
-            new_name = f"{basename}.{_padded_signed_int(int(match.group(1)))}.png"
+            new_name = f"{basename}.{padded_frame_number(int(match.group(1)))}.png"
             path.rename(path.with_name(new_name))
+
+    def _burn_hud(
+        self,
+        tempdir: Path,
+        image_basename: str,
+        content: HudContent,
+        frame_start: int,
+    ) -> str:
+        """Burn `content` onto the rendered frames as a sibling `.hud`
+        sequence. Returns the basename every consumer should read from."""
+        if content.is_empty():
+            return image_basename
+        hud_basename = image_basename + ".hud"
+        try:
+            burn_hud_frames(
+                str(tempdir / image_basename) + ".%04d.png",
+                str(tempdir / hud_basename) + ".%04d.png",
+                content,
+                self.resolution,
+                start_frame=frame_start,
+            )
+        except Exception as exc:
+            raise PlayblastError(str(exc) or exc.__class__.__name__) from exc
+        return hud_basename
 
     def _encode_preset(
         self,
@@ -249,17 +281,6 @@ class Playblaster(metaclass=ABCMeta):
             return "unknown"
         normalized = str(preset).strip().lower()
         return normalized or "unknown"
-
-
-def _padded_signed_int(num: int, width: int = 4) -> str:
-    """Render `num` as a fixed-width zero-padded integer, preserving a leading
-    `-` for negatives but emitting no sign for positives.
-
-    `f"{num:+05d}"` gives `+0003`/`-0003`; we strip the `+` so positives
-    render as `0003`. Width is the *digit* width, so the rendered string is
-    `width` chars for positives and `width + 1` for negatives.
-    """
-    return f"{num:+0{width + 1}d}".replace("+", "")
 
 
 __all__ = ["Playblaster", "PlayblastError"]
