@@ -1,9 +1,15 @@
-"""The preview spec: the JSON handoff a DCC writes for `pipe view`."""
+"""The JSON handoff a DCC writes for `pipe view`.
+
+The spec must carry everything the DCC knew at render time — the viewer
+process cannot ask the DCC anything, and never computes pipeline paths
+itself.
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 import attrs
 import cattrs
@@ -20,6 +26,39 @@ def padded_frame_number(frame: int, width: int = 4) -> str:
 
 
 @attrs.frozen
+class Destination:
+    """One folder row in the viewer's Destinations panel: where a confirmed
+    clip is copied, and the encode preset that folder expects."""
+
+    name: str
+    directory: Path
+    preset: FFmpegPreset
+    default_on: bool = True
+    browsable: bool = False
+
+
+@attrs.frozen
+class ShotGridUpload:
+    """The clip's ShotGrid row: the entity a confirmed Version attaches to."""
+
+    entity_kind: Literal["shot", "asset", "scratch"]
+    entity_value: str
+    artist_display_name: str | None = None
+    playlist_required: bool = False
+
+
+@attrs.frozen
+class PrevisStamp:
+    """Manifest-stamp context for a previs take export. Carried by the spec
+    now; the viewer starts stamping takes on Confirm in Phase 3."""
+
+    sequence_code: str
+    shot_code: str
+    take_version: int
+    camera: str
+
+
+@attrs.frozen
 class PreviewClip:
     """One playable clip in the viewer: a shot playblast, or one previs take."""
 
@@ -28,7 +67,11 @@ class PreviewClip:
     frames_basename: str
     frame_start: int
     frame_end: int
-    destinations: dict[FFmpegPreset, list[Path]]
+    output_prefix: str = ""
+    settings_key: str = ""
+    destinations: tuple[Destination, ...] = ()
+    shotgrid: ShotGridUpload | None = None
+    previs_stamp: PrevisStamp | None = None
 
     def frame_path(self, frame: int) -> Path:
         return self.frames_dir / (
@@ -76,9 +119,12 @@ _converter.register_structure_hook(FFmpegPreset, _preset_from_name)
 
 __all__ = [
     "PREVIEW_SPEC_FILENAME",
+    "Destination",
+    "PrevisStamp",
     "PreviewClip",
     "PreviewSpec",
     "PreviewSpecError",
+    "ShotGridUpload",
     "load_preview_spec",
     "padded_frame_number",
     "save_preview_spec",

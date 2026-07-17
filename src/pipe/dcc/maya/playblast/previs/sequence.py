@@ -1,9 +1,9 @@
-"""`MSequencePlayblaster` — stitches every previs shot's primary into one MP4.
+"""`MSequencePlayblaster` — stitches every previs shot's primary into one clip.
 
 Each cut runs as its own `capture_cut()` call into a *shared* image basename.
 Because the previs sequencer lays shots out contiguously starting at frame
 1001, the per-cut PNGs land at non-overlapping frame numbers and together
-form one continuous sequence — one encode pass produces one MP4.
+form one continuous sequence — one `PreviewClip` for the viewer.
 
 HUD lines are burned onto the frames by the `Playblaster` base after
 `_write_images`, not by Maya during capture.
@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import maya.cmds as mc
 
@@ -24,7 +23,7 @@ from pipe.core.hud import (
     line_date,
     line_shot,
 )
-from pipe.core.playblast import FFmpegPreset, Playblaster, PreviewClip
+from pipe.core.playblast import Playblaster, PreviewClip
 from pipe.core.shotgrid import Shot
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.maya.playblast.previs._viewport import apply_viewport_options
@@ -40,21 +39,13 @@ class MSequenceConfig:
     """Inputs for one sequence playblast.
 
     `cuts` lists every shot's `(camera, start_frame, end_frame)` in playback
-    order. `proxy_shot` is the ShotGrid Shot the sequence is anchored to (e.g.
-    `A_previs`) — the ShotGrid Version uploads against it.
+    order. `code` labels the HUD and the clip — the sequence-proxy Shot code
+    (e.g. `A_previs`).
     """
 
     cuts: list[tuple[str, int, int]]
-    proxy_shot: Shot
-    paths: dict[FFmpegPreset, list[Path | str]]
+    code: str
     viewport_options: dict[str, bool] = field(default_factory=dict)
-
-    def final_output_paths(self) -> list[Path]:
-        out: list[Path] = []
-        for preset, bases in self.paths.items():
-            for base in bases:
-                out.append(Path(str(base) + "." + preset.ext))
-        return out
 
     def frame_range(self) -> tuple[int, int]:
         if not self.cuts:
@@ -74,14 +65,12 @@ class MSequencePlayblaster(Playblaster):
             mc.select(clear=True)
             cut_in, cut_out = self._config.frame_range()
             virtual_shot = dummy_shot(
-                code=self._config.proxy_shot.code or "previs",
+                code=self._config.code or "previs",
                 cut_in=cut_in,
                 cut_out=cut_out,
                 cut_duration=max(0, cut_out - cut_in + 1),
             )
-            return [
-                super()._do_playblast(virtual_shot, self._config.paths, tails=(0, 0))
-            ]
+            return [super()._do_playblast(virtual_shot, tails=(0, 0))]
 
     def _hud_content(self, shot: Shot, start_frame: int) -> HudContent:
         # Per-cut camera labels can't sit in a single static drawtext line

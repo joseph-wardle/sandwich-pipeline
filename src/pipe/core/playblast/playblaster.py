@@ -140,10 +140,6 @@ class Playblaster(metaclass=ABCMeta):
             frames_basename=frames_basename,
             frame_start=frame_start,
             frame_end=frame_end,
-            destinations={
-                preset: [Path(str(raw)) for raw in paths]
-                for preset, paths in out_paths.items()
-            },
         )
 
     @abstractmethod

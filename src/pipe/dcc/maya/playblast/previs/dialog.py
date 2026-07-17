@@ -1,14 +1,14 @@
 """SKD Previs Playblast dialog.
 
-Extends the shared `MPlayblastDialog` with two surfaces that only apply when
-the open Maya scene is a previs file (carries `previs_sequencer_state`):
+Extends the render-only `MPlayblastDialog` with two surfaces that only apply
+when the open Maya scene is a previs file (carries `previs_sequencer_state`):
 
 * the **Shot tab** swaps its baked-`fileInfo("code")` layout for a dropdown
-  over the previs file's shots, with a Compare-alternates checkbox that flips
-  the playblast into a grid render via `MComparePlayblaster`;
-* a new **Sequence tab** stitches every shot's primary into one dailies
-  movie via `MSequencePlayblaster`, with full ShotGrid upload parity targeting
-  the sequence-proxy Shot (e.g. `A_previs`).
+  over the previs file's shots;
+* a new **Sequence tab** stitches every shot's primary into one clip via
+  `MSequencePlayblaster`. Its ShotGrid row in the viewer targets the
+  sequence-proxy Shot (e.g. `A_previs`) — previs dailies go to ShotGrid,
+  never the editorial inbox.
 
 RLO files keep the base dialog's behaviour — the Shot tab stays in its
 baked-code shape, and the Sequence tab is hidden entirely.
@@ -20,34 +20,24 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import attrs
 import maya.cmds as mc
 from Qt.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QGridLayout,
-    QHBoxLayout,
     QLabel,
-    QLineEdit,
     QTabWidget,
     QWidget,
 )
 
-from pipe.core.playblast import FFmpegPreset
+from pipe.core.playblast import Destination, FFmpegPreset, PreviewClip, ShotGridUpload
 from pipe.core.playblast.naming import build_edit_output_directory
-from pipe.core.playblast.review import (
-    PlayblastEntity,
-    PlayblastUploadIntent,
-    run_playblast_upload,
-)
+from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.shot import maya_rlo_stream, shot_owner_for
 from pipe.core.shotgrid import Shot
 from pipe.core.ui import MessageDialog
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.core.versioning import current_version_label
-from pipe.dcc.maya.playblast.previs.compare import (
-    MCompareShotConfig,
-    MComparePlayblaster,
-)
 from pipe.dcc.maya.playblast.previs.sequence import (
     MSequenceConfig,
     MSequencePlayblaster,
@@ -55,12 +45,11 @@ from pipe.dcc.maya.playblast.previs.sequence import (
 from pipe.dcc.maya.playblast.shot.config import (
     MPlayblastConfig,
     MShotPlayblastConfig,
-    SaveLocation,
     dummy_shot,
 )
 from pipe.dcc.maya.playblast.shot.dialog import MPlayblastDialog
 from pipe.dcc.maya.previs import state as previs_state
-from pipe.dcc.maya.previs.cameras import focal_length, is_live
+from pipe.dcc.maya.previs.cameras import is_live
 from pipe.dcc.maya.previs.playback import FRAME_START, compute_shot_ranges
 
 if TYPE_CHECKING:
@@ -69,12 +58,13 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-# Source-mode strings used internally by `_selected_source_mode` and config dispatch.
+# Source-mode strings used internally by `_selected_source_mode` and config
+# dispatch. Shot and custom match the base's strings.
 _MODE_SHOT = "shot"
 _MODE_SEQUENCE = "sequence"
 _MODE_CUSTOM = "custom"
 
-# Display strings used in dropdown labels for shots without a ShotGrid code.
+# Display string used in dropdown labels for shots without a ShotGrid code.
 _UNASSIGNED_SUFFIX = "— unassigned"
 
 
@@ -84,20 +74,15 @@ class PrevisPlayblastDialog(MPlayblastDialog):
     _previs_shot_combo: QComboBox
     _previs_primary_label: QLabel
     _previs_range_label: QLabel
-    _previs_alts_label: QLabel
-    _compare_alts_checkbox: QCheckBox
     _sequence_proxy_label: QLabel
     _sequence_shots_label: QLabel
     _sequence_range_label: QLabel
 
     SEQUENCE_TAB_INDEX: int = -1
 
-    class SAVE_LOCS(MPlayblastDialog.SAVE_LOCS):
-        EDIT = SaveLocation(
-            "Send to Edit",
-            lambda: build_edit_output_directory("previs"),
-            FFmpegPreset.EDIT_SQ,
-        )
+    SETTINGS_KEY = "maya_previs"
+    # Sequence clips remember their own destination toggles in the viewer.
+    SEQUENCE_SETTINGS_KEY = "maya_previs_sequence"
 
     def __init__(self, parent: QWidget | None) -> None:
         # Read previs state before super(), so `_build_shot_source_tab` and
@@ -157,27 +142,6 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         )
         layout.addWidget(self._previs_range_label, row, 1)
 
-        row += 1
-        layout.addWidget(QLabel("Alternates"), row, 0)
-        self._previs_alts_label = QLabel("-")
-        self._previs_alts_label.setToolTip(
-            "Alternate cameras for the selected shot. Compare-alternates renders "
-            "the primary + alternates into one grid video."
-        )
-        layout.addWidget(self._previs_alts_label, row, 1)
-
-        row += 1
-        self._compare_alts_checkbox = QCheckBox("Compare alternates (grid playblast)")
-        self._compare_alts_checkbox.setToolTip(
-            "Render the primary and all alternates side-by-side into one grid "
-            "video. Disabled when the selected shot has no alternates."
-        )
-        self._compare_alts_checkbox.toggled.connect(self._on_source_settings_changed)
-        layout.addWidget(self._compare_alts_checkbox, row, 0, 1, 2)
-
-        # No ShotGrid section in the previs Shot tab — per-shot Versions are a
-        # v2 concern. Dailies for previs go through the Sequence tab.
-
         self._previs_shot_combo.currentIndexChanged.connect(
             self._on_previs_shot_selection_changed
         )
@@ -210,48 +174,7 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         self._sequence_range_label = QLabel("-")
         layout.addWidget(self._sequence_range_label, row, 1)
 
-        row += 1
-        self._build_shotgrid_section_into(layout, start_row=row)
         return tab
-
-    def _build_shotgrid_section_into(self, layout: QGridLayout, start_row: int) -> None:
-        """Build the ShotGrid upload section inline at `start_row` of `layout`.
-
-        Mirrors the base class's `_build_shot_source_tab` rows 4–7. Centralised
-        here so both the previs Shot tab and the Sequence tab can reuse the
-        same widgets (`_shotgrid_upload_checkbox`, `_shotgrid_review_combo`,
-        etc.) without duplicating wiring.
-        """
-        row = start_row
-        layout.addWidget(QLabel("ShotGrid"), row, 0)
-        self._shotgrid_upload_checkbox = QCheckBox("Upload to ShotGrid")
-        self._shotgrid_upload_checkbox.setChecked(False)
-        self._shotgrid_upload_checkbox.setToolTip(
-            "Upload this playblast as a ShotGrid Version on the target Shot."
-        )
-        self._shotgrid_upload_checkbox.toggled.connect(self._on_shotgrid_upload_toggled)
-        layout.addWidget(self._shotgrid_upload_checkbox, row, 1)
-
-        row += 1
-        self._shotgrid_upload_target_row = self._build_shotgrid_upload_target_row()
-        layout.addWidget(self._shotgrid_upload_target_row, row, 0, 1, 2)
-
-        row += 1
-        self._build_shotgrid_review_row()
-        layout.addWidget(self._shotgrid_review_combo, row, 0, 1, 2)
-
-        row += 1
-        self._shotgrid_description_row = QWidget()
-        description_layout = QHBoxLayout(self._shotgrid_description_row)
-        description_layout.setContentsMargins(0, 0, 0, 0)
-        description_layout.addWidget(QLabel("Description"))
-        self._shotgrid_description_field = QLineEdit()
-        self._shotgrid_description_field.setPlaceholderText(
-            "Optional ShotGrid version description"
-        )
-        description_layout.addWidget(self._shotgrid_description_field)
-        layout.addWidget(self._shotgrid_description_row, row, 0, 1, 2)
-        self._sync_shotgrid_description_visibility()
 
     # ------------------------------------------------------------------
     # Previs Shot tab: data binding
@@ -274,6 +197,11 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         if shot.shotgrid_code:
             return f"{display} — {shot.shotgrid_code}"
         return f"{display} {_UNASSIGNED_SUFFIX}"
+
+    @staticmethod
+    def _previs_shot_code(shot: PrevisShot) -> str:
+        """Filename-friendly code for one previs shot."""
+        return shot.shotgrid_code or shot.code or "previs"
 
     def _select_default_previs_shot(self) -> None:
         """Default to the shot containing the current frame. Falls back to the
@@ -313,27 +241,17 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         if shot is None:
             self._previs_primary_label.setText("-")
             self._previs_range_label.setText("-")
-            self._previs_alts_label.setText("-")
-            self._compare_alts_checkbox.setEnabled(False)
             return
 
-        ranges = compute_shot_ranges(self._previs_state) if self._previs_state else {}
-        start, end = ranges.get(shot.id, (FRAME_START, FRAME_START))
+        start, end = self._previs_shot_frame_range(shot)
         self._previs_primary_label.setText(shot.primary or "-")
         self._previs_range_label.setText(f"{start} - {end}")
-        live_alts = [alt for alt in shot.alternates if is_live(alt)]
-        self._previs_alts_label.setText(", ".join(live_alts) if live_alts else "(none)")
 
-        # Compare only makes sense when there is something to compare.
-        has_alts = bool(live_alts)
-        self._compare_alts_checkbox.setEnabled(has_alts)
-        if not has_alts and self._compare_alts_checkbox.isChecked():
-            self._compare_alts_checkbox.setChecked(False)
-        self._compare_alts_checkbox.setToolTip(
-            "Render the primary and all alternates side-by-side into one grid video."
-            if has_alts
-            else "This shot has no alternates to compare."
-        )
+    def _previs_shot_frame_range(self, shot: PrevisShot) -> tuple[int, int]:
+        if self._previs_state is None:
+            return (FRAME_START, FRAME_START)
+        ranges = compute_shot_ranges(self._previs_state)
+        return ranges.get(shot.id, (FRAME_START, FRAME_START))
 
     # ------------------------------------------------------------------
     # Sequence tab: data binding
@@ -355,28 +273,50 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         self._sequence_shots_label.setText(str(shot_count))
         self._sequence_range_label.setText(range_text)
 
-        # No shots → no sequence to playblast.
-        if self.SEQUENCE_TAB_INDEX >= 0:
-            self._source_tabs.setTabEnabled(self.SEQUENCE_TAB_INDEX, shot_count > 0)
-
     # ------------------------------------------------------------------
-    # Source-mode dispatch + validation
+    # Base-dialog behaviour overrides for previs files
     # ------------------------------------------------------------------
 
     def _selected_source_mode(self) -> str:
         current = self._source_tabs.currentIndex()
-        if current == self.SHOT_TAB_INDEX:
-            return _MODE_SHOT
         if self.SEQUENCE_TAB_INDEX >= 0 and current == self.SEQUENCE_TAB_INDEX:
             return _MODE_SEQUENCE
-        return _MODE_CUSTOM
+        return super()._selected_source_mode()
 
-    def _is_previs_shot_compare(self) -> bool:
+    def _refresh_source_tab_availability(self) -> None:
         if self._previs_state is None:
-            return False
-        if self._selected_source_mode() != _MODE_SHOT:
-            return False
-        return self._compare_alts_checkbox.isChecked()
+            super()._refresh_source_tab_availability()
+            return
+        # The previs Shot tab works off sequencer state, not the baked code,
+        # so it stays enabled even without a resolved pipeline shot.
+        self._source_tabs.setTabEnabled(self.SHOT_TAB_INDEX, True)
+        if self.SEQUENCE_TAB_INDEX >= 0:
+            # No shots → no sequence to playblast.
+            self._source_tabs.setTabEnabled(
+                self.SEQUENCE_TAB_INDEX, bool(self._previs_state.shots)
+            )
+
+    def _default_source_tab_index(self) -> int:
+        if self._previs_state is not None:
+            return self.SHOT_TAB_INDEX
+        return super()._default_source_tab_index()
+
+    def _refresh_shot_context_fields(self) -> None:
+        # The base writes to `_shot_code_value` / `_shot_range_value`, which
+        # only exist on the RLO Shot tab. In previs mode the equivalents are
+        # refreshed by `_refresh_previs_shot_fields`. Skip the base path there.
+        if self._previs_state is not None:
+            return
+        super()._refresh_shot_context_fields()
+
+    def _refresh_custom_ui_state(self) -> None:
+        self._refresh_previs_shot_fields()
+        self._refresh_sequence_fields()
+
+    def _action_button_text(self) -> str:
+        if self._selected_source_mode() == _MODE_SEQUENCE:
+            return "Playblast Sequence"
+        return super()._action_button_text()
 
     def _build_shot_camera_widget(self) -> QWidget:
         # Called by the base when the RLO Shot tab is in use. The previs Shot
@@ -444,13 +384,23 @@ class PrevisPlayblastDialog(MPlayblastDialog):
                 self._shot_camera.setCurrentIndex(index)
                 return
 
-    def _validate_source_state(self, mode: str) -> str | None:
+    # ------------------------------------------------------------------
+    # Validation
+    # ------------------------------------------------------------------
+
+    def _validate_export_state(self) -> str | None:
+        mode = self._selected_source_mode()
+        # Previs modes validate against sequencer state, not the base's
+        # pipeline-shot-context requirement.
         if mode == _MODE_SHOT and self._previs_state is not None:
             return self._validate_previs_shot()
-        if mode == _MODE_SHOT:
-            return self._validate_rlo_shot()
         if mode == _MODE_SEQUENCE:
             return self._validate_sequence()
+        return super()._validate_export_state()
+
+    def _validate_source_state(self, mode: str) -> str | None:
+        if mode == _MODE_SHOT:
+            return self._validate_rlo_shot()
         return None
 
     def _validate_rlo_shot(self) -> str | None:
@@ -474,10 +424,6 @@ class PrevisPlayblastDialog(MPlayblastDialog):
                 f"{self._previs_shot_combo.currentText()} has an orphan primary "
                 f"'{shot.primary or '(none)'}'. Fix or remove the shot before playblasting."
             )
-        if self._compare_alts_checkbox.isChecked():
-            live_alts = [alt for alt in shot.alternates if is_live(alt)]
-            if not live_alts:
-                return "Compare alternates needs at least one live alternate."
         return None
 
     def _validate_sequence(self) -> str | None:
@@ -493,66 +439,78 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         return None
 
     # ------------------------------------------------------------------
-    # Visibility rules
+    # Routing for the viewer's Confirm panel
     # ------------------------------------------------------------------
 
-    def _refresh_custom_ui_state(self) -> None:
-        self._refresh_previs_shot_fields()
-        self._refresh_sequence_fields()
-        self._apply_destination_visibility()
+    def _clip_destinations(self) -> tuple[Destination, ...]:
+        scene_dir = Path(str(mc.file(query=True, sceneName=True) or ".")).parent
+        rows = [
+            Destination(
+                name="Current Folder",
+                directory=scene_dir,
+                preset=FFmpegPreset.WEB,
+                default_on=False,
+            ),
+            Destination(
+                name="Custom Folder",
+                directory=resolve_playblast_tempdir(),
+                preset=FFmpegPreset.WEB,
+                default_on=False,
+                browsable=True,
+            ),
+        ]
+        # Per-shot previs playblasts feed editorial; full-sequence dailies go
+        # to ShotGrid instead (see `project_dailies_path_is_shotgrid`).
+        if self._selected_source_mode() != _MODE_SEQUENCE:
+            rows.insert(
+                0,
+                Destination(
+                    name="Send to Edit",
+                    directory=build_edit_output_directory("previs"),
+                    preset=FFmpegPreset.EDIT_SQ,
+                ),
+            )
+        return tuple(rows)
 
-    def _refresh_shot_context_fields(self) -> None:
-        # The base writes to `_shot_code_value` / `_shot_range_value`, which
-        # only exist on the RLO Shot tab. In previs mode the equivalents are
-        # `_previs_primary_label` / `_previs_range_label`, refreshed by
-        # `_refresh_previs_shot_fields`. Skip the base path entirely there.
+    def _clip_shotgrid(self) -> ShotGridUpload | None:
+        if self._selected_source_mode() == _MODE_SEQUENCE:
+            code = (self._shot.code or "").strip() if self._shot is not None else ""
+            if not code:
+                return None
+            return ShotGridUpload(
+                entity_kind="shot",
+                entity_value=code,
+                artist_display_name=resolve_artist_display_name().strip() or None,
+            )
         if self._previs_state is not None:
-            return
-        super()._refresh_shot_context_fields()
+            # Per-shot previs Versions aren't offered; previs dailies go
+            # through the Sequence tab.
+            return None
+        return super()._clip_shotgrid()
 
-    def _apply_destination_visibility(self) -> None:
-        """Hide EDIT in Compare mode and in Sequence mode; show otherwise.
+    def _clip_output_prefix(self) -> str:
+        mode = self._selected_source_mode()
+        if mode == _MODE_SEQUENCE:
+            return (self._shot.code if self._shot is not None else "") or "previs"
+        if mode == _MODE_SHOT and self._previs_state is not None:
+            shot = self._selected_previs_shot()
+            return self._previs_shot_code(shot) if shot is not None else "previs"
+        return super()._clip_output_prefix()
 
-        Compare playblasts are review-internal (never editorial), and full-
-        sequence dailies go to ShotGrid (not the editorial inbox). See
-        `project_dailies_path_is_shotgrid` memory.
-        """
-        edit_name = self.SAVE_LOCS.EDIT.name  # type: ignore[attr-defined]
-        edit_visible = not (
-            self._is_previs_shot_compare()
-            or self._selected_source_mode() == _MODE_SEQUENCE
-        )
-        toggle = self._destination_checkboxes.get(edit_name)
-        if toggle is None:
-            return
-        row = toggle.parentWidget()
-        if row is not None:
-            row.setVisible(edit_visible)
-        if not edit_visible and toggle.isChecked():
-            toggle.setChecked(False)
-
-    def _default_destination_enabled(self, location: SaveLocation) -> bool:
-        return location.name == self.SAVE_LOCS.EDIT.name  # type: ignore[attr-defined]
-
-    def _should_upload_shot_playblast_to_shotgrid(self) -> bool:
-        # In a previs file, the ShotGrid upload section only lives on the
-        # Sequence tab (not the Shot tab). Per-shot uploads to ShotGrid are a
-        # v2 concern. The Sequence tab uses its own export path which uploads
-        # via `_upload_sequence_playblast`, so the base's auto-upload path
-        # never fires for previs files.
-        if self._previs_state is not None:
-            return False
-        return super()._should_upload_shot_playblast_to_shotgrid()
+    def _routed_clip(self, clip: PreviewClip) -> PreviewClip:
+        routed = super()._routed_clip(clip)
+        if self._selected_source_mode() == _MODE_SEQUENCE:
+            routed = attrs.evolve(routed, settings_key=self.SEQUENCE_SETTINGS_KEY)
+        return routed
 
     # ------------------------------------------------------------------
-    # Config dispatch + per-mode execution
+    # Config dispatch + export
     # ------------------------------------------------------------------
 
     def _generate_config(self) -> MPlayblastConfig:
         # `MPlayblastConfig` is the *single-shot, single-camera* shape used by
-        # `MPlayblaster`. Compare and Sequence modes don't fit this shape, so
-        # `do_export` checks for them first and short-circuits before reaching
-        # this method. Reaching here means we're in a single-camera mode.
+        # `MPlayblaster`. Sequence mode doesn't fit it, so `do_export` short-
+        # circuits before reaching this method.
         mode = self._selected_source_mode()
         if mode == _MODE_SHOT and self._previs_state is not None:
             shot_config = self._build_previs_single_shot_config()
@@ -560,50 +518,6 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             shot_config = self._build_rlo_shot_config()
         else:
             shot_config = self._build_custom_playblast_config()
-        return self._wrap_single_shot_config(shot_config)
-
-    def _build_rlo_shot_config(self) -> MShotPlayblastConfig:
-        if self._shot is None:
-            raise ValueError("No pipeline shot context was found.")
-        output_name = self._resolve_output_name(self._shot.code or "")
-        version_label, version_title = _resolve_rlo_version(self._shot)
-        return MShotPlayblastConfig(
-            camera=str(self._shot_camera.currentText()).strip(),
-            shot=self._shot,
-            paths=self._paths_for_filename(output_name),
-            use_sequencer=False,
-            version_label=version_label,
-            version_title=version_title,
-        )
-
-    def _build_previs_single_shot_config(self) -> MShotPlayblastConfig:
-        shot = self._selected_previs_shot()
-        if shot is None or not shot.primary:
-            raise ValueError("Previs shot has no primary camera.")
-        base_name = shot.shotgrid_code or self._previs_shot_combo.currentText()
-        output_name = self._resolve_output_name(base_name)
-        cut_in, cut_out = self._previs_shot_frame_range(shot)
-        return MShotPlayblastConfig(
-            camera=shot.primary,
-            shot=dummy_shot(
-                code=base_name,
-                cut_in=cut_in,
-                cut_out=cut_out,
-                cut_duration=max(0, cut_out - cut_in + 1),
-            ),
-            paths=self._paths_for_filename(output_name),
-            use_sequencer=False,
-        )
-
-    def _previs_shot_frame_range(self, shot: PrevisShot) -> tuple[int, int]:
-        if self._previs_state is None:
-            return (FRAME_START, FRAME_START)
-        ranges = compute_shot_ranges(self._previs_state)
-        return ranges.get(shot.id, (FRAME_START, FRAME_START))
-
-    def _wrap_single_shot_config(
-        self, shot_config: MShotPlayblastConfig
-    ) -> MPlayblastConfig:
         return MPlayblastConfig(
             dof=self.use_dof,
             hardware_fog=self.use_hardware_fog,
@@ -613,38 +527,41 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             ssao=self.use_ssao,
         )
 
-    def _build_compare_config(self) -> MCompareShotConfig:
+    def _build_rlo_shot_config(self) -> MShotPlayblastConfig:
+        if self._shot is None:
+            raise ValueError("No pipeline shot context was found.")
+        version_label, version_title = _resolve_rlo_version(self._shot)
+        return MShotPlayblastConfig(
+            camera=str(self._shot_camera.currentText()).strip(),
+            shot=self._shot,
+            use_sequencer=False,
+            version_label=version_label,
+            version_title=version_title,
+        )
+
+    def _build_previs_single_shot_config(self) -> MShotPlayblastConfig:
         shot = self._selected_previs_shot()
-        assert self._previs_state is not None and shot is not None
-        cut_in, _ = self._previs_shot_frame_range(shot)
-        live_alts = [alt for alt in shot.alternates if is_live(alt)]
-        cameras = [shot.primary, *live_alts]
-        durations = [shot.duration_of(cam) for cam in cameras]
-        focals = [focal_length(cam) for cam in cameras]
-        max_length = max(durations)
-        base_name = shot.shotgrid_code or self._previs_shot_combo.currentText()
-        output_name = self._resolve_output_name(f"{base_name}_compare")
-        return MCompareShotConfig(
-            cameras=cameras,
-            camera_durations=durations,
-            focal_lengths=focals,
-            start_frame=cut_in,
-            total_frames=max_length,
-            paths=self._paths_for_filename(output_name),
-            shot_label=base_name,
-            viewport_options=self._viewport_options_payload(),
+        if shot is None or not shot.primary:
+            raise ValueError("Previs shot has no primary camera.")
+        cut_in, cut_out = self._previs_shot_frame_range(shot)
+        return MShotPlayblastConfig(
+            camera=shot.primary,
+            shot=dummy_shot(
+                code=self._previs_shot_code(shot),
+                cut_in=cut_in,
+                cut_out=cut_out,
+                cut_duration=max(0, cut_out - cut_in + 1),
+            ),
+            use_sequencer=False,
         )
 
     def _build_sequence_config(self) -> MSequenceConfig:
-        assert self._previs_state is not None and self._shot is not None
+        assert self._previs_state is not None
         ranges = compute_shot_ranges(self._previs_state)
         cuts = [(shot.primary, *ranges[shot.id]) for shot in self._previs_state.shots]
-        base_name = self._shot.code or "previs"
-        output_name = self._resolve_output_name(base_name)
         return MSequenceConfig(
             cuts=cuts,
-            proxy_shot=self._shot,
-            paths=self._paths_for_filename(output_name),
+            code=(self._shot.code if self._shot is not None else "") or "previs",
             viewport_options=self._viewport_options_payload(),
         )
 
@@ -657,49 +574,21 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             "ssao": self.use_ssao,
         }
 
-    # ------------------------------------------------------------------
-    # Override `do_export` for Compare and Sequence modes
-    # ------------------------------------------------------------------
-
     def do_export(self) -> None:
-        # Compare and Sequence each use their own playblaster (not the base
-        # `MPlayblaster`). For those, build the per-mode config, validate,
-        # and run their playblaster directly. Everything else delegates to
-        # the base implementation.
-        if self._is_previs_shot_compare():
-            self._run_compare_export()
+        # The Sequence tab renders through its own playblaster; other modes
+        # use the base flow unchanged.
+        if self._selected_source_mode() != _MODE_SEQUENCE:
+            super().do_export()
             return
-        if self._selected_source_mode() == _MODE_SEQUENCE:
-            self._run_sequence_export()
-            return
-        super().do_export()
 
-    def _run_compare_export(self) -> None:
-        validation_error = self._validate_target_destination_state()
+        validation_error = self._validate_export_state()
         if validation_error:
             MessageDialog(self, validation_error, "Playblast").exec_()
             return
-        try:
-            config = self._build_compare_config()
-            MComparePlayblaster().configure(config).playblast()
-        except Exception as exc:
-            log.exception("Compare playblast failed")
-            MessageDialog(
-                self, f"Compare playblast failed.\n\n{exc}", "Playblast Error"
-            ).exec_()
-            return
-        self._remember_custom_folder()
-        MessageDialog(self, self._format_compare_success(config)).exec_()
-        self.close()
 
-    def _run_sequence_export(self) -> None:
-        validation_error = self._validate_target_destination_state()
-        if validation_error:
-            MessageDialog(self, validation_error, "Playblast").exec_()
-            return
         try:
             config = self._build_sequence_config()
-            MSequencePlayblaster().configure(config).playblast()
+            clips = MSequencePlayblaster().configure(config).playblast()
         except Exception as exc:
             log.exception("Sequence playblast failed")
             MessageDialog(
@@ -707,50 +596,17 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             ).exec_()
             return
 
-        self._remember_custom_folder()
-        post_messages: list[str] = []
-        if self._is_shotgrid_upload_requested():
-            post_messages = self._upload_sequence_playblast(config)
+        if not clips:
+            MessageDialog(self, "Nothing was rendered.", "Playblast").exec_()
+            return
 
-        MessageDialog(
-            self, self._format_sequence_success(config, post_messages)
-        ).exec_()
-        self.close()
-
-    def _upload_sequence_playblast(self, config: MSequenceConfig) -> list[str]:
-        proxy_code = config.proxy_shot.code or ""
-        output_paths = config.final_output_paths()
-        intent = PlayblastUploadIntent(
-            entity=PlayblastEntity.shot(proxy_code),
-            output_paths=tuple(output_paths),
-            preferred_paths=tuple(output_paths),
-            description=self._shotgrid_upload_description() or None,
-            artist_display_name=resolve_artist_display_name().strip() or None,
-            upload_version=self._is_shotgrid_version_upload_enabled(),
-            upload_to_review=self._is_shotgrid_review_upload_enabled(),
-            review_playlist_id=self._shotgrid_review_combo.selected_playlist_id,
-            review_load_error=self._shotgrid_review_combo.load_error,
-            fallback_version_name=f"{proxy_code}_playblast",
+        viewer_error = self._hand_off_to_viewer(
+            [self._routed_clip(clip) for clip in clips]
         )
-        return run_playblast_upload(intent)
-
-    @staticmethod
-    def _format_compare_success(config: MCompareShotConfig) -> str:
-        lines = ["Compare playblast export successful.", "", "Outputs:"]
-        lines.extend(str(p) for p in config.final_output_paths())
-        return "\n".join(lines)
-
-    @staticmethod
-    def _format_sequence_success(
-        config: MSequenceConfig, post_messages: list[str]
-    ) -> str:
-        lines = ["Sequence playblast export successful.", "", "Outputs:"]
-        lines.extend(str(p) for p in config.final_output_paths())
-        if post_messages:
-            lines.append("")
-            lines.append("Post-export:")
-            lines.extend(post_messages)
-        return "\n".join(lines)
+        if viewer_error:
+            MessageDialog(self, viewer_error, "Playblast Error").exec_()
+            return
+        self.close()
 
 
 def _resolve_rlo_version(shot: Shot) -> tuple[str | None, str | None]:

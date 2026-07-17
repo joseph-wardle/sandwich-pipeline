@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, cast
 
 from pipe.core.playblast import FFmpegPreset
 from pipe.core.shotgrid import Shot
@@ -25,22 +24,6 @@ def dummy_shot(code: str, cut_in: int, cut_out: int, cut_duration: int) -> Shot:
         set=None,
         sets=[],
     )
-
-
-@dataclass
-class MShotDialogConfig:
-    """Information needed to add a shot to the playblast dialog
-    id: str
-        Unique id for this shot
-    name: str
-        Display name of the shot
-    save_locs: list[tuple[SaveLocation, bool]]
-        List of save locations, paired with their default enable value
-    """
-
-    id: str
-    name: str
-    save_locs: list[tuple[SaveLocation, bool]]
 
 
 @dataclass
@@ -73,35 +56,8 @@ class MPlayblastConfig:
     ssao: bool
 
 
-class SaveLocation:
-    """Information needed for a save location. If a lambda is provided to
-    `path` it will call that and return the value"""
-
-    name: str
-    preset: FFmpegPreset
-    _path: str | Path | Callable[[], str | Path]
-
-    def __init__(
-        self,
-        name: str,
-        path: str | Path | Callable[[], str | Path],
-        preset: FFmpegPreset,
-    ):
-        self.name = name
-        self._path = path
-        self.preset = preset
-
-    @property
-    def path(self) -> str | Path:
-        if callable(self._path):
-            return cast(Callable[[], str | Path], self._path)()
-        return self._path
-
-
 __all__ = [
     "MPlayblastConfig",
-    "MShotDialogConfig",
     "MShotPlayblastConfig",
-    "SaveLocation",
     "dummy_shot",
 ]

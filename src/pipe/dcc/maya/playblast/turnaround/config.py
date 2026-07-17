@@ -3,12 +3,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 from typing import Iterable
 
 import maya.cmds as mc
 
-from pipe.core.playblast import FFmpegPreset, Playblaster
+from pipe.core.playblast import Playblaster
 
 log = logging.getLogger(__name__)
 
@@ -70,10 +69,9 @@ class TurnaroundReviewRoots:
 
 @dataclass(frozen=True)
 class TurnaroundPlayblastConfig:
-    """All settings required to export an asset turnaround movie."""
+    """All settings required to render an asset turnaround preview."""
 
     asset_label: str
-    output_paths: dict[FFmpegPreset, list[str | Path]]
     review_roots: tuple[str, ...]
     hud_asset_details: bool = True
     passes: tuple[TurnaroundPass, ...] = DEFAULT_PASSES
