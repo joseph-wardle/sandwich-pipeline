@@ -341,11 +341,9 @@ def _frame_camera_for_pass(
     position = (
         aim[0],
         aim[1] + fit.distance * math.sin(phi),
-        aim[2] - fit.distance * math.cos(phi),
+        aim[2] + fit.distance * math.cos(phi),
     )
-    # At the top, the camera looks straight down, so a Y up vector is degenerate;
-    # face the front of the asset toward the top of frame instead.
-    world_up = (0.0, 0.0, -1.0) if elevation is Elevation.TOP else (0.0, 1.0, 0.0)
+    world_up = (0.0, 0.0, 1.0) if elevation is Elevation.TOP else (0.0, 1.0, 0.0)
 
     reach = bounding_radius(profile, fit.aim_y)
     mc.setAttr(f"{camera_shape}.nearClipPlane", max(0.1, fit.distance - 2.0 * reach))  # type: ignore
