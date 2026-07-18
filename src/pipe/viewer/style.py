@@ -15,6 +15,9 @@ PAD_L = 18
 GAP = 8
 RADIUS = 4
 
+# Diameter of the round transport play button; halved for its QSS radius.
+TRANSPORT_PLAY_SIZE = 46
+
 ACCENT = "#5285a6"
 ACCENT_HOVER = "#5f97bb"
 ACCENT_PRESSED = "#456f8a"
@@ -89,6 +92,19 @@ QToolButton { border-radius: ${radius}px; padding: 2px; }
 QToolButton:hover { background-color: $raised_hover; }
 QToolButton:pressed { background-color: $pressed; }
 
+/* The centered play/pause control: a round accent button, the transport's
+   one primary action. Radius tracks TRANSPORT_PLAY_SIZE. */
+QToolButton#transportPlay {
+    background-color: $accent;
+    border: 1px solid $accent;
+    border-radius: ${play_radius}px;
+}
+QToolButton#transportPlay:hover {
+    background-color: $accent_hover;
+    border-color: $accent_hover;
+}
+QToolButton#transportPlay:pressed { background-color: $accent_pressed; }
+
 QCheckBox { spacing: 6px; padding: 2px 0; }
 QCheckBox:hover { color: $text_bright; }
 
@@ -108,6 +124,13 @@ QGroupBox::title {
     font-weight: 600;
 }
 
+/* Nested well for a row's expandable sub-options (e.g. ShotGrid playlist). */
+QFrame#shotgridOptions {
+    background-color: $base;
+    border: 1px solid $border;
+    border-radius: ${radius}px;
+}
+
 QListWidget {
     border: 1px solid $border;
     border-radius: ${radius}px;
@@ -118,6 +141,12 @@ QListWidget::item { padding: 6px 8px; border-radius: 3px; }
 QListWidget::item:hover { background-color: $raised; }
 QListWidget::item:selected { background-color: $accent; color: $text_bright; }
 
+/* The clip filmstrip paints its own rows via a delegate, so strip the generic
+   item padding and highlight that would otherwise double up beneath it. */
+QListWidget#clipList::item { padding: 0; }
+QListWidget#clipList::item:hover,
+QListWidget#clipList::item:selected { background: transparent; }
+
 QLineEdit {
     background-color: $base;
     border: 1px solid $border;
@@ -127,19 +156,49 @@ QLineEdit {
 }
 QLineEdit:focus { border-color: $accent; }
 
+QComboBox {
+    background-color: $base;
+    border: 1px solid $border;
+    border-radius: ${radius}px;
+    padding: 4px 6px;
+    padding-right: 18px;
+    color: $text;
+}
+QComboBox:focus { border-color: $accent; }
+QComboBox:disabled { color: $disabled_text; }
+QComboBox::drop-down { border: none; width: 18px; }
+/* Caret drawn as a CSS border triangle so we ship no arrow image. */
+QComboBox::down-arrow {
+    image: none;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid $muted;
+    margin-right: 6px;
+}
+QComboBox QAbstractItemView {
+    background-color: $base;
+    border: 1px solid $border_strong;
+    selection-background-color: $accent;
+    selection-color: $text_bright;
+    outline: 0;
+}
+
 QSlider::groove:horizontal {
     height: 4px;
     background: $base;
     border-radius: 2px;
 }
 QSlider::sub-page:horizontal { background: $accent; border-radius: 2px; }
+/* Slim vertical pill reads as a playhead marker rather than a knob. */
 QSlider::handle:horizontal {
-    background: $text;
-    width: 12px;
-    margin: -5px 0;
-    border-radius: 6px;
+    background: $text_bright;
+    width: 6px;
+    margin: -6px 0;
+    border-radius: 3px;
 }
-QSlider::handle:horizontal:hover { background: $text_bright; }
+QSlider::handle:horizontal:hover { background: $accent_hover; }
 """
 )
 
@@ -148,6 +207,7 @@ def stylesheet() -> str:
     """The global QSS layered over the Fusion palette in `apply_dark_theme`."""
     return _STYLESHEET.substitute(
         radius=RADIUS,
+        play_radius=TRANSPORT_PLAY_SIZE // 2,
         accent=ACCENT,
         accent_hover=ACCENT_HOVER,
         accent_pressed=ACCENT_PRESSED,

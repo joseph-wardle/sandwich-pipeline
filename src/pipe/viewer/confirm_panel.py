@@ -8,11 +8,13 @@ from enum import Enum, auto
 from pathlib import Path
 
 import attrs
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
+from PySide6.QtCore import Qt, QObject, QRunnable, QThreadPool, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
+    QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -41,8 +43,7 @@ from pipe.viewer.settings import (
     save_checked_destinations,
     save_last_custom_folder,
 )
-from pipe.viewer.style import FAIL_STYLE as _FAIL_STYLE
-from pipe.viewer.style import OK_STYLE as _OK_STYLE
+from pipe.viewer import style
 
 log = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ class _Row(QWidget):
         self._status = QLabel("")
         self._detail = QLabel("")
         self._detail.setWordWrap(True)
-        self._detail.setStyleSheet(_FAIL_STYLE)
+        self._detail.setStyleSheet(style.FAIL_STYLE)
         self._detail.hide()
 
         self._header = QHBoxLayout()
@@ -152,7 +153,7 @@ class _Row(QWidget):
     def set_delivered(self, detail: str) -> None:
         self._state = RowState.DELIVERED
         self._status.setText("✓")
-        self._status.setStyleSheet(_OK_STYLE)
+        self._status.setStyleSheet(style.OK_STYLE)
         self._status.setToolTip(detail)
         self._checkbox.setEnabled(False)
         self._detail.hide()
@@ -160,7 +161,7 @@ class _Row(QWidget):
     def set_failed(self, detail: str) -> None:
         self._state = RowState.FAILED
         self._status.setText("✗")
-        self._status.setStyleSheet(_FAIL_STYLE)
+        self._status.setStyleSheet(style.FAIL_STYLE)
         self._detail.setText(detail)
         self._detail.show()
 
@@ -211,6 +212,7 @@ class _ShotGridRow(_Row):
     review playlist."""
 
     _upload: ShotGridUpload
+    _options: QFrame
     _playlist_check: QCheckBox
     _playlist_combo: QComboBox
     _refresh_button: QPushButton
@@ -242,12 +244,20 @@ class _ShotGridRow(_Row):
         combo_row = QHBoxLayout()
         combo_row.addWidget(self._playlist_combo, stretch=1)
         combo_row.addWidget(self._refresh_button)
-        sub = QVBoxLayout()
-        sub.setContentsMargins(22, 0, 0, 0)
-        sub.addWidget(self._playlist_check)
-        sub.addLayout(combo_row)
-        sub.addWidget(self._description)
-        self._column.addLayout(sub)
+
+        # A framed well that appears only while ShotGrid is checked
+        self._options = QFrame()
+        self._options.setObjectName("shotgridOptions")
+        self._options.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        options_layout = QVBoxLayout(self._options)
+        options_layout.addWidget(self._playlist_check)
+        options_layout.addLayout(combo_row)
+        options_layout.addWidget(self._description)
+
+        indent = QHBoxLayout()
+        indent.setContentsMargins(style.PAD_L, 0, 0, 0)
+        indent.addWidget(self._options)
+        self._column.addLayout(indent)
         self._sync_enabled()
 
     @property
@@ -277,6 +287,8 @@ class _ShotGridRow(_Row):
         super()._on_toggled()
 
     def _sync_enabled(self) -> None:
+        # Sub-options are only relevant while the upload is selected.
+        self._options.setVisible(self.is_checked)
         active = self.is_checked and self._state is not RowState.DELIVERED
         self._playlist_check.setEnabled(active and not self._upload.playlist_required)
         self._description.setEnabled(active)
@@ -360,21 +372,25 @@ class ConfirmPanel(QWidget):
         if not self.is_confirmable:
             return
 
-        header = QLabel("Destinations")
-        font = header.font()
-        font.setBold(True)
-        header.setFont(font)
+        destinations = QGroupBox("Destinations")
+        destinations_layout = QVBoxLayout(destinations)
+        destinations_layout.setSpacing(style.GAP)
+        for row in self._all_rows():
+            destinations_layout.addWidget(row)
+
         self._error_label = QLabel("")
         self._error_label.setWordWrap(True)
-        self._error_label.setStyleSheet(_FAIL_STYLE)
+        self._error_label.setStyleSheet(style.FAIL_STYLE)
         self._error_label.hide()
         self._confirm_button = QPushButton()
+        # Confirm is the panel's primary action; the accent variant reads it as
+        # the anchor the way Maya's OK button did.
+        self._confirm_button.setProperty("primary", True)
         self._confirm_button.clicked.connect(self.request_confirm)
 
         column = QVBoxLayout(self)
-        column.addWidget(header)
-        for row in self._all_rows():
-            column.addWidget(row)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.addWidget(destinations)
         column.addStretch(1)
         column.addWidget(self._error_label)
         column.addWidget(self._confirm_button)
@@ -416,9 +432,9 @@ class ConfirmPanel(QWidget):
         rows = self._rows_to_run()
         if self._running or not rows:
             return
-        run_shotgrid = self._sg_row is not None and self._sg_row in rows
-        if run_shotgrid and self._sg_row is not None:
-            error = self._sg_row.validation_error()
+        sg = self._sg_row if self._sg_row in rows else None
+        if sg is not None:
+            error = sg.validation_error()
             if error is not None:
                 self._show_error(error)
                 return
@@ -431,17 +447,9 @@ class ConfirmPanel(QWidget):
                 row.chosen() for row in rows if isinstance(row, _FolderRow)
             ),
             send_to_edit=run_edit,
-            upload_to_shotgrid=run_shotgrid,
-            review_playlist_id=(
-                self._sg_row.playlist_id
-                if run_shotgrid and self._sg_row is not None
-                else None
-            ),
-            description=(
-                self._sg_row.description
-                if run_shotgrid and self._sg_row is not None
-                else None
-            ),
+            upload_to_shotgrid=sg is not None,
+            review_playlist_id=sg.playlist_id if sg else None,
+            description=sg.description if sg else None,
         )
         for row in rows:
             row.set_running()
