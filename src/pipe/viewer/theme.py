@@ -1,15 +1,15 @@
-"""Fusion-based dark theme so the viewer sits comfortably next to the DCCs."""
+"""Fusion-based dark theme so the viewer sits comfortably next to the DCCs.
+
+The QPalette handles native widget defaults; `style.stylesheet()` layers the
+polish (accent buttons, hover states, styled slider) on top. Both read their
+colors from `style.py`."""
 
 from __future__ import annotations
 
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
-_WINDOW = QColor(53, 53, 53)
-_BASE = QColor(42, 42, 42)
-_TEXT = QColor(220, 220, 220)
-_DISABLED = QColor(128, 128, 128)
-_HIGHLIGHT = QColor(82, 133, 166)
+from pipe.viewer import style
 
 
 def apply_dark_theme(app: QApplication) -> None:
@@ -17,22 +17,23 @@ def apply_dark_theme(app: QApplication) -> None:
 
     palette = QPalette()
     role = QPalette.ColorRole
-    palette.setColor(role.Window, _WINDOW)
-    palette.setColor(role.WindowText, _TEXT)
-    palette.setColor(role.Base, _BASE)
-    palette.setColor(role.AlternateBase, _WINDOW)
-    palette.setColor(role.Text, _TEXT)
-    palette.setColor(role.Button, _WINDOW)
-    palette.setColor(role.ButtonText, _TEXT)
-    palette.setColor(role.ToolTipBase, _BASE)
-    palette.setColor(role.ToolTipText, _TEXT)
-    palette.setColor(role.Highlight, _HIGHLIGHT)
-    palette.setColor(role.HighlightedText, QColor(255, 255, 255))
+    palette.setColor(role.Window, QColor(style.SURFACE))
+    palette.setColor(role.WindowText, QColor(style.TEXT))
+    palette.setColor(role.Base, QColor(style.BASE))
+    palette.setColor(role.AlternateBase, QColor(style.SURFACE))
+    palette.setColor(role.Text, QColor(style.TEXT))
+    palette.setColor(role.Button, QColor(style.SURFACE))
+    palette.setColor(role.ButtonText, QColor(style.TEXT))
+    palette.setColor(role.ToolTipBase, QColor(style.BASE))
+    palette.setColor(role.ToolTipText, QColor(style.TEXT))
+    palette.setColor(role.Highlight, QColor(style.ACCENT))
+    palette.setColor(role.HighlightedText, QColor(style.TEXT_BRIGHT))
     disabled = QPalette.ColorGroup.Disabled
-    palette.setColor(disabled, role.Text, _DISABLED)
-    palette.setColor(disabled, role.ButtonText, _DISABLED)
-    palette.setColor(disabled, role.WindowText, _DISABLED)
+    palette.setColor(disabled, role.Text, QColor(style.DISABLED_TEXT))
+    palette.setColor(disabled, role.ButtonText, QColor(style.DISABLED_TEXT))
+    palette.setColor(disabled, role.WindowText, QColor(style.DISABLED_TEXT))
     app.setPalette(palette)
+    app.setStyleSheet(style.stylesheet())
 
 
 __all__ = ["apply_dark_theme"]

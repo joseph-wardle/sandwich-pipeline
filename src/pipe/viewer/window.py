@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from pipe.core.playblast.preview_spec import PreviewClip, PreviewSpec
+from pipe.viewer import style
 from pipe.viewer.confirm_panel import ConfirmPanel, PanelStatus
 
 _SIDEBAR_WIDTH = 200
@@ -129,6 +130,8 @@ class ViewerWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QHBoxLayout(central)
+        layout.setContentsMargins(style.PAD_M, style.PAD_M, style.PAD_M, style.PAD_M)
+        layout.setSpacing(style.PAD_M)
 
         self._clip_list = QListWidget()
         self._clip_list.addItems([clip.label for clip in self._spec.clips])
@@ -156,6 +159,7 @@ class ViewerWindow(QMainWindow):
         )
 
         player_column = QVBoxLayout()
+        player_column.setSpacing(style.GAP)
         player_column.addWidget(self._canvas, stretch=1)
         player_column.addLayout(self._build_transport())
         layout.addLayout(player_column, stretch=1)

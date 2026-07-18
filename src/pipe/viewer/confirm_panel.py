@@ -41,11 +41,10 @@ from pipe.viewer.settings import (
     save_checked_destinations,
     save_last_custom_folder,
 )
+from pipe.viewer.style import FAIL_STYLE as _FAIL_STYLE
+from pipe.viewer.style import OK_STYLE as _OK_STYLE
 
 log = logging.getLogger(__name__)
-
-_OK_STYLE = "color: #8cc88c;"
-_FAIL_STYLE = "color: #e08282;"
 
 
 class RowState(Enum):
