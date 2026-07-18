@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from pathlib import Path
 from typing import TYPE_CHECKING, Iterator, cast
 
 import hou
@@ -15,7 +14,7 @@ from pipe.core.hud import (
     line_date,
     line_shot,
 )
-from pipe.core.playblast import FFmpegPreset, Playblaster
+from pipe.core.playblast import Playblaster, PreviewClip
 from pipe.core.shot import houdini_department_stream, shot_owner_for
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.core.versioning import current_version_label
@@ -56,13 +55,11 @@ _GUIDES_TO_DISABLE = (
 
 class HPlayblaster(Playblaster):
     _camera_path: str | None
-    _out_paths: dict[FFmpegPreset, list[Path | str]]
     _shot: Shot
     _tails: tuple[int, int]
 
     def __init__(self) -> None:
         self._camera_path = None
-        self._out_paths = {}
         self._tails = (0, 0)
         try:
             self.fps = int(round(hou.fps()))
@@ -72,12 +69,10 @@ class HPlayblaster(Playblaster):
     def configure(
         self,
         shot: Shot,
-        out_paths: dict[FFmpegPreset, list[Path | str]],
         tails: tuple[int, int] = (0, 0),
         camera_path: str | None = None,
     ) -> "HPlayblaster":
         self._shot = shot
-        self._out_paths = out_paths
         self._tails = tails
         self._camera_path = camera_path.strip() or None if camera_path else None
         return self
@@ -128,8 +123,8 @@ class HPlayblaster(Playblaster):
         ):
             _run_flipbook(scene_viewer, viewport, flip)
 
-    def playblast(self) -> None:
-        super()._do_playblast(self._shot, self._out_paths, self._tails)
+    def playblast(self) -> list[PreviewClip]:
+        return [super()._do_playblast(self._shot, tails=self._tails)]
 
 
 def _scene_viewer_and_viewport() -> tuple[hou.SceneViewer, hou.GeometryViewport]:

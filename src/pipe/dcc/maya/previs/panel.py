@@ -22,12 +22,14 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.core.previs import codes, mutate_manifest, naming
+from pipe.core.playblast import PREVIEW_SPEC_FILENAME, PreviewSpec, save_preview_spec
+from pipe.core.previs import codes, mutate_manifest
 from pipe.core.shotgrid import ShotGrid, is_previs_shot_code
 from pipe.core.ui import MessageDialog, MessageDialogCustomButtons
-from pipe.core.util.paths import get_production_path
+from pipe.core.util.paths import get_previs_path, get_production_path
 
 from pipe.dcc.maya.runtime import get_main_qt_window
+from pipe.viewer.spawn import spawn_viewer
 
 from . import (
     breakout,
@@ -583,40 +585,66 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self._persist()
 
     def export_take(self, shot_id: str) -> None:
-        """Render one shot's primary to a new take, then report the outcome."""
-        if not self._guard_previs_file():
-            return
+        """Render one shot's primary to a take preview and open it in the viewer."""
         shot = self._state.find_shot(shot_id)
-        if shot is None:
+        if shot is not None:
+            self._launch_take_previews([shot])
+
+    def export_all_takes(self) -> None:
+        self._launch_take_previews(self._state.shots)
+
+    def _launch_take_previews(self, shots: list[PrevisShot]) -> None:
+        """Render take previews for `shots` and hand them to the viewer."""
+        if not self._guard_previs_file():
             return
         sequence_code = self._sequence_code()
         if sequence_code is None:
             return  # guarded above; re-checked so the type stays narrowed
-        cut_in, cut_out = playback.compute_shot_ranges(self._state)[shot.id]
-        try:
-            result = export.export_take(shot, cut_in, cut_out, sequence_code)
-        except export.PrevisExportError as exc:
-            MessageDialog(self, str(exc), "Export Take").exec_()
-            return
-        except Exception as exc:
-            log.exception("export_take failed")
-            MessageDialog(self, str(exc), "Export Failed").exec_()
-            return
-        MessageDialog(self, _describe_take(result), "Export Take").exec_()
-
-    def export_all_takes(self) -> None:
-        if not self._guard_previs_file():
-            return
-        sequence_code = self._sequence_code()
-        if sequence_code is None:
-            return
-        if not self._state.shots:
+        if not shots:
             MessageDialog(
                 self, "No shots in this file to export.", "Export Takes"
             ).exec_()
             return
-        result = export.export_all_takes(self._state, sequence_code)
-        MessageDialog(self, _summarize_take_batch(result), "Export Takes").exec_()
+
+        try:
+            batch = export.build_take_previews(
+                self._state, shots, sequence_code, previs_root=get_previs_path()
+            )
+        except Exception as exc:
+            log.exception("Take preview render failed")
+            MessageDialog(self, str(exc), "Export Failed").exec_()
+            return
+
+        if batch.failed:
+            MessageDialog(
+                self, _summarize_skipped(batch.failed), "Export Takes"
+            ).exec_()
+        if not batch.clips:
+            if not batch.failed:
+                MessageDialog(self, "Nothing was rendered.", "Export Takes").exec_()
+            return
+
+        error = self._hand_off_to_viewer(batch)
+        if error:
+            MessageDialog(self, error, "Export Takes").exec_()
+
+    def _hand_off_to_viewer(self, batch: export.TakePreviewBatch) -> str | None:
+        """Write the preview spec and spawn the viewer on it. Returns an
+        artist-facing error message if the viewer could not open."""
+        spec = PreviewSpec(
+            fps=batch.fps, resolution=batch.resolution, clips=batch.clips
+        )
+        spec_path = batch.clips[0].frames_dir / PREVIEW_SPEC_FILENAME
+        try:
+            save_preview_spec(spec, spec_path)
+            spawn_viewer(spec_path)
+        except Exception as exc:
+            log.exception("Could not open the playblast viewer")
+            return (
+                "The takes rendered, but the viewer could not open, so nothing "
+                f"was sent to edit.\n\nReason: {exc}"
+            )
+        return None
 
     def _confirm_break_out(self, shots: list[PrevisShot]) -> bool:
         """Confirm a destructive re-bake, flagging any RLO files it would overwrite."""
@@ -667,44 +695,12 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         return False
 
 
-def _describe_take_delta(result: export.TakeResult) -> str:
-    """How this take's length compares to the shot's previous take, as a phrase."""
-    delta = result.length_delta
-    if delta is None:
-        return "first take"
-    if delta == 0:
-        return "same length"
-    return f"{delta:+d}f vs previous"
-
-
-def _describe_take(result: export.TakeResult) -> str:
-    """One-line success sentence for a single take export."""
-    return (
-        f"Exported take {naming.version_token(result.version)} of {result.code} "
-        f"— {result.duration_frames}f ({_describe_take_delta(result)})."
-    )
-
-
-def _summarize_take_batch(result: export.BatchResult) -> str:
-    """Multi-line summary: exported takes with deltas, then skipped shots with reasons."""
-    lines: list[str] = []
-    if result.exported:
-        plural = "s" if len(result.exported) != 1 else ""
-        lines.append(f"Exported {len(result.exported)} take{plural}.")
-        lines.append("")
-        for take in result.exported:
-            lines.append(
-                f"  • {take.code}  {naming.version_token(take.version)}  "
-                f"{take.duration_frames}f  ({_describe_take_delta(take)})"
-            )
-    if result.failed:
-        if lines:
-            lines.append("")
-        plural = "s" if len(result.failed) != 1 else ""
-        lines.append(f"Skipped {len(result.failed)} shot{plural}:")
-        for label, reason in result.failed:
-            lines.append(f"  • {label} — {reason}")
-    return "\n".join(lines) if lines else "Nothing to export."
+def _summarize_skipped(failed: list[tuple[str, str]]) -> str:
+    """Multi-line list of shots that rendered no take preview, with reasons."""
+    plural = "s" if len(failed) != 1 else ""
+    lines = [f"Skipped {len(failed)} shot{plural}:"]
+    lines += [f"  • {label} — {reason}" for label, reason in failed]
+    return "\n".join(lines)
 
 
 # ---------- workspaceControl boilerplate ----------

@@ -10,6 +10,7 @@ from typing import Any
 
 import ffmpeg  # type: ignore[import-untyped]
 
+from pipe.core.hud import HudContent, apply_hud
 from pipe.core.playblast.presets import FFmpegPreset
 
 log = logging.getLogger(__name__)
@@ -52,6 +53,26 @@ def build_image_input_chain(
     ).filter("format", "yuv422p")
 
 
+def burn_hud_frames(
+    input_pattern: str,
+    output_pattern: str,
+    content: HudContent,
+    resolution: tuple[int, int],
+    *,
+    start_frame: int,
+) -> None:
+    """Burn `content` onto a PNG sequence, writing a sibling PNG sequence."""
+    chain = apply_hud(
+        ffmpeg.input(input_pattern, start_number=start_frame), content, resolution
+    )
+    try:
+        ffmpeg.output(
+            chain, output_pattern, start_number=start_frame
+        ).overwrite_output().run()
+    except ffmpeg.Error as exc:
+        raise FFmpegEncodeError.from_exc(exc, Path(output_pattern)) from exc
+
+
 def encode_movie(
     input_chain: Any,
     *,
@@ -82,4 +103,9 @@ def encode_movie(
     return output_path
 
 
-__all__ = ["FFmpegEncodeError", "build_image_input_chain", "encode_movie"]
+__all__ = [
+    "FFmpegEncodeError",
+    "build_image_input_chain",
+    "burn_hud_frames",
+    "encode_movie",
+]

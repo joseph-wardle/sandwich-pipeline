@@ -2,6 +2,7 @@
 **/.idea/
 **/.vscode/
 **/.venv/
+**/.venv-viewer/
 **/.zed/
 
 # Local-only throwaway prototypes (e.g. risk-mitigation spikes)

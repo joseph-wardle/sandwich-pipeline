@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import math
 import shutil
-import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -12,10 +11,11 @@ import maya.cmds as mc
 from pipe.core.hud import (
     ARTIST,
     HudContent,
-    apply_hud,
     labeled_line,
 )
-from pipe.core.playblast.encoding import build_image_input_chain, encode_movie
+from pipe.core.playblast.encoding import burn_hud_frames
+from pipe.core.playblast.preview_spec import PreviewClip
+from pipe.core.playblast.tempdir import create_preview_dir
 from pipe.core.ui.progress import progress_scope
 from pipe.core.util.users import resolve_artist_display_name
 from mayacapture.capture import capture  # type: ignore[import-not-found]
@@ -50,7 +50,9 @@ BACKGROUND = (0.161, 0.161, 0.161)
 
 
 class MTurnaroundPlayblaster:
-    """Capture a sequence of asset turnaround passes into one movie."""
+    """Capture a sequence of asset turnaround passes into one HUD-burned
+    frame sequence for the viewer. Passes are stitched back-to-back into a
+    single clip; nothing is encoded or copied here."""
 
     _config: TurnaroundPlayblastConfig
 
@@ -58,7 +60,7 @@ class MTurnaroundPlayblaster:
         self._config = config
         return self
 
-    def playblast(self, *, parent: QtWidgets.QWidget | None = None) -> None:
+    def playblast(self, *, parent: QtWidgets.QWidget | None = None) -> PreviewClip:
         config = self._config
         if not config.review_roots:
             raise ValueError("No review roots were resolved for turnaround export.")
@@ -68,56 +70,63 @@ class MTurnaroundPlayblaster:
         profile = swept_profile(samples, pivot)
 
         steps = [_pass_label(index, p) for index, p in enumerate(config.passes)]
-        steps += ["Assembling frames", "Encoding movies"]
+        steps += ["Assembling frames", "Burning HUD"]
 
-        with tempfile.TemporaryDirectory(prefix="skd_turnaround_") as temp_dir:
-            temp_root = Path(temp_dir)
-            combined_base = temp_root / "turnaround_combined"
+        preview_dir = create_preview_dir()
+        combined_base = preview_dir / "turnaround"
 
-            with progress_scope(
-                parent=parent,
-                title="Turnaround Playblast",
-                steps=steps,
-            ) as progress:
-                with (
-                    maintain_selection(),
-                    _preserved_current_time(),
-                    _held_animation(),
-                    _orbiting_turnaround_camera(
+        with progress_scope(
+            parent=parent,
+            title="Turnaround Playblast",
+            steps=steps,
+        ) as progress:
+            with (
+                maintain_selection(),
+                _preserved_current_time(),
+                _held_animation(),
+                _orbiting_turnaround_camera(
+                    pivot=pivot,
+                    frames_per_pass=config.frames_per_pass,
+                    focal_length=config.focal_length,
+                ) as (camera_transform, camera_shape),
+            ):
+                pass_bases: list[Path] = []
+                for index, turnaround_pass in enumerate(config.passes):
+                    progress.begin_step(
+                        _pass_label(index, turnaround_pass),
+                        "Rendering frames — this may take a moment...",
+                    )
+                    _frame_camera_for_pass(
+                        camera_transform,
+                        camera_shape,
+                        profile=profile,
                         pivot=pivot,
-                        frames_per_pass=config.frames_per_pass,
-                        focal_length=config.focal_length,
-                    ) as (camera_transform, camera_shape),
-                ):
-                    pass_bases: list[Path] = []
-                    for index, turnaround_pass in enumerate(config.passes):
-                        progress.begin_step(
-                            _pass_label(index, turnaround_pass),
-                            "Rendering frames — this may take a moment...",
-                        )
-                        _frame_camera_for_pass(
-                            camera_transform,
-                            camera_shape,
-                            profile=profile,
-                            pivot=pivot,
-                            elevation=turnaround_pass.elevation,
-                            aspect=config.width / config.height,
-                            padding=config.camera_padding,
-                        )
-                        pass_base = temp_root / f"turnaround_pass_{index:02d}"
-                        self._capture_pass(
-                            output_base=pass_base,
-                            camera_shape=camera_shape,
-                            review_roots=config.review_roots,
-                            wireframe_on_shaded=turnaround_pass.wireframe_on_shaded,
-                        )
-                        pass_bases.append(pass_base)
+                        elevation=turnaround_pass.elevation,
+                        aspect=config.width / config.height,
+                        padding=config.camera_padding,
+                    )
+                    pass_base = preview_dir / f"turnaround_pass_{index:02d}"
+                    self._capture_pass(
+                        output_base=pass_base,
+                        camera_shape=camera_shape,
+                        review_roots=config.review_roots,
+                        wireframe_on_shaded=turnaround_pass.wireframe_on_shaded,
+                    )
+                    pass_bases.append(pass_base)
 
-                progress.begin_step("Assembling frames")
-                self._assemble_combined_sequence(pass_bases, combined_base)
+            progress.begin_step("Assembling frames")
+            self._assemble_combined_sequence(pass_bases, combined_base)
 
-                progress.begin_step("Encoding movies", "Running FFmpeg...")
-                self._encode_output_movies(combined_base=combined_base)
+            progress.begin_step("Burning HUD", "Running FFmpeg...")
+            frames_basename = self._burn_hud(combined_base)
+
+        return PreviewClip(
+            label=config.asset_label,
+            frames_dir=preview_dir,
+            frames_basename=frames_basename,
+            frame_start=1,
+            frame_end=len(config.passes) * config.frames_per_pass,
+        )
 
     def _capture_pass(
         self,
@@ -155,7 +164,8 @@ class MTurnaroundPlayblaster:
             viewport_options={
                 "displayAppearance": "smoothShaded",
                 "shadows": True,
-                # HUD bakes during encode (apply_hud), so the viewport HUD is off.
+                # HUD bakes onto the frames afterwards (burn_hud_frames), so the
+                # viewport HUD is off.
                 "headsUpDisplay": False,
                 "wireframeOnShaded": wireframe_on_shaded,
             },
@@ -207,35 +217,18 @@ class MTurnaroundPlayblaster:
             if offset % 10 == 0:
                 QtWidgets.QApplication.processEvents()
 
-    def _encode_output_movies(self, *, combined_base: Path) -> None:
-        image_pattern = str(combined_base) + ".%04d.png"
-        resolution = (self._config.width, self._config.height)
-        hud = self._hud_content()
-
-        for preset, output_bases in self._config.output_paths.items():
-            if not output_bases:
-                continue
-
-            temp_movie_path = combined_base.with_suffix(f".{preset.ext}")
-            input_chain = build_image_input_chain(
-                image_pattern,
-                start_frame=1,
-                frame_rate=self._config.frame_rate,
-            )
-            input_chain = apply_hud(input_chain, hud, resolution)
-            encode_movie(
-                input_chain,
-                output_path=temp_movie_path,
-                preset=preset,
-                frame_rate=self._config.frame_rate,
-                start_frame=1,
-            )
-
-            for output_base in output_bases:
-                output_path = Path(str(output_base) + f".{preset.ext}")
-                output_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
-                shutil.copyfile(temp_movie_path, output_path)
-                QtWidgets.QApplication.processEvents()
+    def _burn_hud(self, combined_base: Path) -> str:
+        """Burn the HUD onto the combined sequence as a sibling `.hud`
+        sequence. Returns the basename the viewer should read from."""
+        hud_basename = combined_base.name + ".hud"
+        burn_hud_frames(
+            str(combined_base) + ".%04d.png",
+            str(combined_base.with_name(hud_basename)) + ".%04d.png",
+            self._hud_content(),
+            (self._config.width, self._config.height),
+            start_frame=1,
+        )
+        return hud_basename
 
     def _hud_content(self) -> HudContent:
         config = self._config

@@ -13,14 +13,14 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.core.playblast import FFmpegPreset
+from pipe.core.playblast import Destination, FFmpegPreset
 from pipe.core.playblast.naming import build_edit_output_directory
+from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.shot import maya_anim_stream, shot_owner_for
 from pipe.core.versioning import current_version_label
 from pipe.dcc.maya.playblast.shot.config import (
     MPlayblastConfig,
     MShotPlayblastConfig,
-    SaveLocation,
 )
 from pipe.dcc.maya.playblast.shot.dialog import MPlayblastDialog
 
@@ -33,14 +33,9 @@ class AnimPlayblastDialog(MPlayblastDialog):
 
     PASS_PATTERN = re.compile(r"^(?:Blocking|Polish) #\d+$")
 
-    class SAVE_LOCS(MPlayblastDialog.SAVE_LOCS):
-        EDIT = SaveLocation(
-            "Send to Edit",
-            lambda: build_edit_output_directory("anim"),
-            FFmpegPreset.EDIT_SQ,
-        )
+    SETTINGS_KEY = "maya_anim"
 
-    def __init__(self, parent) -> None:
+    def __init__(self, parent: QWidget | None) -> None:
         super().__init__(parent, windowTitle="SKD Anim Playblast")
 
     def _build_extra_source_options(self) -> QWidget | None:
@@ -95,16 +90,37 @@ class AnimPlayblastDialog(MPlayblastDialog):
         log.warning("No USD shot camera found; falling back to legacy path.")
         return "|__mayaUsd__|shotCamParent|shotCam"
 
+    def _clip_destinations(self) -> tuple[Destination, ...]:
+        scene_dir = Path(str(mc.file(query=True, sceneName=True) or ".")).parent
+        return (
+            Destination(
+                name="Send to Edit",
+                directory=build_edit_output_directory("anim"),
+                preset=FFmpegPreset.EDIT_SQ,
+                default_on=False,
+            ),
+            Destination(
+                name="Current Folder",
+                directory=scene_dir,
+                preset=FFmpegPreset.WEB,
+            ),
+            Destination(
+                name="Custom Folder",
+                directory=resolve_playblast_tempdir(),
+                preset=FFmpegPreset.WEB,
+                default_on=False,
+                browsable=True,
+            ),
+        )
+
     def _build_shot_playblast_config(self) -> MShotPlayblastConfig:
         if self._shot is None:
             raise ValueError("No pipeline shot context is available.")
 
-        shot_output_name = self._resolve_output_name(self._shot.code or "")
         version_label, version_title = _resolve_anim_version(self._shot)
         return MShotPlayblastConfig(
             camera=self._get_shot_camera_path(),
             shot=self._shot,
-            paths=self._paths_for_filename(shot_output_name),
             tails=(5, 5),
             use_sequencer=False,
             version_label=version_label,
@@ -112,8 +128,7 @@ class AnimPlayblastDialog(MPlayblastDialog):
         )
 
     def _generate_config(self) -> MPlayblastConfig:
-        mode = self._selected_source_mode()
-        if mode == "shot":
+        if self._selected_source_mode() == "shot":
             shot_config = self._build_shot_playblast_config()
         else:
             shot_config = self._build_custom_playblast_config()

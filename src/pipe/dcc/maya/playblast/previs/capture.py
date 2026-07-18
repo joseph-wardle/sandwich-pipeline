@@ -7,8 +7,6 @@ from typing import Any
 
 from mayacapture.capture import capture  # type: ignore[import-not-found]
 
-from pipe.dcc.maya.previs.cameras import resolve_camera_node
-
 CAPTURE_WIDTH = 1280
 CAPTURE_HEIGHT = 720
 
@@ -21,6 +19,11 @@ def capture_cut(
     capture_kwargs: dict[str, Any],
 ) -> None:
     """Capture one camera's `[start_frame, end_frame]` to PNGs under `filename`."""
+    # Imported lazily: the `pipe.dcc.maya.previs` package init pulls in the
+    # previs panel, whose export flow imports back into this package — a
+    # module-level import makes that cycle order-dependent.
+    from pipe.dcc.maya.previs.cameras import resolve_camera_node
+
     capture(
         width=CAPTURE_WIDTH,
         height=CAPTURE_HEIGHT,

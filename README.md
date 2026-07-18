@@ -25,9 +25,14 @@ sandwich-pipeline/
 
 ## Setting up a copy of `sandwich-pipeline`
 1. Fork this repo and clone it to the production location.
-1. Create an `src/env.py` file following the specifications in `src/env.py.md`. This will get things like ShotGrid auth set up, and provide OS-specific DCC executable paths.
-1. Run `uv sync` (or `.githooks/update-venv`) to set up the project environment.
-1. Clone branches for development locally, copy over the env files and get to work!
+2. Create an `src/env.py` file following the specifications in `src/env.py.md`. This will get things like ShotGrid auth set up, and provide OS-specific DCC executable paths.
+3. Run `uv sync` (or `.githooks/update-venv`) to set up the project environment.
+4. Create the playblast viewer environment (kept separate so PySide6 never enters the main venv):
+   ```bash
+   uv venv .venv-viewer
+   uv pip install -p .venv-viewer -r pyproject.toml --group viewer
+   ```
+5. Clone branches for development locally, copy over the env files and get to work!
 
 ## Setting up a dev environment in the labs
 1. Generate a GitHub SSH key and upload it to your GitHub

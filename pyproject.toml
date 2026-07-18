@@ -34,6 +34,12 @@ build-backend = "hatchling.build"
 packages = ["src/pipe"]
 
 [dependency-groups]
+# Installed only into the standalone viewer venv. PySide6 must never enter
+# the main venv, which DCCs put on PYTHONPATH (a second Qt collides with
+# the DCC's own).
+viewer = [
+    "pyside6-essentials>=6.8,<7",
+]
 dev = [
     "ruff>=0.5.7,<0.6",
     "maya-stubs>=0.4.1,<0.5",
@@ -84,6 +90,8 @@ allowed-unresolved-imports = [
     "substance_painter_plugins.**",
     "yrig.**",
     "tractor.**",
+    # Lives only in the viewer venv, never the main venv
+    "PySide6.**",
 ]
 replace-imports-with-any = [
     # shotgun_api3 is untyped; treat as Any to avoid churn.

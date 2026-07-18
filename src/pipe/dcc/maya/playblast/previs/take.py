@@ -1,13 +1,13 @@
-"""`MTakePlayblaster` renders one previs shot's primary into a take movie."""
+"""`MTakePlayblaster` renders one previs shot's primary into a HUD-burned
+preview clip. The viewer's "Send to Edit" turns that preview into a take."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import maya.cmds as mc
 
-from pipe.core.playblast import FFmpegPreset, Playblaster
+from pipe.core.playblast import Playblaster, PreviewClip
 from pipe.core.shotgrid import Shot
 from pipe.dcc.maya.playblast.previs._viewport import apply_viewport_options
 from pipe.dcc.maya.playblast.previs.capture import capture_cut
@@ -30,7 +30,6 @@ class MTakeConfig:
     code: str
     cut_in: int
     cut_out: int
-    paths: dict[FFmpegPreset, list[Path | str]]
     viewport_options: dict[str, bool] = field(default_factory=dict)
 
 
@@ -41,7 +40,7 @@ class MTakePlayblaster(Playblaster):
         self._config = config
         return self
 
-    def playblast(self) -> None:
+    def playblast(self) -> list[PreviewClip]:
         with maintain_selection():
             mc.select(clear=True)
             virtual_shot = dummy_shot(
@@ -50,7 +49,7 @@ class MTakePlayblaster(Playblaster):
                 cut_out=self._config.cut_out,
                 cut_duration=max(0, self._config.cut_out - self._config.cut_in + 1),
             )
-            super()._do_playblast(virtual_shot, self._config.paths, tails=(0, 0))
+            return [super()._do_playblast(virtual_shot, tails=(0, 0))]
 
     def _write_images(self, shot: Shot, path: str) -> None:  # type: ignore[override]
         del shot  # frame range comes from `_config`, not the virtual shot
