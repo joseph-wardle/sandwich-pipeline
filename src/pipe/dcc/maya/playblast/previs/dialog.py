@@ -1,18 +1,4 @@
-"""SKD Previs Playblast dialog.
-
-Extends the render-only `MPlayblastDialog` with two surfaces that only apply
-when the open Maya scene is a previs file (carries `previs_sequencer_state`):
-
-* the **Shot tab** swaps its baked-`fileInfo("code")` layout for a dropdown
-  over the previs file's shots;
-* a new **Sequence tab** stitches every shot's primary into one clip via
-  `MSequencePlayblaster`. Its ShotGrid row in the viewer targets the
-  sequence-proxy Shot (e.g. `A_previs`) — previs dailies go to ShotGrid,
-  never the editorial inbox.
-
-RLO files keep the base dialog's behaviour — the Shot tab stays in its
-baked-code shape, and the Sequence tab is hidden entirely.
-"""
+"""SKD Previs Playblast dialog."""
 
 from __future__ import annotations
 
@@ -31,7 +17,6 @@ from Qt.QtWidgets import (
 )
 
 from pipe.core.playblast import Destination, FFmpegPreset, PreviewClip, ShotGridUpload
-from pipe.core.playblast.naming import build_edit_output_directory
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.shot import maya_rlo_stream, shot_owner_for
 from pipe.core.shotgrid import Shot
@@ -45,15 +30,14 @@ from pipe.dcc.maya.playblast.previs.sequence import (
 from pipe.dcc.maya.playblast.shot.config import (
     MPlayblastConfig,
     MShotPlayblastConfig,
-    dummy_shot,
 )
 from pipe.dcc.maya.playblast.shot.dialog import MPlayblastDialog
 from pipe.dcc.maya.previs import state as previs_state
 from pipe.dcc.maya.previs.cameras import is_live
-from pipe.dcc.maya.previs.playback import FRAME_START, compute_shot_ranges
+from pipe.dcc.maya.previs.playback import compute_shot_ranges
 
 if TYPE_CHECKING:
-    from pipe.dcc.maya.previs.state import PrevisShot, PrevisState
+    from pipe.dcc.maya.previs.state import PrevisState
 
 log = logging.getLogger(__name__)
 
@@ -62,18 +46,11 @@ log = logging.getLogger(__name__)
 # dispatch. Shot and custom match the base's strings.
 _MODE_SHOT = "shot"
 _MODE_SEQUENCE = "sequence"
-_MODE_CUSTOM = "custom"
-
-# Display string used in dropdown labels for shots without a ShotGrid code.
-_UNASSIGNED_SUFFIX = "— unassigned"
 
 
 class PrevisPlayblastDialog(MPlayblastDialog):
     _previs_state: PrevisState | None
     _shot_camera: QComboBox  # RLO Shot tab camera dropdown
-    _previs_shot_combo: QComboBox
-    _previs_primary_label: QLabel
-    _previs_range_label: QLabel
     _sequence_proxy_label: QLabel
     _sequence_shots_label: QLabel
     _sequence_range_label: QLabel
@@ -85,19 +62,14 @@ class PrevisPlayblastDialog(MPlayblastDialog):
     SEQUENCE_SETTINGS_KEY = "maya_previs_sequence"
 
     def __init__(self, parent: QWidget | None) -> None:
-        # Read previs state before super(), so `_build_shot_source_tab` and
-        # `_add_custom_tabs` can branch on file type while the UI is built.
+        # Read previs state before super(), so `_add_custom_tabs` can branch on
+        # file type while the UI is built.
         self._previs_state = previs_state.read_state()
         super().__init__(parent, windowTitle="SKD Previs Playblast")
 
     # ------------------------------------------------------------------
     # Tab assembly
     # ------------------------------------------------------------------
-
-    def _build_shot_source_tab(self) -> QWidget:
-        if self._previs_state is None:
-            return super()._build_shot_source_tab()
-        return self._build_previs_shot_tab()
 
     def _add_custom_tabs(self, tabs: QTabWidget) -> None:
         if self._previs_state is None:
@@ -108,45 +80,6 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             self.SEQUENCE_TAB_INDEX,
             "Stitch every shot's primary into one dailies movie.",
         )
-
-    def _build_previs_shot_tab(self) -> QWidget:
-        tab = QWidget()
-        layout = QGridLayout(tab)
-
-        row = 0
-        layout.addWidget(QLabel("Source"), row, 0)
-        source_label = QLabel("Previs File — shot picker")
-        source_label.setToolTip(
-            "One previs file holds the whole sequence; pick which shot to playblast."
-        )
-        layout.addWidget(source_label, row, 1)
-
-        row += 1
-        layout.addWidget(QLabel("Shot"), row, 0)
-        self._previs_shot_combo = self._build_previs_shot_combo()
-        layout.addWidget(self._previs_shot_combo, row, 1)
-
-        row += 1
-        layout.addWidget(QLabel("Primary"), row, 0)
-        self._previs_primary_label = QLabel("-")
-        self._previs_primary_label.setToolTip(
-            "Primary camera (namespace) for the selected shot."
-        )
-        layout.addWidget(self._previs_primary_label, row, 1)
-
-        row += 1
-        layout.addWidget(QLabel("Frame Range"), row, 0)
-        self._previs_range_label = QLabel("-")
-        self._previs_range_label.setToolTip(
-            "Frame range the selected shot occupies in the sequence."
-        )
-        layout.addWidget(self._previs_range_label, row, 1)
-
-        self._previs_shot_combo.currentIndexChanged.connect(
-            self._on_previs_shot_selection_changed
-        )
-        self._select_default_previs_shot()
-        return tab
 
     def _build_sequence_tab(self) -> QWidget:
         tab = QWidget()
@@ -175,83 +108,6 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         layout.addWidget(self._sequence_range_label, row, 1)
 
         return tab
-
-    # ------------------------------------------------------------------
-    # Previs Shot tab: data binding
-    # ------------------------------------------------------------------
-
-    def _build_previs_shot_combo(self) -> QComboBox:
-        combo = QComboBox(self)
-        combo.setToolTip(
-            "Pick which previs shot to playblast. Default = the shot the "
-            "current frame is inside."
-        )
-        assert self._previs_state is not None
-        for shot in self._previs_state.shots:
-            combo.addItem(self._previs_shot_label(shot), userData=shot.id)
-        return combo
-
-    @staticmethod
-    def _previs_shot_label(shot: PrevisShot) -> str:
-        display = shot.code or "—"
-        if shot.shotgrid_code:
-            return f"{display} — {shot.shotgrid_code}"
-        return f"{display} {_UNASSIGNED_SUFFIX}"
-
-    @staticmethod
-    def _previs_shot_code(shot: PrevisShot) -> str:
-        """Filename-friendly code for one previs shot."""
-        return shot.shotgrid_code or shot.code or "previs"
-
-    def _select_default_previs_shot(self) -> None:
-        """Default to the shot containing the current frame. Falls back to the
-        first shot if the playhead is outside the sequence."""
-        if self._previs_state is None or not self._previs_state.shots:
-            return
-        ranges = compute_shot_ranges(self._previs_state)
-        frame = int(mc.currentTime(query=True))
-        for shot in self._previs_state.shots:
-            start, end = ranges.get(shot.id, (0, -1))
-            if start <= frame <= end:
-                self._set_previs_shot_combo_to(shot.id)
-                return
-        self._previs_shot_combo.setCurrentIndex(0)
-
-    def _set_previs_shot_combo_to(self, shot_id: str) -> None:
-        for index in range(self._previs_shot_combo.count()):
-            if self._previs_shot_combo.itemData(index) == shot_id:
-                self._previs_shot_combo.setCurrentIndex(index)
-                return
-
-    def _selected_previs_shot(self) -> PrevisShot | None:
-        if self._previs_state is None:
-            return None
-        shot_id = self._previs_shot_combo.currentData()
-        if not isinstance(shot_id, str):
-            return None
-        return self._previs_state.find_shot(shot_id)
-
-    def _on_previs_shot_selection_changed(self, _index: int) -> None:
-        self._update_ui_state()
-
-    def _refresh_previs_shot_fields(self) -> None:
-        if self._previs_state is None:
-            return
-        shot = self._selected_previs_shot()
-        if shot is None:
-            self._previs_primary_label.setText("-")
-            self._previs_range_label.setText("-")
-            return
-
-        start, end = self._previs_shot_frame_range(shot)
-        self._previs_primary_label.setText(shot.primary or "-")
-        self._previs_range_label.setText(f"{start} - {end}")
-
-    def _previs_shot_frame_range(self, shot: PrevisShot) -> tuple[int, int]:
-        if self._previs_state is None:
-            return (FRAME_START, FRAME_START)
-        ranges = compute_shot_ranges(self._previs_state)
-        return ranges.get(shot.id, (FRAME_START, FRAME_START))
 
     # ------------------------------------------------------------------
     # Sequence tab: data binding
@@ -287,30 +143,25 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         if self._previs_state is None:
             super()._refresh_source_tab_availability()
             return
-        # The previs Shot tab works off sequencer state, not the baked code,
-        # so it stays enabled even without a resolved pipeline shot.
-        self._source_tabs.setTabEnabled(self.SHOT_TAB_INDEX, True)
+        # Per-shot previs delivery lives in the previs panel now; this dialog
+        # only offers whole-sequence dailies (and Custom).
+        self._source_tabs.setTabEnabled(self.SHOT_TAB_INDEX, False)
         if self.SEQUENCE_TAB_INDEX >= 0:
             # No shots → no sequence to playblast.
             self._source_tabs.setTabEnabled(
                 self.SEQUENCE_TAB_INDEX, bool(self._previs_state.shots)
             )
+        if self._source_tabs.currentIndex() == self.SHOT_TAB_INDEX:
+            self._source_tabs.setCurrentIndex(self._default_source_tab_index())
 
     def _default_source_tab_index(self) -> int:
         if self._previs_state is not None:
-            return self.SHOT_TAB_INDEX
+            if self.SEQUENCE_TAB_INDEX >= 0 and self._previs_state.shots:
+                return self.SEQUENCE_TAB_INDEX
+            return self.CUSTOM_TAB_INDEX
         return super()._default_source_tab_index()
 
-    def _refresh_shot_context_fields(self) -> None:
-        # The base writes to `_shot_code_value` / `_shot_range_value`, which
-        # only exist on the RLO Shot tab. In previs mode the equivalents are
-        # refreshed by `_refresh_previs_shot_fields`. Skip the base path there.
-        if self._previs_state is not None:
-            return
-        super()._refresh_shot_context_fields()
-
     def _refresh_custom_ui_state(self) -> None:
-        self._refresh_previs_shot_fields()
         self._refresh_sequence_fields()
 
     def _action_button_text(self) -> str:
@@ -319,8 +170,8 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         return super()._action_button_text()
 
     def _build_shot_camera_widget(self) -> QWidget:
-        # Called by the base when the RLO Shot tab is in use. The previs Shot
-        # tab is built by `_build_previs_shot_tab` and doesn't touch this.
+        # Called by the base when the RLO Shot tab is in use. (In previs files
+        # that tab is disabled, but the base still builds it.)
         #
         # Order matters: set the default selection *before* wiring the
         # `currentTextChanged` signal. The base's `_build_shot_source_tab`
@@ -389,12 +240,7 @@ class PrevisPlayblastDialog(MPlayblastDialog):
     # ------------------------------------------------------------------
 
     def _validate_export_state(self) -> str | None:
-        mode = self._selected_source_mode()
-        # Previs modes validate against sequencer state, not the base's
-        # pipeline-shot-context requirement.
-        if mode == _MODE_SHOT and self._previs_state is not None:
-            return self._validate_previs_shot()
-        if mode == _MODE_SEQUENCE:
+        if self._selected_source_mode() == _MODE_SEQUENCE:
             return self._validate_sequence()
         return super()._validate_export_state()
 
@@ -415,23 +261,12 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             return "Choose a camera for Shot Playblast."
         return None
 
-    def _validate_previs_shot(self) -> str | None:
-        shot = self._selected_previs_shot()
-        if shot is None:
-            return "Pick a shot to playblast."
-        if not shot.primary or not is_live(shot.primary):
-            return (
-                f"{self._previs_shot_combo.currentText()} has an orphan primary "
-                f"'{shot.primary or '(none)'}'. Fix or remove the shot before playblasting."
-            )
-        return None
-
     def _validate_sequence(self) -> str | None:
         if self._previs_state is None or not self._previs_state.shots:
             return "This previs file has no shots."
         for shot in self._previs_state.shots:
             if not shot.primary or not is_live(shot.primary):
-                label = self._previs_shot_label(shot)
+                label = shot.code or "(shot)"
                 return (
                     f"{label} has an orphan primary '{shot.primary or '(none)'}'. "
                     "Fix or remove the shot before playblasting the sequence."
@@ -444,7 +279,7 @@ class PrevisPlayblastDialog(MPlayblastDialog):
 
     def _clip_destinations(self) -> tuple[Destination, ...]:
         scene_dir = Path(str(mc.file(query=True, sceneName=True) or ".")).parent
-        rows = [
+        return (
             Destination(
                 name="Current Folder",
                 directory=scene_dir,
@@ -458,19 +293,7 @@ class PrevisPlayblastDialog(MPlayblastDialog):
                 default_on=False,
                 browsable=True,
             ),
-        ]
-        # Per-shot previs playblasts feed editorial; full-sequence dailies go
-        # to ShotGrid instead (see `project_dailies_path_is_shotgrid`).
-        if self._selected_source_mode() != _MODE_SEQUENCE:
-            rows.insert(
-                0,
-                Destination(
-                    name="Send to Edit",
-                    directory=build_edit_output_directory("previs"),
-                    preset=FFmpegPreset.EDIT_SQ,
-                ),
-            )
-        return tuple(rows)
+        )
 
     def _clip_shotgrid(self) -> ShotGridUpload | None:
         if self._selected_source_mode() == _MODE_SEQUENCE:
@@ -489,12 +312,8 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         return super()._clip_shotgrid()
 
     def _clip_output_prefix(self) -> str:
-        mode = self._selected_source_mode()
-        if mode == _MODE_SEQUENCE:
+        if self._selected_source_mode() == _MODE_SEQUENCE:
             return (self._shot.code if self._shot is not None else "") or "previs"
-        if mode == _MODE_SHOT and self._previs_state is not None:
-            shot = self._selected_previs_shot()
-            return self._previs_shot_code(shot) if shot is not None else "previs"
         return super()._clip_output_prefix()
 
     def _routed_clip(self, clip: PreviewClip) -> PreviewClip:
@@ -511,10 +330,7 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         # `MPlayblastConfig` is the *single-shot, single-camera* shape used by
         # `MPlayblaster`. Sequence mode doesn't fit it, so `do_export` short-
         # circuits before reaching this method.
-        mode = self._selected_source_mode()
-        if mode == _MODE_SHOT and self._previs_state is not None:
-            shot_config = self._build_previs_single_shot_config()
-        elif mode == _MODE_SHOT:
+        if self._selected_source_mode() == _MODE_SHOT:
             shot_config = self._build_rlo_shot_config()
         else:
             shot_config = self._build_custom_playblast_config()
@@ -537,22 +353,6 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             use_sequencer=False,
             version_label=version_label,
             version_title=version_title,
-        )
-
-    def _build_previs_single_shot_config(self) -> MShotPlayblastConfig:
-        shot = self._selected_previs_shot()
-        if shot is None or not shot.primary:
-            raise ValueError("Previs shot has no primary camera.")
-        cut_in, cut_out = self._previs_shot_frame_range(shot)
-        return MShotPlayblastConfig(
-            camera=shot.primary,
-            shot=dummy_shot(
-                code=self._previs_shot_code(shot),
-                cut_in=cut_in,
-                cut_out=cut_out,
-                cut_duration=max(0, cut_out - cut_in + 1),
-            ),
-            use_sequencer=False,
         )
 
     def _build_sequence_config(self) -> MSequenceConfig:

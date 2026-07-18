@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 
-from pipe.core.playblast import FFmpegPreset
 from pipe.core.shotgrid import Shot
 
 log = logging.getLogger(__name__)
@@ -36,7 +34,6 @@ class MShotPlayblastConfig:
 
     camera: str | None
     shot: Shot
-    paths: dict[FFmpegPreset, list[str | Path]] = field(default_factory=dict)
     tails: tuple[int, int] = (0, 0)
     use_sequencer: bool = False
     pass_label: str | None = None

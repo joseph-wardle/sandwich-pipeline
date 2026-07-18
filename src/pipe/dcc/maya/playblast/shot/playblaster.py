@@ -171,8 +171,7 @@ class MPlayblaster(Playblaster):
                 try:
                     clip = super()._do_playblast(
                         shot_config.shot,
-                        shot_config.paths,
-                        shot_config.tails,
+                        tails=shot_config.tails,
                     )
                 finally:
                     self._current_shot_config = None

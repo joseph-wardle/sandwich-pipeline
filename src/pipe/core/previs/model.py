@@ -9,11 +9,18 @@ a manifest through the tools.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import cast
 
 from .codes import normalize_code
 
 SCHEMA_VERSION = 3
+
+
+def utcnow_iso() -> str:
+    """UTC timestamp for a take's `created_at` (e.g. `2026-07-17T18:03:00+00:00`)."""
+    return datetime.now(timezone.utc).isoformat()
+
 
 _KEY_SCHEMA_VERSION = "schema_version"
 _KEY_SEQUENCE_CODE = "sequence_code"
@@ -385,4 +392,11 @@ class SequenceManifest:
         return None
 
 
-__all__ = ["SCHEMA_VERSION", "FileRecord", "ManifestShot", "SequenceManifest", "Take"]
+__all__ = [
+    "SCHEMA_VERSION",
+    "FileRecord",
+    "ManifestShot",
+    "SequenceManifest",
+    "Take",
+    "utcnow_iso",
+]

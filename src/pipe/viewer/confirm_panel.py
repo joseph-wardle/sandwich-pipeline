@@ -22,12 +22,18 @@ from PySide6.QtWidgets import (
 )
 
 from pipe.core.playblast.confirm import (
+    SEND_TO_EDIT_DESTINATION_NAME,
     SHOTGRID_DESTINATION_NAME,
     ConfirmChoices,
     ConfirmResult,
     confirm_clip,
 )
-from pipe.core.playblast.preview_spec import Destination, PreviewClip, ShotGridUpload
+from pipe.core.playblast.preview_spec import (
+    Destination,
+    PreviewClip,
+    PrevisStamp,
+    ShotGridUpload,
+)
 from pipe.core.playblast.review.playlists import list_recent_review_playlists
 from pipe.viewer.settings import (
     load_checked_destinations,
@@ -305,6 +311,23 @@ class _ShotGridRow(_Row):
         self._playlist_combo.addItem(label, None)
 
 
+class _SendToEditRow(_Row):
+    """The Send to Edit peer row (previs only): delivers an immutable take and
+    stamps the sequence manifest. Present only when the clip carries a
+    `PrevisStamp`. The take version is allocated by the engine at Confirm, so
+    the row shows only its target, not a version number."""
+
+    _stamp: PrevisStamp
+
+    def __init__(self, stamp: PrevisStamp) -> None:
+        super().__init__(SEND_TO_EDIT_DESTINATION_NAME)
+        self._stamp = stamp
+        self._checkbox.setToolTip(
+            f"Deliver an immutable take for {stamp.shot_code} "
+            f"(sequence {stamp.sequence_code}) and stamp the previs manifest."
+        )
+
+
 class ConfirmPanel(QWidget):
     """The Destinations checklist for one clip. Emits `state_changed` when
     its `status` may have moved, so the window can update badges, advance to
@@ -317,6 +340,7 @@ class ConfirmPanel(QWidget):
     _basename: str | None
     _running: bool
     _job: _ConfirmJob | None
+    _edit_row: _SendToEditRow | None
     _folder_rows: list[_FolderRow]
     _sg_row: _ShotGridRow | None
     _error_label: QLabel
@@ -329,6 +353,9 @@ class ConfirmPanel(QWidget):
         self._basename = None
         self._running = False
         self._job = None
+        self._edit_row = (
+            _SendToEditRow(clip.previs_stamp) if clip.previs_stamp else None
+        )
         self._folder_rows = [_FolderRow(spot) for spot in clip.destinations]
         self._sg_row = _ShotGridRow(clip.shotgrid) if clip.shotgrid else None
         if not self.is_confirmable:
@@ -364,7 +391,7 @@ class ConfirmPanel(QWidget):
 
     @property
     def is_confirmable(self) -> bool:
-        return bool(self._folder_rows or self._sg_row)
+        return bool(self._edit_row or self._folder_rows or self._sg_row)
 
     @property
     def status(self) -> PanelStatus:
@@ -396,6 +423,7 @@ class ConfirmPanel(QWidget):
             if error is not None:
                 self._show_error(error)
                 return
+        run_edit = self._edit_row is not None and self._edit_row in rows
 
         self._show_error("")
         self._remember_toggles()
@@ -403,6 +431,7 @@ class ConfirmPanel(QWidget):
             destinations=tuple(
                 row.chosen() for row in rows if isinstance(row, _FolderRow)
             ),
+            send_to_edit=run_edit,
             upload_to_shotgrid=run_shotgrid,
             review_playlist_id=(
                 self._sg_row.playlist_id
@@ -462,7 +491,12 @@ class ConfirmPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _all_rows(self) -> list[_Row]:
-        rows: list[_Row] = list(self._folder_rows)
+        # Send to Edit leads: for a previs clip it is the primary delivery, and
+        # its take version sets the shared basename the other rows reuse.
+        rows: list[_Row] = []
+        if self._edit_row is not None:
+            rows.append(self._edit_row)
+        rows.extend(self._folder_rows)
         if self._sg_row is not None:
             rows.append(self._sg_row)
         return rows
@@ -501,6 +535,12 @@ class ConfirmPanel(QWidget):
 
     def _apply_remembered_toggles(self) -> None:
         remembered = load_checked_destinations(self._clip.settings_key)
+        if self._edit_row is not None:
+            # Send to Edit is the point of a take export, so it defaults on.
+            checked = True
+            if remembered is not None:
+                checked = self._edit_row.name in remembered
+            self._edit_row.set_checked(checked)
         for destination, row in zip(self._clip.destinations, self._folder_rows):
             checked = destination.default_on
             if remembered is not None:

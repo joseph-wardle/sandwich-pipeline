@@ -49,13 +49,14 @@ class ShotGridUpload:
 
 @attrs.frozen
 class PrevisStamp:
-    """Manifest-stamp context for a previs take export. Carried by the spec
-    now; the viewer starts stamping takes on Confirm in Phase 3."""
+    """Manifest-stamp context for a previs take."""
 
     sequence_code: str
     shot_code: str
-    take_version: int
     camera: str
+    source_filename: str
+    duration_frames: int
+    previs_root: Path
 
 
 @attrs.frozen
