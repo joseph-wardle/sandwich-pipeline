@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -32,13 +33,33 @@ _LINE_GAP_RATIO = 0.039
 
 
 @dataclass(frozen=True)
+class TimedText:
+    """A HUD line whose text changes across the burn. Each `(n, text)` marks
+    where `text` takes over."""
+
+    changes: tuple[tuple[int, str], ...]
+
+
+def timed_text(values: Sequence[str]) -> str | TimedText:
+    """Coalesce per-frame `values` (index 0 is the first burned frame) into
+    changepoints. Returns a plain `str` when every frame is identical."""
+    changes: list[tuple[int, str]] = [(0, values[0])]
+    for index, value in enumerate(values[1:], start=1):
+        if value != changes[-1][1]:
+            changes.append((index, value))
+    if len(changes) == 1:
+        return values[0]
+    return TimedText(tuple(changes))
+
+
+@dataclass(frozen=True)
 class HudContent:
     """`left_lines` and `right_lines` stack bottom-up: index 0 is the bottom row.
     `frame_start` enables the per-frame counter in the lower-right; `None`
     disables it. `right_lines` sit above the counter."""
 
-    left_lines: tuple[str, ...] = ()
-    right_lines: tuple[str, ...] = ()
+    left_lines: tuple[str | TimedText, ...] = ()
+    right_lines: tuple[str | TimedText, ...] = ()
     frame_start: int | None = None
 
     def is_empty(self) -> bool:
@@ -107,25 +128,39 @@ class _Style:
         }
 
 
-def _iter_filter_kwargs(content: HudContent, style: _Style):
-    common = style.common_kwargs()
+def _stack_y(style: _Style, rows_up: int) -> str:
+    """Bottom-up row position: row 0 sits at the padding, each row up adds a gap."""
+    return f"h-th-{style.padding + rows_up * style.line_gap}"
 
-    for index, text in enumerate(content.left_lines):
-        yield {
-            "text": text,
-            "x": str(style.padding),
-            "y": f"h-th-{style.padding + index * style.line_gap}",
-            **common,
-        }
+
+def _line_kwargs(
+    line: str | TimedText, x: str, y: str, common: dict[str, str]
+) -> Iterator[dict[str, str]]:
+    """Yield drawtext kwargs for one HUD row."""
+    if isinstance(line, str):
+        yield {"text": line, "x": x, "y": y, **common}
+        return
+    for index, (frame, text) in enumerate(line.changes):
+        if index + 1 < len(line.changes):
+            enable = f"between(n,{frame},{line.changes[index + 1][0] - 1})"
+        else:
+            enable = f"gte(n,{frame})"
+        yield {"text": text, "x": x, "y": y, "enable": enable, **common}
+
+
+def _iter_filter_kwargs(content: HudContent, style: _Style) -> Iterator[dict[str, str]]:
+    common = style.common_kwargs()
+    left_x = str(style.padding)
+    right_x = f"w-tw-{style.padding}"
+
+    for index, line in enumerate(content.left_lines):
+        yield from _line_kwargs(line, left_x, _stack_y(style, index), common)
 
     counter_offset = 1 if content.frame_start is not None else 0
-    for index, text in enumerate(content.right_lines):
-        yield {
-            "text": text,
-            "x": f"w-tw-{style.padding}",
-            "y": f"h-th-{style.padding + (index + counter_offset) * style.line_gap}",
-            **common,
-        }
+    for index, line in enumerate(content.right_lines):
+        yield from _line_kwargs(
+            line, right_x, _stack_y(style, index + counter_offset), common
+        )
 
     if content.frame_start is not None:
         # Bare `:` inside the eif expression must reach ffmpeg as `\:`.
@@ -133,8 +168,8 @@ def _iter_filter_kwargs(content: HudContent, style: _Style):
         # so we pass the colons unescaped
         yield {
             "text": _FRAME_COUNTER_TEMPLATE.format(start=content.frame_start),
-            "x": f"w-tw-{style.padding}",
-            "y": f"h-th-{style.padding}",
+            "x": right_x,
+            "y": _stack_y(style, 0),
             **common,
         }
 
@@ -145,8 +180,10 @@ __all__ = [
     "HudContent",
     "SHOT",
     "TITLE",
+    "TimedText",
     "apply_hud",
     "labeled_line",
     "line_date",
     "line_shot",
+    "timed_text",
 ]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import maya.cmds as mc
 from mayacapture.capture import capture  # type: ignore[import-not-found]
@@ -10,9 +10,11 @@ from pipe.core.hud import (
     ARTIST,
     TITLE,
     HudContent,
+    TimedText,
     labeled_line,
     line_date,
     line_shot,
+    timed_text,
 )
 from pipe.core.playblast import Playblaster
 from pipe.core.util.users import resolve_artist_display_name
@@ -121,9 +123,12 @@ class MPlayblaster(Playblaster):
             )
         )
 
-        right_lines: list[str] = [line_date()]
-        camera_line = _camera_focal_lines(shot_config)
-        right_lines.extend(camera_line)
+        end_frame = start_frame
+        if shot_config is not None:
+            end_frame = shot.frame_range[1] + shot_config.tails[1]
+
+        right_lines: list[str | TimedText] = [line_date()]
+        right_lines.extend(_camera_focal_lines(shot_config, start_frame, end_frame))
 
         return HudContent(
             left_lines=tuple(left_lines),
@@ -177,14 +182,18 @@ class MPlayblaster(Playblaster):
                     self._current_shot_config = None
 
 
-def _camera_focal_lines(shot_config: MShotPlayblastConfig | None) -> list[str]:
+def _camera_focal_lines(
+    shot_config: MShotPlayblastConfig | None, start_frame: int, end_frame: int
+) -> list[str | TimedText]:
     if shot_config is None or not shot_config.camera or shot_config.use_sequencer:
         return []
     camera_path = str(shot_config.camera)
-    lines = [labeled_line(_LABEL_CAMERA, _short_camera_name(camera_path))]
-    focal = _camera_focal_length(camera_path)
+    lines: list[str | TimedText] = [
+        labeled_line(_LABEL_CAMERA, _short_camera_name(camera_path))
+    ]
+    focal = _focal_line(camera_path, start_frame, end_frame)
     if focal is not None:
-        lines.append(labeled_line(_LABEL_FOCAL, f"{focal:.0f}mm"))
+        lines.append(focal)
     return lines
 
 
@@ -192,14 +201,31 @@ def _short_camera_name(camera_path: str) -> str:
     return camera_path.rsplit("|", 1)[-1] or camera_path
 
 
-def _camera_focal_length(camera_path: str) -> float | None:
+def _focal_line(
+    camera_path: str, start_frame: int, end_frame: int
+) -> str | TimedText | None:
+    """The `Focal: NNmm` HUD line, sampled per frame so a keyed lens reads
+    correctly. `None` when the camera has no queryable focal length."""
+    shape = _camera_shape(camera_path)
+    if shape is None or start_frame > end_frame:
+        return None
     try:
-        # mc.camera query is typed as a broad union; focalLength always returns a scalar.
-        return float(
-            cast("float", mc.camera(camera_path, query=True, focalLength=True))
-        )
+        millimeters = [
+            round(float(mc.getAttr(f"{shape}.focalLength", time=frame)))
+            for frame in range(start_frame, end_frame + 1)
+        ]
     except Exception:
         return None
+    return timed_text([labeled_line(_LABEL_FOCAL, f"{mm}mm") for mm in millimeters])
+
+
+def _camera_shape(camera_path: str) -> str | None:
+    """Resolve `camera_path` (transform or shape) to its camera shape node,
+    the holder of the `focalLength` attribute."""
+    if mc.objExists(camera_path) and mc.nodeType(camera_path) == "camera":
+        return camera_path
+    shapes = mc.listRelatives(camera_path, shapes=True, type="camera", fullPath=True)
+    return shapes[0] if shapes else None
 
 
 __all__ = ["MPlayblaster"]
