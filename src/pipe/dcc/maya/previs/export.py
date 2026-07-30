@@ -32,14 +32,11 @@ class PrevisExportError(Exception):
 class TakePreviewBatch:
     """Rendered take previews plus the shots that produced none.
 
-    `fps`/`resolution` come from the playblaster and go into the preview spec.
     `failed` is `(shot label, artist-facing reason)` per skipped shot.
     """
 
     clips: list[PreviewClip]
     failed: list[tuple[str, str]]
-    fps: int
-    resolution: tuple[int, int]
 
 
 def build_take_previews(
@@ -69,12 +66,7 @@ def build_take_previews(
         except Exception as exc:  # a render crash on one shot must not abort the rest
             log.exception("Take preview render failed for shot %s.", label)
             failed.append((label, str(exc) or exc.__class__.__name__))
-    return TakePreviewBatch(
-        clips=clips,
-        failed=failed,
-        fps=playblaster.fps,
-        resolution=playblaster.resolution,
-    )
+    return TakePreviewBatch(clips=clips, failed=failed)
 
 
 def _render_take_preview(

@@ -1,5 +1,3 @@
-"""The Confirm panel: one clip's destination checklist and Confirm button."""
-
 from __future__ import annotations
 
 import logging
@@ -8,8 +6,8 @@ from enum import Enum, auto
 from pathlib import Path
 
 import attrs
-from PySide6.QtCore import Qt, QObject, QRunnable, QThreadPool, Signal
-from PySide6.QtWidgets import (
+from Qt.QtCore import Qt, QObject, QRunnable, QThreadPool, Signal
+from Qt.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -30,20 +28,20 @@ from pipe.core.playblast.confirm import (
     ConfirmResult,
     confirm_clip,
 )
-from pipe.core.playblast.preview_spec import (
+from pipe.core.playblast.clip import (
     Destination,
     PreviewClip,
     PrevisStamp,
     ShotGridUpload,
 )
 from pipe.core.playblast.review.playlists import list_recent_review_playlists
-from pipe.viewer.settings import (
+from pipe.core.playblast.viewer import style
+from pipe.core.playblast.viewer.settings import (
     load_checked_destinations,
     load_last_custom_folder,
     save_checked_destinations,
     save_last_custom_folder,
 )
-from pipe.viewer import style
 
 log = logging.getLogger(__name__)
 
@@ -91,8 +89,6 @@ class _ConfirmJob(QRunnable):
 
 
 class _Row(QWidget):
-    """One checklist row: checkbox, status mark, inline failure detail."""
-
     toggled = Signal()
 
     _state: RowState
@@ -324,9 +320,7 @@ class _ShotGridRow(_Row):
 
 class _SendToEditRow(_Row):
     """The Send to Edit peer row (previs only): delivers an immutable take and
-    stamps the sequence manifest. Present only when the clip carries a
-    `PrevisStamp`. The take version is allocated by the engine at Confirm, so
-    the row shows only its target, not a version number."""
+    stamps the sequence manifest."""
 
     _stamp: PrevisStamp
 
@@ -340,14 +334,12 @@ class _SendToEditRow(_Row):
 
 
 class ConfirmPanel(QWidget):
-    """The Destinations checklist for one clip. Emits `state_changed` when
-    its `status` may have moved, so the window can update badges, advance to
-    the next pending clip, and gate closing."""
+    """The Destinations checklist for one clip."""
 
     state_changed = Signal()
 
     _clip: PreviewClip
-    _fps: int
+    _pool: QThreadPool
     _basename: str | None
     _running: bool
     _job: _ConfirmJob | None
@@ -357,10 +349,10 @@ class ConfirmPanel(QWidget):
     _error_label: QLabel
     _confirm_button: QPushButton
 
-    def __init__(self, clip: PreviewClip, *, fps: int) -> None:
+    def __init__(self, clip: PreviewClip, pool: QThreadPool) -> None:
         super().__init__()
         self._clip = clip
-        self._fps = fps
+        self._pool = pool
         self._basename = None
         self._running = False
         self._job = None
@@ -458,14 +450,12 @@ class ConfirmPanel(QWidget):
         self.state_changed.emit()
 
         job = _ConfirmJob(
-            lambda: confirm_clip(
-                self._clip, choices, fps=self._fps, basename=self._basename
-            )
+            lambda: confirm_clip(self._clip, choices, basename=self._basename)
         )
         job.signals.finished.connect(self._on_confirm_finished)
         job.signals.failed.connect(self._on_confirm_error)
         self._job = job
-        QThreadPool.globalInstance().start(job)
+        self._pool.start(job)
 
     def _on_confirm_finished(self, result: ConfirmResult) -> None:
         self._job = None

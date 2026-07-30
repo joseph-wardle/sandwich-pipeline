@@ -20,16 +20,14 @@ from Qt.QtWidgets import (
 )
 
 from pipe.core.playblast import (
-    PREVIEW_SPEC_FILENAME,
     Destination,
     FFmpegPreset,
     Playblaster,
     PreviewClip,
-    PreviewSpec,
     ShotGridUpload,
-    save_preview_spec,
 )
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
+from pipe.core.playblast.viewer import open_viewer
 from pipe.core.shotgrid import normalize_display_name
 from pipe.core.ui import ButtonPair, MessageDialog
 from pipe.core.util.users import resolve_artist_display_name
@@ -42,7 +40,7 @@ from pipe.dcc.maya.playblast.turnaround.config import (
     resolve_turnaround_review_roots,
 )
 from pipe.dcc.maya.playblast.turnaround.playblaster import MTurnaroundPlayblaster
-from pipe.viewer.spawn import spawn_viewer
+from pipe.dcc.maya.runtime import get_main_qt_window
 
 log = logging.getLogger(__name__)
 
@@ -359,28 +357,6 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
             passes=self._selected_passes(),
         )
 
-    def _hand_off_to_viewer(
-        self, config: TurnaroundPlayblastConfig, clip: PreviewClip
-    ) -> str | None:
-        """Write the preview spec and spawn the viewer on it. Returns an
-        artist-facing error message if the viewer could not open."""
-        spec = PreviewSpec(
-            fps=config.frame_rate,
-            resolution=(config.width, config.height),
-            clips=[clip],
-        )
-        spec_path = clip.frames_dir / PREVIEW_SPEC_FILENAME
-        try:
-            save_preview_spec(spec, spec_path)
-            spawn_viewer(spec_path)
-        except Exception as exc:
-            log.exception("Could not open the playblast viewer")
-            return (
-                "The turnaround rendered, but the viewer could not open, so "
-                f"nothing was saved or uploaded.\n\nReason: {exc}"
-            )
-        return None
-
     def do_export(self) -> None:
         """Render the turnaround frames and open the viewer on them. Nothing
         persists here — that happens in the viewer, on Confirm."""
@@ -414,10 +390,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
             ).exec_()
             return
 
-        viewer_error = self._hand_off_to_viewer(config, self._routed_clip(clip))
-        if viewer_error:
-            MessageDialog(self, viewer_error, "Turnaround Error").exec_()
-            return
+        open_viewer([self._routed_clip(clip)], parent=get_main_qt_window())
         self.close()
 
     def _on_refresh_selection_clicked(self) -> None:

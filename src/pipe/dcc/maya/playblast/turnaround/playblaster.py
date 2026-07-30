@@ -14,7 +14,7 @@ from pipe.core.hud import (
     labeled_line,
 )
 from pipe.core.playblast.encoding import burn_hud_frames
-from pipe.core.playblast.preview_spec import PreviewClip
+from pipe.core.playblast.clip import PreviewClip
 from pipe.core.playblast.tempdir import create_preview_dir
 from pipe.core.ui.progress import progress_scope
 from pipe.core.util.users import resolve_artist_display_name
@@ -126,6 +126,7 @@ class MTurnaroundPlayblaster:
             frames_basename=frames_basename,
             frame_start=1,
             frame_end=len(config.passes) * config.frames_per_pass,
+            fps=config.frame_rate,
         )
 
     def _capture_pass(

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygonF
+from Qt.QtCore import QPointF, QRectF, Qt
+from Qt.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygonF
 
 # Painted at twice the logical size so antialiased edges stay sharp on
 # high-DPI displays.

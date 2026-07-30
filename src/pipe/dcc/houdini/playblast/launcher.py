@@ -9,17 +9,12 @@ from typing import TYPE_CHECKING, Any
 
 import hou
 
-from pipe.core.playblast import (
-    PREVIEW_SPEC_FILENAME,
-    PreviewSpec,
-    save_preview_spec,
-)
+from pipe.core.playblast.viewer import open_viewer
 from pipe.core.shotgrid import Shot, ShotGrid
 from pipe.core.ui import MessageDialog
 from pipe.dcc.houdini import runtime
 from pipe.dcc.houdini.playblast.dialog import HPlayblastDialog
 from pipe.dcc.houdini.playblast.playblaster import HPlayblaster
-from pipe.viewer.spawn import spawn_viewer
 
 log = logging.getLogger(__name__)
 
@@ -69,24 +64,7 @@ def launch_playblast() -> None:
         MessageDialog(parent, "Nothing was rendered.", "Playblast").exec_()
         return
 
-    routed_clips = [dialog.routed_clip(clip) for clip in clips]
-    spec = PreviewSpec(
-        fps=playblaster.fps,
-        resolution=playblaster.resolution,
-        clips=routed_clips,
-    )
-    spec_path = routed_clips[0].frames_dir / PREVIEW_SPEC_FILENAME
-    try:
-        save_preview_spec(spec, spec_path)
-        spawn_viewer(spec_path)
-    except Exception as exc:
-        log.exception("Could not open the playblast viewer")
-        MessageDialog(
-            parent,
-            "The playblast rendered, but the viewer could not open, so "
-            f"nothing was saved or uploaded.\n\nReason: {exc}",
-            "Playblast Error",
-        ).exec_()
+    open_viewer([dialog.routed_clip(clip) for clip in clips], parent=parent)
 
 
 def _resolve_connection_or_report(parent: QtWidgets.QWidget | None) -> ShotGrid | None:

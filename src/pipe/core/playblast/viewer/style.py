@@ -1,13 +1,12 @@
-"""Shared style tokens for the viewer: the single place colors, spacing, and
-the global stylesheet are defined so `theme.py`, `window.py`, and
-`confirm_panel.py` all speak the same visual language.
-
-Hold to `pyside6-essentials`: the stylesheet uses no image assets, so it
-survives the sanitized-env deploy with nothing to bundle."""
+"""How the viewer looks: color/spacing tokens, the stylesheet, and `apply`,
+the one call that puts them on a window."""
 
 from __future__ import annotations
 
 from string import Template
+
+from Qt.QtGui import QColor, QPalette
+from Qt.QtWidgets import QWidget
 
 PAD_S = 6
 PAD_M = 12
@@ -203,8 +202,32 @@ QSlider::handle:horizontal:hover { background: $accent_hover; }
 )
 
 
-def stylesheet() -> str:
-    """The global QSS layered over the Fusion palette in `apply_dark_theme`."""
+def apply(widget: QWidget) -> None:
+    """Give `widget` and its children the viewer's dark look. The palette
+    handles native widget defaults; the stylesheet layers the polish (accent
+    buttons, hover states, styled slider) on top."""
+    palette = QPalette()
+    role = QPalette.ColorRole
+    palette.setColor(role.Window, QColor(SURFACE))
+    palette.setColor(role.WindowText, QColor(TEXT))
+    palette.setColor(role.Base, QColor(BASE))
+    palette.setColor(role.AlternateBase, QColor(SURFACE))
+    palette.setColor(role.Text, QColor(TEXT))
+    palette.setColor(role.Button, QColor(SURFACE))
+    palette.setColor(role.ButtonText, QColor(TEXT))
+    palette.setColor(role.ToolTipBase, QColor(BASE))
+    palette.setColor(role.ToolTipText, QColor(TEXT))
+    palette.setColor(role.Highlight, QColor(ACCENT))
+    palette.setColor(role.HighlightedText, QColor(TEXT_BRIGHT))
+    disabled = QPalette.ColorGroup.Disabled
+    palette.setColor(disabled, role.Text, QColor(DISABLED_TEXT))
+    palette.setColor(disabled, role.ButtonText, QColor(DISABLED_TEXT))
+    palette.setColor(disabled, role.WindowText, QColor(DISABLED_TEXT))
+    widget.setPalette(palette)
+    widget.setStyleSheet(_stylesheet())
+
+
+def _stylesheet() -> str:
     return _STYLESHEET.substitute(
         radius=RADIUS,
         play_radius=TRANSPORT_PLAY_SIZE // 2,
@@ -228,4 +251,4 @@ def stylesheet() -> str:
     )
 
 
-__all__ = ["stylesheet"]
+__all__ = ["apply"]

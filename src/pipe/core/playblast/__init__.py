@@ -9,16 +9,11 @@ from pipe.core.playblast.confirm import (
 )
 from pipe.core.playblast.playblaster import DEFAULT_RESOLUTION, Playblaster
 from pipe.core.playblast.presets import FFmpegPreset
-from pipe.core.playblast.preview_spec import (
-    PREVIEW_SPEC_FILENAME,
+from pipe.core.playblast.clip import (
     Destination,
     PrevisStamp,
     PreviewClip,
-    PreviewSpec,
-    PreviewSpecError,
     ShotGridUpload,
-    load_preview_spec,
-    save_preview_spec,
 )
 
 __all__ = [
@@ -29,14 +24,9 @@ __all__ = [
     "Destination",
     "DestinationOutcome",
     "FFmpegPreset",
-    "PREVIEW_SPEC_FILENAME",
     "Playblaster",
     "PrevisStamp",
     "PreviewClip",
-    "PreviewSpec",
-    "PreviewSpecError",
     "ShotGridUpload",
     "confirm_clip",
-    "load_preview_spec",
-    "save_preview_spec",
 ]
