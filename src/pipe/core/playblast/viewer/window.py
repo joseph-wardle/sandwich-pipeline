@@ -18,6 +18,7 @@ from Qt.QtGui import (
     QIcon,
     QImageReader,
     QKeySequence,
+    QPalette,
     QPixmap,
     QResizeEvent,
 )
@@ -99,9 +100,6 @@ class ViewerWindow(QMainWindow):
         # reference.
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        # Palette and stylesheet cascade to children and stop at this window,
-        # so the viewer keeps its own look without restyling the host DCC.
-        style.apply(self)
         self._clips = clips
         # Sizing only — an unreadable first frame (reported per clip on
         # playback) still deserves a sanely sized window.
@@ -146,7 +144,6 @@ class ViewerWindow(QMainWindow):
         layout.setSpacing(style.PAD_M)
 
         self._clip_list = QListWidget()
-        self._clip_list.setObjectName("clipList")
         self._clip_list.setFixedWidth(_SIDEBAR_WIDTH)
         self._clip_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._clip_list.setMouseTracking(True)  # so rows repaint on hover
@@ -163,7 +160,7 @@ class ViewerWindow(QMainWindow):
         self._clip_list.currentRowChanged.connect(self._on_clip_selected)
 
         header = QLabel("Clips")
-        header.setStyleSheet(f"color: {style.MUTED}; font-weight: 600; padding: 0 2px;")
+        header.setStyleSheet("font-weight: 600; padding: 0 2px;")
         sidebar = QVBoxLayout()
         sidebar.setContentsMargins(0, 0, 0, 0)
         sidebar.setSpacing(style.PAD_S)
@@ -221,14 +218,13 @@ class ViewerWindow(QMainWindow):
         self._scrub.sliderPressed.connect(self._on_scrub_pressed)
         self._scrub.sliderReleased.connect(self._on_scrub_released)
 
-        # Muted start/end frames flank the bar so its ends read as the clip's
+        # Start/end frames flank the bar so its ends read as the clip's
         # range; the current frame is drawn on the handle by the slider itself.
         fixed = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         self._start_label = QLabel("")
         self._end_label = QLabel("")
         for label in (self._start_label, self._end_label):
             label.setFont(fixed)
-            label.setStyleSheet(f"color: {style.MUTED};")
         scrub_row = QHBoxLayout()
         scrub_row.setSpacing(style.PAD_S)
         scrub_row.addWidget(self._start_label)
@@ -236,9 +232,9 @@ class ViewerWindow(QMainWindow):
         scrub_row.addWidget(self._end_label)
         transport.addLayout(scrub_row)
 
-        # Drawn once and reused; the play button swaps between them on toggle.
-        self._play_icon = icons.play(style.TEXT_BRIGHT, _PLAY_ICON)
-        self._pause_icon = icons.pause(style.TEXT_BRIGHT, _PLAY_ICON)
+        icon_color = self.palette().color(QPalette.ColorRole.ButtonText).name()
+        self._play_icon = icons.play(icon_color, _PLAY_ICON)
+        self._pause_icon = icons.pause(icon_color, _PLAY_ICON)
 
         row = QHBoxLayout()
         row.setSpacing(style.GAP)
@@ -251,7 +247,7 @@ class ViewerWindow(QMainWindow):
 
         row.addWidget(
             self._transport_button(
-                icons.step_back(style.TEXT, _STEP_ICON),
+                icons.step_back(icon_color, _STEP_ICON),
                 "Step one frame back (Left)",
                 lambda: self._step_frames(-1),
             )
@@ -265,7 +261,7 @@ class ViewerWindow(QMainWindow):
         row.addWidget(self._play_button)
         row.addWidget(
             self._transport_button(
-                icons.step_forward(style.TEXT, _STEP_ICON),
+                icons.step_forward(icon_color, _STEP_ICON),
                 "Step one frame forward (Right)",
                 lambda: self._step_frames(1),
             )
@@ -293,8 +289,8 @@ class ViewerWindow(QMainWindow):
         button = QToolButton()
         button.setIcon(icon)
         if primary:
-            # The round accent play button; QSS keys off this object name.
-            button.setObjectName("transportPlay")
+            # The play button keeps the native raised look (the flat step
+            # buttons flank it) and a bigger hit area.
             button.setIconSize(QSize(_PLAY_ICON, _PLAY_ICON))
             button.setFixedSize(style.TRANSPORT_PLAY_SIZE, style.TRANSPORT_PLAY_SIZE)
         else:

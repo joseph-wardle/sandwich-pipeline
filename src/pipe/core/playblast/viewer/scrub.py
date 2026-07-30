@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 from Qt.QtCore import QRect, QRectF, Qt
-from Qt.QtGui import QColor, QFontDatabase, QMouseEvent, QPainter, QPaintEvent
+from Qt.QtGui import QFontDatabase, QMouseEvent, QPainter, QPaintEvent, QPalette
 from Qt.QtWidgets import QSlider, QStyle, QStyleOptionSlider
-
-from pipe.core.playblast.viewer import style
 
 # Taller than a bare slider to leave room above the handle for the frame
 # readout that tracks it.
@@ -99,7 +97,8 @@ class TimelineSlider(QSlider):
             if x <= played_to:
                 continue
             painter.fillRect(
-                QRectF(snap(x), top, tick_w, height), QColor(style.BORDER_STRONG)
+                QRectF(snap(x), top, tick_w, height),
+                self.palette().color(QPalette.ColorRole.Mid),
             )
 
     def _paint_readout(self, painter: QPainter, handle: QRect) -> None:
@@ -109,7 +108,7 @@ class TimelineSlider(QSlider):
         metrics = painter.fontMetrics()
         text_w = metrics.horizontalAdvance(text)
         x = min(max(handle.center().x() - text_w / 2, 0), self.width() - text_w)
-        painter.setPen(QColor(style.TEXT_BRIGHT))
+        painter.setPen(self.palette().color(QPalette.ColorRole.WindowText))
         painter.drawText(int(x), metrics.ascent(), text)
 
 

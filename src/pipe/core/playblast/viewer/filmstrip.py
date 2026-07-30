@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import cast
 
 from Qt.QtCore import QModelIndex, QRect, QRectF, QSize, Qt
-from Qt.QtGui import QColor, QPainter, QPixmap
+from Qt.QtGui import QColor, QPainter, QPalette, QPixmap
 from Qt.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from pipe.core.playblast.clip import PreviewClip
@@ -27,12 +27,17 @@ _STATUS_TEXT: dict[PanelStatus, str] = {
     PanelStatus.CONFIRMED: "Confirmed",
     PanelStatus.FAILED: "Failed",
 }
-_STATUS_COLORS: dict[PanelStatus, QColor] = {
-    PanelStatus.PENDING: QColor(style.MUTED),
-    PanelStatus.RUNNING: QColor(style.ACCENT),
-    PanelStatus.CONFIRMED: QColor(style.OK),
-    PanelStatus.FAILED: QColor(style.FAIL),
-}
+
+
+def _status_color(status: object, palette: QPalette) -> QColor:
+    """Confirmed/failed carry semantic colors."""
+    if status is PanelStatus.CONFIRMED:
+        return QColor(style.OK)
+    if status is PanelStatus.FAILED:
+        return QColor(style.FAIL)
+    if status is PanelStatus.RUNNING:
+        return palette.highlight().color()
+    return palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text)
 
 
 def thumbnail(clip: PreviewClip, size: QSize) -> QPixmap:
@@ -78,7 +83,7 @@ class ClipDelegate(QStyledItemDelegate):
             self._thumb_h,
         )
         self._paint_background(painter, option, selected)
-        self._paint_thumbnail(painter, thumb_rect, index)
+        self._paint_thumbnail(painter, option, thumb_rect, index)
         self._paint_text(painter, option, thumb_rect, index, selected)
         painter.restore()
 
@@ -86,12 +91,18 @@ class ClipDelegate(QStyledItemDelegate):
         self, painter: QPainter, option: QStyleOptionViewItem, selected: bool
     ) -> None:
         if selected:
-            painter.fillRect(option.rect, QColor(style.ACCENT))
+            painter.fillRect(option.rect, option.palette.highlight().color())
         elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.fillRect(option.rect, QColor(style.RAISED))
+            hover = option.palette.highlight().color()
+            hover.setAlpha(40)
+            painter.fillRect(option.rect, hover)
 
     def _paint_thumbnail(
-        self, painter: QPainter, thumb_rect: QRect, index: QModelIndex
+        self,
+        painter: QPainter,
+        option: QStyleOptionViewItem,
+        thumb_rect: QRect,
+        index: QModelIndex,
     ) -> None:
         thumb = index.data(THUMB_ROLE)
         if isinstance(thumb, QPixmap) and not thumb.isNull():
@@ -100,8 +111,8 @@ class ClipDelegate(QStyledItemDelegate):
             target.moveCenter(thumb_rect.center())
             painter.drawPixmap(target.topLeft(), thumb)
         else:
-            painter.fillRect(thumb_rect, QColor(style.BASE))
-        painter.setPen(QColor(style.BORDER))
+            painter.fillRect(thumb_rect, option.palette.color(QPalette.ColorRole.Base))
+        painter.setPen(option.palette.color(QPalette.ColorRole.Mid))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(thumb_rect)
 
@@ -124,11 +135,14 @@ class ClipDelegate(QStyledItemDelegate):
         label = metrics.elidedText(
             label, Qt.TextElideMode.ElideRight, option.rect.right() - self._PAD - text_x
         )
-        painter.setPen(QColor(style.TEXT_BRIGHT if selected else style.TEXT))
+        role = (
+            QPalette.ColorRole.HighlightedText if selected else QPalette.ColorRole.Text
+        )
+        painter.setPen(option.palette.color(role))
         painter.drawText(text_x, block_top + metrics.ascent(), label)
 
         status = index.data(STATUS_ROLE)
-        color = _STATUS_COLORS.get(status, QColor(style.MUTED))
+        color = _status_color(status, option.palette)
         baseline = block_top + line_h + metrics.ascent()
         dot_cx = text_x + self._DOT_R
         dot_cy = baseline - metrics.ascent() / 2
@@ -143,7 +157,11 @@ class ClipDelegate(QStyledItemDelegate):
             )
         )
         status_x = dot_cx + self._DOT_R + 5
-        painter.setPen(QColor(style.TEXT_BRIGHT) if selected else color)
+        painter.setPen(
+            option.palette.color(QPalette.ColorRole.HighlightedText)
+            if selected
+            else color
+        )
         painter.drawText(status_x, baseline, _STATUS_TEXT.get(status, ""))
 
 

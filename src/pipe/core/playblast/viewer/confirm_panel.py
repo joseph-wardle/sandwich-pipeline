@@ -6,7 +6,7 @@ from enum import Enum, auto
 from pathlib import Path
 
 import attrs
-from Qt.QtCore import Qt, QObject, QRunnable, QThreadPool, Signal
+from Qt.QtCore import QObject, QRunnable, QThreadPool, Signal
 from Qt.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -243,8 +243,7 @@ class _ShotGridRow(_Row):
 
         # A framed well that appears only while ShotGrid is checked
         self._options = QFrame()
-        self._options.setObjectName("shotgridOptions")
-        self._options.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._options.setFrameShape(QFrame.Shape.StyledPanel)
         options_layout = QVBoxLayout(self._options)
         options_layout.addWidget(self._playlist_check)
         options_layout.addLayout(combo_row)
@@ -375,9 +374,6 @@ class ConfirmPanel(QWidget):
         self._error_label.setStyleSheet(style.FAIL_STYLE)
         self._error_label.hide()
         self._confirm_button = QPushButton()
-        # Confirm is the panel's primary action; the accent variant reads it as
-        # the anchor the way Maya's OK button did.
-        self._confirm_button.setProperty("primary", True)
         self._confirm_button.clicked.connect(self.request_confirm)
 
         column = QVBoxLayout(self)
