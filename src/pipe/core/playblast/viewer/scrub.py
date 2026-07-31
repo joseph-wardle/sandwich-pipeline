@@ -6,17 +6,12 @@ from Qt.QtCore import QRect, QRectF, Qt
 from Qt.QtGui import QFontDatabase, QMouseEvent, QPainter, QPaintEvent, QPalette
 from Qt.QtWidgets import QSlider, QStyle, QStyleOptionSlider
 
-# Taller than a bare slider to leave room above the handle for the frame
-# readout that tracks it.
 _SCRUB_HEIGHT = 48
 
 
 class TimelineSlider(QSlider):
-    """Scrub bar: frame ticks on the unplayed track, plus a current-frame
-    readout that tracks the handle."""
+    """Scrub bar."""
 
-    # Nice steps to fall back through when per-frame ticks would smear; the
-    # first whose spacing clears _MIN_TICK_GAP wins.
     _TICK_STEPS = (1, 2, 5, 10, 25, 50, 100, 250, 500, 1000)
     _MIN_TICK_GAP = 5.0
     _TICK_HALF = 3  # px above/below the groove centre
@@ -72,16 +67,11 @@ class TimelineSlider(QSlider):
             0,
         )
         if step == 0:
-            return  # even the coarsest step would smear — leave the bar clean
+            return  # even the coarsest step would smear
 
         left = groove.x() + handle.width() / 2
-        played_to = (
-            left + (self.value() - self.minimum()) * px_per_frame + handle.width() / 2
-        )
 
-        # Snap every edge to the physical pixel grid. A 1px logical tick spans a
-        # fractional number of device pixels under display scaling, so without
-        # snapping each tick rounds to one or two pixels by sub-pixel position.
+        # Snap every edge to the physical pixel grid. Without this, ticks get anti aliased into oblivion
         dpr = self.devicePixelRatioF()
 
         def snap(value: float) -> float:
@@ -90,20 +80,19 @@ class TimelineSlider(QSlider):
         tick_w = max(1, round(dpr)) / dpr
         top = snap(groove.center().y() - self._TICK_HALF)
         height = snap(self._TICK_HALF * 2)
+
+        tick_color = self.palette().color(QPalette.ColorRole.WindowText)
+        tick_color.setAlpha(110)
         frame = self.minimum()
         while frame <= self.maximum():
             x = left + (frame - self.minimum()) * px_per_frame
             frame += step
-            if x <= played_to:
+            if handle.left() <= x <= handle.right():
                 continue
-            painter.fillRect(
-                QRectF(snap(x), top, tick_w, height),
-                self.palette().color(QPalette.ColorRole.Mid),
-            )
+            painter.fillRect(QRectF(snap(x), top, tick_w, height), tick_color)
 
     def _paint_readout(self, painter: QPainter, handle: QRect) -> None:
-        # The slider value is the current frame; draw it above the handle so
-        # the number sits where the playhead is, clamped inside the ends.
+        # The slider value is the current frame
         text = str(self.value())
         metrics = painter.fontMetrics()
         text_w = metrics.horizontalAdvance(text)

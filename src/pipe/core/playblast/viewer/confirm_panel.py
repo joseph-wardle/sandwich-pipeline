@@ -168,25 +168,49 @@ class _FolderRow(_Row):
 
     _destination: Destination
     _directory: Path
+    _options: QFrame | None
     _path_label: QLabel
 
     def __init__(self, destination: Destination) -> None:
         super().__init__(destination.name)
         self._destination = destination
         self._directory = destination.directory
+        self._options = None
         if destination.browsable:
             self._directory = load_last_custom_folder() or destination.directory
-            self._path_label = QLabel()
-            self._show_directory()
-            browse = QPushButton("Browse…")
-            browse.clicked.connect(self._on_browse)
-            self._header.insertWidget(2, self._path_label)
-            self._header.insertWidget(3, browse)
+            self._build_options()
         else:
             self._checkbox.setToolTip(str(destination.directory))
 
+    def _build_options(self) -> None:
+        self._path_label = QLabel()
+        self._show_directory()
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self._on_browse)
+        self._options = QFrame()
+        self._options.setFrameShape(QFrame.Shape.StyledPanel)
+        row = QHBoxLayout(self._options)
+        row.addWidget(self._path_label, stretch=1)
+        row.addWidget(browse)
+        indent = QHBoxLayout()
+        indent.setContentsMargins(style.PAD_L, 0, 0, 0)
+        indent.addWidget(self._options)
+        self._column.addLayout(indent)
+        self._options.setVisible(self.is_checked)
+
     def chosen(self) -> Destination:
         return attrs.evolve(self._destination, directory=self._directory)
+
+    def set_delivered(self, detail: str) -> None:
+        super().set_delivered(detail)
+        # the folder can't be changed after the fact.
+        if self._options is not None:
+            self._options.setEnabled(False)
+
+    def _on_toggled(self) -> None:
+        if self._options is not None:
+            self._options.setVisible(self.is_checked)
+        super()._on_toggled()
 
     def _show_directory(self) -> None:
         self._path_label.setText(self._directory.name or str(self._directory))
