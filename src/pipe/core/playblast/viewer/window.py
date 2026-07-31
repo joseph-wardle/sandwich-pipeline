@@ -5,30 +5,24 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import (
+from Qt.QtCore import (
     QElapsedTimer,
-    QModelIndex,
-    QRect,
-    QRectF,
     QSize,
     Qt,
+    QThreadPool,
     QTimer,
 )
-from PySide6.QtGui import (
+from Qt.QtGui import (
     QCloseEvent,
-    QColor,
     QFontDatabase,
-    QGuiApplication,
     QIcon,
+    QImageReader,
     QKeySequence,
-    QMouseEvent,
-    QPainter,
-    QPaintEvent,
+    QPalette,
     QPixmap,
     QResizeEvent,
-    QShortcut,
 )
-from PySide6.QtWidgets import (
+from Qt.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QLabel,
@@ -37,21 +31,19 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QShortcut,
     QSizePolicy,
-    QSlider,
     QStackedWidget,
-    QStyle,
-    QStyledItemDelegate,
-    QStyleOptionSlider,
-    QStyleOptionViewItem,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from pipe.core.playblast.preview_spec import PreviewClip, PreviewSpec
-from pipe.viewer import icons, style
-from pipe.viewer.confirm_panel import ConfirmPanel, PanelStatus
+from pipe.core.playblast.clip import PreviewClip
+from pipe.core.playblast.playblaster import DEFAULT_RESOLUTION
+from pipe.core.playblast.viewer import filmstrip, icons, style
+from pipe.core.playblast.viewer.confirm_panel import ConfirmPanel, PanelStatus
+from pipe.core.playblast.viewer.scrub import TimelineSlider
 
 _SIDEBAR_WIDTH = 200
 _TRANSPORT_HEIGHT = 112
@@ -61,227 +53,23 @@ _STEP_BUTTON = 34
 _STEP_ICON = 16
 _PLAY_ICON = 26
 
-# Taller than a bare slider to leave room above the handle for the frame
-# readout that tracks it.
-_SCRUB_HEIGHT = 48
-
-# Filmstrip thumbnail width; row height follows from the clip aspect ratio.
-_THUMB_W = 80
-_THUMB_ROLE = int(Qt.ItemDataRole.UserRole)
-_STATUS_ROLE = int(Qt.ItemDataRole.UserRole) + 1
-
-_STATUS_TEXT: dict[PanelStatus, str] = {
-    PanelStatus.PENDING: "Pending",
-    PanelStatus.RUNNING: "Running…",
-    PanelStatus.CONFIRMED: "Confirmed",
-    PanelStatus.FAILED: "Failed",
-}
-_STATUS_COLORS: dict[PanelStatus, QColor] = {
-    PanelStatus.PENDING: QColor(style.MUTED),
-    PanelStatus.RUNNING: QColor(style.ACCENT),
-    PanelStatus.CONFIRMED: QColor(style.OK),
-    PanelStatus.FAILED: QColor(style.FAIL),
-}
-_UNCONFIRMED = (PanelStatus.PENDING, PanelStatus.RUNNING, PanelStatus.FAILED)
+# RUNNING is deliberately absent: closeEvent blocks outright on a running
+# delivery rather than offering to discard it.
+_UNCONFIRMED = (PanelStatus.PENDING, PanelStatus.FAILED)
 
 
-class _TimelineSlider(QSlider):
-    """Scrub bar: frame ticks on the unplayed track, plus a current-frame
-    readout that tracks the handle."""
-
-    # Nice steps to fall back through when per-frame ticks would smear; the
-    # first whose spacing clears _MIN_TICK_GAP wins.
-    _TICK_STEPS = (1, 2, 5, 10, 25, 50, 100, 250, 500, 1000)
-    _MIN_TICK_GAP = 5.0
-    _TICK_HALF = 3  # px above/below the groove centre
-
-    def __init__(self) -> None:
-        super().__init__(Qt.Orientation.Horizontal)
-        self.setFixedHeight(_SCRUB_HEIGHT)
-        self.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.setValue(
-                QStyle.sliderValueFromPosition(
-                    self.minimum(),
-                    self.maximum(),
-                    int(event.position().x()),
-                    self.width(),
-                )
-            )
-        # The handle now sits under the cursor, so the default handler starts
-        # a normal drag from it.
-        super().mousePressEvent(event)
-
-    def paintEvent(self, event: QPaintEvent) -> None:
-        super().paintEvent(event)
-        option = QStyleOptionSlider()
-        self.initStyleOption(option)
-        control = QStyle.ComplexControl.CC_Slider
-        groove = self.style().subControlRect(
-            control, option, QStyle.SubControl.SC_SliderGroove, self
-        )
-        handle = self.style().subControlRect(
-            control, option, QStyle.SubControl.SC_SliderHandle, self
-        )
-        painter = QPainter(self)
-        self._paint_ticks(painter, groove, handle)
-        self._paint_readout(painter, handle)
-        painter.end()
-
-    def _paint_ticks(self, painter: QPainter, groove: QRect, handle: QRect) -> None:
-        span = self.maximum() - self.minimum()
-        if span <= 0:
-            return
-        # Values map onto the track the handle centre can actually reach.
-        available = groove.width() - handle.width()
-        if available <= 0:
-            return
-        px_per_frame = available / span
-        step = next(
-            (s for s in self._TICK_STEPS if s * px_per_frame >= self._MIN_TICK_GAP),
-            0,
-        )
-        if step == 0:
-            return  # even the coarsest step would smear — leave the bar clean
-
-        left = groove.x() + handle.width() / 2
-        played_to = (
-            left + (self.value() - self.minimum()) * px_per_frame + handle.width() / 2
-        )
-
-        # Snap every edge to the physical pixel grid. A 1px logical tick spans a
-        # fractional number of device pixels under display scaling, so without
-        # snapping each tick rounds to one or two pixels by sub-pixel position.
-        dpr = self.devicePixelRatioF()
-
-        def snap(value: float) -> float:
-            return round(value * dpr) / dpr
-
-        tick_w = max(1, round(dpr)) / dpr
-        top = snap(groove.center().y() - self._TICK_HALF)
-        height = snap(self._TICK_HALF * 2)
-        frame = self.minimum()
-        while frame <= self.maximum():
-            x = left + (frame - self.minimum()) * px_per_frame
-            frame += step
-            if x <= played_to:
-                continue
-            painter.fillRect(
-                QRectF(snap(x), top, tick_w, height), QColor(style.BORDER_STRONG)
-            )
-
-    def _paint_readout(self, painter: QPainter, handle: QRect) -> None:
-        # The slider value is the current frame; draw it above the handle so
-        # the number sits where the playhead is, clamped inside the ends.
-        text = str(self.value())
-        metrics = painter.fontMetrics()
-        text_w = metrics.horizontalAdvance(text)
-        x = min(max(handle.center().x() - text_w / 2, 0), self.width() - text_w)
-        painter.setPen(QColor(style.TEXT_BRIGHT))
-        painter.drawText(int(x), metrics.ascent(), text)
-
-
-class _ClipDelegate(QStyledItemDelegate):
-    """One filmstrip row: thumbnail, clip label, and confirm status."""
-
-    _PAD = 8
-    _GAP = 8
-    _DOT_R = 3
-
-    def __init__(self, thumb_w: int, thumb_h: int) -> None:
-        super().__init__()
-        self._thumb_w = thumb_w
-        self._thumb_h = thumb_h
-
-    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
-        return QSize(0, self._thumb_h + self._PAD * 2)
-
-    def paint(
-        self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex
-    ) -> None:
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        selected = bool(option.state & QStyle.StateFlag.State_Selected)
-        thumb_rect = QRect(
-            option.rect.x() + self._PAD,
-            option.rect.y() + self._PAD,
-            self._thumb_w,
-            self._thumb_h,
-        )
-        self._paint_background(painter, option, selected)
-        self._paint_thumbnail(painter, thumb_rect, index)
-        self._paint_text(painter, option, thumb_rect, index, selected)
-        painter.restore()
-
-    def _paint_background(
-        self, painter: QPainter, option: QStyleOptionViewItem, selected: bool
-    ) -> None:
-        if selected:
-            painter.fillRect(option.rect, QColor(style.ACCENT))
-        elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.fillRect(option.rect, QColor(style.RAISED))
-
-    def _paint_thumbnail(
-        self, painter: QPainter, thumb_rect: QRect, index: QModelIndex
-    ) -> None:
-        thumb = index.data(_THUMB_ROLE)
-        if isinstance(thumb, QPixmap) and not thumb.isNull():
-            # Centre in the box so aspect-rounding slack doesn't shift the image.
-            target = thumb.rect()
-            target.moveCenter(thumb_rect.center())
-            painter.drawPixmap(target.topLeft(), thumb)
-        else:
-            painter.fillRect(thumb_rect, QColor(style.BASE))
-        painter.setPen(QColor(style.BORDER))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(thumb_rect)
-
-    def _paint_text(
-        self,
-        painter: QPainter,
-        option: QStyleOptionViewItem,
-        thumb_rect: QRect,
-        index: QModelIndex,
-        selected: bool,
-    ) -> None:
-        # Label and status word stack as two lines, vertically centred against
-        # the thumbnail.
-        metrics = option.fontMetrics
-        line_h = metrics.height()
-        block_top = option.rect.y() + (option.rect.height() - line_h * 2) // 2
-        text_x = thumb_rect.right() + 1 + self._GAP
-
-        label = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
-        label = metrics.elidedText(
-            label, Qt.TextElideMode.ElideRight, option.rect.right() - self._PAD - text_x
-        )
-        painter.setPen(QColor(style.TEXT_BRIGHT if selected else style.TEXT))
-        painter.drawText(text_x, block_top + metrics.ascent(), label)
-
-        status = index.data(_STATUS_ROLE)
-        color = _STATUS_COLORS.get(status, QColor(style.MUTED))
-        baseline = block_top + line_h + metrics.ascent()
-        dot_cx = text_x + self._DOT_R
-        dot_cy = baseline - metrics.ascent() / 2
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(color)
-        painter.drawEllipse(
-            QRectF(
-                dot_cx - self._DOT_R,
-                dot_cy - self._DOT_R,
-                self._DOT_R * 2,
-                self._DOT_R * 2,
-            )
-        )
-        status_x = dot_cx + self._DOT_R + 5
-        painter.setPen(QColor(style.TEXT_BRIGHT) if selected else color)
-        painter.drawText(status_x, baseline, _STATUS_TEXT.get(status, ""))
+def _frame_size(clip: PreviewClip) -> tuple[int, int] | None:
+    """Pixel size of the clip's first frame, read from the PNG header alone,
+    or None if the frame is unreadable."""
+    size = QImageReader(str(clip.frame_path(clip.frame_start))).size()
+    if size.width() > 0 and size.height() > 0:
+        return size.width(), size.height()
+    return None
 
 
 class ViewerWindow(QMainWindow):
-    _spec: PreviewSpec
+    _clips: list[PreviewClip]
+    _resolution: tuple[int, int]
     _current_index: int
     _frame: int
     _pixmap: QPixmap
@@ -297,18 +85,27 @@ class ViewerWindow(QMainWindow):
     _play_icon: QIcon
     _pause_icon: QIcon
     _loop_checkbox: QCheckBox
-    _scrub: _TimelineSlider
+    _scrub: TimelineSlider
     _start_label: QLabel
     _end_label: QLabel
+    _confirm_pool: QThreadPool
     _panels: list[ConfirmPanel]
     _panel_stack: QStackedWidget
     _confirm_remaining_button: QPushButton
 
-    def __init__(self, spec: PreviewSpec) -> None:
-        super().__init__()
-        self._spec = spec
+    def __init__(self, clips: list[PreviewClip], parent: QWidget | None) -> None:
+        # The parent (the DCC main window) owns the viewer's lifetime; a
+        # QMainWindow always carries Qt.Window, so it stays a real window
+        # rather than embedding. DeleteOnClose frees it — nobody keeps a
+        # reference.
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._clips = clips
+        # Sizing only — an unreadable first frame (reported per clip on
+        # playback) still deserves a sanely sized window.
+        self._resolution = _frame_size(clips[0]) or DEFAULT_RESOLUTION
         self._current_index = 0
-        self._frame = spec.clips[0].frame_start
+        self._frame = clips[0].frame_start
         self._pixmap = QPixmap()
         self._playing = False
         self._was_playing_before_scrub = False
@@ -320,8 +117,14 @@ class ViewerWindow(QMainWindow):
         self._clock_frame = self._frame
         self._ticker = QTimer(self)
         self._ticker.setTimerType(Qt.TimerType.PreciseTimer)
-        self._ticker.setInterval(max(1, round(1000 / self._fps())))
         self._ticker.timeout.connect(self._on_tick)
+
+        # Confirm jobs run here, one at a time — parallel deliveries would
+        # race on encode CPU and previs take numbering. The window owns the
+        # pool (not the DCC-global one) so viewer work never mixes with the
+        # host application's.
+        self._confirm_pool = QThreadPool(self)
+        self._confirm_pool.setMaxThreadCount(1)
 
         self._build_ui()
         self._build_shortcuts()
@@ -341,23 +144,23 @@ class ViewerWindow(QMainWindow):
         layout.setSpacing(style.PAD_M)
 
         self._clip_list = QListWidget()
-        self._clip_list.setObjectName("clipList")
         self._clip_list.setFixedWidth(_SIDEBAR_WIDTH)
         self._clip_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._clip_list.setMouseTracking(True)  # so rows repaint on hover
-        width, height = self._spec.resolution
-        thumb_h = round(_THUMB_W * height / width) if width else _THUMB_W
-        self._clip_list.setItemDelegate(_ClipDelegate(_THUMB_W, thumb_h))
-        thumb_size = QSize(_THUMB_W, thumb_h)
-        for clip in self._spec.clips:
+        width, height = self._resolution
+        thumb_w = filmstrip.THUMB_W
+        thumb_h = round(thumb_w * height / width) if width else thumb_w
+        self._clip_list.setItemDelegate(filmstrip.ClipDelegate(thumb_w, thumb_h))
+        thumb_size = QSize(thumb_w, thumb_h)
+        for clip in self._clips:
             item = QListWidgetItem(clip.label)
-            item.setData(_THUMB_ROLE, self._thumbnail(clip, thumb_size))
-            item.setData(_STATUS_ROLE, PanelStatus.PENDING)
+            item.setData(filmstrip.THUMB_ROLE, filmstrip.thumbnail(clip, thumb_size))
+            item.setData(filmstrip.STATUS_ROLE, PanelStatus.PENDING)
             self._clip_list.addItem(item)
         self._clip_list.currentRowChanged.connect(self._on_clip_selected)
 
         header = QLabel("Clips")
-        header.setStyleSheet(f"color: {style.MUTED}; font-weight: 600; padding: 0 2px;")
+        header.setStyleSheet("font-weight: 600; padding: 0 2px;")
         sidebar = QVBoxLayout()
         sidebar.setContentsMargins(0, 0, 0, 0)
         sidebar.setSpacing(style.PAD_S)
@@ -368,7 +171,7 @@ class ViewerWindow(QMainWindow):
         sidebar.addWidget(self._confirm_remaining_button)
         sidebar_widget = QWidget()
         sidebar_widget.setLayout(sidebar)
-        sidebar_widget.setVisible(len(self._spec.clips) > 1)
+        sidebar_widget.setVisible(len(self._clips) > 1)
         layout.addWidget(sidebar_widget)
 
         self._canvas = QLabel()
@@ -393,14 +196,14 @@ class ViewerWindow(QMainWindow):
         self._panels = []
         self._panel_stack = QStackedWidget()
         self._panel_stack.setFixedWidth(_CONFIRM_PANEL_WIDTH)
-        for index, clip in enumerate(self._spec.clips):
-            panel = ConfirmPanel(clip, fps=self._spec.fps)
+        for index, clip in enumerate(self._clips):
+            panel = ConfirmPanel(clip, self._confirm_pool)
             panel.state_changed.connect(
                 lambda clip_index=index: self._on_confirm_state_changed(clip_index)
             )
             self._panels.append(panel)
             self._panel_stack.addWidget(panel)
-        # A spec with nothing to confirm (unmigrated DCC flows) keeps the
+        # A batch with nothing to confirm (unmigrated DCC flows) keeps the
         # plain view-only window.
         self._panel_stack.setVisible(self._has_confirmables())
         self._refresh_sidebar()
@@ -409,20 +212,19 @@ class ViewerWindow(QMainWindow):
         transport = QVBoxLayout()
         transport.setSpacing(style.GAP)
 
-        self._scrub = _TimelineSlider()
+        self._scrub = TimelineSlider()
         self._scrub.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._scrub.sliderMoved.connect(self._on_scrub_moved)
         self._scrub.sliderPressed.connect(self._on_scrub_pressed)
         self._scrub.sliderReleased.connect(self._on_scrub_released)
 
-        # Muted start/end frames flank the bar so its ends read as the clip's
+        # Start/end frames flank the bar so its ends read as the clip's
         # range; the current frame is drawn on the handle by the slider itself.
         fixed = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         self._start_label = QLabel("")
         self._end_label = QLabel("")
         for label in (self._start_label, self._end_label):
             label.setFont(fixed)
-            label.setStyleSheet(f"color: {style.MUTED};")
         scrub_row = QHBoxLayout()
         scrub_row.setSpacing(style.PAD_S)
         scrub_row.addWidget(self._start_label)
@@ -430,9 +232,9 @@ class ViewerWindow(QMainWindow):
         scrub_row.addWidget(self._end_label)
         transport.addLayout(scrub_row)
 
-        # Drawn once and reused; the play button swaps between them on toggle.
-        self._play_icon = icons.play(style.TEXT_BRIGHT, _PLAY_ICON)
-        self._pause_icon = icons.pause(style.TEXT_BRIGHT, _PLAY_ICON)
+        icon_color = self.palette().color(QPalette.ColorRole.ButtonText).name()
+        self._play_icon = icons.play(icon_color, _PLAY_ICON)
+        self._pause_icon = icons.pause(icon_color, _PLAY_ICON)
 
         row = QHBoxLayout()
         row.setSpacing(style.GAP)
@@ -445,7 +247,7 @@ class ViewerWindow(QMainWindow):
 
         row.addWidget(
             self._transport_button(
-                icons.step_back(style.TEXT, _STEP_ICON),
+                icons.step_back(icon_color, _STEP_ICON),
                 "Step one frame back (Left)",
                 lambda: self._step_frames(-1),
             )
@@ -459,7 +261,7 @@ class ViewerWindow(QMainWindow):
         row.addWidget(self._play_button)
         row.addWidget(
             self._transport_button(
-                icons.step_forward(style.TEXT, _STEP_ICON),
+                icons.step_forward(icon_color, _STEP_ICON),
                 "Step one frame forward (Right)",
                 lambda: self._step_frames(1),
             )
@@ -487,8 +289,8 @@ class ViewerWindow(QMainWindow):
         button = QToolButton()
         button.setIcon(icon)
         if primary:
-            # The round accent play button; QSS keys off this object name.
-            button.setObjectName("transportPlay")
+            # The play button keeps the native raised look (the flat step
+            # buttons flank it) and a bigger hit area.
             button.setIconSize(QSize(_PLAY_ICON, _PLAY_ICON))
             button.setFixedSize(style.TRANSPORT_PLAY_SIZE, style.TRANSPORT_PLAY_SIZE)
         else:
@@ -503,18 +305,23 @@ class ViewerWindow(QMainWindow):
         return button
 
     def _build_shortcuts(self) -> None:
-        QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._toggle_playback)
-        QShortcut(QKeySequence(Qt.Key.Key_Left), self, lambda: self._step_frames(-1))
-        QShortcut(QKeySequence(Qt.Key.Key_Right), self, lambda: self._step_frames(1))
+        # int() because the stubs' QKeySequence overloads take an int, not a Key.
+        QShortcut(QKeySequence(int(Qt.Key.Key_Space)), self, self._toggle_playback)
+        QShortcut(
+            QKeySequence(int(Qt.Key.Key_Left)), self, lambda: self._step_frames(-1)
+        )
+        QShortcut(
+            QKeySequence(int(Qt.Key.Key_Right)), self, lambda: self._step_frames(1)
+        )
 
     def _size_to_video(self) -> None:
-        width, height = self._spec.resolution
-        if len(self._spec.clips) > 1:
+        width, height = self._resolution
+        if len(self._clips) > 1:
             width += _SIDEBAR_WIDTH
         if self._has_confirmables():
             width += _CONFIRM_PANEL_WIDTH
         height += _TRANSPORT_HEIGHT
-        screen = QGuiApplication.primaryScreen().availableGeometry()
+        screen = self.screen().availableGeometry()
         self.resize(min(width, screen.width() - 80), min(height, screen.height() - 80))
 
     # ------------------------------------------------------------------
@@ -522,14 +329,15 @@ class ViewerWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _fps(self) -> int:
-        return max(1, self._spec.fps)
+        return max(1, self._clip().fps)
 
     def _clip(self) -> PreviewClip:
-        return self._spec.clips[self._current_index]
+        return self._clips[self._current_index]
 
     def _load_clip(self, index: int) -> None:
         self._current_index = index
         clip = self._clip()
+        self._ticker.setInterval(max(1, round(1000 / self._fps())))
         self.setWindowTitle(f"Playblast Viewer — {clip.label}")
         if self._clip_list.currentRow() != index:
             self._clip_list.setCurrentRow(index)
@@ -598,7 +406,7 @@ class ViewerWindow(QMainWindow):
             self._show_frame(self._clip().frame_start)
             self._clock_frame = self._frame
             self._clock.restart()
-        elif self._current_index + 1 < len(self._spec.clips):
+        elif self._current_index + 1 < len(self._clips):
             self._load_clip(self._current_index + 1)
         else:
             self._show_frame(self._clip().frame_end)
@@ -637,23 +445,9 @@ class ViewerWindow(QMainWindow):
         if panel.status is PanelStatus.CONFIRMED and index == self._current_index:
             self._advance_to_next_pending()
 
-    def _thumbnail(self, clip: PreviewClip, size: QSize) -> QPixmap:
-        """A scaled preview frame for the filmstrip; empty if none loads (the
-        delegate then draws a placeholder)."""
-        mid = (clip.frame_start + clip.frame_end) // 2
-        for frame in (mid, clip.frame_start):
-            pixmap = QPixmap(str(clip.frame_path(frame)))
-            if not pixmap.isNull():
-                return pixmap.scaled(
-                    size,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-        return QPixmap()
-
     def _refresh_sidebar(self) -> None:
         for index, panel in enumerate(self._panels):
-            self._clip_list.item(index).setData(_STATUS_ROLE, panel.status)
+            self._clip_list.item(index).setData(filmstrip.STATUS_ROLE, panel.status)
         self._clip_list.viewport().update()
         confirmable = [panel for panel in self._panels if panel.is_confirmable]
         self._confirm_remaining_button.setVisible(len(confirmable) > 1)
@@ -679,7 +473,7 @@ class ViewerWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_clip_selected(self, row: int) -> None:
-        if 0 <= row < len(self._spec.clips) and row != self._current_index:
+        if 0 <= row < len(self._clips) and row != self._current_index:
             self._load_clip(row)
 
     def _set_play_icon(self, *, playing: bool) -> None:
@@ -706,6 +500,17 @@ class ViewerWindow(QMainWindow):
         self._paint_canvas()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        # A running delivery is already writing files and pipeline records;
+        # closing mid-flight would abandon it half-done, so it can't be
+        # discarded — only waited out.
+        if any(panel.status is PanelStatus.RUNNING for panel in self._panels):
+            QMessageBox.information(
+                self,
+                "Playblast Viewer",
+                "A delivery is still running. Wait for it to finish, then close.",
+            )
+            event.ignore()
+            return
         unconfirmed = [panel for panel in self._panels if panel.status in _UNCONFIRMED]
         if not unconfirmed:
             event.accept()

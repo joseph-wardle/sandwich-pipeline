@@ -6,7 +6,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import attrs
 import maya.cmds as mc
 from Qt.QtWidgets import (
     QComboBox,
@@ -16,8 +15,9 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.core.playblast import Destination, FFmpegPreset, PreviewClip, ShotGridUpload
+from pipe.core.playblast import Destination, FFmpegPreset, ShotGridUpload
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
+from pipe.core.playblast.viewer import open_viewer
 from pipe.core.shot import maya_rlo_stream, shot_owner_for
 from pipe.core.shotgrid import Shot
 from pipe.core.ui import MessageDialog
@@ -35,6 +35,7 @@ from pipe.dcc.maya.playblast.shot.dialog import MPlayblastDialog
 from pipe.dcc.maya.previs import state as previs_state
 from pipe.dcc.maya.previs.cameras import is_live
 from pipe.dcc.maya.previs.playback import compute_shot_ranges
+from pipe.dcc.maya.runtime import get_main_qt_window
 
 if TYPE_CHECKING:
     from pipe.dcc.maya.previs.state import PrevisState
@@ -316,11 +317,10 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             return (self._shot.code if self._shot is not None else "") or "previs"
         return super()._clip_output_prefix()
 
-    def _routed_clip(self, clip: PreviewClip) -> PreviewClip:
-        routed = super()._routed_clip(clip)
+    def _clip_settings_key(self) -> str:
         if self._selected_source_mode() == _MODE_SEQUENCE:
-            routed = attrs.evolve(routed, settings_key=self.SEQUENCE_SETTINGS_KEY)
-        return routed
+            return self.SEQUENCE_SETTINGS_KEY
+        return super()._clip_settings_key()
 
     # ------------------------------------------------------------------
     # Config dispatch + export
@@ -400,12 +400,10 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             MessageDialog(self, "Nothing was rendered.", "Playblast").exec_()
             return
 
-        viewer_error = self._hand_off_to_viewer(
-            [self._routed_clip(clip) for clip in clips]
+        open_viewer(
+            [self._routed_clip(clip) for clip in clips],
+            parent=get_main_qt_window(),
         )
-        if viewer_error:
-            MessageDialog(self, viewer_error, "Playblast Error").exec_()
-            return
         self.close()
 
 

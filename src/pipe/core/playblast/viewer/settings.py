@@ -6,7 +6,7 @@ import json
 from collections.abc import Iterable
 from pathlib import Path
 
-from PySide6.QtCore import QSettings
+from Qt.QtCore import QSettings
 
 _SETTINGS_ORG = "sandwich-pipeline"
 _SETTINGS_APP = "playblast"

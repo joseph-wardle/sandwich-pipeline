@@ -22,14 +22,13 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.core.playblast import PREVIEW_SPEC_FILENAME, PreviewSpec, save_preview_spec
+from pipe.core.playblast.viewer import open_viewer
 from pipe.core.previs import codes, mutate_manifest
 from pipe.core.shotgrid import ShotGrid, is_previs_shot_code
 from pipe.core.ui import MessageDialog, MessageDialogCustomButtons
 from pipe.core.util.paths import get_previs_path, get_production_path
 
 from pipe.dcc.maya.runtime import get_main_qt_window
-from pipe.viewer.spawn import spawn_viewer
 
 from . import (
     breakout,
@@ -624,27 +623,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
                 MessageDialog(self, "Nothing was rendered.", "Export Takes").exec_()
             return
 
-        error = self._hand_off_to_viewer(batch)
-        if error:
-            MessageDialog(self, error, "Export Takes").exec_()
-
-    def _hand_off_to_viewer(self, batch: export.TakePreviewBatch) -> str | None:
-        """Write the preview spec and spawn the viewer on it. Returns an
-        artist-facing error message if the viewer could not open."""
-        spec = PreviewSpec(
-            fps=batch.fps, resolution=batch.resolution, clips=batch.clips
-        )
-        spec_path = batch.clips[0].frames_dir / PREVIEW_SPEC_FILENAME
-        try:
-            save_preview_spec(spec, spec_path)
-            spawn_viewer(spec_path)
-        except Exception as exc:
-            log.exception("Could not open the playblast viewer")
-            return (
-                "The takes rendered, but the viewer could not open, so nothing "
-                f"was sent to edit.\n\nReason: {exc}"
-            )
-        return None
+        open_viewer(batch.clips, parent=get_main_qt_window())
 
     def _confirm_break_out(self, shots: list[PrevisShot]) -> bool:
         """Confirm a destructive re-bake, flagging any RLO files it would overwrite."""

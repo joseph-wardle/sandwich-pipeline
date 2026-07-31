@@ -1,5 +1,3 @@
-"""The Confirm panel: one clip's destination checklist and Confirm button."""
-
 from __future__ import annotations
 
 import logging
@@ -8,8 +6,8 @@ from enum import Enum, auto
 from pathlib import Path
 
 import attrs
-from PySide6.QtCore import Qt, QObject, QRunnable, QThreadPool, Signal
-from PySide6.QtWidgets import (
+from Qt.QtCore import QObject, QRunnable, QThreadPool, Signal
+from Qt.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -30,20 +28,20 @@ from pipe.core.playblast.confirm import (
     ConfirmResult,
     confirm_clip,
 )
-from pipe.core.playblast.preview_spec import (
+from pipe.core.playblast.clip import (
     Destination,
     PreviewClip,
     PrevisStamp,
     ShotGridUpload,
 )
 from pipe.core.playblast.review.playlists import list_recent_review_playlists
-from pipe.viewer.settings import (
+from pipe.core.playblast.viewer import style
+from pipe.core.playblast.viewer.settings import (
     load_checked_destinations,
     load_last_custom_folder,
     save_checked_destinations,
     save_last_custom_folder,
 )
-from pipe.viewer import style
 
 log = logging.getLogger(__name__)
 
@@ -91,8 +89,6 @@ class _ConfirmJob(QRunnable):
 
 
 class _Row(QWidget):
-    """One checklist row: checkbox, status mark, inline failure detail."""
-
     toggled = Signal()
 
     _state: RowState
@@ -172,25 +168,49 @@ class _FolderRow(_Row):
 
     _destination: Destination
     _directory: Path
+    _options: QFrame | None
     _path_label: QLabel
 
     def __init__(self, destination: Destination) -> None:
         super().__init__(destination.name)
         self._destination = destination
         self._directory = destination.directory
+        self._options = None
         if destination.browsable:
             self._directory = load_last_custom_folder() or destination.directory
-            self._path_label = QLabel()
-            self._show_directory()
-            browse = QPushButton("Browse…")
-            browse.clicked.connect(self._on_browse)
-            self._header.insertWidget(2, self._path_label)
-            self._header.insertWidget(3, browse)
+            self._build_options()
         else:
             self._checkbox.setToolTip(str(destination.directory))
 
+    def _build_options(self) -> None:
+        self._path_label = QLabel()
+        self._show_directory()
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self._on_browse)
+        self._options = QFrame()
+        self._options.setFrameShape(QFrame.Shape.StyledPanel)
+        row = QHBoxLayout(self._options)
+        row.addWidget(self._path_label, stretch=1)
+        row.addWidget(browse)
+        indent = QHBoxLayout()
+        indent.setContentsMargins(style.PAD_L, 0, 0, 0)
+        indent.addWidget(self._options)
+        self._column.addLayout(indent)
+        self._options.setVisible(self.is_checked)
+
     def chosen(self) -> Destination:
         return attrs.evolve(self._destination, directory=self._directory)
+
+    def set_delivered(self, detail: str) -> None:
+        super().set_delivered(detail)
+        # the folder can't be changed after the fact.
+        if self._options is not None:
+            self._options.setEnabled(False)
+
+    def _on_toggled(self) -> None:
+        if self._options is not None:
+            self._options.setVisible(self.is_checked)
+        super()._on_toggled()
 
     def _show_directory(self) -> None:
         self._path_label.setText(self._directory.name or str(self._directory))
@@ -247,8 +267,7 @@ class _ShotGridRow(_Row):
 
         # A framed well that appears only while ShotGrid is checked
         self._options = QFrame()
-        self._options.setObjectName("shotgridOptions")
-        self._options.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._options.setFrameShape(QFrame.Shape.StyledPanel)
         options_layout = QVBoxLayout(self._options)
         options_layout.addWidget(self._playlist_check)
         options_layout.addLayout(combo_row)
@@ -324,9 +343,7 @@ class _ShotGridRow(_Row):
 
 class _SendToEditRow(_Row):
     """The Send to Edit peer row (previs only): delivers an immutable take and
-    stamps the sequence manifest. Present only when the clip carries a
-    `PrevisStamp`. The take version is allocated by the engine at Confirm, so
-    the row shows only its target, not a version number."""
+    stamps the sequence manifest."""
 
     _stamp: PrevisStamp
 
@@ -340,14 +357,12 @@ class _SendToEditRow(_Row):
 
 
 class ConfirmPanel(QWidget):
-    """The Destinations checklist for one clip. Emits `state_changed` when
-    its `status` may have moved, so the window can update badges, advance to
-    the next pending clip, and gate closing."""
+    """The Destinations checklist for one clip."""
 
     state_changed = Signal()
 
     _clip: PreviewClip
-    _fps: int
+    _pool: QThreadPool
     _basename: str | None
     _running: bool
     _job: _ConfirmJob | None
@@ -357,10 +372,10 @@ class ConfirmPanel(QWidget):
     _error_label: QLabel
     _confirm_button: QPushButton
 
-    def __init__(self, clip: PreviewClip, *, fps: int) -> None:
+    def __init__(self, clip: PreviewClip, pool: QThreadPool) -> None:
         super().__init__()
         self._clip = clip
-        self._fps = fps
+        self._pool = pool
         self._basename = None
         self._running = False
         self._job = None
@@ -383,9 +398,6 @@ class ConfirmPanel(QWidget):
         self._error_label.setStyleSheet(style.FAIL_STYLE)
         self._error_label.hide()
         self._confirm_button = QPushButton()
-        # Confirm is the panel's primary action; the accent variant reads it as
-        # the anchor the way Maya's OK button did.
-        self._confirm_button.setProperty("primary", True)
         self._confirm_button.clicked.connect(self.request_confirm)
 
         column = QVBoxLayout(self)
@@ -458,14 +470,12 @@ class ConfirmPanel(QWidget):
         self.state_changed.emit()
 
         job = _ConfirmJob(
-            lambda: confirm_clip(
-                self._clip, choices, fps=self._fps, basename=self._basename
-            )
+            lambda: confirm_clip(self._clip, choices, basename=self._basename)
         )
         job.signals.finished.connect(self._on_confirm_finished)
         job.signals.failed.connect(self._on_confirm_error)
         self._job = job
-        QThreadPool.globalInstance().start(job)
+        self._pool.start(job)
 
     def _on_confirm_finished(self, result: ConfirmResult) -> None:
         self._job = None

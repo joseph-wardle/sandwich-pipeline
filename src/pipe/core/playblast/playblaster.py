@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from pipe.core import telemetry
 from pipe.core.hud import HudContent
 from pipe.core.playblast.encoding import burn_hud_frames
-from pipe.core.playblast.preview_spec import PreviewClip, padded_frame_number
+from pipe.core.playblast.clip import PreviewClip, padded_frame_number
 from pipe.core.playblast.tempdir import create_preview_dir
 
 if TYPE_CHECKING:
@@ -86,6 +86,7 @@ class Playblaster(metaclass=ABCMeta):
             frames_basename=frames_basename,
             frame_start=frame_start,
             frame_end=frame_end,
+            fps=self.fps,
         )
 
     @abstractmethod

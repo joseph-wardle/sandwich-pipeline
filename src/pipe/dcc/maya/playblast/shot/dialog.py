@@ -24,14 +24,8 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.core.playblast import (
-    PREVIEW_SPEC_FILENAME,
-    Destination,
-    PreviewClip,
-    PreviewSpec,
-    ShotGridUpload,
-    save_preview_spec,
-)
+from pipe.core.playblast import Destination, PreviewClip, ShotGridUpload
+from pipe.core.playblast.viewer import open_viewer
 from pipe.core.shotgrid import ShotGrid, ShotGridError
 from pipe.core.ui import ButtonPair, MessageDialog
 from pipe.core.util.users import resolve_artist_display_name
@@ -41,7 +35,7 @@ from pipe.dcc.maya.playblast.shot.config import (
     dummy_shot,
 )
 from pipe.dcc.maya.playblast.shot.playblaster import MPlayblaster
-from pipe.viewer.spawn import spawn_viewer
+from pipe.dcc.maya.runtime import get_main_qt_window
 
 if TYPE_CHECKING:
     from pipe.core.shotgrid import Shot
@@ -566,11 +560,16 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             return self._shot.code or "playblast"
         return f"{self._scene_stem()}_custom"
 
+    def _clip_settings_key(self) -> str:
+        """Key for the viewer's destination-toggle memory. Override to give a
+        source mode its own remembered toggles."""
+        return self.SETTINGS_KEY
+
     def _routed_clip(self, clip: PreviewClip) -> PreviewClip:
         return attrs.evolve(
             clip,
             output_prefix=self._clip_output_prefix(),
-            settings_key=self.SETTINGS_KEY,
+            settings_key=self._clip_settings_key(),
             destinations=self._clip_destinations(),
             shotgrid=self._clip_shotgrid(),
         )
@@ -578,26 +577,6 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     # ------------------------------------------------------------------
     # Export
     # ------------------------------------------------------------------
-
-    def _hand_off_to_viewer(self, clips: list[PreviewClip]) -> str | None:
-        """Write the preview spec and spawn the viewer on it. Returns an
-        artist-facing error message if the viewer could not open."""
-        spec = PreviewSpec(
-            fps=self.playblaster.fps,
-            resolution=self.playblaster.resolution,
-            clips=clips,
-        )
-        spec_path = clips[0].frames_dir / PREVIEW_SPEC_FILENAME
-        try:
-            save_preview_spec(spec, spec_path)
-            spawn_viewer(spec_path)
-        except Exception as exc:
-            log.exception("Could not open the playblast viewer")
-            return (
-                "The playblast rendered, but the viewer could not open, so "
-                f"nothing was saved or uploaded.\n\nReason: {exc}"
-            )
-        return None
 
     def do_export(self) -> None:
         """Render the preview frames and open the viewer on them. Nothing
@@ -631,10 +610,8 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             MessageDialog(self, "Nothing was rendered.", "Playblast").exec_()
             return
 
-        viewer_error = self._hand_off_to_viewer(
-            [self._routed_clip(clip) for clip in clips]
+        open_viewer(
+            [self._routed_clip(clip) for clip in clips],
+            parent=get_main_qt_window(),
         )
-        if viewer_error:
-            MessageDialog(self, viewer_error, "Playblast Error").exec_()
-            return
         self.close()
