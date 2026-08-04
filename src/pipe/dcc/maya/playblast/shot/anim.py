@@ -13,7 +13,13 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.core.playblast import Destination, FFmpegPreset
+from pipe.core.playblast import (
+    CURRENT_FOLDER_ID,
+    CUSTOM_FOLDER_ID,
+    EDIT_FOLDER_ID,
+    DiskDestination,
+    FFmpegPreset,
+)
 from pipe.core.playblast.naming import build_edit_output_directory
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.shot import maya_anim_stream, shot_owner_for
@@ -90,21 +96,24 @@ class AnimPlayblastDialog(MPlayblastDialog):
         log.warning("No USD shot camera found; falling back to legacy path.")
         return "|__mayaUsd__|shotCamParent|shotCam"
 
-    def _clip_destinations(self) -> tuple[Destination, ...]:
+    def _clip_folders(self) -> tuple[DiskDestination, ...]:
         scene_dir = Path(str(mc.file(query=True, sceneName=True) or ".")).parent
         return (
-            Destination(
+            DiskDestination(
+                id=EDIT_FOLDER_ID,
                 name="Send to Edit",
                 directory=build_edit_output_directory("anim"),
                 preset=FFmpegPreset.EDIT_SQ,
                 default_on=False,
             ),
-            Destination(
+            DiskDestination(
+                id=CURRENT_FOLDER_ID,
                 name="Current Folder",
                 directory=scene_dir,
                 preset=FFmpegPreset.WEB,
             ),
-            Destination(
+            DiskDestination(
+                id=CUSTOM_FOLDER_ID,
                 name="Custom Folder",
                 directory=resolve_playblast_tempdir(),
                 preset=FFmpegPreset.WEB,

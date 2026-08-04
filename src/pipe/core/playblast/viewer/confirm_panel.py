@@ -5,7 +5,6 @@ from collections.abc import Callable
 from enum import Enum, auto
 from pathlib import Path
 
-import attrs
 from Qt.QtCore import QObject, QRunnable, QThreadPool, Signal
 from Qt.QtWidgets import (
     QCheckBox,
@@ -21,18 +20,21 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.core.playblast.confirm import (
-    SEND_TO_EDIT_DESTINATION_NAME,
-    SHOTGRID_DESTINATION_NAME,
-    ConfirmChoices,
-    ConfirmResult,
-    confirm_clip,
-)
 from pipe.core.playblast.clip import (
     Destination,
+    DestinationId,
+    DiskDestination,
     PreviewClip,
-    PrevisStamp,
-    ShotGridUpload,
+    PrevisTakeDestination,
+    ShotGridDestination,
+)
+from pipe.core.playblast.confirm import (
+    ChosenDestination,
+    ChosenDisk,
+    ChosenShotGrid,
+    ChosenTake,
+    ConfirmResult,
+    confirm_clip,
 )
 from pipe.core.playblast.review.playlists import list_recent_review_playlists
 from pipe.core.playblast.viewer import style
@@ -91,6 +93,8 @@ class _ConfirmJob(QRunnable):
 class _Row(QWidget):
     toggled = Signal()
 
+    destination_id: DestinationId
+    default_on: bool
     _state: RowState
     _checkbox: QCheckBox
     _status: QLabel
@@ -98,10 +102,12 @@ class _Row(QWidget):
     _header: QHBoxLayout
     _column: QVBoxLayout
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, destination: Destination) -> None:
         super().__init__()
+        self.destination_id = destination.id
+        self.default_on = destination.default_on
         self._state = RowState.IDLE
-        self._checkbox = QCheckBox(name)
+        self._checkbox = QCheckBox(destination.name)
         self._checkbox.toggled.connect(lambda _checked: self._on_toggled())
         self._status = QLabel("")
         self._detail = QLabel("")
@@ -121,9 +127,12 @@ class _Row(QWidget):
     def _on_toggled(self) -> None:
         self.toggled.emit()
 
-    @property
-    def name(self) -> str:
-        return self._checkbox.text()
+    def chosen(self) -> ChosenDestination:
+        raise NotImplementedError
+
+    def validation_error(self) -> str | None:
+        """An artist-facing reason this row cannot be confirmed yet."""
+        return None
 
     @property
     def state(self) -> RowState:
@@ -166,13 +175,13 @@ class _FolderRow(_Row):
     """A disk-folder destination. Browsable rows let the artist pick the
     directory; the picked folder is remembered globally across tools."""
 
-    _destination: Destination
+    _destination: DiskDestination
     _directory: Path
     _options: QFrame | None
     _path_label: QLabel
 
-    def __init__(self, destination: Destination) -> None:
-        super().__init__(destination.name)
+    def __init__(self, destination: DiskDestination) -> None:
+        super().__init__(destination)
         self._destination = destination
         self._directory = destination.directory
         self._options = None
@@ -198,8 +207,8 @@ class _FolderRow(_Row):
         self._column.addLayout(indent)
         self._options.setVisible(self.is_checked)
 
-    def chosen(self) -> Destination:
-        return attrs.evolve(self._destination, directory=self._directory)
+    def chosen(self) -> ChosenDisk:
+        return ChosenDisk(destination=self._destination, directory=self._directory)
 
     def set_delivered(self, detail: str) -> None:
         super().set_delivered(detail)
@@ -231,7 +240,7 @@ class _ShotGridRow(_Row):
     """The ShotGrid peer row: a Version upload, optionally linked to a
     review playlist."""
 
-    _upload: ShotGridUpload
+    _destination: ShotGridDestination
     _options: QFrame
     _playlist_check: QCheckBox
     _playlist_combo: QComboBox
@@ -239,16 +248,16 @@ class _ShotGridRow(_Row):
     _description: QLineEdit
     _playlists_loaded: bool
 
-    def __init__(self, upload: ShotGridUpload) -> None:
-        super().__init__(SHOTGRID_DESTINATION_NAME)
-        self._upload = upload
+    def __init__(self, destination: ShotGridDestination) -> None:
+        super().__init__(destination)
+        self._destination = destination
         self._playlists_loaded = False
         self._checkbox.setToolTip(
-            f"Upload a Version to {upload.entity_kind} {upload.entity_value}."
+            f"Upload a Version to {destination.entity.description}."
         )
 
         self._playlist_check = QCheckBox("Add to review playlist")
-        if upload.playlist_required:
+        if destination.playlist_required:
             self._playlist_check.setChecked(True)
             self._playlist_check.setToolTip(
                 "Required here: these Versions are only discoverable "
@@ -279,27 +288,30 @@ class _ShotGridRow(_Row):
         self._column.addLayout(indent)
         self._sync_enabled()
 
-    @property
-    def playlist_id(self) -> int | None:
-        if not self._playlist_check.isChecked():
-            return None
-        selected = self._playlist_combo.currentData()
-        if isinstance(selected, int) and selected > 0:
-            return selected
-        return None
-
-    @property
-    def description(self) -> str | None:
-        return self._description.text().strip() or None
+    def chosen(self) -> ChosenShotGrid:
+        return ChosenShotGrid(
+            destination=self._destination,
+            playlist_id=self._playlist_id,
+            description=self._description.text().strip() or None,
+        )
 
     def validation_error(self) -> str | None:
-        if self._playlist_check.isChecked() and self.playlist_id is None:
+        if self._playlist_check.isChecked() and self._playlist_id is None:
             return "Pick a review playlist for the ShotGrid upload."
         return None
 
     def set_delivered(self, detail: str) -> None:
         super().set_delivered(detail)
         self._sync_enabled()
+
+    @property
+    def _playlist_id(self) -> int | None:
+        if not self._playlist_check.isChecked():
+            return None
+        selected = self._playlist_combo.currentData()
+        if isinstance(selected, int) and selected > 0:
+            return selected
+        return None
 
     def _on_toggled(self) -> None:
         self._sync_enabled()
@@ -309,7 +321,9 @@ class _ShotGridRow(_Row):
         # Sub-options are only relevant while the upload is selected.
         self._options.setVisible(self.is_checked)
         active = self.is_checked and self._state is not RowState.DELIVERED
-        self._playlist_check.setEnabled(active and not self._upload.playlist_required)
+        self._playlist_check.setEnabled(
+            active and not self._destination.playlist_required
+        )
         self._description.setEnabled(active)
         playlist_on = active and self._playlist_check.isChecked()
         self._playlist_combo.setEnabled(playlist_on)
@@ -345,15 +359,27 @@ class _SendToEditRow(_Row):
     """The Send to Edit peer row (previs only): delivers an immutable take and
     stamps the sequence manifest."""
 
-    _stamp: PrevisStamp
+    _destination: PrevisTakeDestination
 
-    def __init__(self, stamp: PrevisStamp) -> None:
-        super().__init__(SEND_TO_EDIT_DESTINATION_NAME)
-        self._stamp = stamp
+    def __init__(self, destination: PrevisTakeDestination) -> None:
+        super().__init__(destination)
+        self._destination = destination
+        stamp = destination.stamp
         self._checkbox.setToolTip(
             f"Deliver an immutable take for {stamp.shot_code} "
             f"(sequence {stamp.sequence_code}) and stamp the previs manifest."
         )
+
+    def chosen(self) -> ChosenTake:
+        return ChosenTake(destination=self._destination)
+
+
+def _build_row(destination: Destination) -> _Row:
+    if isinstance(destination, DiskDestination):
+        return _FolderRow(destination)
+    if isinstance(destination, ShotGridDestination):
+        return _ShotGridRow(destination)
+    return _SendToEditRow(destination)
 
 
 class ConfirmPanel(QWidget):
@@ -366,9 +392,7 @@ class ConfirmPanel(QWidget):
     _basename: str | None
     _running: bool
     _job: _ConfirmJob | None
-    _edit_row: _SendToEditRow | None
-    _folder_rows: list[_FolderRow]
-    _sg_row: _ShotGridRow | None
+    _rows: list[_Row]
     _error_label: QLabel
     _confirm_button: QPushButton
 
@@ -379,26 +403,22 @@ class ConfirmPanel(QWidget):
         self._basename = None
         self._running = False
         self._job = None
-        self._edit_row = (
-            _SendToEditRow(clip.previs_stamp) if clip.previs_stamp else None
-        )
-        self._folder_rows = [_FolderRow(spot) for spot in clip.destinations]
-        self._sg_row = _ShotGridRow(clip.shotgrid) if clip.shotgrid else None
-        if not self.is_confirmable:
-            return
-
-        destinations = QGroupBox("Destinations")
-        destinations_layout = QVBoxLayout(destinations)
-        destinations_layout.setSpacing(style.GAP)
-        for row in self._all_rows():
-            destinations_layout.addWidget(row)
-
         self._error_label = QLabel("")
         self._error_label.setWordWrap(True)
         self._error_label.setStyleSheet(style.FAIL_STYLE)
         self._error_label.hide()
         self._confirm_button = QPushButton()
         self._confirm_button.clicked.connect(self.request_confirm)
+
+        self._rows = [_build_row(destination) for destination in clip.destinations]
+        if not self.is_confirmable:
+            return
+
+        destinations = QGroupBox("Destinations")
+        destinations_layout = QVBoxLayout(destinations)
+        destinations_layout.setSpacing(style.GAP)
+        for row in self._rows:
+            destinations_layout.addWidget(row)
 
         column = QVBoxLayout(self)
         column.setContentsMargins(0, 0, 0, 0)
@@ -408,7 +428,7 @@ class ConfirmPanel(QWidget):
         column.addWidget(self._confirm_button)
 
         self._apply_remembered_toggles()
-        for row in self._all_rows():
+        for row in self._rows:
             row.toggled.connect(self._on_row_toggled)
         self._refresh_confirm_button()
 
@@ -418,7 +438,7 @@ class ConfirmPanel(QWidget):
 
     @property
     def is_confirmable(self) -> bool:
-        return bool(self._edit_row or self._folder_rows or self._sg_row)
+        return bool(self._rows)
 
     @property
     def status(self) -> PanelStatus:
@@ -426,12 +446,11 @@ class ConfirmPanel(QWidget):
             return PanelStatus.VIEW_ONLY
         if self._running:
             return PanelStatus.RUNNING
-        rows = self._all_rows()
-        if any(row.is_checked and row.state is RowState.FAILED for row in rows):
+        if any(row.is_checked and row.state is RowState.FAILED for row in self._rows):
             return PanelStatus.FAILED
-        if any(row.is_checked and row.state is RowState.IDLE for row in rows):
+        if any(row.is_checked and row.state is RowState.IDLE for row in self._rows):
             return PanelStatus.PENDING
-        if any(row.state is RowState.DELIVERED for row in rows):
+        if any(row.state is RowState.DELIVERED for row in self._rows):
             return PanelStatus.CONFIRMED
         return PanelStatus.PENDING
 
@@ -444,25 +463,15 @@ class ConfirmPanel(QWidget):
         rows = self._rows_to_run()
         if self._running or not rows:
             return
-        sg = self._sg_row if self._sg_row in rows else None
-        if sg is not None:
-            error = sg.validation_error()
+        for row in rows:
+            error = row.validation_error()
             if error is not None:
                 self._show_error(error)
                 return
-        run_edit = self._edit_row is not None and self._edit_row in rows
 
         self._show_error("")
         self._remember_toggles()
-        choices = ConfirmChoices(
-            destinations=tuple(
-                row.chosen() for row in rows if isinstance(row, _FolderRow)
-            ),
-            send_to_edit=run_edit,
-            upload_to_shotgrid=sg is not None,
-            review_playlist_id=sg.playlist_id if sg else None,
-            description=sg.description if sg else None,
-        )
+        chosen = tuple(row.chosen() for row in rows)
         for row in rows:
             row.set_running()
         self._running = True
@@ -470,7 +479,7 @@ class ConfirmPanel(QWidget):
         self.state_changed.emit()
 
         job = _ConfirmJob(
-            lambda: confirm_clip(self._clip, choices, basename=self._basename)
+            lambda: confirm_clip(self._clip, chosen, basename=self._basename)
         )
         job.signals.finished.connect(self._on_confirm_finished)
         job.signals.failed.connect(self._on_confirm_error)
@@ -481,9 +490,9 @@ class ConfirmPanel(QWidget):
         self._job = None
         self._running = False
         self._basename = result.basename
-        rows_by_name = {row.name: row for row in self._all_rows()}
+        rows_by_id = {row.destination_id: row for row in self._rows}
         for outcome in result.outcomes:
-            row = rows_by_name.get(outcome.name)
+            row = rows_by_id.get(outcome.id)
             if row is None:
                 continue
             if outcome.ok:
@@ -496,7 +505,7 @@ class ConfirmPanel(QWidget):
     def _on_confirm_error(self, reason: str) -> None:
         self._job = None
         self._running = False
-        for row in self._all_rows():
+        for row in self._rows:
             if row.state is RowState.RUNNING:
                 row.set_idle()
         self._show_error(f"Could not confirm: {reason}")
@@ -507,21 +516,10 @@ class ConfirmPanel(QWidget):
     # Internals
     # ------------------------------------------------------------------
 
-    def _all_rows(self) -> list[_Row]:
-        # Send to Edit leads: for a previs clip it is the primary delivery, and
-        # its take version sets the shared basename the other rows reuse.
-        rows: list[_Row] = []
-        if self._edit_row is not None:
-            rows.append(self._edit_row)
-        rows.extend(self._folder_rows)
-        if self._sg_row is not None:
-            rows.append(self._sg_row)
-        return rows
-
     def _rows_to_run(self) -> list[_Row]:
         return [
             row
-            for row in self._all_rows()
+            for row in self._rows
             if row.is_checked and row.state in (RowState.IDLE, RowState.FAILED)
         ]
 
@@ -540,7 +538,7 @@ class ConfirmPanel(QWidget):
             self._confirm_button.setText("Retry failed" if retrying else "Confirm")
         else:
             self._confirm_button.setEnabled(False)
-            delivered = any(row.state is RowState.DELIVERED for row in self._all_rows())
+            delivered = any(row.state is RowState.DELIVERED for row in self._rows)
             self._confirm_button.setText("Confirmed ✓" if delivered else "Confirm")
             self._confirm_button.setToolTip(
                 "" if delivered else "Check at least one destination."
@@ -552,26 +550,16 @@ class ConfirmPanel(QWidget):
 
     def _apply_remembered_toggles(self) -> None:
         remembered = load_checked_destinations(self._clip.settings_key)
-        if self._edit_row is not None:
-            # Send to Edit is the point of a take export, so it defaults on.
-            checked = True
+        for row in self._rows:
+            checked = row.default_on
             if remembered is not None:
-                checked = self._edit_row.name in remembered
-            self._edit_row.set_checked(checked)
-        for destination, row in zip(self._clip.destinations, self._folder_rows):
-            checked = destination.default_on
-            if remembered is not None:
-                checked = row.name in remembered
+                checked = row.destination_id in remembered
             row.set_checked(checked)
-        if self._sg_row is not None:
-            self._sg_row.set_checked(
-                remembered is not None and self._sg_row.name in remembered
-            )
 
     def _remember_toggles(self) -> None:
         save_checked_destinations(
             self._clip.settings_key,
-            [row.name for row in self._all_rows() if row.is_checked],
+            [row.destination_id for row in self._rows if row.is_checked],
         )
 
 

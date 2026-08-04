@@ -15,7 +15,14 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.core.playblast import Destination, FFmpegPreset, ShotGridUpload
+from pipe.core.playblast import (
+    CURRENT_FOLDER_ID,
+    CUSTOM_FOLDER_ID,
+    DiskDestination,
+    FFmpegPreset,
+    ShotEntity,
+    ShotGridDestination,
+)
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.playblast.viewer import open_viewer
 from pipe.core.shot import maya_rlo_stream, shot_owner_for
@@ -278,16 +285,18 @@ class PrevisPlayblastDialog(MPlayblastDialog):
     # Routing for the viewer's Confirm panel
     # ------------------------------------------------------------------
 
-    def _clip_destinations(self) -> tuple[Destination, ...]:
+    def _clip_folders(self) -> tuple[DiskDestination, ...]:
         scene_dir = Path(str(mc.file(query=True, sceneName=True) or ".")).parent
         return (
-            Destination(
+            DiskDestination(
+                id=CURRENT_FOLDER_ID,
                 name="Current Folder",
                 directory=scene_dir,
                 preset=FFmpegPreset.WEB,
                 default_on=False,
             ),
-            Destination(
+            DiskDestination(
+                id=CUSTOM_FOLDER_ID,
                 name="Custom Folder",
                 directory=resolve_playblast_tempdir(),
                 preset=FFmpegPreset.WEB,
@@ -296,14 +305,13 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             ),
         )
 
-    def _clip_shotgrid(self) -> ShotGridUpload | None:
+    def _clip_shotgrid(self) -> ShotGridDestination | None:
         if self._selected_source_mode() == _MODE_SEQUENCE:
             code = (self._shot.code or "").strip() if self._shot is not None else ""
             if not code:
                 return None
-            return ShotGridUpload(
-                entity_kind="shot",
-                entity_value=code,
+            return ShotGridDestination(
+                entity=ShotEntity(code),
                 artist_display_name=resolve_artist_display_name().strip() or None,
             )
         if self._previs_state is not None:

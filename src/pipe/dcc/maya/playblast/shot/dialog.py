@@ -24,7 +24,14 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.core.playblast import Destination, PreviewClip, ShotGridUpload
+from pipe.core.playblast import (
+    Destination,
+    DiskDestination,
+    PreviewClip,
+    ShotEntity,
+    ShotGridDestination,
+    destination_rows,
+)
 from pipe.core.playblast.viewer import open_viewer
 from pipe.core.shotgrid import ShotGrid, ShotGridError
 from pipe.core.ui import ButtonPair, MessageDialog
@@ -537,22 +544,25 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def _clip_destinations(self) -> tuple[Destination, ...]:
+    def _clip_folders(self) -> tuple[DiskDestination, ...]:
         """Folder rows the viewer's Confirm panel offers for this tool."""
         raise NotImplementedError
 
-    def _clip_shotgrid(self) -> ShotGridUpload | None:
+    def _clip_shotgrid(self) -> ShotGridDestination | None:
         """The clip's ShotGrid row. Only shot-mode playblasts have an entity."""
         if self._selected_source_mode() != _MODE_SHOT or self._shot is None:
             return None
         code = (self._shot.code or "").strip()
         if not code:
             return None
-        return ShotGridUpload(
-            entity_kind="shot",
-            entity_value=code,
+        return ShotGridDestination(
+            entity=ShotEntity(code),
             artist_display_name=resolve_artist_display_name().strip() or None,
         )
+
+    def _clip_destinations(self) -> tuple[Destination, ...]:
+        """Every row the viewer offers, in the order it shows them."""
+        return destination_rows(*self._clip_folders(), self._clip_shotgrid())
 
     def _clip_output_prefix(self) -> str:
         """Basename prefix Confirm versions filenames from (`<prefix>_<date>.v###`)."""
@@ -571,7 +581,6 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             output_prefix=self._clip_output_prefix(),
             settings_key=self._clip_settings_key(),
             destinations=self._clip_destinations(),
-            shotgrid=self._clip_shotgrid(),
         )
 
     # ------------------------------------------------------------------

@@ -20,11 +20,16 @@ from Qt.QtWidgets import (
 )
 
 from pipe.core.playblast import (
+    CUSTOM_FOLDER_ID,
+    RENDER_FOLDER_ID,
+    AssetEntity,
     Destination,
+    DiskDestination,
     FFmpegPreset,
     Playblaster,
     PreviewClip,
-    ShotGridUpload,
+    ShotGridDestination,
+    destination_rows,
 )
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.playblast.viewer import open_viewer
@@ -299,19 +304,21 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
     # Routing for the viewer's Confirm panel
     # ------------------------------------------------------------------
 
-    def _clip_destinations(self) -> tuple[Destination, ...]:
-        rows: list[Destination] = []
+    def _clip_folders(self) -> tuple[DiskDestination, ...]:
+        rows: list[DiskDestination] = []
         scene_path = _scene_path()
         if scene_path is not None:
             rows.append(
-                Destination(
+                DiskDestination(
+                    id=RENDER_FOLDER_ID,
                     name="Render Folder",
                     directory=scene_path.parent / "render",
                     preset=FFmpegPreset.WEB,
                 )
             )
         rows.append(
-            Destination(
+            DiskDestination(
+                id=CUSTOM_FOLDER_ID,
                 name="Custom Folder",
                 directory=resolve_playblast_tempdir(),
                 preset=FFmpegPreset.WEB,
@@ -323,18 +330,21 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         )
         return tuple(rows)
 
-    def _clip_shotgrid(self) -> ShotGridUpload | None:
+    def _clip_shotgrid(self) -> ShotGridDestination | None:
         """The clip's ShotGrid row: the Asset its Version attaches to.
         Without resolvable asset metadata there is nothing to attach to,
         so the viewer offers no ShotGrid row."""
         display_name = self._shotgrid_asset_display_name()
         if not display_name:
             return None
-        return ShotGridUpload(
-            entity_kind="asset",
-            entity_value=display_name,
+        return ShotGridDestination(
+            entity=AssetEntity(display_name),
             artist_display_name=resolve_artist_display_name().strip() or None,
         )
+
+    def _clip_destinations(self) -> tuple[Destination, ...]:
+        """Every row the viewer offers, in the order it shows them."""
+        return destination_rows(*self._clip_folders(), self._clip_shotgrid())
 
     def _routed_clip(self, clip: PreviewClip) -> PreviewClip:
         return attrs.evolve(
@@ -342,7 +352,6 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
             output_prefix=f"{self._asset_filename_token()}_turnaround",
             settings_key=self.SETTINGS_KEY,
             destinations=self._clip_destinations(),
-            shotgrid=self._clip_shotgrid(),
         )
 
     # ------------------------------------------------------------------

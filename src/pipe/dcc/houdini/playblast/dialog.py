@@ -11,10 +11,16 @@ import hou
 from Qt import QtCore, QtWidgets
 
 from pipe.core.playblast import (
+    CURRENT_FOLDER_ID,
+    CUSTOM_FOLDER_ID,
+    EDIT_FOLDER_ID,
     Destination,
+    DiskDestination,
     FFmpegPreset,
     PreviewClip,
-    ShotGridUpload,
+    ShotEntity,
+    ShotGridDestination,
+    destination_rows,
 )
 from pipe.core.playblast.naming import build_edit_output_directory
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
@@ -332,23 +338,29 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
             output_prefix=self._clip_output_prefix(),
             settings_key=self.SETTINGS_KEY,
             destinations=self._clip_destinations(),
-            shotgrid=self._clip_shotgrid(),
         )
 
     def _clip_destinations(self) -> tuple[Destination, ...]:
+        """Every row the viewer offers, in the order it shows them."""
+        return destination_rows(*self._clip_folders(), self._clip_shotgrid())
+
+    def _clip_folders(self) -> tuple[DiskDestination, ...]:
         return (
-            Destination(
+            DiskDestination(
+                id=EDIT_FOLDER_ID,
                 name="Send to Edit",
                 directory=build_edit_output_directory(EDIT_DEPARTMENT),
                 preset=FFmpegPreset.EDIT_SQ,
             ),
-            Destination(
+            DiskDestination(
+                id=CURRENT_FOLDER_ID,
                 name="Current Folder",
                 directory=self._current_scene_directory(),
                 preset=FFmpegPreset.WEB,
                 default_on=False,
             ),
-            Destination(
+            DiskDestination(
+                id=CUSTOM_FOLDER_ID,
                 name="Custom Folder",
                 directory=resolve_playblast_tempdir(),
                 preset=FFmpegPreset.WEB,
@@ -357,16 +369,15 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
             ),
         )
 
-    def _clip_shotgrid(self) -> ShotGridUpload | None:
+    def _clip_shotgrid(self) -> ShotGridDestination | None:
         """The clip's ShotGrid row. Only shot-mode playblasts have an entity."""
         if self.selected_source_mode != "shot":
             return None
         code = self.shot_code
         if not code or code == "-":
             return None
-        return ShotGridUpload(
-            entity_kind="shot",
-            entity_value=code,
+        return ShotGridDestination(
+            entity=ShotEntity(code),
             artist_display_name=resolve_artist_display_name().strip() or None,
         )
 

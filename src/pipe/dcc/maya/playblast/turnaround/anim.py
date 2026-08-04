@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pipe.core.playblast import ShotGridUpload
+from pipe.core.playblast import ScratchEntity, ShotGridDestination
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.maya.assetfile import AssetMetadata
 from pipe.dcc.maya.playblast.turnaround.config import Elevation, TurnaroundPass
@@ -31,12 +31,11 @@ class AnimTurnaroundDialog(AssetTurnaroundDialog):
         # doesn't log a scary (and expected) resolution failure.
         return None
 
-    def _clip_shotgrid(self) -> ShotGridUpload:
+    def _clip_shotgrid(self) -> ShotGridDestination:
         # Falls back to the scene name; never None, so an upload row is
         # always offered even without metadata.
-        return ShotGridUpload(
-            entity_kind="scratch",
-            entity_value=self._asset_display_name(),
+        return ShotGridDestination(
+            entity=ScratchEntity(self._asset_display_name()),
             artist_display_name=resolve_artist_display_name().strip() or None,
             playlist_required=True,
         )
