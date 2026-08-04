@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
 
 from pipe.core.util.paths import get_edit_path
 
@@ -15,16 +15,43 @@ _VERSION_PADDING = 3
 
 def next_versioned_basename(
     prefix: str,
-    destination_dirs: Iterable[Path | str],
+    occupied_names: Iterable[str],
     *,
     now: datetime | None = None,
-    padding: int = _VERSION_PADDING,
 ) -> str:
-    """Return a versioned basename `<prefix>_YYYY-MM-DD.v###` whose version
-    number is one higher than the highest already present across
-    `destination_dirs`."""
-    next_version = _next_version(prefix, destination_dirs, now=now)
-    return _output_basename(prefix, version=next_version, now=now, padding=padding)
+    """Return `<prefix>_YYYY-MM-DD.v###`, one past the highest version in
+    `occupied_names`."""
+    normalized_prefix = prefix.strip()
+    if not normalized_prefix:
+        raise ValueError("Playblast output prefix cannot be empty.")
+
+    day_token = _date_folder(now)
+    pattern = _version_pattern(normalized_prefix, day_token)
+
+    highest_version = 0
+    for name in occupied_names:
+        match = pattern.match(name)
+        if match:
+            highest_version = max(highest_version, int(match.group("version")))
+
+    version_token = f"v{highest_version + 1:0{_VERSION_PADDING}d}"
+    return f"{normalized_prefix}_{day_token}.{version_token}"
+
+
+def existing_filenames(directories: Iterable[Path | str]) -> list[str]:
+    """Every filename in the directories that exist and can be listed."""
+    names: list[str] = []
+    for raw_path in directories:
+        directory = Path(str(raw_path))
+        if not directory.is_dir():
+            continue
+        try:
+            names.extend(item.name for item in directory.iterdir() if item.is_file())
+        except OSError:
+            # Versioning past a folder we could not read risks overwriting what
+            # is in it, so say so rather than silently starting over at v001.
+            log.warning("Could not list %s", directory, exc_info=True)
+    return names
 
 
 def build_edit_output_directory(
@@ -39,49 +66,6 @@ def _date_folder(now: datetime | None = None) -> str:
     return timestamp.strftime("%Y-%m-%d")
 
 
-def _version_token(version: int, *, padding: int = _VERSION_PADDING) -> str:
-    if version < 1:
-        raise ValueError("Playblast version must be at least 1.")
-    return f"v{version:0{padding}d}"
-
-
-def _output_basename(
-    prefix: str,
-    *,
-    version: int,
-    now: datetime | None = None,
-    padding: int = _VERSION_PADDING,
-) -> str:
-    normalized_prefix = prefix.strip()
-    if not normalized_prefix:
-        raise ValueError("Playblast output prefix cannot be empty.")
-
-    day_token = _date_folder(now)
-    version_token = _version_token(version, padding=padding)
-    return f"{normalized_prefix}_{day_token}.{version_token}"
-
-
-def _next_version(
-    prefix: str,
-    destination_dirs: Iterable[Path | str],
-    *,
-    now: datetime | None = None,
-) -> int:
-    normalized_prefix = prefix.strip()
-    if not normalized_prefix:
-        raise ValueError("Playblast output prefix cannot be empty.")
-
-    day_token = _date_folder(now)
-    version_pattern = _version_pattern(normalized_prefix, day_token)
-    highest_version = 0
-
-    for directory in _existing_directories(destination_dirs):
-        for version in _versions_in_directory(directory, version_pattern):
-            highest_version = max(highest_version, version)
-
-    return highest_version + 1
-
-
 def _version_pattern(prefix: str, day_token: str) -> re.Pattern[str]:
     escaped_prefix = re.escape(prefix)
     escaped_day_token = re.escape(day_token)
@@ -90,35 +74,8 @@ def _version_pattern(prefix: str, day_token: str) -> re.Pattern[str]:
     )
 
 
-def _existing_directories(destination_dirs: Iterable[Path | str]) -> list[Path]:
-    directories: list[Path] = []
-    for raw_path in destination_dirs:
-        path = Path(str(raw_path))
-        if path.exists() and path.is_dir():
-            directories.append(path)
-    return directories
-
-
-def _versions_in_directory(directory: Path, pattern: re.Pattern[str]) -> list[int]:
-    versions: list[int] = []
-    try:
-        for item in directory.iterdir():
-            if not item.is_file():
-                continue
-            match = pattern.match(item.name)
-            if not match:
-                continue
-            try:
-                versions.append(int(match.group("version")))
-            except ValueError:
-                continue
-    except OSError:
-        log.warning("Could not scan playblast versions in %s", directory, exc_info=True)
-
-    return versions
-
-
 __all__ = [
     "build_edit_output_directory",
+    "existing_filenames",
     "next_versioned_basename",
 ]

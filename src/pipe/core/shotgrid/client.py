@@ -879,6 +879,21 @@ class ShotGrid:
 
     # ---- versions ----------------------------------------------------------
 
+    def find_version_codes(self, *, code_starts_with: str) -> list[str]:
+        """Return the `code` of every Version starting with `code_starts_with`.
+
+        Not `@ttl_cache`d: callers allocate the next version number from this,
+        and a stale hit hands out a code that already exists.
+        """
+        filters = [self._project_filter(), ("code", "starts_with", code_starts_with)]
+        rows = _read_or_raise(
+            lambda: self._sg.find("Version", filters, ["code"]),
+            entity_type="Version",
+            selector="code_starts_with",
+            value=code_starts_with,
+        )
+        return [row["code"] for row in rows if row.get("code")]
+
     def create_shot_version(
         self,
         shot: Shot,

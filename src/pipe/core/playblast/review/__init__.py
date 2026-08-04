@@ -7,6 +7,7 @@ from pipe.core.playblast.review.versions import (
     PlayblastVersionUploadRequest,
     PlayblastVersionUploadResult,
     UploadTarget,
+    find_playblast_version_codes,
     upload_playblast_version,
 )
 
@@ -16,6 +17,7 @@ __all__ = [
     "PlayblastVersionUploadRequest",
     "PlayblastVersionUploadResult",
     "UploadTarget",
+    "find_playblast_version_codes",
     "list_recent_review_playlists",
     "upload_playblast_version",
 ]

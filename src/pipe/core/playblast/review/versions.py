@@ -182,6 +182,11 @@ _ENTITY_DISPATCH: dict[str, tuple[_EntityLookup, _VersionCreator]] = {
 }
 
 
+def find_playblast_version_codes(prefix: str) -> tuple[str, ...]:
+    """Existing ShotGrid Version codes starting with `prefix`."""
+    return tuple(_resolve_connection(None).find_version_codes(code_starts_with=prefix))
+
+
 def upload_playblast_version(
     request: PlayblastVersionUploadRequest,
     *,
@@ -441,5 +446,6 @@ __all__ = [
     "PlayblastVersionUploadRequest",
     "PlayblastVersionUploadResult",
     "UploadTarget",
+    "find_playblast_version_codes",
     "upload_playblast_version",
 ]

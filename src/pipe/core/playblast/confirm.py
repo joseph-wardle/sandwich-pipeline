@@ -20,12 +20,13 @@ from pipe.core.playblast.clip import (
     ShotGridDestination,
 )
 from pipe.core.playblast.encoding import build_image_input_chain, encode_movie
-from pipe.core.playblast.naming import next_versioned_basename
+from pipe.core.playblast.naming import existing_filenames, next_versioned_basename
 from pipe.core.playblast.presets import FFmpegPreset
 from pipe.core.playblast.review.versions import (
     PlayblastEntity,
     PlayblastVersionUploadRequest,
     UploadTarget,
+    find_playblast_version_codes,
     upload_playblast_version,
 )
 from pipe.core.previs import (
@@ -98,10 +99,7 @@ def confirm_clip(
         basename = basename or take_basename
 
     if basename is None:
-        basename = next_versioned_basename(
-            clip.output_prefix,
-            [choice.directory for choice in chosen if isinstance(choice, ChosenDisk)],
-        )
+        basename = _next_basename(clip, chosen)
 
     for choice in chosen:
         if isinstance(choice, ChosenDisk):
@@ -110,6 +108,40 @@ def confirm_clip(
             outcomes.append(_upload_to_shotgrid(clip, choice, basename))
 
     return ConfirmResult(basename=basename, outcomes=tuple(outcomes))
+
+
+def _next_basename(clip: PreviewClip, chosen: tuple[ChosenDestination, ...]) -> str:
+    """Version past every folder the clip declares, not only the checked ones:
+    unchecking a folder must not rewind the count and overwrite what is in it."""
+    directories = {
+        destination.directory
+        for destination in clip.destinations
+        if isinstance(destination, DiskDestination)
+    } | {choice.directory for choice in chosen if isinstance(choice, ChosenDisk)}
+
+    return next_versioned_basename(
+        clip.output_prefix,
+        [
+            *existing_filenames(directories),
+            *_shotgrid_version_codes(clip.output_prefix, chosen),
+        ],
+    )
+
+
+def _shotgrid_version_codes(
+    prefix: str, chosen: tuple[ChosenDestination, ...]
+) -> tuple[str, ...]:
+    """Queried only when ShotGrid is checked. Unlike a folder, a Version code
+    that repeats overwrites nothing, so an unchecked row is not worth a round
+    trip on the Confirm thread."""
+    if not any(isinstance(choice, ChosenShotGrid) for choice in chosen):
+        return ()
+    try:
+        return find_playblast_version_codes(prefix)
+    except Exception:
+        # Losing the delivery to a failed read is worse than a repeated code.
+        log.exception("Could not read existing ShotGrid Version codes for %s", prefix)
+        return ()
 
 
 def _deliver_take(
