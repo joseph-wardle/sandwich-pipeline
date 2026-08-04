@@ -44,7 +44,6 @@ _S = TypeVar("_S")
 
 _SG_NAME = "sg_name"
 _STRUCT_HOOK = "struct_hook"
-_UNSTRUCT_HOOK = "unstruct_hook"
 _con = cattrs.Converter()
 
 _con.register_structure_hook_factory(
@@ -56,7 +55,6 @@ _con.register_structure_hook_factory(
             f.name: cattrs.gen.override(
                 rename=f.metadata.get(_SG_NAME, None),
                 struct_hook=f.metadata.get(_STRUCT_HOOK, None),
-                unstruct_hook=f.metadata.get(_UNSTRUCT_HOOK, None),
             )
             for f in attrs.fields(cls)
         },
@@ -115,38 +113,6 @@ class SGEntity:
                 f"Cannot create {cls.__name__} from an empty ShotGrid dict"
             )
         return _con.structure(sg_dict, cls)
-
-    def to_sg(self, exclude: list[str] | None = None) -> dict[str, Any]:
-        """Return this entity as a ShotGrid-shaped dict.
-
-        `exclude` lists *Python* field names to omit from the output.
-        """
-        excluded = set(exclude or ())
-        data = _con.unstructure(self)
-        result: dict[str, Any] = {}
-        for f in attrs.fields(self.__class__):
-            if f.name in excluded or f.name.startswith("_"):
-                continue
-            sg_key = f.metadata.get(_SG_NAME, f.name)
-            val = data.get(f.name)
-            if val is None:
-                continue
-            if hook := f.metadata.get(_UNSTRUCT_HOOK):
-                val = hook(val, None)
-            result[sg_key] = val
-        return result
-
-    @classmethod
-    def map_sg_field_names(cls: type[attrs.AttrsInstance], name: str) -> str:
-        """Map a Python attribute name to its ShotGrid field name."""
-        return next(
-            (
-                f.metadata.get(_SG_NAME, None) or f.name
-                for f in attrs.fields(cls)
-                if f.name == name
-            ),
-            "",
-        )
 
     # ---- Identity, equality, lazy hydration -------------------------------
 
@@ -225,7 +191,6 @@ class Asset(SGEntity):
         metadata={
             _SG_NAME: "sg_subdirectory",
             _STRUCT_HOOK: lambda subdir, _: normalize_subdirectory(subdir),
-            _UNSTRUCT_HOOK: lambda subdir, _: subdir or "",
         },
     )
     material_variants: set[str] | None = field(
@@ -234,7 +199,6 @@ class Asset(SGEntity):
         metadata={
             _SG_NAME: "sg_material_variants",
             _STRUCT_HOOK: lambda mv, _: split_csv_set(mv),
-            _UNSTRUCT_HOOK: lambda mv, _: ",".join(mv) if mv else "",
         },
     )
     geometry_variants: set[str] | None = field(
@@ -243,7 +207,6 @@ class Asset(SGEntity):
         metadata={
             _SG_NAME: "sg_geometry_variants",
             _STRUCT_HOOK: lambda mv, _: split_csv_set(mv),
-            _UNSTRUCT_HOOK: lambda mv, _: ",".join(mv) if mv else "",
         },
     )
     material_layers: set[str] | None = field(
@@ -252,7 +215,6 @@ class Asset(SGEntity):
         metadata={
             _SG_NAME: "sg_material_layers",
             _STRUCT_HOOK: lambda mv, _: split_csv_set(mv),
-            _UNSTRUCT_HOOK: lambda mv, _: ",".join(mv) if mv else "",
         },
     )
 
@@ -298,7 +260,6 @@ class Environment(SGEntity):
         metadata={
             _SG_NAME: "sg_subdirectory",
             _STRUCT_HOOK: lambda subdir, _: normalize_subdirectory(subdir),
-            _UNSTRUCT_HOOK: lambda subdir, _: subdir or "",
         },
     )
 
@@ -464,21 +425,26 @@ class Shot(SGEntity):
         return self.cut_in, self.cut_out
 
 
+def _linked_entity(ref: dict[str, Any] | None, _: Any) -> Shot | Asset | None:
+    """A ShotGrid `entity` link may point at a Shot or an Asset; only the ref's
+    `type` says which. Guessing wrong hands back a `Shot` holding an Asset's id,
+    which then lazily fetches whatever unrelated Shot shares it."""
+    if not ref:
+        return None
+    cls = Asset if ref.get("type") == "Asset" else Shot
+    return cls(id=ref["id"], code=ref.get("name"))
+
+
 @attrs.define(eq=False)
 class Task(SGEntity):
     """A ShotGrid Task — a unit of work assigned to a user on a shot or asset."""
 
     code: str | None = field(init=False, repr=False, default=None)
 
-    entity: Shot | None = field(
+    entity: Shot | Asset | None = field(
         default=None,
         kw_only=True,
-        metadata={
-            _SG_NAME: "entity",
-            _STRUCT_HOOK: lambda s, _: (
-                Shot(id=s["id"], code=s.get("name")) if s else None
-            ),
-        },
+        metadata={_SG_NAME: "entity", _STRUCT_HOOK: _linked_entity},
     )
     status: str | None = field(
         default=None, kw_only=True, metadata={_SG_NAME: "sg_status_list"}
@@ -490,24 +456,17 @@ class Task(SGEntity):
 
 @attrs.define(eq=False)
 class Version(SGEntity):
-    """A ShotGrid Version — a review-able media upload linked to a shot or asset."""
+    """A ShotGrid Version — a review-able media upload, usually linked to a
+    shot or asset."""
 
     code: str | None = field(default=None, on_setattr=attrs.setters.frozen)
 
-    shot: Shot | None = field(
+    # `None` on a project-level Version: a review movie with nothing in the
+    # pipeline to hang off, reachable only through a playlist.
+    entity: Shot | Asset | None = field(
         default=None,
         kw_only=True,
-        metadata={
-            _SG_NAME: "entity",
-            _STRUCT_HOOK: lambda s, _: (
-                Shot(id=s["id"], code=s.get("name")) if s else None
-            ),
-            _UNSTRUCT_HOOK: lambda val, _: (
-                {"type": "Shot", "id": val["id"]}
-                if isinstance(val, dict)
-                else {"type": "Shot", "id": val.id}
-            ),
-        },
+        metadata={_SG_NAME: "entity", _STRUCT_HOOK: _linked_entity},
     )
 
     task: Task | None = field(
@@ -516,11 +475,6 @@ class Version(SGEntity):
         metadata={
             _SG_NAME: "sg_task",
             _STRUCT_HOOK: lambda t, _: (Task(id=t["id"]) if t else None),
-            _UNSTRUCT_HOOK: lambda val, _: (
-                {"type": "Task", "id": val["id"]}
-                if isinstance(val, dict)
-                else {"type": "Task", "id": val.id}
-            ),
         },
     )
 
@@ -530,11 +484,6 @@ class Version(SGEntity):
         metadata={
             _SG_NAME: "user",
             _STRUCT_HOOK: lambda val, _: User.from_sg(val) if val else None,
-            _UNSTRUCT_HOOK: lambda val, _: (
-                {"type": "HumanUser", "id": val["id"]}
-                if isinstance(val, dict)
-                else {"type": "HumanUser", "id": val.id}
-            ),
         },
     )
 
@@ -550,11 +499,6 @@ class Version(SGEntity):
 class Playlist(SGEntity):
     """A ShotGrid Playlist — a named collection of Versions for review."""
 
-    sg_status_list: str | None = field(
-        default=None,
-        kw_only=True,
-        metadata={_SG_NAME: "sg_status_list"},
-    )
     versions: list[Version] | None = field(
         default=None,
         kw_only=True,

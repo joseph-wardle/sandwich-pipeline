@@ -42,8 +42,7 @@ class AssetEntity:
 
 @attrs.frozen
 class ScratchEntity:
-    """A scene with no pipeline entity to attach to. Its Version is created at
-    the project level, so it is discoverable only inside a review playlist."""
+    """A scene with no pipeline entity to attach to."""
 
     label: str
 
@@ -53,6 +52,11 @@ class ScratchEntity:
 
 
 ReviewEntity = ShotEntity | AssetEntity | ScratchEntity
+
+
+def is_unlinked(entity: ReviewEntity) -> bool:
+    """Whether the Version hangs off the project alone."""
+    return isinstance(entity, ScratchEntity)
 
 
 @attrs.frozen
@@ -89,8 +93,11 @@ class ShotGridDestination:
 
     entity: ReviewEntity
     artist_display_name: str | None = None
-    playlist_required: bool = False
     default_on: bool = False
+
+    @property
+    def playlist_required(self) -> bool:
+        return is_unlinked(self.entity)
 
 
 @attrs.frozen
@@ -168,5 +175,6 @@ __all__ = [
     "ShotEntity",
     "ShotGridDestination",
     "destination_rows",
+    "is_unlinked",
     "padded_frame_number",
 ]

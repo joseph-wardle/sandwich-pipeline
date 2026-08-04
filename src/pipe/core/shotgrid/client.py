@@ -87,8 +87,9 @@ class SG_Config:
 # ---------------------------------------------------------------------------
 # Module-level constants — field lists and filter fragments.
 #
-# These are the only ShotGrid field-name strings the pipeline knows about.
-# If ShotGrid schema changes, every rename starts here.
+# A ShotGrid schema rename starts here and in the `_SG_NAME` metadata on
+# `pipe.core.shotgrid.entities`, which maps the same fields onto entity
+# attributes.
 # ---------------------------------------------------------------------------
 
 
@@ -139,11 +140,22 @@ _SG_FIELDS_VERSION: tuple[str, ...] = (
 _SG_FIELDS_PLAYLIST: tuple[str, ...] = (
     "id",
     "code",
-    "sg_status_list",
     "versions",
     "updated_at",
     "created_at",
 )
+
+# The fields the Version/Playlist writes below name. Reads project the
+# `_SG_FIELDS_*` tuples above.
+_SG_PROJECT = "project"
+_SG_VERSION_CODE = "code"
+_SG_VERSION_ENTITY = "entity"
+_SG_VERSION_USER = "user"
+_SG_VERSION_TASK = "sg_task"
+_SG_VERSION_DESCRIPTION = "description"
+_SG_VERSION_UPLOADED_MOVIE = "sg_uploaded_movie"
+_SG_VERSION_PATH_TO_FRAMES = "sg_path_to_frames"
+_SG_PLAYLIST_VERSIONS = "versions"
 
 # Active-record filters: skip records that are marked out-of-project / disabled.
 _SG_STATUS_ACTIVE_FILTER: tuple[str, str, str] = ("sg_status_list", "is_not", "oop")
@@ -191,8 +203,8 @@ class ShotGrid:
 
     Every read method returns a fully-typed entity from
     `pipe.core.shotgrid.entities` or raises a subclass of
-    `ShotGridError`. Every write verb returns the refreshed entity so
-    callers do not have to re-fetch.
+    `ShotGridError`. Write verbs that leave an entity worth holding return
+    the refreshed copy so callers do not have to re-fetch.
     """
 
     _sg: shotgun_api3.Shotgun
@@ -894,145 +906,52 @@ class ShotGrid:
         )
         return [row["code"] for row in rows if row.get("code")]
 
-    def create_shot_version(
+    def create_version(
         self,
-        shot: Shot,
         *,
         code: str,
+        entity: Shot | Asset | None = None,
         user: User | None = None,
         task: Task | None = None,
-        video: Path | str | None = None,
         description: str | None = None,
-        playlist: Playlist | None = None,
-        extra_fields: dict[str, Any] | None = None,
+        path_to_frames: Path | str | None = None,
     ) -> Version:
-        """Create a ShotGrid `Version` linked to `shot`.
+        """Create a ShotGrid `Version`.
 
         Args:
-            shot: The shot this version is for.
             code: The Version code (display name).
+            entity: The shot or asset this version is for. Omit for a
+                project-level Version — a review movie with nothing in the
+                pipeline to hang off, discoverable only inside a playlist.
             user: Optional artist who created the version.
             task: Optional task this version belongs to.
-            video: Optional path to a movie; if given, uploads it via
-                `upload_movie` after the Version row is created.
             description: Optional artist-authored description.
-            playlist: If given, the created Version is linked to this playlist.
-            extra_fields: Escape hatch for one-off SG field writes. Prefer
-                extending `pipe.core.shotgrid.entities.Version` over using
-                this.
+            path_to_frames: Where the media lives for good, if anywhere, so a
+                reviewer can find the source. Omit when the only copy is the
+                temp file `upload_movie` will send.
+
+        Returns:
+            The created `Version`. Upload its movie with `upload_movie` and
+            put it in front of reviewers with `link_to_playlist`.
 
         Raises:
-            ShotGridWriteError: ShotGrid rejected the Version create or a
-                downstream upload / link step failed.
+            ShotGridWriteError: ShotGrid rejected the create.
         """
-        return self._create_version(
-            parent_type="Shot",
-            parent=shot,
-            code=code,
-            user=user,
-            task=task,
-            video=video,
-            description=description,
-            playlist=playlist,
-            extra_fields=extra_fields,
-        )
-
-    def create_asset_version(
-        self,
-        asset: Asset,
-        *,
-        code: str,
-        user: User | None = None,
-        task: Task | None = None,
-        video: Path | str | None = None,
-        description: str | None = None,
-        playlist: Playlist | None = None,
-        extra_fields: dict[str, Any] | None = None,
-    ) -> Version:
-        """Create a ShotGrid `Version` linked to `asset`.
-
-        See `create_shot_version` for argument semantics — only the
-        parent entity type differs.
-
-        Raises:
-            ShotGridWriteError: The create, upload, or link failed.
-        """
-        return self._create_version(
-            parent_type="Asset",
-            parent=asset,
-            code=code,
-            user=user,
-            task=task,
-            video=video,
-            description=description,
-            playlist=playlist,
-            extra_fields=extra_fields,
-        )
-
-    def create_project_version(
-        self,
-        *,
-        code: str,
-        user: User | None = None,
-        task: Task | None = None,
-        video: Path | str | None = None,
-        description: str | None = None,
-        playlist: Playlist | None = None,
-        extra_fields: dict[str, Any] | None = None,
-    ) -> Version:
-        """Create a ShotGrid `Version` linked only to the project.
-
-        For review movies with no Shot or Asset to attach to (e.g. turnarounds
-        from animation scratch scenes). See `create_shot_version` for argument
-        semantics — only the entity link is omitted.
-
-        Raises:
-            ShotGridWriteError: The create, upload, or link failed.
-        """
-        return self._create_version(
-            parent_type=None,
-            parent=None,
-            code=code,
-            user=user,
-            task=task,
-            video=video,
-            description=description,
-            playlist=playlist,
-            extra_fields=extra_fields,
-        )
-
-    def _create_version(
-        self,
-        *,
-        parent_type: str | None,
-        parent: Shot | Asset | None,
-        code: str,
-        user: User | None,
-        task: Task | None,
-        video: Path | str | None,
-        description: str | None,
-        playlist: Playlist | None,
-        extra_fields: dict[str, Any] | None,
-    ) -> Version:
         payload: dict[str, Any] = {
-            "code": code,
-            "project": {"type": "Project", "id": self._project_id},
+            _SG_VERSION_CODE: code,
+            _SG_PROJECT: self._project_ref(),
         }
-        if parent_type is not None and parent is not None:
-            payload["entity"] = {"type": parent_type, "id": parent.id}
+        if entity is not None:
+            sg_type = "Shot" if isinstance(entity, Shot) else "Asset"
+            payload[_SG_VERSION_ENTITY] = _entity_ref(sg_type, entity)
         if user is not None:
-            payload["user"] = _entity_ref("HumanUser", user)
+            payload[_SG_VERSION_USER] = _entity_ref("HumanUser", user)
         if task is not None:
-            payload["sg_task"] = _entity_ref("Task", task)
+            payload[_SG_VERSION_TASK] = _entity_ref("Task", task)
         if description is not None:
-            payload["description"] = description
-        if extra_fields:
-            conflicts = set(extra_fields) & set(payload)
-            if conflicts:
-                raise ValueError(
-                    f"extra_fields cannot override structured keys: {sorted(conflicts)}"
-                )
-            payload.update(extra_fields)
+            payload[_SG_VERSION_DESCRIPTION] = description
+        if path_to_frames is not None:
+            payload[_SG_VERSION_PATH_TO_FRAMES] = str(path_to_frames)
         row = _write_or_raise(
             lambda: self._sg.create("Version", payload, list(_SG_FIELDS_VERSION)),
             entity_type="Version",
@@ -1042,57 +961,25 @@ class ShotGrid:
         version = Version.from_sg(row)
         self._attach_db(version)
         object.__setattr__(version, "_hydrated", True)
-        if video is not None:
-            version = self.upload_movie(version, video)
-        if playlist is not None:
-            self.link_to_playlist(version, playlist)
-            version = self.reload(version)
         invalidate(self)
         return version
 
     # ---- uploads -----------------------------------------------------------
 
-    def upload_movie(self, version: Version, path: Path | str) -> Version:
-        """Upload a movie file to an existing `Version` row.
+    def upload_movie(self, version: Version, path: Path | str) -> None:
+        """Upload a movie file to `sg_uploaded_movie` on an existing `Version`.
 
-        Performs three things atomically from the caller's perspective:
+        `path` may be a temp file that does not outlive the upload; record a
+        lasting location with `create_version(path_to_frames=...)` instead.
 
-        1. Uploads the file to `sg_uploaded_movie` (the SG-hosted attachment).
-        2. Writes the same path to `sg_path_to_frames` (the source-on-disk
-           text field) so the two never drift apart.
-        3. Reloads the Version and returns the refreshed entity.
-
-        The upload call retries on transient network failures.  Three attempts
-        total, with 2s and 4s waits between them; the final failure raises
-        `ShotGridWriteError` and preserves the underlying
-        `shotgun_api3.Fault` as `__cause__` for developer debugging.
-
-        Args:
-            version: The Version to upload against.
-            path: Path to the movie file on disk.
-
-        Returns:
-            The refreshed `Version` with both `sg_uploaded_movie`
-            and `sg_path_to_frames` populated.
+        Retries on transient network failures — three attempts total, with 2s
+        and 4s waits between them. The final failure raises
+        `ShotGridWriteError` and preserves the underlying `shotgun_api3.Fault`
+        as `__cause__` for developer debugging.
 
         Raises:
-            ShotGridWriteError: Every upload attempt failed, or the
-                `sg_path_to_frames` follow-up write failed.
+            ShotGridWriteError: Every upload attempt failed.
         """
-        path_str = str(path)
-        self._upload_movie_with_retry(version, path_str)
-        _write_or_raise(
-            lambda: self._sg.update(
-                "Version", version.id, {"sg_path_to_frames": path_str}
-            ),
-            entity_type="Version",
-            entity_id=version.id,
-            field="sg_path_to_frames",
-        )
-        return self.reload(version)
-
-    def _upload_movie_with_retry(self, version: Version, path_str: str) -> None:
-        """Run `self._sg.upload` with the configured backoff schedule."""
         backoffs = self._UPLOAD_BACKOFF_SECONDS
         total_attempts = len(backoffs) + 1
         last_exc: BaseException | None = None
@@ -1101,8 +988,8 @@ class ShotGrid:
                 self._sg.upload(
                     "Version",
                     version.id,
-                    path_str,
-                    field_name="sg_uploaded_movie",
+                    str(path),
+                    field_name=_SG_VERSION_UPLOADED_MOVIE,
                 )
                 return
             except _NETWORK_EXCEPTIONS as exc:
@@ -1123,37 +1010,34 @@ class ShotGrid:
         raise ShotGridWriteError(
             entity_type="Version",
             entity_id=version.id,
-            field="sg_uploaded_movie",
+            field=_SG_VERSION_UPLOADED_MOVIE,
             cause=last_exc,
         ) from last_exc
 
     # ---- playlist links ----------------------------------------------------
 
-    def link_to_playlist(self, version: Version, playlist: Playlist) -> Playlist:
-        """Add `version` to `playlist` without replacing existing members.
+    def link_to_playlist(self, version: Version, *, playlist_id: int) -> None:
+        """Add `version` to the playlist without replacing existing members.
 
         Uses ShotGrid's `multi_entity_update_modes={"versions": "add"}`
         so other versions already on the playlist are preserved.
 
-        Returns:
-            The refreshed `Playlist`.
-
         Raises:
-            ShotGridWriteError: ShotGrid rejected the link.
+            ShotGridWriteError: ShotGrid rejected the link, including when
+                no playlist has this id.
         """
         _write_or_raise(
             lambda: self._sg.update(
                 "Playlist",
-                playlist.id,
-                {"versions": [{"type": "Version", "id": version.id}]},
-                multi_entity_update_modes={"versions": "add"},
+                playlist_id,
+                {_SG_PLAYLIST_VERSIONS: [{"type": "Version", "id": version.id}]},
+                multi_entity_update_modes={_SG_PLAYLIST_VERSIONS: "add"},
             ),
             entity_type="Playlist",
-            entity_id=playlist.id,
-            field="versions",
+            entity_id=playlist_id,
+            field=_SG_PLAYLIST_VERSIONS,
         )
         invalidate(self)
-        return self.reload(playlist)
 
     # ---- refresh -----------------------------------------------------------
 
@@ -1187,8 +1071,8 @@ class ShotGrid:
 
     def _reload_version(self, version: Version) -> Version:
         """Re-fetch a Version by id. Version has no public `get_version`
-        because callers hold the Version returned by `create_*_version` /
-        `upload_movie`; this exists for the lazy-fetch + reload paths."""
+        because callers hold the one `create_version` returned; this exists
+        for the lazy-fetch + reload paths."""
         rows = _read_or_raise(
             lambda: self._sg.find(
                 "Version",
@@ -1211,7 +1095,10 @@ class ShotGrid:
 
     def _project_filter(self) -> tuple[str, str, dict[str, Any]]:
         """The filter fragment that scopes every project-local query."""
-        return ("project", "is", {"type": "Project", "id": self._project_id})
+        return (_SG_PROJECT, "is", self._project_ref())
+
+    def _project_ref(self) -> dict[str, Any]:
+        return {"type": "Project", "id": self._project_id}
 
     def _asset_scope_filters(self) -> list[Any]:
         """Filters shared by every Asset query — project, status, type excludes."""

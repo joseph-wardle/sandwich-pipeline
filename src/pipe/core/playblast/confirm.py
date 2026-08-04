@@ -9,23 +9,18 @@ from pathlib import Path
 import attrs
 
 from pipe.core.playblast.clip import (
-    AssetEntity,
     Destination,
     DestinationId,
     DiskDestination,
     PreviewClip,
     PrevisTakeDestination,
-    ReviewEntity,
-    ShotEntity,
     ShotGridDestination,
 )
 from pipe.core.playblast.encoding import build_image_input_chain, encode_movie
 from pipe.core.playblast.naming import existing_filenames, next_versioned_basename
 from pipe.core.playblast.presets import FFmpegPreset
 from pipe.core.playblast.review.versions import (
-    PlayblastEntity,
     PlayblastVersionUploadRequest,
-    UploadTarget,
     find_playblast_version_codes,
     upload_playblast_version,
 )
@@ -66,12 +61,13 @@ ChosenDestination = ChosenDisk | ChosenShotGrid | ChosenTake
 
 @attrs.frozen
 class DestinationOutcome:
-    """One delivery result: `detail` is the final path (or upload message)
-    on success, the artist-facing reason on failure."""
+    """One delivery result. `detail` is what the artist reads; `path` is set
+    only where the movie landed somewhere it will stay."""
 
     id: DestinationId
     ok: bool
     detail: str
+    path: Path | None = None
 
 
 @attrs.frozen
@@ -104,8 +100,11 @@ def confirm_clip(
     for choice in chosen:
         if isinstance(choice, ChosenDisk):
             outcomes.append(_deliver_to_folder(clip, choice, basename))
-        elif isinstance(choice, ChosenShotGrid):
-            outcomes.append(_upload_to_shotgrid(clip, choice, basename))
+
+    kept = next((outcome.path for outcome in outcomes if outcome.path), None)
+    for choice in chosen:
+        if isinstance(choice, ChosenShotGrid):
+            outcomes.append(_upload_to_shotgrid(clip, choice, basename, kept))
 
     return ConfirmResult(basename=basename, outcomes=tuple(outcomes))
 
@@ -169,7 +168,7 @@ def _deliver_take(
             "Send to Edit failed for take v%s of %s", version, stamp.shot_code
         )
         return _failed(destination, exc), basename
-    return _delivered(destination, str(final_path)), basename
+    return _delivered(destination, final_path), basename
 
 
 def _stamp_take(destination: PrevisTakeDestination, version: int) -> None:
@@ -199,7 +198,7 @@ def _deliver_to_folder(
     except Exception as exc:
         log.exception("Confirm delivery to '%s' failed", destination.name)
         return _failed(destination, exc)
-    return _delivered(destination, str(final_path))
+    return _delivered(destination, final_path)
 
 
 def _encode_and_copy(
@@ -213,24 +212,22 @@ def _encode_and_copy(
 
 
 def _upload_to_shotgrid(
-    clip: PreviewClip, chosen: ChosenShotGrid, basename: str
+    clip: PreviewClip,
+    chosen: ChosenShotGrid,
+    basename: str,
+    disk_path: Path | None,
 ) -> DestinationOutcome:
     destination = chosen.destination
     try:
-        movie = _encoded_movie(clip, destination.preset, basename)
         result = upload_playblast_version(
             PlayblastVersionUploadRequest(
-                entity=_playblast_entity(destination.entity),
-                movie_path=movie,
+                entity=destination.entity,
+                movie_path=_encoded_movie(clip, destination.preset, basename),
                 version_name=basename,
                 description=chosen.description,
                 artist_display_name=destination.artist_display_name,
-                upload_target=(
-                    UploadTarget.REVIEW
-                    if chosen.playlist_id is not None
-                    else UploadTarget.VERSION_ONLY
-                ),
                 review_playlist_id=chosen.playlist_id,
+                disk_path=disk_path,
             )
         )
     except Exception as exc:
@@ -242,14 +239,6 @@ def _upload_to_shotgrid(
         ok=result.ok,
         detail=" ".join([result.message, *result.warnings]),
     )
-
-
-def _playblast_entity(entity: ReviewEntity) -> PlayblastEntity:
-    if isinstance(entity, ShotEntity):
-        return PlayblastEntity(kind="shot", value=entity.code)
-    if isinstance(entity, AssetEntity):
-        return PlayblastEntity(kind="asset", value=entity.display_name)
-    return PlayblastEntity(kind="scratch", value=entity.label)
 
 
 def _encoded_movie(clip: PreviewClip, preset: FFmpegPreset, basename: str) -> Path:
@@ -272,8 +261,8 @@ def _encoded_movie(clip: PreviewClip, preset: FFmpegPreset, basename: str) -> Pa
     )
 
 
-def _delivered(destination: Destination, detail: str) -> DestinationOutcome:
-    return DestinationOutcome(id=destination.id, ok=True, detail=detail)
+def _delivered(destination: Destination, path: Path) -> DestinationOutcome:
+    return DestinationOutcome(id=destination.id, ok=True, detail=str(path), path=path)
 
 
 def _failed(destination: Destination, exc: Exception) -> DestinationOutcome:

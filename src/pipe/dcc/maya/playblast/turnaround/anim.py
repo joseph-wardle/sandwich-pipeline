@@ -8,12 +8,7 @@ from pipe.dcc.maya.playblast.turnaround.dialog import AssetTurnaroundDialog
 
 
 class AnimTurnaroundDialog(AssetTurnaroundDialog):
-    """Turnaround dialog for animation scratch scenes (pose library reviews).
-
-    Scratch scenes carry no asset or shot metadata, so a ShotGrid upload
-    creates a project-level Version — undiscoverable outside a review
-    playlist, hence `playlist_required` on the clip's ShotGrid row.
-    """
+    """Turnaround dialog for animation scratch scenes (pose library reviews)."""
 
     WINDOW_TITLE = "SKD Anim Turnaround"
     SOURCE_VALUE = "Current Maya Scene"
@@ -32,12 +27,9 @@ class AnimTurnaroundDialog(AssetTurnaroundDialog):
         return None
 
     def _clip_shotgrid(self) -> ShotGridDestination:
-        # Falls back to the scene name; never None, so an upload row is
-        # always offered even without metadata.
         return ShotGridDestination(
             entity=ScratchEntity(self._asset_display_name()),
             artist_display_name=resolve_artist_display_name().strip() or None,
-            playlist_required=True,
         )
 
 

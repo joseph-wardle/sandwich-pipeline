@@ -806,13 +806,13 @@ def create_new_shot_version():
     # an upload failure can be reported distinctly from a create failure.
     _conn = ShotGrid.connect(DB_Config)
     try:
-        new_version = _conn.create_shot_version(
-            shot,
+        new_version = _conn.create_version(
+            entity=shot,
             code=version_name,
             user=user,
             task=task,
             description=description,
-            playlist=playlist,
+            path_to_frames=video_path,
         )
     except Exception as e:
         nuke.message(f"ShotGrid version creation failed: {e}")
@@ -820,11 +820,23 @@ def create_new_shot_version():
 
     try:
         _conn.upload_movie(new_version, video_path)
-        nuke.message(
-            f"ShotGrid version '{version_name}' created and movie uploaded successfully."
-        )
     except Exception as e:
         nuke.message(f"Version '{version_name}' created, but movie upload failed: {e}")
+        return
+
+    if playlist is not None:
+        try:
+            _conn.link_to_playlist(new_version, playlist_id=playlist.id)
+        except Exception as e:
+            nuke.message(
+                f"Version '{version_name}' uploaded, but adding it to playlist "
+                f"'{playlist.code}' failed: {e}"
+            )
+            return
+
+    nuke.message(
+        f"ShotGrid version '{version_name}' created and movie uploaded successfully."
+    )
 
 
 ### End return to shotgrid helper functions ###

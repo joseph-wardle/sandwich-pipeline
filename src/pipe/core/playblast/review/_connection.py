@@ -1,7 +1,4 @@
-"""Lazy default ShotGrid connection used by `pipe.core.playblast.review`
-helpers when a caller hasn't passed an explicit `conn`. Lives in its own
-module so sibling submodules can import it without the `__init__.py`
-reverse-import dance the package used to do."""
+"""The ShotGrid connection `pipe.core.playblast.review` submodules share."""
 
 from __future__ import annotations
 
