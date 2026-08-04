@@ -29,7 +29,7 @@ def manifest_path(sequence_code: str, *, previs_root: Path | None = None) -> Pat
 
 
 def playblasts_dir(sequence_code: str, *, previs_root: Path | None = None) -> Path:
-    """Directory holding a sequence's take playblasts: ``<previs_root>/<seq>/playblasts``."""
+    """Directory holding a sequence's playblasts: ``<previs_root>/<seq>/playblasts``."""
     root = previs_root if previs_root is not None else get_previs_path()
     return root / sequence_code / PLAYBLASTS_DIRNAME
 
@@ -47,8 +47,7 @@ def load_manifest(
             raw = json.load(handle)
     except (OSError, ValueError) as exc:
         log.error(
-            "Could not read previs manifest at %s (%s); "
-            "treating sequence %s as empty.",
+            "Could not read previs manifest at %s (%s); treating sequence %s as empty.",
             path,
             exc,
             sequence_code,

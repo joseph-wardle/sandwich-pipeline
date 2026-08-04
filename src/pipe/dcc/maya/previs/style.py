@@ -31,15 +31,8 @@ TRUNC_TEXT = "#F4D4BE"
 
 # --- break-out dot (RLO) ----------------------------------------------------
 
-RLO_NO_CODE = "#6E665A"  # unpaired — drawn as a dashed outline
-RLO_READY = "#6E8BA8"  # paired, never broken out
-RLO_DRIFTED = "#E5B340"  # RLO exists, primary moved since
-RLO_IN_SYNC = "#88AA70"  # live primary matches last break-out
-
-# --- cam-publish pip --------------------------------------------------------
-
-CAM_ABSENT_STALE = "#585348"  # cam.usd missing or stale — dim
-CAM_IN_SYNC = "#6F8C5A"  # cam.usd matches last publish — muted green
+RLO_PENDING = "#6E8BA8"  # no RLO scene yet — drawn as a dashed outline
+RLO_BROKEN_OUT = "#88AA70"  # an RLO scene exists on disk
 
 # --- playhead ---------------------------------------------------------------
 

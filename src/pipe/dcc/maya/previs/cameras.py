@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 from typing import cast
@@ -91,51 +90,6 @@ def focal_length(namespace: str) -> float | None:
         return float(cast(float, mc.camera(shape, query=True, focalLength=True)))
     except Exception:
         return None
-
-
-def camera_animation_range(namespace: str) -> tuple[float, float] | None:
-    """Earliest and latest keyframe time across every rig control, or None when unkeyed.
-
-    Used at publish time to bake the camera's actual animation into USD —
-    the sequencer panel no longer reads this for layout (durations are stored
-    explicitly on `PrevisShot.durations`).
-    """
-    all_times: list[float] = []
-    for control in RIG_CONTROLS:
-        plug = f"{namespace}:{control}"
-        if not mc.objExists(plug):
-            continue
-        raw = mc.keyframe(plug, query=True, timeChange=True) or []
-        if raw:
-            all_times.extend(cast(list[float], raw))
-    if not all_times:
-        return None
-    return (float(min(all_times)), float(max(all_times)))
-
-
-def compute_animation_hash(camera_namespace: str) -> str:
-    """SHA1 over every (control, attr, time, value) tuple under `camera_namespace`.
-
-    Stored on each shot at publish; the panel re-hashes the live primary and
-    compares to flag "current" vs "modified".
-    """
-    parts: list[str] = []
-    for control in RIG_CONTROLS:
-        plug = f"{camera_namespace}:{control}"
-        if not mc.objExists(plug):
-            continue
-        for attr in mc.listAttr(plug, keyable=True) or []:
-            target = f"{plug}.{attr}"
-            count = mc.keyframe(target, query=True, keyframeCount=True) or 0
-            if count <= 0:
-                continue
-            # `mc.keyframe` stubs union list/scalar; count>0 guarantees a list.
-            times = cast(list[float], mc.keyframe(target, query=True, timeChange=True))
-            values = cast(
-                list[float], mc.keyframe(target, query=True, valueChange=True)
-            )
-            parts.append(f"{control}.{attr}|{list(zip(times, values))}")
-    return hashlib.sha1("\n".join(parts).encode()).hexdigest()
 
 
 def find_scene_cameras_outside_state(state: PrevisState) -> list[str]:

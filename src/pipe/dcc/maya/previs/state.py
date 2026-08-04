@@ -31,15 +31,11 @@ def utcnow_iso() -> str:
 @dataclass
 class PrevisShot:
     id: str
-    # Sticky sequence code (`A_010`). Distinct from `shotgrid_code`,
-    # the dormant link to an official SG Shot.
+    # Sticky sequence code (`A_010`) — also the ShotGrid code, when a Shot exists.
     code: str = ""
     primary: str = ""
     alternates: list[str] = field(default_factory=list)
     durations: dict[str, int] = field(default_factory=dict)
-    shotgrid_code: str | None = None
-    rlo_animation_hash: str | None = None
-    cam_animation_hash: str | None = None
 
     @property
     def all_cameras(self) -> list[str]:
@@ -59,7 +55,6 @@ class PrevisShot:
 class PrevisState:
     schema_version: int = SCHEMA_VERSION
     created_at: str = field(default_factory=utcnow_iso)
-    last_published_at: str | None = None
     notes: str = ""
     shots: list[PrevisShot] = field(default_factory=list)
 
@@ -75,7 +70,6 @@ class PrevisState:
         return cls(
             schema_version=int(raw.get("schema_version") or SCHEMA_VERSION),
             created_at=str(metadata.get("created_at") or utcnow_iso()),
-            last_published_at=metadata.get("last_published_at"),
             notes=str(metadata.get("notes") or ""),
             shots=shots,
         )
@@ -85,7 +79,6 @@ class PrevisState:
             "schema_version": self.schema_version,
             "metadata": {
                 "created_at": self.created_at,
-                "last_published_at": self.last_published_at,
                 "notes": self.notes,
             },
             "shots": [
@@ -95,9 +88,6 @@ class PrevisState:
                     "primary": s.primary,
                     "alternates": list(s.alternates),
                     "durations": dict(s.durations),
-                    "shotgrid_code": s.shotgrid_code,
-                    "rlo_animation_hash": s.rlo_animation_hash,
-                    "cam_animation_hash": s.cam_animation_hash,
                 }
                 for s in self.shots
             ],
@@ -108,7 +98,7 @@ class PrevisState:
 
 
 def _load_shot_fields(s: dict[str, Any]) -> dict[str, Any]:
-    """Build PrevisShot kwargs from raw JSON, migrating legacy v1 field names."""
+    """Build PrevisShot kwargs from raw JSON. Retired keys are ignored."""
     primary = str(s.get("primary") or "")
     durations_raw = s.get("durations")
     if isinstance(durations_raw, dict):
@@ -123,11 +113,6 @@ def _load_shot_fields(s: dict[str, Any]) -> dict[str, Any]:
         primary=primary,
         alternates=list(s.get("alternates") or []),
         durations=durations,
-        shotgrid_code=s.get("shotgrid_code"),
-        rlo_animation_hash=s.get("rlo_animation_hash"),
-        # v1 named the cam-bake hash `published_animation_hash`.
-        cam_animation_hash=s.get("cam_animation_hash")
-        or s.get("published_animation_hash"),
     )
 
 

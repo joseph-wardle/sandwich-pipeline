@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -21,34 +20,9 @@ from Qt.QtWidgets import (
 
 from pipe.core.previs import naming
 from pipe.core.ui import DialogButtons, FilteredListDialog
-from pipe.core.shotgrid import ShotGrid
 
 if TYPE_CHECKING:
     from pipe.core.previs.model import FileRecord
-
-
-def shotgrid_codes_for_sequence(conn: ShotGrid, sequence_letter: str) -> list[str]:
-    """Real shot codes (e.g. `A_010`) for the given sequence letter, sorted."""
-    pattern = re.compile(rf"^{re.escape(sequence_letter)}_\d+$")
-    return sorted(s.code for s in conn.find_shots() if s.code and pattern.match(s.code))
-
-
-def pick_shotgrid_code(
-    parent: QWidget,
-    codes: Sequence[str],
-    sequence_letter: str,
-) -> str | None:
-    """Prompt the user to pick one of `codes`; None on cancel."""
-    dialog = FilteredListDialog(
-        parent,
-        list(codes),
-        title="Assign ShotGrid Code",
-        list_label=f"Select the shot to pair with this previs shot (sequence {sequence_letter}):",
-        accept_button_name="Assign",
-    )
-    if not dialog.exec_():
-        return None
-    return dialog.get_selected_item()
 
 
 def pick_scene_camera(parent: QWidget, candidates: Sequence[str]) -> str | None:

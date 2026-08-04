@@ -66,18 +66,6 @@ def shot_or_scratch(shot_code: str, scratch_label: str) -> ReviewEntity:
 
 
 @attrs.frozen
-class PrevisStamp:
-    """Manifest-stamp context for a previs take."""
-
-    sequence_code: str
-    shot_code: str
-    camera: str
-    source_filename: str
-    duration_frames: int
-    previs_root: Path
-
-
-@attrs.frozen
 class DiskDestination:
     id: DestinationId
     name: str
@@ -105,20 +93,7 @@ class ShotGridDestination:
         return is_unlinked(self.entity)
 
 
-@attrs.frozen
-class PrevisTakeDestination:
-    """The immutable previs take: a movie in the sequence's playblasts dir plus
-    a manifest stamp."""
-
-    id: ClassVar[DestinationId] = DestinationId("previs_take")
-    name: ClassVar[str] = "Send to Edit"
-    preset: ClassVar[FFmpegPreset] = FFmpegPreset.EDIT_SQ
-
-    stamp: PrevisStamp
-    default_on: bool = True
-
-
-Destination = DiskDestination | ShotGridDestination | PrevisTakeDestination
+Destination = DiskDestination | ShotGridDestination
 
 
 def _validate_destinations(
@@ -167,8 +142,6 @@ __all__ = [
     "Destination",
     "DestinationId",
     "DiskDestination",
-    "PrevisStamp",
-    "PrevisTakeDestination",
     "PreviewClip",
     "ReviewEntity",
     "ScratchEntity",

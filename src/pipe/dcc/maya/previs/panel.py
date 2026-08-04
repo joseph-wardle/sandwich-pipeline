@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import maya.cmds as mc
-from env_sg import DB_Config
 from maya.app.general.mayaMixin import MayaQWidgetDockableMixin  # type: ignore
 from maya.OpenMayaUI import MQtUtil
 from Qt.QtCompat import wrapInstance
@@ -24,23 +23,20 @@ from Qt.QtWidgets import (
 
 from pipe.core.playblast.viewer import open_viewer
 from pipe.core.previs import codes, mutate_manifest
-from pipe.core.shotgrid import ShotGrid, is_previs_shot_code
-from pipe.core.ui import MessageDialog, MessageDialogCustomButtons
-from pipe.core.util.paths import get_previs_path, get_production_path
+from pipe.core.shotgrid import is_previs_shot_code
+from pipe.core.ui import MessageDialog
+from pipe.core.util.paths import get_previs_path
 
 from pipe.dcc.maya.runtime import get_main_qt_window
 
 from . import (
-    breakout,
     cameras,
     dialogs,
-    export,
     file_ops,
     monitor,
     playback,
-    publish,
+    playblast,
     state,
-    status,
     style,
 )
 from .state import PrevisShot, PrevisState
@@ -53,6 +49,7 @@ log = logging.getLogger(__name__)
 
 PANEL_OBJECT_NAME = "previsPanel"
 WORKSPACE_CONTROL_NAME = PANEL_OBJECT_NAME + "WorkspaceControl"
+_PLAYBLAST_TITLE = "Previs Playblast"
 
 _panel_instance: PrevisPanel | None = None
 
@@ -65,7 +62,6 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self.setStyleSheet(f"#{PANEL_OBJECT_NAME} {{ background: {style.PANEL_BG}; }}")
 
         self._state = state.read_state() or PrevisState.empty()
-        self._sg_conn: ShotGrid | None = None
 
         self._build_ui()
         self.refresh()
@@ -135,21 +131,13 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self._branch_btn.clicked.connect(self.branch_file)
         row.addWidget(self._branch_btn)
 
-        breakout_btn = QPushButton("break out all", bar)
-        breakout_btn.setStyleSheet(style.TOOLBAR_BUTTON)
-        breakout_btn.clicked.connect(self.break_out_all)
-        row.addWidget(breakout_btn)
-
-        publish_btn = QPushButton("publish all cams", bar)
-        publish_btn.setStyleSheet(style.TOOLBAR_BUTTON)
-        publish_btn.clicked.connect(self.publish_all_shot_cameras)
-        row.addWidget(publish_btn)
-
-        export_btn = QPushButton("export takes", bar)
-        export_btn.setStyleSheet(style.TOOLBAR_BUTTON)
-        export_btn.setToolTip("Render every shot's primary to a new immutable take")
-        export_btn.clicked.connect(self.export_all_takes)
-        row.addWidget(export_btn)
+        playblast_btn = QPushButton("playblast all", bar)
+        playblast_btn.setStyleSheet(style.TOOLBAR_BUTTON)
+        playblast_btn.setToolTip(
+            "Render every shot's primary take and review the clips"
+        )
+        playblast_btn.clicked.connect(self.playblast_all_shots)
+        row.addWidget(playblast_btn)
         return bar
 
     def refresh(self) -> None:
@@ -497,103 +485,17 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         shots[index], shots[new_index] = shots[new_index], shots[index]
         self._persist()
 
-    def break_out_shot(self, shot_id: str) -> None:
-        shot = self._state.find_shot(shot_id)
-        if shot is None:
-            return
-        if not shot.shotgrid_code:
-            MessageDialog(
-                self,
-                "Assign a ShotGrid code to this shot before breaking out.",
-                "Break Out to RLO",
-            ).exec_()
-            return
-        if not self._confirm_break_out([shot]):
-            return
-        try:
-            conn = self._conn()
-            shot_range = playback.compute_shot_ranges(self._state)[shot.id]
-            sg_shot = conn.get_shot(code=shot.shotgrid_code)
-            breakout.break_out_shot(shot, sg_shot, shot_range, conn)
-        except Exception as exc:
-            log.exception("break_out_shot failed")
-            MessageDialog(self, str(exc), "Break Out Failed").exec_()
-            return
-        self._persist()
-
-    def break_out_all(self) -> None:
-        paired = [s for s in self._state.shots if s.shotgrid_code]
-        if not paired:
-            MessageDialog(
-                self,
-                "No shots have a ShotGrid code yet. Assign codes before breaking out.",
-                "Break Out to RLO",
-            ).exec_()
-            return
-        if not self._confirm_break_out(paired):
-            return
-        try:
-            paths = breakout.break_out_sequence(self._state, self._conn())
-        except Exception as exc:
-            log.exception("break_out_all failed")
-            MessageDialog(self, str(exc), "Break Out Failed").exec_()
-            return
-        MessageDialog(
-            self, f"Broke out {len(paths)} shot(s).", "Break Out to RLO"
-        ).exec_()
-        self._persist()
-
-    def publish_shot_camera(self, shot_id: str) -> None:
-        shot = self._state.find_shot(shot_id)
-        if shot is None:
-            return
-        if not shot.shotgrid_code:
-            MessageDialog(
-                self,
-                "Assign a ShotGrid code to this shot before publishing its camera.",
-                "Publish Shot Camera",
-            ).exec_()
-            return
-        try:
-            sg_shot = self._conn().get_shot(code=shot.shotgrid_code)
-            publish.publish_shot_camera(shot, sg_shot)
-        except Exception as exc:
-            log.exception("publish_shot_camera failed")
-            MessageDialog(self, str(exc), "Publish Failed").exec_()
-            return
-        self._persist()
-
-    def publish_all_shot_cameras(self) -> None:
-        paired = [s for s in self._state.shots if s.shotgrid_code]
-        if not paired:
-            MessageDialog(
-                self,
-                "No shots have a ShotGrid code yet. Assign codes before publishing.",
-                "Publish Shot Cameras",
-            ).exec_()
-            return
-        try:
-            paths = publish.publish_all_shot_cameras(self._state, self._conn())
-        except Exception as exc:
-            log.exception("publish_all_shot_cameras failed")
-            MessageDialog(self, str(exc), "Publish Failed").exec_()
-            return
-        MessageDialog(
-            self, f"Published {len(paths)} shot camera(s).", "Publish Shot Cameras"
-        ).exec_()
-        self._persist()
-
-    def export_take(self, shot_id: str) -> None:
-        """Render one shot's primary to a take preview and open it in the viewer."""
+    def playblast_shot(self, shot_id: str) -> None:
+        """Render one shot's primary to a preview and open it in the viewer."""
         shot = self._state.find_shot(shot_id)
         if shot is not None:
-            self._launch_take_previews([shot])
+            self._launch_playblasts([shot])
 
-    def export_all_takes(self) -> None:
-        self._launch_take_previews(self._state.shots)
+    def playblast_all_shots(self) -> None:
+        self._launch_playblasts(self._state.shots)
 
-    def _launch_take_previews(self, shots: list[PrevisShot]) -> None:
-        """Render take previews for `shots` and hand them to the viewer."""
+    def _launch_playblasts(self, shots: list[PrevisShot]) -> None:
+        """Render `shots` and hand the clips to the viewer."""
         if not self._guard_previs_file():
             return
         sequence_code = self._sequence_code()
@@ -601,64 +503,31 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             return  # guarded above; re-checked so the type stays narrowed
         if not shots:
             MessageDialog(
-                self, "No shots in this file to export.", "Export Takes"
+                self, "No shots in this file to playblast.", _PLAYBLAST_TITLE
             ).exec_()
             return
 
         try:
-            batch = export.build_take_previews(
+            batch = playblast.build_shot_playblasts(
                 self._state, shots, sequence_code, previs_root=get_previs_path()
             )
         except Exception as exc:
-            log.exception("Take preview render failed")
-            MessageDialog(self, str(exc), "Export Failed").exec_()
+            log.exception("Previs playblast render failed")
+            MessageDialog(self, str(exc), _PLAYBLAST_TITLE).exec_()
             return
 
         if batch.failed:
             MessageDialog(
-                self, _summarize_skipped(batch.failed), "Export Takes"
+                self, _summarize_skipped(batch.failed), _PLAYBLAST_TITLE
             ).exec_()
         if not batch.clips:
             if not batch.failed:
-                MessageDialog(self, "Nothing was rendered.", "Export Takes").exec_()
+                MessageDialog(self, "Nothing was rendered.", _PLAYBLAST_TITLE).exec_()
             return
 
         open_viewer(batch.clips, parent=get_main_qt_window())
 
-    def _confirm_break_out(self, shots: list[PrevisShot]) -> bool:
-        """Confirm a destructive re-bake, flagging any RLO files it would overwrite."""
-        prod_root = get_production_path()
-        overwrites = [
-            s.shotgrid_code
-            for s in shots
-            if s.shotgrid_code and status.rlo_path(s.shotgrid_code, prod_root).exists()
-        ]
-        plural = "s" if len(shots) != 1 else ""
-        body = (
-            f"Break out {len(shots)} shot{plural} to RLO? "
-            "This re-bakes the scene from scratch."
-        )
-        if overwrites:
-            body += "\n\nOverwrites existing RLO files:\n" + "\n".join(
-                f"  • {code}" for code in overwrites
-            )
-        return bool(
-            MessageDialogCustomButtons(
-                self,
-                body,
-                "Break Out to RLO",
-                has_cancel_button=True,
-                ok_name="Break Out",
-                cancel_name="Cancel",
-            ).exec_()
-        )
-
     # ---------- helpers ----------
-
-    def _conn(self) -> ShotGrid:
-        if self._sg_conn is None:
-            self._sg_conn = ShotGrid.connect(DB_Config)
-        return self._sg_conn
 
     def _is_previs_file(self) -> bool:
         return self._sequence_code() is not None
@@ -675,7 +544,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
 
 
 def _summarize_skipped(failed: list[tuple[str, str]]) -> str:
-    """Multi-line list of shots that rendered no take preview, with reasons."""
+    """Multi-line list of shots that rendered nothing, with reasons."""
     plural = "s" if len(failed) != 1 else ""
     lines = [f"Skipped {len(failed)} shot{plural}:"]
     lines += [f"  • {label} — {reason}" for label, reason in failed]

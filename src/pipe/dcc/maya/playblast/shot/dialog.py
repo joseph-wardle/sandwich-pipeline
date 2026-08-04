@@ -132,8 +132,6 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         self._source_tabs.addTab(self._build_shot_source_tab(), "Shot Playblast")
         source_tab_bar = self._source_tabs.tabBar()
 
-        self._add_custom_tabs(self._source_tabs)
-
         self.CUSTOM_TAB_INDEX = self._source_tabs.count()
         self._source_tabs.addTab(self._build_custom_source_tab(), "Custom Playblast")
         source_tab_bar.setTabToolTip(
@@ -154,10 +152,6 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         source_layout.addWidget(self._validation_label)
 
         self._main_layout.addWidget(source_group)
-
-    def _add_custom_tabs(self, tabs: QTabWidget) -> None:
-        """Override to inject tabs between Shot and Custom."""
-        pass
 
     def _build_extra_source_options(self) -> QWidget | None:
         """Override to add options below the tabs."""

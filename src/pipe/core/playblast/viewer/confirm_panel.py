@@ -27,14 +27,12 @@ from pipe.core.playblast.clip import (
     DestinationId,
     DiskDestination,
     PreviewClip,
-    PrevisTakeDestination,
     ShotGridDestination,
 )
 from pipe.core.playblast.confirm import (
     ChosenDestination,
     ChosenDisk,
     ChosenShotGrid,
-    ChosenTake,
     ConfirmResult,
     confirm_clip,
     failure_summary,
@@ -446,32 +444,11 @@ class _ShotGridRow(_Row):
         return "No review playlists found."
 
 
-class _SendToEditRow(_Row):
-    """The Send to Edit peer row (previs only): delivers an immutable take and
-    stamps the sequence manifest."""
-
-    _destination: PrevisTakeDestination
-
-    def __init__(self, destination: PrevisTakeDestination) -> None:
-        super().__init__(destination)
-        self._destination = destination
-        stamp = destination.stamp
-        self._checkbox.setToolTip(
-            f"Deliver an immutable take for {stamp.shot_code} "
-            f"(sequence {stamp.sequence_code}) and stamp the previs manifest."
-        )
-
-    def chosen(self) -> ChosenTake:
-        return ChosenTake(destination=self._destination)
-
-
 def _build_row(destination: Destination, playlists: ReviewPlaylists) -> _Row:
     if isinstance(destination, DiskDestination):
         return _FolderRow(destination)
     if isinstance(destination, ShotGridDestination):
         return _ShotGridRow(destination, playlists)
-    if isinstance(destination, PrevisTakeDestination):
-        return _SendToEditRow(destination)
     assert_never(destination)
 
 
