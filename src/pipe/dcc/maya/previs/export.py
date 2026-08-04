@@ -10,7 +10,13 @@ from pathlib import Path
 import attrs
 import maya.cmds as mc
 
-from pipe.core.playblast import PreviewClip, PrevisStamp, PrevisTakeDestination
+from pipe.core.playblast import (
+    PreviewClip,
+    PrevisStamp,
+    PrevisTakeDestination,
+    ScratchEntity,
+    ShotGridDestination,
+)
 from pipe.core.previs import codes
 
 from pipe.dcc.maya.playblast.previs.take import MTakeConfig, MTakePlayblaster
@@ -105,7 +111,10 @@ def _render_take_preview(
         label=code,
         output_prefix=code,
         settings_key=TAKE_SETTINGS_KEY,
-        destinations=(PrevisTakeDestination(stamp=stamp),),
+        destinations=(
+            PrevisTakeDestination(stamp=stamp),
+            ShotGridDestination(entity=ScratchEntity(code), default_on=False),
+        ),
     )
 
 

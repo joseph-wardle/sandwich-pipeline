@@ -43,6 +43,7 @@ from pipe.core.playblast.clip import PreviewClip
 from pipe.core.playblast.playblaster import DEFAULT_RESOLUTION
 from pipe.core.playblast.viewer import filmstrip, icons, style
 from pipe.core.playblast.viewer.confirm_panel import ConfirmPanel, PanelStatus
+from pipe.core.playblast.viewer.playlists import ReviewPlaylists
 from pipe.core.playblast.viewer.scrub import TimelineSlider
 
 _SIDEBAR_WIDTH = 200
@@ -89,6 +90,7 @@ class ViewerWindow(QMainWindow):
     _start_label: QLabel
     _end_label: QLabel
     _confirm_pool: QThreadPool
+    _playlists: ReviewPlaylists
     _panels: list[ConfirmPanel]
     _panel_stack: QStackedWidget
     _confirm_remaining_button: QPushButton
@@ -125,6 +127,7 @@ class ViewerWindow(QMainWindow):
         # host application's.
         self._confirm_pool = QThreadPool(self)
         self._confirm_pool.setMaxThreadCount(1)
+        self._playlists = ReviewPlaylists(self)
 
         self._build_ui()
         self._build_shortcuts()
@@ -197,7 +200,7 @@ class ViewerWindow(QMainWindow):
         self._panel_stack = QStackedWidget()
         self._panel_stack.setFixedWidth(_CONFIRM_PANEL_WIDTH)
         for index, clip in enumerate(self._clips):
-            panel = ConfirmPanel(clip, self._confirm_pool)
+            panel = ConfirmPanel(clip, self._confirm_pool, self._playlists)
             panel.state_changed.connect(
                 lambda clip_index=index: self._on_confirm_state_changed(clip_index)
             )

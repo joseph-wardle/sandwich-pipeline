@@ -32,6 +32,7 @@ from pipe.core.previs import (
     utcnow_iso,
 )
 from pipe.core.previs.model import Take
+from pipe.core.util.users import resolve_artist_display_name
 
 log = logging.getLogger(__name__)
 
@@ -225,7 +226,7 @@ def _upload_to_shotgrid(
                 movie_path=_encoded_movie(clip, destination.preset, basename),
                 version_name=basename,
                 description=chosen.description,
-                artist_display_name=destination.artist_display_name,
+                artist_display_name=resolve_artist_display_name().strip() or None,
                 review_playlist_id=chosen.playlist_id,
                 disk_path=disk_path,
             )

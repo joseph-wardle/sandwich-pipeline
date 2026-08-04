@@ -20,7 +20,6 @@ from pipe.core.playblast import (
     CUSTOM_FOLDER_ID,
     DiskDestination,
     FFmpegPreset,
-    ShotEntity,
     ShotGridDestination,
 )
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
@@ -28,7 +27,6 @@ from pipe.core.playblast.viewer import open_viewer
 from pipe.core.shot import maya_rlo_stream, shot_owner_for
 from pipe.core.shotgrid import Shot
 from pipe.core.ui import MessageDialog
-from pipe.core.util.users import resolve_artist_display_name
 from pipe.core.versioning import current_version_label
 from pipe.dcc.maya.playblast.previs.sequence import (
     MSequenceConfig,
@@ -305,20 +303,18 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             ),
         )
 
-    def _clip_shotgrid(self) -> ShotGridDestination | None:
+    def _review_shot_code(self) -> str:
         if self._selected_source_mode() == _MODE_SEQUENCE:
-            code = (self._shot.code or "").strip() if self._shot is not None else ""
-            if not code:
-                return None
-            return ShotGridDestination(
-                entity=ShotEntity(code),
-                artist_display_name=resolve_artist_display_name().strip() or None,
-            )
-        if self._previs_state is not None:
-            # Per-shot previs Versions aren't offered; previs dailies go
-            # through the Sequence tab.
-            return None
-        return super()._clip_shotgrid()
+            return (self._shot.code or "").strip() if self._shot is not None else ""
+        return super()._review_shot_code()
+
+    def _clip_shotgrid(self) -> ShotGridDestination:
+        # An RLO shot playblast is working iteration; previs dailies are the
+        # whole-sequence movie from the Sequence tab.
+        return ShotGridDestination(
+            entity=self._review_entity(),
+            default_on=self._selected_source_mode() != _MODE_SHOT,
+        )
 
     def _clip_output_prefix(self) -> str:
         if self._selected_source_mode() == _MODE_SEQUENCE:

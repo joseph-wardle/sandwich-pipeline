@@ -16,7 +16,7 @@ from pipe.core.playblast.clip import (
     ScratchEntity,
     ShotEntity,
     ShotGridDestination,
-    destination_rows,
+    shot_or_scratch,
 )
 from pipe.core.playblast.confirm import (
     ChosenDestination,
@@ -56,5 +56,5 @@ __all__ = [
     "ShotEntity",
     "ShotGridDestination",
     "confirm_clip",
-    "destination_rows",
+    "shot_or_scratch",
 ]

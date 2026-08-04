@@ -28,14 +28,13 @@ from pipe.core.playblast import (
     Destination,
     DiskDestination,
     PreviewClip,
-    ShotEntity,
+    ReviewEntity,
     ShotGridDestination,
-    destination_rows,
+    shot_or_scratch,
 )
 from pipe.core.playblast.viewer import open_viewer
 from pipe.core.shotgrid import ShotGrid, ShotGridError
 from pipe.core.ui import ButtonPair, MessageDialog
-from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.maya.playblast.shot.config import (
     MPlayblastConfig,
     MShotPlayblastConfig,
@@ -548,21 +547,22 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         """Folder rows the viewer's Confirm panel offers for this tool."""
         raise NotImplementedError
 
-    def _clip_shotgrid(self) -> ShotGridDestination | None:
-        """The clip's ShotGrid row. Only shot-mode playblasts have an entity."""
+    def _clip_shotgrid(self) -> ShotGridDestination:
+        return ShotGridDestination(entity=self._review_entity())
+
+    def _review_entity(self) -> ReviewEntity:
+        """What this playblast's ShotGrid Version attaches to."""
+        return shot_or_scratch(self._review_shot_code(), self._scene_stem())
+
+    def _review_shot_code(self) -> str:
+        """The pipeline shot this playblast reviews, or "" for a scratch scene."""
         if self._selected_source_mode() != _MODE_SHOT or self._shot is None:
-            return None
-        code = (self._shot.code or "").strip()
-        if not code:
-            return None
-        return ShotGridDestination(
-            entity=ShotEntity(code),
-            artist_display_name=resolve_artist_display_name().strip() or None,
-        )
+            return ""
+        return (self._shot.code or "").strip()
 
     def _clip_destinations(self) -> tuple[Destination, ...]:
         """Every row the viewer offers, in the order it shows them."""
-        return destination_rows(*self._clip_folders(), self._clip_shotgrid())
+        return (*self._clip_folders(), self._clip_shotgrid())
 
     def _clip_output_prefix(self) -> str:
         """Basename prefix Confirm versions filenames from (`<prefix>_<date>.v###`)."""

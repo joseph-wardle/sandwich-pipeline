@@ -28,14 +28,14 @@ from pipe.core.playblast import (
     FFmpegPreset,
     Playblaster,
     PreviewClip,
+    ReviewEntity,
+    ScratchEntity,
     ShotGridDestination,
-    destination_rows,
 )
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.playblast.viewer import open_viewer
 from pipe.core.shotgrid import normalize_display_name
 from pipe.core.ui import ButtonPair, MessageDialog
-from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.maya.assetfile import AssetMetadata, read_asset_metadata
 from pipe.dcc.maya.playblast.turnaround.config import (
     DEFAULT_FRAMES_PER_PASS,
@@ -226,22 +226,23 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
             )
             return None
 
-    def _asset_display_name(self) -> str:
-        if self._asset_metadata and self._asset_metadata.asset:
-            return self._asset_metadata.asset.display_name
-        if self._asset_metadata and self._asset_metadata.display_name:
-            return self._asset_metadata.display_name
-        scene_path = _scene_path()
-        if scene_path is not None:
-            return scene_path.stem
-        return "turnaround"
-
-    def _shotgrid_asset_display_name(self) -> str | None:
+    def _pipeline_display_name(self) -> str | None:
+        """The resolved pipeline asset's display name, if this scene has one."""
         if self._asset_metadata and self._asset_metadata.asset:
             return self._asset_metadata.asset.display_name
         if self._asset_metadata and self._asset_metadata.display_name:
             return self._asset_metadata.display_name
         return None
+
+    def _asset_display_name(self) -> str:
+        """What the artist and the HUD call this turnaround's subject."""
+        pipeline_name = self._pipeline_display_name()
+        if pipeline_name:
+            return pipeline_name
+        scene_path = _scene_path()
+        if scene_path is not None:
+            return scene_path.stem
+        return "turnaround"
 
     def _asset_filename_token(self) -> str:
         if self._asset_metadata and self._asset_metadata.asset:
@@ -330,21 +331,19 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         )
         return tuple(rows)
 
-    def _clip_shotgrid(self) -> ShotGridDestination | None:
-        """The clip's ShotGrid row: the Asset its Version attaches to.
-        Without resolvable asset metadata there is nothing to attach to,
-        so the viewer offers no ShotGrid row."""
-        display_name = self._shotgrid_asset_display_name()
-        if not display_name:
-            return None
-        return ShotGridDestination(
-            entity=AssetEntity(display_name),
-            artist_display_name=resolve_artist_display_name().strip() or None,
-        )
+    def _review_entity(self) -> ReviewEntity:
+        """What this turnaround's ShotGrid Version attaches to."""
+        pipeline_name = self._pipeline_display_name()
+        if pipeline_name:
+            return AssetEntity(pipeline_name)
+        return ScratchEntity(self._asset_display_name())
 
     def _clip_destinations(self) -> tuple[Destination, ...]:
         """Every row the viewer offers, in the order it shows them."""
-        return destination_rows(*self._clip_folders(), self._clip_shotgrid())
+        return (
+            *self._clip_folders(),
+            ShotGridDestination(entity=self._review_entity()),
+        )
 
     def _routed_clip(self, clip: PreviewClip) -> PreviewClip:
         return attrs.evolve(

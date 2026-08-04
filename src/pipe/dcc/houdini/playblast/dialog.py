@@ -18,15 +18,14 @@ from pipe.core.playblast import (
     DiskDestination,
     FFmpegPreset,
     PreviewClip,
-    ShotEntity,
+    ReviewEntity,
     ShotGridDestination,
-    destination_rows,
+    shot_or_scratch,
 )
 from pipe.core.playblast.naming import build_edit_output_directory
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.shotgrid import ShotGridError
 from pipe.core.ui import DialogButtons
-from pipe.core.util.users import resolve_artist_display_name
 
 if TYPE_CHECKING:
     from pipe.core.shotgrid import Shot, ShotGrid
@@ -82,8 +81,15 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         self._update_ui_state()
 
     @property
+    def shot(self) -> Shot | None:
+        """The shot resolved at construction, or None for a non-shot file."""
+        return self._shot
+
+    @property
     def shot_code(self) -> str:
-        return self._shot_code_value.text().strip()
+        if self._shot is None:
+            return ""
+        return (self._shot.code or "").strip()
 
     @property
     def selected_source_mode(self) -> SOURCE_MODE:
@@ -342,7 +348,10 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
 
     def _clip_destinations(self) -> tuple[Destination, ...]:
         """Every row the viewer offers, in the order it shows them."""
-        return destination_rows(*self._clip_folders(), self._clip_shotgrid())
+        return (
+            *self._clip_folders(),
+            ShotGridDestination(entity=self._review_entity()),
+        )
 
     def _clip_folders(self) -> tuple[DiskDestination, ...]:
         return (
@@ -369,17 +378,10 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
             ),
         )
 
-    def _clip_shotgrid(self) -> ShotGridDestination | None:
-        """The clip's ShotGrid row. Only shot-mode playblasts have an entity."""
-        if self.selected_source_mode != "shot":
-            return None
-        code = self.shot_code
-        if not code or code == "-":
-            return None
-        return ShotGridDestination(
-            entity=ShotEntity(code),
-            artist_display_name=resolve_artist_display_name().strip() or None,
-        )
+    def _review_entity(self) -> ReviewEntity:
+        """What this playblast's ShotGrid Version attaches to."""
+        code = self.shot_code if self.selected_source_mode == "shot" else ""
+        return shot_or_scratch(code, self.custom_shot_code)
 
     def _clip_output_prefix(self) -> str:
         if self.selected_source_mode == "shot":

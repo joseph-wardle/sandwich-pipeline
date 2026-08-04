@@ -13,7 +13,7 @@ from pipe.core.playblast.clip import DestinationId
 _SETTINGS_ORG = "sandwich-pipeline"
 _SETTINGS_APP = "playblast"
 _LAST_CUSTOM_FOLDER_KEY = "last_custom_folder"
-_CHECKED_KEY_PREFIX = "confirm_checked_v2"
+_CHECKED_KEY_PREFIX = "confirm_checked_v3"
 
 
 def _settings() -> QSettings:

@@ -36,8 +36,8 @@ from pipe.core.playblast.confirm import (
     ConfirmResult,
     confirm_clip,
 )
-from pipe.core.playblast.review.playlists import list_recent_review_playlists
 from pipe.core.playblast.viewer import style
+from pipe.core.playblast.viewer.playlists import ReviewPlaylists
 from pipe.core.playblast.viewer.settings import (
     load_checked_destinations,
     load_last_custom_folder,
@@ -241,17 +241,19 @@ class _ShotGridRow(_Row):
     review playlist."""
 
     _destination: ShotGridDestination
+    _playlists: ReviewPlaylists
     _options: QFrame
     _playlist_check: QCheckBox
     _playlist_combo: QComboBox
     _refresh_button: QPushButton
     _description: QLineEdit
-    _playlists_loaded: bool
 
-    def __init__(self, destination: ShotGridDestination) -> None:
+    def __init__(
+        self, destination: ShotGridDestination, playlists: ReviewPlaylists
+    ) -> None:
         super().__init__(destination)
         self._destination = destination
-        self._playlists_loaded = False
+        self._playlists = playlists
         self._checkbox.setToolTip(
             f"Upload a Version to {destination.entity.description}."
         )
@@ -286,6 +288,8 @@ class _ShotGridRow(_Row):
         indent.setContentsMargins(style.PAD_L, 0, 0, 0)
         indent.addWidget(self._options)
         self._column.addLayout(indent)
+        self._playlists.changed.connect(self._show_playlists)
+        self._show_playlists()
         self._sync_enabled()
 
     def chosen(self) -> ChosenShotGrid:
@@ -296,9 +300,22 @@ class _ShotGridRow(_Row):
         )
 
     def validation_error(self) -> str | None:
-        if self._playlist_check.isChecked() and self._playlist_id is None:
-            return "Pick a review playlist for the ShotGrid upload."
-        return None
+        if not self._playlist_check.isChecked() or self._playlist_id is not None:
+            return None
+        if not self._playlists.settled:
+            return "Still loading review playlists — try Confirm again in a moment."
+        if self._playlists.error is not None:
+            return f"Could not load review playlists — press Refresh to retry. {self._skip_hint()}"
+        if not self._playlists.options:
+            return f"ShotGrid has no recent review playlists. {self._skip_hint()}"
+        return "Pick a review playlist for the ShotGrid upload."
+
+    def _skip_hint(self) -> str:
+        """A playlist the artist cannot pick would block Confirm outright, so
+        every unpickable case has to name the way past it."""
+        if self._destination.playlist_required:
+            return "Uncheck ShotGrid to confirm the other destinations without it."
+        return "Uncheck 'Add to review playlist' to upload without one."
 
     def set_delivered(self, detail: str) -> None:
         super().set_delivered(detail)
@@ -328,31 +345,34 @@ class _ShotGridRow(_Row):
         playlist_on = active and self._playlist_check.isChecked()
         self._playlist_combo.setEnabled(playlist_on)
         self._refresh_button.setEnabled(playlist_on)
-        if playlist_on and not self._playlists_loaded:
-            self._load_playlists()
+        if playlist_on:
+            self._playlists.ensure_loaded()
 
     def _on_refresh(self) -> None:
-        self._load_playlists()
+        self._playlists.reload()
 
-    def _load_playlists(self) -> None:
-        self._playlists_loaded = True
-        try:
-            options = list_recent_review_playlists(limit=10)
-        except Exception:
-            log.exception("Could not load ShotGrid review playlists")
-            self._set_placeholder("Could not load reviews — Refresh to retry.")
-            return
+    def _show_playlists(self) -> None:
+        chosen = self._playlist_combo.currentData()
         self._playlist_combo.clear()
-        if not options:
-            self._set_placeholder("No recent reviews found.")
+        if not self._playlists.settled:
+            self._playlist_combo.addItem("Loading reviews…", None)
             return
-        for option in options:
-            label = f"{option.display_name} (#{option.playlist_id})"
-            self._playlist_combo.addItem(label, option.playlist_id)
-
-    def _set_placeholder(self, label: str) -> None:
-        self._playlist_combo.clear()
-        self._playlist_combo.addItem(label, None)
+        if self._playlists.error is not None:
+            self._playlist_combo.addItem(
+                "Could not load reviews — Refresh to retry.", None
+            )
+            return
+        if not self._playlists.options:
+            self._playlist_combo.addItem("No recent reviews found.", None)
+            return
+        for option in self._playlists.options:
+            self._playlist_combo.addItem(
+                f"{option.display_name} (#{option.playlist_id})", option.playlist_id
+            )
+        # A Refresh must not silently repoint an already-picked playlist.
+        restored = self._playlist_combo.findData(chosen)
+        if restored >= 0:
+            self._playlist_combo.setCurrentIndex(restored)
 
 
 class _SendToEditRow(_Row):
@@ -374,11 +394,11 @@ class _SendToEditRow(_Row):
         return ChosenTake(destination=self._destination)
 
 
-def _build_row(destination: Destination) -> _Row:
+def _build_row(destination: Destination, playlists: ReviewPlaylists) -> _Row:
     if isinstance(destination, DiskDestination):
         return _FolderRow(destination)
     if isinstance(destination, ShotGridDestination):
-        return _ShotGridRow(destination)
+        return _ShotGridRow(destination, playlists)
     return _SendToEditRow(destination)
 
 
@@ -396,7 +416,9 @@ class ConfirmPanel(QWidget):
     _error_label: QLabel
     _confirm_button: QPushButton
 
-    def __init__(self, clip: PreviewClip, pool: QThreadPool) -> None:
+    def __init__(
+        self, clip: PreviewClip, pool: QThreadPool, playlists: ReviewPlaylists
+    ) -> None:
         super().__init__()
         self._clip = clip
         self._pool = pool
@@ -410,7 +432,9 @@ class ConfirmPanel(QWidget):
         self._confirm_button = QPushButton()
         self._confirm_button.clicked.connect(self.request_confirm)
 
-        self._rows = [_build_row(destination) for destination in clip.destinations]
+        self._rows = [
+            _build_row(destination, playlists) for destination in clip.destinations
+        ]
         if not self.is_confirmable:
             return
 

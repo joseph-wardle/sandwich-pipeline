@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pipe.core.playblast import ScratchEntity, ShotGridDestination
-from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.maya.assetfile import AssetMetadata
 from pipe.dcc.maya.playblast.turnaround.config import Elevation, TurnaroundPass
 from pipe.dcc.maya.playblast.turnaround.dialog import AssetTurnaroundDialog
@@ -25,12 +23,6 @@ class AnimTurnaroundDialog(AssetTurnaroundDialog):
         # Scratch scenes have no pipeline metadata; skip the read so it
         # doesn't log a scary (and expected) resolution failure.
         return None
-
-    def _clip_shotgrid(self) -> ShotGridDestination:
-        return ShotGridDestination(
-            entity=ScratchEntity(self._asset_display_name()),
-            artist_display_name=resolve_artist_display_name().strip() or None,
-        )
 
 
 __all__ = ["AnimTurnaroundDialog"]

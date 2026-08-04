@@ -59,6 +59,12 @@ def is_unlinked(entity: ReviewEntity) -> bool:
     return isinstance(entity, ScratchEntity)
 
 
+def shot_or_scratch(shot_code: str, scratch_label: str) -> ReviewEntity:
+    """A scene with no pipeline shot still uploads, unlinked."""
+    code = shot_code.strip()
+    return ShotEntity(code) if code else ScratchEntity(scratch_label.strip())
+
+
 @attrs.frozen
 class PrevisStamp:
     """Manifest-stamp context for a previs take."""
@@ -92,8 +98,7 @@ class ShotGridDestination:
     preset: ClassVar[FFmpegPreset] = FFmpegPreset.WEB
 
     entity: ReviewEntity
-    artist_display_name: str | None = None
-    default_on: bool = False
+    default_on: bool = True
 
     @property
     def playlist_required(self) -> bool:
@@ -114,11 +119,6 @@ class PrevisTakeDestination:
 
 
 Destination = DiskDestination | ShotGridDestination | PrevisTakeDestination
-
-
-def destination_rows(*rows: Destination | None) -> tuple[Destination, ...]:
-    """Drop the rows a tool has no context to offer."""
-    return tuple(row for row in rows if row is not None)
 
 
 def _validate_destinations(
@@ -174,7 +174,6 @@ __all__ = [
     "ScratchEntity",
     "ShotEntity",
     "ShotGridDestination",
-    "destination_rows",
     "is_unlinked",
     "padded_frame_number",
 ]
