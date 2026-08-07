@@ -244,9 +244,11 @@ class _ShotGridRow(_Row):
     _playlists: ReviewPlaylists
     _options: QFrame
     _playlist_check: QCheckBox
+    _search_field: QLineEdit
     _playlist_combo: QComboBox
     _refresh_button: QPushButton
     _description: QLineEdit
+    _picked: tuple[int, str] | None
 
     def __init__(
         self, destination: ShotGridDestination, playlists: ReviewPlaylists
@@ -254,6 +256,7 @@ class _ShotGridRow(_Row):
         super().__init__(destination)
         self._destination = destination
         self._playlists = playlists
+        self._picked = None
         self._checkbox.setToolTip(
             f"Upload a Version to {destination.entity.description}."
         )
@@ -266,22 +269,27 @@ class _ShotGridRow(_Row):
                 "inside a review playlist."
             )
         self._playlist_check.toggled.connect(lambda _checked: self._sync_enabled())
+        self._search_field = QLineEdit()
+        self._search_field.setPlaceholderText("Filter playlists by name (press Enter)")
+        self._search_field.returnPressed.connect(self._on_refresh)
         self._playlist_combo = QComboBox()
+        self._playlist_combo.activated.connect(lambda _index: self._remember_picked())
         self._refresh_button = QPushButton("Refresh")
         self._refresh_button.clicked.connect(self._on_refresh)
         self._description = QLineEdit()
         self._description.setPlaceholderText("Description (optional)")
 
-        combo_row = QHBoxLayout()
-        combo_row.addWidget(self._playlist_combo, stretch=1)
-        combo_row.addWidget(self._refresh_button)
+        search_row = QHBoxLayout()
+        search_row.addWidget(self._search_field, stretch=1)
+        search_row.addWidget(self._refresh_button)
 
         # A framed well that appears only while ShotGrid is checked
         self._options = QFrame()
         self._options.setFrameShape(QFrame.Shape.StyledPanel)
         options_layout = QVBoxLayout(self._options)
         options_layout.addWidget(self._playlist_check)
-        options_layout.addLayout(combo_row)
+        options_layout.addLayout(search_row)
+        options_layout.addWidget(self._playlist_combo)
         options_layout.addWidget(self._description)
 
         indent = QHBoxLayout()
@@ -307,14 +315,22 @@ class _ShotGridRow(_Row):
         if self._playlists.error is not None:
             return f"Could not load review playlists — press Refresh to retry. {self._skip_hint()}"
         if not self._playlists.options:
-            return f"ShotGrid has no recent review playlists. {self._skip_hint()}"
+            if self._playlists.search:
+                return (
+                    f"No review playlist matches '{self._playlists.search}'. Clear "
+                    "the filter and press Refresh."
+                )
+            return f"ShotGrid has no review playlists yet. {self._skip_hint()}"
         return "Pick a review playlist for the ShotGrid upload."
 
     def _skip_hint(self) -> str:
-        """A playlist the artist cannot pick would block Confirm outright, so
-        every unpickable case has to name the way past it."""
+        """A playlist the artist cannot pick leaves this row stuck, so every
+        unpickable case has to name the way past it."""
         if self._destination.playlist_required:
-            return "Uncheck ShotGrid to confirm the other destinations without it."
+            return (
+                "Uncheck ShotGrid to skip the upload — a Version outside a "
+                "playlist would be undiscoverable."
+            )
         return "Uncheck 'Add to review playlist' to upload without one."
 
     def set_delivered(self, detail: str) -> None:
@@ -343,16 +359,20 @@ class _ShotGridRow(_Row):
         )
         self._description.setEnabled(active)
         playlist_on = active and self._playlist_check.isChecked()
+        self._search_field.setEnabled(playlist_on)
         self._playlist_combo.setEnabled(playlist_on)
         self._refresh_button.setEnabled(playlist_on)
         if playlist_on:
             self._playlists.ensure_loaded()
 
     def _on_refresh(self) -> None:
-        self._playlists.reload()
+        """Refresh doubles as the filter's apply button."""
+        self._playlists.load(self._search_field.text())
 
     def _show_playlists(self) -> None:
-        chosen = self._playlist_combo.currentData()
+        # The filter is window-wide, so every row mirrors it.
+        if self._search_field.text() != self._playlists.search:
+            self._search_field.setText(self._playlists.search)
         self._playlist_combo.clear()
         if not self._playlists.settled:
             self._playlist_combo.addItem("Loading reviews…", None)
@@ -362,17 +382,37 @@ class _ShotGridRow(_Row):
                 "Could not load reviews — Refresh to retry.", None
             )
             return
-        if not self._playlists.options:
-            self._playlist_combo.addItem("No recent reviews found.", None)
-            return
         for option in self._playlists.options:
             self._playlist_combo.addItem(
                 f"{option.display_name} (#{option.playlist_id})", option.playlist_id
             )
-        # A Refresh must not silently repoint an already-picked playlist.
-        restored = self._playlist_combo.findData(chosen)
-        if restored >= 0:
-            self._playlist_combo.setCurrentIndex(restored)
+        self._restore_picked()
+        if not self._playlist_combo.count():
+            self._playlist_combo.addItem(self._empty_text(), None)
+
+    def _remember_picked(self) -> None:
+        """Only a pick the artist made themselves, so a repopulated combo
+        auto-selecting its first row is never mistaken for one."""
+        picked = self._playlist_combo.currentData()
+        if isinstance(picked, int):
+            self._picked = (picked, self._playlist_combo.currentText())
+
+    def _restore_picked(self) -> None:
+        """Neither a Refresh nor a filter may silently repoint an already-picked
+        playlist, so one that falls outside the new results is re-added."""
+        if self._picked is None:
+            return
+        picked_id, label = self._picked
+        index = self._playlist_combo.findData(picked_id)
+        if index < 0:
+            self._playlist_combo.insertItem(0, label, picked_id)
+            index = 0
+        self._playlist_combo.setCurrentIndex(index)
+
+    def _empty_text(self) -> str:
+        if self._playlists.search:
+            return f"No playlist matches '{self._playlists.search}'."
+        return "No review playlists found."
 
 
 class _SendToEditRow(_Row):
@@ -483,20 +523,29 @@ class ConfirmPanel(QWidget):
     # ------------------------------------------------------------------
 
     def request_confirm(self) -> None:
-        """Deliver the checked-but-undelivered rows on a worker thread."""
-        rows = self._rows_to_run()
-        if self._running or not rows:
+        """Deliver every checked-but-undelivered row that validates. A row that
+        does not stays checked and idle, so Confirm remains live to retry it."""
+        if self._running:
             return
+        rows = self._rows_to_run()
+        if not rows:
+            return
+        runnable: list[_Row] = []
+        blocked: list[str] = []
         for row in rows:
             error = row.validation_error()
-            if error is not None:
-                self._show_error(error)
-                return
+            if error is None:
+                runnable.append(row)
+            else:
+                blocked.append(error)
 
-        self._show_error("")
+        self._show_error("\n".join(blocked))
+        if not runnable:
+            return
+
         self._remember_toggles()
-        chosen = tuple(row.chosen() for row in rows)
-        for row in rows:
+        chosen = tuple(row.chosen() for row in runnable)
+        for row in runnable:
             row.set_running()
         self._running = True
         self._refresh_confirm_button()

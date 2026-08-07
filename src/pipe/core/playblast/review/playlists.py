@@ -17,16 +17,24 @@ class PlayblastReviewPlaylistOption:
         return self.code.strip() or f"Playlist {self.playlist_id}"
 
 
-def list_recent_review_playlists(
-    *, limit: int = 10
+def list_review_playlists(
+    *, search: str = "", limit: int = 10
 ) -> tuple[PlayblastReviewPlaylistOption, ...]:
+    """Return up to `limit` playlists, most recently updated first, restricted to
+    those whose code contains `search`.
+
+    Every ShotGrid Playlist is a review list — there is no review-only subtype to
+    filter on — so `search` is the only way past the `limit` most recent ones.
+    """
     return tuple(
         PlayblastReviewPlaylistOption(playlist_id=playlist.id, code=playlist.code or "")
-        for playlist in default_db_connection().find_recent_playlists(limit=limit)
+        for playlist in default_db_connection().find_playlists(
+            code_contains=search.strip() or None, limit=limit
+        )
     )
 
 
 __all__ = [
     "PlayblastReviewPlaylistOption",
-    "list_recent_review_playlists",
+    "list_review_playlists",
 ]

@@ -686,39 +686,21 @@ class ShotGrid:
             cls=Playlist,
         )
 
-    @ttl_cache(seconds=60)
-    def find_recent_playlists(self, *, limit: int = 10) -> list[Playlist]:
-        """Return the most recently updated review playlists, newest first.
-
-        Args:
-            limit: How many rows to return. Defaults to 10.
-        """
-        filters = [self._project_filter()]
-        rows = _read_or_raise(
-            lambda: self._sg.find(
-                "Playlist",
-                filters,
-                list(_SG_FIELDS_PLAYLIST),
-                order=[{"field_name": "updated_at", "direction": "desc"}],
-                limit=limit,
-            ),
-            entity_type="Playlist",
-            selector="filters",
-            value=None,
-        )
-        return self._many(rows, Playlist)
-
-    @ttl_cache(seconds=60)
     def find_playlists(
         self,
         *,
         code_contains: str | None = None,
+        limit: int | None = None,
     ) -> list[Playlist]:
-        """Return playlists matching the given filters.
+        """Return playlists matching the given filters, most recently updated first.
+
+        Not `@ttl_cache`d: this backs a Refresh button, and a cached hit would
+        make pressing it do nothing.
 
         Args:
             code_contains: Restrict to playlists whose `code` contains this
                 substring (e.g. `"Lighting"` for "Lighting Dailies").
+            limit: How many rows to return, or None for all of them.
 
         Returns:
             A list of `Playlist`, possibly empty.
@@ -727,7 +709,13 @@ class ShotGrid:
         if code_contains:
             filters.append(("code", "contains", code_contains))
         rows = _read_or_raise(
-            lambda: self._sg.find("Playlist", filters, list(_SG_FIELDS_PLAYLIST)),
+            lambda: self._sg.find(
+                "Playlist",
+                filters,
+                list(_SG_FIELDS_PLAYLIST),
+                order=[{"field_name": "updated_at", "direction": "desc"}],
+                limit=0 if limit is None else limit,
+            ),
             entity_type="Playlist",
             selector="filters",
             value=None,

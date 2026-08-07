@@ -8,7 +8,7 @@ from Qt.QtCore import QObject, QRunnable, QThreadPool, Signal
 
 from pipe.core.playblast.review.playlists import (
     PlayblastReviewPlaylistOption,
-    list_recent_review_playlists,
+    list_review_playlists,
 )
 
 log = logging.getLogger(__name__)
@@ -23,18 +23,20 @@ class _FetchSignals(QObject):
 
 class _FetchJob(QRunnable):
     signals: _FetchSignals
+    _search: str
 
-    def __init__(self) -> None:
+    def __init__(self, search: str) -> None:
         super().__init__()
         # The source holds a reference until the job reports back, so Python
         # keeps ownership of the C++ runnable.
         self.setAutoDelete(False)
         self.signals = _FetchSignals()
+        self._search = search
 
     def run(self) -> None:
         try:
             self.signals.finished.emit(
-                list_recent_review_playlists(limit=_PLAYLIST_LIMIT)
+                list_review_playlists(search=self._search, limit=_PLAYLIST_LIMIT)
             )
         except Exception as exc:
             log.exception("Could not load ShotGrid review playlists")
@@ -42,20 +44,22 @@ class _FetchJob(QRunnable):
 
 
 class ReviewPlaylists(QObject):
-    """Recent review playlists, fetched off the GUI thread at most once.
+    """Review playlists, fetched off the GUI thread and refetched on demand.
 
     Every clip in a viewer offers the same playlists, so one window-wide fetch
-    replaces one blocking ShotGrid round trip per ShotGrid row.
+    replaces one blocking ShotGrid round trip per ShotGrid row. `search` is
+    shared for the same reason: an artist filtering to today's dailies wants it
+    to hold across the whole batch.
     """
 
     changed = Signal()
 
     _pool: QThreadPool
     _options: tuple[PlayblastReviewPlaylistOption, ...]
+    _search: str
     _error: str | None
-    _loading: bool
     _settled: bool
-    _job: _FetchJob | None
+    _jobs: list[_FetchJob]
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -64,14 +68,19 @@ class ReviewPlaylists(QObject):
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(1)
         self._options = ()
+        self._search = ""
         self._error = None
-        self._loading = False
         self._settled = False
-        self._job = None
+        self._jobs = []
 
     @property
     def options(self) -> tuple[PlayblastReviewPlaylistOption, ...]:
         return self._options
+
+    @property
+    def search(self) -> str:
+        """The code substring `options` is filtered by, or "" for unfiltered."""
+        return self._search
 
     @property
     def error(self) -> str | None:
@@ -84,22 +93,25 @@ class ReviewPlaylists(QObject):
         return self._settled
 
     def ensure_loaded(self) -> None:
-        if self._loading or self._settled:
+        """Fetch for the first row that needs the list."""
+        if self._jobs or self._settled:
             return
-        self.reload()
+        self._fetch()
 
-    def reload(self) -> None:
-        if self._loading:
-            return
-        self._loading = True
+    def load(self, search: str) -> None:
+        """Refetch under a new code filter. Always live."""
+        self._search = search.strip()
+        self._fetch()
+
+    def _fetch(self) -> None:
         self._settled = False
         self._error = None
         self.changed.emit()
 
-        job = _FetchJob()
+        job = _FetchJob(self._search)
         job.signals.finished.connect(self._on_finished)
         job.signals.failed.connect(self._on_failed)
-        self._job = job
+        self._jobs.append(job)
         self._pool.start(job)
 
     def _on_finished(self, options: tuple[PlayblastReviewPlaylistOption, ...]) -> None:
@@ -111,8 +123,11 @@ class ReviewPlaylists(QObject):
     def _settle(
         self, options: tuple[PlayblastReviewPlaylistOption, ...], *, error: str | None
     ) -> None:
-        self._job = None
-        self._loading = False
+        # The single-threaded pool reports jobs in start order, so a job still
+        # queued here carries a newer filter than this result.
+        self._jobs.pop(0)
+        if self._jobs:
+            return
         self._settled = True
         self._options = options
         self._error = error

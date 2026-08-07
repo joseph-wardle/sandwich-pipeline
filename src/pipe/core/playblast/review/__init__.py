@@ -1,6 +1,6 @@
 from pipe.core.playblast.review.playlists import (
     PlayblastReviewPlaylistOption,
-    list_recent_review_playlists,
+    list_review_playlists,
 )
 from pipe.core.playblast.review.versions import (
     PlayblastVersionUploadRequest,
@@ -14,6 +14,6 @@ __all__ = [
     "PlayblastVersionUploadRequest",
     "PlayblastVersionUploadResult",
     "find_playblast_version_codes",
-    "list_recent_review_playlists",
+    "list_review_playlists",
     "upload_playblast_version",
 ]

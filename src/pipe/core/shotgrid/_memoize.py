@@ -1,9 +1,10 @@
 """Per-instance TTL cache for ShotGrid `find_*` list queries.
 
-The ShotGrid client wraps every list query with `@ttl_cache(seconds=60)` so
+The ShotGrid client wraps most list queries with `@ttl_cache(seconds=60)` so
 that hot UI paths (e.g. filling an asset dropdown) do not hit the live API on
 every keystroke.  Write verbs call `invalidate` to drop the cache so a
-read after a write always sees fresh data.
+read after a write always sees fresh data.  Queries behind a Refresh button
+are left uncached and say so in their own docstring.
 """
 
 from __future__ import annotations
