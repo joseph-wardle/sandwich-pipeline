@@ -20,6 +20,7 @@ from pipe.core.playblast import Playblaster, PreviewClip
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.maya.playblast.shot.config import MPlayblastConfig, MShotPlayblastConfig
 from pipe.dcc.maya.util.selection import maintain_selection
+from pipe.dcc.maya.util.time import scene_frame_rate
 
 if TYPE_CHECKING:
     from typing import Any
@@ -137,6 +138,7 @@ class MPlayblaster(Playblaster):
         )
 
     def playblast(self) -> list[PreviewClip]:
+        self.fps = scene_frame_rate()
         with maintain_selection():
             mc.select(clear=True)
 

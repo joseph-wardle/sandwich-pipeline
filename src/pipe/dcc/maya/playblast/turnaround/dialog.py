@@ -26,7 +26,6 @@ from pipe.core.playblast import (
     Destination,
     DiskDestination,
     FFmpegPreset,
-    Playblaster,
     PreviewClip,
     ReviewEntity,
     ScratchEntity,
@@ -46,6 +45,7 @@ from pipe.dcc.maya.playblast.turnaround.config import (
 )
 from pipe.dcc.maya.playblast.turnaround.playblaster import MTurnaroundPlayblaster
 from pipe.dcc.maya.runtime import get_main_qt_window
+from pipe.dcc.maya.util.time import scene_frame_rate
 
 log = logging.getLogger(__name__)
 
@@ -271,7 +271,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         pass_count = len(self._selected_passes())
         if not pass_count:
             return "No passes selected"
-        seconds = pass_count * DEFAULT_FRAMES_PER_PASS / Playblaster.fps
+        seconds = pass_count * DEFAULT_FRAMES_PER_PASS / scene_frame_rate()
         noun = "pass" if pass_count == 1 else "passes"
         return f"{pass_count} {noun} · ~{seconds:.0f}s"
 
@@ -365,6 +365,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         return TurnaroundPlayblastConfig(
             asset_label=self._asset_display_name(),
             review_roots=self._review_roots.roots,
+            frame_rate=scene_frame_rate(),
             hud_asset_details=self.HUD_ASSET_DETAILS,
             passes=self._selected_passes(),
         )

@@ -13,6 +13,7 @@ from pipe.dcc.maya.playblast.previs._viewport import apply_viewport_options
 from pipe.dcc.maya.playblast.previs.capture import capture_cut
 from pipe.dcc.maya.playblast.shot.config import dummy_shot
 from pipe.dcc.maya.util.selection import maintain_selection
+from pipe.dcc.maya.util.time import scene_frame_rate
 
 
 @dataclass
@@ -41,6 +42,7 @@ class MTakePlayblaster(Playblaster):
         return self
 
     def playblast(self) -> list[PreviewClip]:
+        self.fps = scene_frame_rate()
         with maintain_selection():
             mc.select(clear=True)
             virtual_shot = dummy_shot(
