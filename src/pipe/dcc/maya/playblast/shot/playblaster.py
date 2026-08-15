@@ -170,10 +170,7 @@ class MPlayblaster(Playblaster):
             clips: list[PreviewClip] = []
             for shot_config in self._config.shots:
                 self._extra_kwargs = copy.deepcopy(global_kwargs)
-                if shot_config.use_sequencer:
-                    self._extra_kwargs["use_camera_sequencer"] = True
-                else:
-                    self._extra_kwargs["camera"] = shot_config.camera
+                self._extra_kwargs["camera"] = shot_config.camera
 
                 # Stashed so `_hud_content` can read per-shot inputs when the
                 # base calls it back up the stack.
@@ -192,7 +189,7 @@ class MPlayblaster(Playblaster):
 def _camera_focal_lines(
     shot_config: MShotPlayblastConfig | None, start_frame: int, end_frame: int
 ) -> list[str | TimedText]:
-    if shot_config is None or not shot_config.camera or shot_config.use_sequencer:
+    if shot_config is None or not shot_config.camera:
         return []
     camera_path = str(shot_config.camera)
     lines: list[str | TimedText] = [

@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Iterable
 
 import maya.cmds as mc
-
-log = logging.getLogger(__name__)
 
 DEFAULT_WIDTH = 1920
 DEFAULT_HEIGHT = 1080

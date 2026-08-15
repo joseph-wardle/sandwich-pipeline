@@ -359,7 +359,6 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         return MShotPlayblastConfig(
             camera=str(self._shot_camera.currentText()).strip(),
             shot=self._shot,
-            use_sequencer=False,
             version_label=version_label,
             version_title=version_title,
         )

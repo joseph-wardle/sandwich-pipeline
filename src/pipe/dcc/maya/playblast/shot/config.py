@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
 from pipe.core.shotgrid import Shot
-
-log = logging.getLogger(__name__)
 
 
 def dummy_shot(code: str, cut_in: int, cut_out: int, cut_duration: int) -> Shot:
@@ -26,8 +23,7 @@ def dummy_shot(code: str, cut_in: int, cut_out: int, cut_duration: int) -> Shot:
 
 @dataclass
 class MShotPlayblastConfig:
-    """`camera` is ignored when `use_sequencer=True`.
-    `pass_label` adds a `Pass: <label>` line to the HUD
+    """`pass_label` adds a `Pass: <label>` line to the HUD
     (anim uses this for blocking/polish tags).
     `version_label` / `version_title` are the resolved HUD strings for this
     scene's latest saved version; both `None` when there's no version to show"""
@@ -35,7 +31,6 @@ class MShotPlayblastConfig:
     camera: str | None
     shot: Shot
     tails: tuple[int, int] = (0, 0)
-    use_sequencer: bool = False
     pass_label: str | None = None
     version_label: str | None = None
     version_title: str | None = None

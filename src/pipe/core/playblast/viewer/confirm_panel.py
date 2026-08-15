@@ -14,6 +14,7 @@ from Qt.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QLineEdit,
     QPushButton,
     QVBoxLayout,
@@ -119,12 +120,14 @@ class _Row(QWidget):
     _detail: QLabel
     _header: QHBoxLayout
     _column: QVBoxLayout
+    _options: QFrame | None
 
     def __init__(self, destination: Destination) -> None:
         super().__init__()
         self.destination_id = destination.id
         self.default_on = destination.default_on
         self._state = RowState.IDLE
+        self._options = None
         self._checkbox = QCheckBox(destination.name)
         # Nothing here but the text fields takes focus: a control left focused
         # by the last click would swallow the window's Space and arrow keys.
@@ -153,7 +156,21 @@ class _Row(QWidget):
         self._column.addLayout(self._header)
         self._column.addWidget(self._detail)
 
+    def add_options(self, layout: QLayout) -> None:
+        """Attach this row's sub-options as an indented, framed well below the
+        checkbox. The well only shows while the row is checked."""
+        self._options = QFrame()
+        self._options.setFrameShape(QFrame.Shape.StyledPanel)
+        self._options.setLayout(layout)
+        indent = QHBoxLayout()
+        indent.setContentsMargins(style.PAD_L, 0, 0, 0)
+        indent.addWidget(self._options)
+        self._column.addLayout(indent)
+        self._options.setVisible(self.is_checked)
+
     def _on_toggled(self) -> None:
+        if self._options is not None:
+            self._options.setVisible(self.is_checked)
         # Unchecking abandons the attempt, so its ✗ goes with it — otherwise the
         # row keeps reporting a failure nobody is retrying.
         if not self.is_checked and self._state is RowState.FAILED:
@@ -209,6 +226,9 @@ class _Row(QWidget):
         self._set_status("✓", OK_STYLE)
         self._set_detail(detail, OK_STYLE, str(path) if path else "")
         self._checkbox.setEnabled(False)
+        # What was delivered can't be re-aimed after the fact.
+        if self._options is not None:
+            self._options.setEnabled(False)
 
     def set_failed(self, detail: str) -> None:
         self._state = RowState.FAILED
@@ -223,14 +243,12 @@ class _FolderRow(_Row):
 
     _destination: DiskDestination
     _directory: Path
-    _options: QFrame | None
     _path_label: QLabel
 
     def __init__(self, destination: DiskDestination) -> None:
         super().__init__(destination)
         self._destination = destination
         self._directory = destination.directory
-        self._options = None
         if destination.browsable:
             self._directory = load_last_custom_folder() or destination.directory
             self._build_options()
@@ -243,30 +261,13 @@ class _FolderRow(_Row):
         browse = QPushButton("Browse…")
         browse.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         browse.clicked.connect(self._on_browse)
-        self._options = QFrame()
-        self._options.setFrameShape(QFrame.Shape.StyledPanel)
-        row = QHBoxLayout(self._options)
+        row = QHBoxLayout()
         row.addWidget(self._path_label, stretch=1)
         row.addWidget(browse)
-        indent = QHBoxLayout()
-        indent.setContentsMargins(style.PAD_L, 0, 0, 0)
-        indent.addWidget(self._options)
-        self._column.addLayout(indent)
-        self._options.setVisible(self.is_checked)
+        self.add_options(row)
 
     def chosen(self) -> ChosenDisk:
         return ChosenDisk(destination=self._destination, directory=self._directory)
-
-    def set_delivered(self, detail: str, path: Path | None) -> None:
-        super().set_delivered(detail, path)
-        # the folder can't be changed after the fact.
-        if self._options is not None:
-            self._options.setEnabled(False)
-
-    def _on_toggled(self) -> None:
-        if self._options is not None:
-            self._options.setVisible(self.is_checked)
-        super()._on_toggled()
 
     def _show_directory(self) -> None:
         self._path_label.setText(self._directory.name or str(self._directory))
@@ -289,7 +290,6 @@ class _ShotGridRow(_Row):
 
     _destination: ShotGridDestination
     _playlists: ReviewPlaylists
-    _options: QFrame
     _playlist_check: QCheckBox
     _search_field: QLineEdit
     _playlist_combo: QComboBox
@@ -333,19 +333,13 @@ class _ShotGridRow(_Row):
         search_row.addWidget(self._search_field, stretch=1)
         search_row.addWidget(self._refresh_button)
 
-        # A framed well that appears only while ShotGrid is checked
-        self._options = QFrame()
-        self._options.setFrameShape(QFrame.Shape.StyledPanel)
-        options_layout = QVBoxLayout(self._options)
+        options_layout = QVBoxLayout()
         options_layout.addWidget(self._playlist_check)
         options_layout.addLayout(search_row)
         options_layout.addWidget(self._playlist_combo)
         options_layout.addWidget(self._description)
+        self.add_options(options_layout)
 
-        indent = QHBoxLayout()
-        indent.setContentsMargins(style.PAD_L, 0, 0, 0)
-        indent.addWidget(self._options)
-        self._column.addLayout(indent)
         self._playlists.changed.connect(self._show_playlists)
         self._show_playlists()
         self._sync_enabled()
@@ -405,8 +399,6 @@ class _ShotGridRow(_Row):
         super()._on_toggled()
 
     def _sync_enabled(self) -> None:
-        # Sub-options are only relevant while the upload is selected.
-        self._options.setVisible(self.is_checked)
         active = self.is_checked and self._state is not RowState.DELIVERED
         self._playlist_check.setEnabled(
             active and not self._destination.playlist_required

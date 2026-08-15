@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import re
 from abc import ABCMeta, abstractmethod
 from pathlib import Path
@@ -15,8 +14,6 @@ from pipe.core.playblast.tempdir import create_preview_dir
 if TYPE_CHECKING:
     from pipe.core.shotgrid import Shot
 
-
-log = logging.getLogger(__name__)
 
 DEFAULT_RESOLUTION: tuple[int, int] = (1280, 720)
 

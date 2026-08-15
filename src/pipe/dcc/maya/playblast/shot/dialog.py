@@ -542,7 +542,6 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
                 cut_out=custom_out,
                 cut_duration=max(0, custom_out - custom_in),
             ),
-            use_sequencer=False,
         )
 
     # ------------------------------------------------------------------

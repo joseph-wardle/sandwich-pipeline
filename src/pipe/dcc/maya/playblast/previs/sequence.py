@@ -11,7 +11,6 @@ HUD lines are burned onto the frames by the `Playblaster` base after
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 
 import maya.cmds as mc
@@ -31,8 +30,6 @@ from pipe.dcc.maya.playblast.previs.capture import capture_cut
 from pipe.dcc.maya.playblast.shot.config import dummy_shot
 from pipe.dcc.maya.util.selection import maintain_selection
 from pipe.dcc.maya.util.time import scene_frame_rate
-
-log = logging.getLogger(__name__)
 
 
 @dataclass

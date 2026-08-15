@@ -131,7 +131,6 @@ class AnimPlayblastDialog(MPlayblastDialog):
             camera=self._get_shot_camera_path(),
             shot=self._shot,
             tails=(5, 5),
-            use_sequencer=False,
             version_label=version_label,
             version_title=version_title,
         )
