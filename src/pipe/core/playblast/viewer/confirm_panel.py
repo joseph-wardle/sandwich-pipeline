@@ -46,6 +46,7 @@ from pipe.core.playblast.viewer.settings import (
     save_checked_destinations,
     save_last_custom_folder,
 )
+from pipe.core.ui import FAIL_STYLE, OK_STYLE
 
 log = logging.getLogger(__name__)
 
@@ -205,14 +206,14 @@ class _Row(QWidget):
 
     def set_delivered(self, detail: str, path: Path | None) -> None:
         self._state = RowState.DELIVERED
-        self._set_status("✓", style.OK_STYLE)
-        self._set_detail(detail, style.OK_STYLE, str(path) if path else "")
+        self._set_status("✓", OK_STYLE)
+        self._set_detail(detail, OK_STYLE, str(path) if path else "")
         self._checkbox.setEnabled(False)
 
     def set_failed(self, detail: str) -> None:
         self._state = RowState.FAILED
-        self._set_status("✗", style.FAIL_STYLE)
-        self._set_detail(detail, style.FAIL_STYLE)
+        self._set_status("✗", FAIL_STYLE)
+        self._set_detail(detail, FAIL_STYLE)
         self._checkbox.setEnabled(True)
 
 
@@ -524,7 +525,7 @@ class ConfirmPanel(QWidget):
         self._error_label = QLabel("")
         self._error_label.setWordWrap(True)
         self._error_label.setTextFormat(Qt.TextFormat.PlainText)
-        self._error_label.setStyleSheet(style.FAIL_STYLE)
+        self._error_label.setStyleSheet(FAIL_STYLE)
         self._error_label.hide()
         self._confirm_button = QPushButton()
         self._confirm_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -672,11 +673,14 @@ class ConfirmPanel(QWidget):
             return
         if rows:
             retrying = all(row.state is RowState.FAILED for row in rows)
-            self._set_confirm_button(
-                "Retry failed" if retrying else "Confirm",
+            action = (
                 "Try the destinations that failed again."
                 if retrying
-                else "Deliver this playblast to every checked destination.",
+                else "Deliver this playblast to every checked destination."
+            )
+            self._set_confirm_button(
+                "Retry failed" if retrying else "Confirm",
+                f"{action} (Ctrl+Enter)",
                 enabled=True,
             )
             return

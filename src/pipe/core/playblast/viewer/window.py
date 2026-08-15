@@ -151,6 +151,7 @@ class ViewerWindow(QMainWindow):
         self._clip_list.setFixedWidth(_SIDEBAR_WIDTH)
         self._clip_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._clip_list.setMouseTracking(True)  # so rows repaint on hover
+        self._clip_list.setToolTip("Up and Down move between clips.")
         width, height = self._resolution
         thumb_w = filmstrip.THUMB_W
         thumb_h = round(thumb_w * height / width) if width else thumb_w
@@ -171,6 +172,10 @@ class ViewerWindow(QMainWindow):
         sidebar.addWidget(header)
         sidebar.addWidget(self._clip_list)
         self._confirm_remaining_button = QPushButton("Confirm remaining")
+        self._confirm_remaining_button.setToolTip(
+            "Deliver every clip that still has checked destinations, using the "
+            "choices already made on each one."
+        )
         self._confirm_remaining_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._confirm_remaining_button.clicked.connect(self._confirm_remaining)
         sidebar.addWidget(self._confirm_remaining_button)
@@ -231,6 +236,7 @@ class ViewerWindow(QMainWindow):
         transport.setSpacing(style.GAP)
 
         self._scrub = TimelineSlider()
+        self._scrub.setToolTip("Home and End jump to the first and last frame.")
         self._scrub.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._scrub.sliderMoved.connect(self._on_scrub_moved)
         self._scrub.sliderPressed.connect(self._on_scrub_pressed)

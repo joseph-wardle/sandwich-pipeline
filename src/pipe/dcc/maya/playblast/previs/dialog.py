@@ -26,7 +26,7 @@ from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.playblast.viewer import open_viewer
 from pipe.core.shot import maya_rlo_stream, shot_owner_for
 from pipe.core.shotgrid import Shot
-from pipe.core.ui import MessageDialog
+from pipe.core.ui import MessageDialog, set_tab_available
 from pipe.core.versioning import current_version_label
 from pipe.dcc.maya.playblast.previs.sequence import (
     MSequenceConfig,
@@ -52,6 +52,13 @@ log = logging.getLogger(__name__)
 # dispatch. Shot and custom match the base's strings.
 _MODE_SHOT = "shot"
 _MODE_SEQUENCE = "sequence"
+
+_SEQUENCE_TAB_TIP = "Stitch every shot's primary into one dailies movie."
+_NO_SHOTS_TIP = (
+    "This previs file has no shots yet. Add one in the previs panel, "
+    "or use Custom Playblast."
+)
+_RLO_SHOT_TAB_TIP = "Playblast a single previs shot from the previs panel."
 
 
 class PrevisPlayblastDialog(MPlayblastDialog):
@@ -82,10 +89,6 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             return
         self.SEQUENCE_TAB_INDEX = tabs.count()
         tabs.addTab(self._build_sequence_tab(), "Sequence")
-        tabs.tabBar().setTabToolTip(
-            self.SEQUENCE_TAB_INDEX,
-            "Stitch every shot's primary into one dailies movie.",
-        )
 
     def _build_sequence_tab(self) -> QWidget:
         tab = QWidget()
@@ -149,13 +152,15 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         if self._previs_state is None:
             super()._refresh_source_tab_availability()
             return
-        # Per-shot previs delivery lives in the previs panel now; this dialog
-        # only offers whole-sequence dailies (and Custom).
         self._source_tabs.setTabEnabled(self.SHOT_TAB_INDEX, False)
+        self._source_tabs.tabBar().setTabToolTip(self.SHOT_TAB_INDEX, _RLO_SHOT_TAB_TIP)
         if self.SEQUENCE_TAB_INDEX >= 0:
-            # No shots → no sequence to playblast.
-            self._source_tabs.setTabEnabled(
-                self.SEQUENCE_TAB_INDEX, bool(self._previs_state.shots)
+            set_tab_available(
+                self._source_tabs,
+                self.SEQUENCE_TAB_INDEX,
+                available=bool(self._previs_state.shots),
+                tooltip=_SEQUENCE_TAB_TIP,
+                reason=_NO_SHOTS_TIP,
             )
         if self._source_tabs.currentIndex() == self.SHOT_TAB_INDEX:
             self._source_tabs.setCurrentIndex(self._default_source_tab_index())

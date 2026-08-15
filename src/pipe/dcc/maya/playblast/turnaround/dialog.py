@@ -35,7 +35,7 @@ from pipe.core.playblast import (
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.playblast.viewer import open_viewer
 from pipe.core.shotgrid import normalize_display_name
-from pipe.core.ui import ButtonPair, MessageDialog
+from pipe.core.ui import FAIL_STYLE, ButtonPair, MessageDialog
 from pipe.dcc.maya.assetfile import AssetMetadata, read_asset_metadata
 from pipe.dcc.maya.playblast.turnaround.config import (
     DEFAULT_FRAMES_PER_PASS,
@@ -169,6 +169,10 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
 
     def _build_passes_section(self) -> None:
         passes_group = QGroupBox("Passes")
+        passes_group.setToolTip(
+            f"Each checked pass is one {DEFAULT_FRAMES_PER_PASS}-frame revolution, "
+            "appended to the same turnaround clip."
+        )
         passes_layout = QGridLayout(passes_group)
 
         passes_layout.addWidget(QLabel("Elevation"), 0, 0)
@@ -192,7 +196,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
 
     def _build_validation_label(self) -> None:
         self._validation_label = QLabel()
-        self._validation_label.setStyleSheet("color: #b00020;")
+        self._validation_label.setStyleSheet(FAIL_STYLE)
         self._validation_label.setVisible(False)
         self._main_layout.addWidget(self._validation_label)
 

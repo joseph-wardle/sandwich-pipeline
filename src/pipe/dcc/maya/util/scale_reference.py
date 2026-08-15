@@ -16,8 +16,8 @@ from Qt.QtWidgets import (
 )
 
 from pipe.core.asset import paths_for_asset
-from pipe.core.ui import ButtonPair, MessageDialog
 from pipe.core.shotgrid import ShotGrid
+from pipe.core.ui import FAIL_STYLE, ButtonPair, MessageDialog
 from pipe.dcc.maya.command import maya_command
 from pipe.dcc.maya.runtime import get_main_qt_window
 from pipe.dcc.maya.util.optionvar import StringOptionVar
@@ -102,7 +102,7 @@ class ScaleReferenceDialog(ButtonPair, QtWidgets.QDialog):
         layout.addLayout(row)
 
         self._status = QLabel()
-        self._status.setStyleSheet("color: #b00020;")
+        self._status.setStyleSheet(FAIL_STYLE)
         self._status.setVisible(False)
         layout.addWidget(self._status)
 
