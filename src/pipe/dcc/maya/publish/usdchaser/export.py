@@ -13,7 +13,7 @@ from pxr import Sdf, Usd
 from pipe.core.asset import paths_for_asset
 
 from .utils import (
-    find_and_move_prim,
+    flatten_camera,
     make_topo_attrs_default,
     path_to_maya_dag_map,
     prefix_material_bindings,
@@ -43,6 +43,11 @@ ANIM_CLASS_PATH = Sdf.Path("/__class__/anim")
 RIG_SCOPE_PATH = Sdf.Path("/rig")
 RIG_ROOT_PATH = Sdf.Path("/rig")
 RIG_GEO_PATH = Sdf.Path("/rig/geo")
+
+# Shot files locate the published camera by this prim name — see
+# `MAnimShotFileManager.run_on_open`. The `/cameras` scope is the prim Solaris
+# references the publish into and scales cm-to-m — see `Bobo_Import_Camera`.
+SHOT_CAM_PATH = Sdf.Path("/cameras/shotCam")
 
 
 class ExportChaserMode(IntEnum):
@@ -182,13 +187,8 @@ class ExportChaser(mayaUsdLib.ExportChaser):
         # but we'll remove the materials authored in Maya since we only want the bindings
         self._stage.RemovePrim(RIG_ROOT_PATH.AppendChild("mtl"))
 
-    def _post_export_cam(self):
+    def _post_export_cam(self) -> None:
         # We don't scale down the camera here because we need to import it
         # back into Maya. Instead we'll scale it down when we import it into
         # Solaris.
-
-        new_shotCam_path = Sdf.Path("/LnD_shotCam")
-        find_and_move_prim(
-            self._stage.GetEditTarget().GetLayer(), "world_CTRL", new_shotCam_path
-        )
-        self._stage.SetDefaultPrim(self._stage.GetPrimAtPath(new_shotCam_path))
+        flatten_camera(self._stage, SHOT_CAM_PATH)

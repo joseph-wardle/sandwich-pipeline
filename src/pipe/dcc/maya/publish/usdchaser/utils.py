@@ -155,50 +155,96 @@ def prefix_material_bindings(
         rel.SetTargets((collection_target, material_target))
 
 
-def move_prim(
-    layer: Sdf.Layer, prim_to_move: Sdf.Path, new_prim_parent: Sdf.Path
-) -> None:
-    with Sdf.ChangeBlock():
-        old_prim_parent = prim_to_move.GetParentPath()
-        if old_prim_parent != new_prim_parent:
-            prim_spec = Sdf.CreatePrimInLayer(layer, new_prim_parent)
-            prim_spec.SetInfo(prim_spec.SpecifierKey, Sdf.SpecifierDef)
+def flatten_camera(stage: Usd.Stage, camera_path: Sdf.Path) -> None:
+    """Bake the exported camera down to a single prim at `camera_path`.
 
-            edit = Sdf.BatchNamespaceEdit()
-            edit.Add(Sdf.NamespaceEdit.Reparent(prim_to_move, new_prim_parent, -1))
-            edit.Add(Sdf.NamespaceEdit.Remove(old_prim_parent.GetPrefixes()[0]))
+    Nothing downstream animates the camera, so whatever drove it in Maya — a
+    shot camera rig, a hand-keyed camera, a camera parented under a set — is
+    collapsed into one world-space transform. Rigged and unrigged cameras
+    publish to the same shape, and consumers get a camera at a fixed path
+    instead of one buried several controls deep.
 
-            if not layer.Apply(edit):
-                raise Exception("Failed to apply layer edit!")
+    `camera_path`'s parent becomes the default prim, so it must be nested.
+    Solaris references that parent in as a scope and scales it cm-to-m, which
+    only works if the scale has somewhere to land other than the camera's own
+    baked transform.
+    """
+    source = _sole_camera(stage)
+    transforms = _world_transform_samples(source)
+    source_path = source.GetPath()
+    layer = stage.GetRootLayer()
+
+    # Everything below has to land in the layer being published, not in
+    # whatever layer the export left as the edit target.
+    with Usd.EditContext(stage, layer):
+        scope = UsdGeom.Xform.Define(stage, camera_path.GetParentPath())
+
+        if source_path != camera_path:
+            if not Sdf.CopySpec(layer, source_path, layer, camera_path):
+                raise RuntimeError(
+                    f"Could not move the exported camera from {source_path} to {camera_path}."
+                )
+            # Discard whatever the camera used to hang off of, unless the
+            # camera now lives underneath it.
+            stale_path = source_path.GetPrefixes()[0]
+            if not camera_path.HasPrefix(stale_path):
+                stage.RemovePrim(stale_path)
+
+        camera = stage.GetPrimAtPath(camera_path)
+        for name in camera.GetPropertyNames():
+            if name.startswith("xformOp:"):  # the rig's ops, superseded by the bake
+                camera.RemoveProperty(name)
+
+        xform_op = UsdGeom.Xformable(camera).MakeMatrixXform()
+        for time, matrix in transforms.items():
+            xform_op.Set(matrix, time)
+
+        stage.SetDefaultPrim(scope.GetPrim())
 
 
-def find_and_move_prim(
-    layer: Sdf.Layer, prim_to_find: str, new_prim_parent: Sdf.Path
-) -> None:
-    """Searches for the prim with name `prim_to_find` and moves it underneath
-    `new_prim_parent`. *Assumes only 1 prim with the given name*"""
-    # TODO: will work in Usd v24?
-    # editor = Usd.NamespaceEditor(self._stage)
-    # editor.MovePrimAtPath(Sdf.Path("/WORLD/CAM/LnD_shotCam"), Sdf.Path("/"))
-    # editor.ApplyEdits()
+def _sole_camera(stage: Usd.Stage) -> Usd.Prim:
+    cameras = [prim for prim in stage.Traverse() if prim.IsA("Camera")]
+    if not cameras:
+        raise RuntimeError(
+            "The export contains no camera. Select the camera you want to "
+            "publish before running the camera publish."
+        )
+    if len(cameras) > 1:
+        found = ", ".join(str(prim.GetPath()) for prim in cameras)
+        raise RuntimeError(
+            f"The export contains {len(cameras)} cameras ({found}), but a shot "
+            "can only publish one. Select a single camera and try again."
+        )
+    return cameras[0]
 
-    prim_search: list[Sdf.Path] = []
 
-    def traverse_kernel(path: Sdf.Path | str):
-        if isinstance(path, str):
-            path = Sdf.Path(path)
-        if path.IsPrimPath():
-            if path.name == prim_to_find:
-                prim_search.append(path)
+def _world_transform_samples(prim: Usd.Prim) -> dict[Usd.TimeCode, Gf.Matrix4d]:
+    """World-space transform of `prim` at every frame its ancestry is keyed on."""
+    xformable = UsdGeom.Xformable(prim)
+    times = _xform_time_samples(prim)
+    if not times:
+        return {
+            Usd.TimeCode.Default(): xformable.ComputeLocalToWorldTransform(
+                Usd.TimeCode.Default()
+            )
+        }
+    return {
+        Usd.TimeCode(t): xformable.ComputeLocalToWorldTransform(Usd.TimeCode(t))
+        for t in times
+    }
 
-    layer.Traverse(Sdf.Path("/"), traverse_kernel)
 
-    try:
-        prim_to_move = prim_search.pop()
-    except IndexError:
-        raise RuntimeError(f"Could not find {prim_to_find} in export!")
-
-    move_prim(layer, prim_to_move, new_prim_parent)
+def _xform_time_samples(prim: Usd.Prim) -> list[float]:
+    """Every frame keyed anywhere between `prim` and the stage root."""
+    times: set[float] = set()
+    ancestor = prim
+    while ancestor and not ancestor.IsPseudoRoot():
+        xformable = UsdGeom.Xformable(ancestor)
+        if xformable:
+            for xform_op in xformable.GetOrderedXformOps():
+                times.update(xform_op.GetTimeSamples())
+        ancestor = ancestor.GetParent()
+    return sorted(times)
 
 
 def path_to_maya_dag_map(
