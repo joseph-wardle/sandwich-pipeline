@@ -23,6 +23,15 @@ from .usdchaser import ExportChaser, ExportChaserMode
 log = logging.getLogger(__name__)
 
 
+def _publishable_cameras() -> list[str]:
+    """Every camera in the scene except Maya's own persp/top/front/side."""
+    return [
+        camera
+        for camera in mc.ls(cameras=True) or []
+        if not mc.camera(camera, query=True, startupCamera=True)
+    ]
+
+
 class PublishCameraDialog(FilteredListDialog):
     _camera: QComboBox
 
@@ -38,9 +47,10 @@ class PublishCameraDialog(FilteredListDialog):
         self._camera = QComboBox(
             self,
         )
-        cameras = mc.ls(cameras=True, visible=True)
+        cameras = _publishable_cameras()
         self._camera.addItems(cameras)
-        self._camera.setCurrentText(cameras[0])
+        if cameras:
+            self._camera.setCurrentText(cameras[0])
         validator = QRegExpValidator(QRegExp("|".join(cameras)))
         self._camera.setValidator(validator)
 
