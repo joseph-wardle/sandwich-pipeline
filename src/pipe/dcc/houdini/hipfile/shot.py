@@ -22,6 +22,7 @@ from pipe.core.shotgrid import (
     validate_shot_code_token,
 )
 from pipe.core.versioning import VersionStreamSpec, path_matches_stream
+from pipe.dcc.houdini.util import nodetypes
 
 from .filemanager import HFileManager
 
@@ -525,7 +526,7 @@ class HShotFileManager(HFileManager):
         muted_departments: list[str],
         environment: Environment | None,
     ) -> hou.Node:
-        load_layer = stage.createNode("dbclark::main::Bobo_Load_Layers::1.0")
+        load_layer = stage.createNode(nodetypes.LOAD_LAYERS)
         load_layer.setUserData("nodeshape", "bulge_down")
         load_layer.parm("shot").set("$JOB/`@SHOT`")  # type: ignore
 

@@ -4,6 +4,7 @@ import hou
 from env_sg import DB_Config
 
 from pipe.core.shotgrid import ShotGrid
+from pipe.dcc.houdini.util import nodetypes
 
 
 class AnimPostProcessor:
@@ -34,7 +35,7 @@ class AnimPostProcessor:
 
         load_layers = []
         for env in envs:
-            load_layer = stage_ctx.createNode("dbclark::main::Bobo_Load_Layers::1.0")
+            load_layer = stage_ctx.createNode(nodetypes.LOAD_LAYERS)
             load_layer.parm("shot").set(f"$JOB/{shot_path}")  # type: ignore
             for dep in ["cfx", "fx", "envfx", "flo", "lighting", "render"]:
                 load_layer.parm(f"{dep}_enable").set(0)  # type: ignore

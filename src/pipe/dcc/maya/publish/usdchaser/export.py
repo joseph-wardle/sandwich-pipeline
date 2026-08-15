@@ -46,7 +46,7 @@ RIG_GEO_PATH = Sdf.Path("/rig/geo")
 
 # Shot files locate the published camera by this prim name — see
 # `MAnimShotFileManager.run_on_open`. The `/cameras` scope is the prim Solaris
-# references the publish into and scales cm-to-m — see `Bobo_Import_Camera`.
+# references the publish into and scales cm-to-m — see `SKD Import Camera`.
 SHOT_CAM_PATH = Sdf.Path("/cameras/shotCam")
 
 
