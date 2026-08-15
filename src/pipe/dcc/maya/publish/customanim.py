@@ -18,6 +18,7 @@ from pipe.dcc.maya.util.selection import maintain_selection
 from pipe.core.struct.timeline import Timeline
 
 from .anim_lock import confirm_anim_republish_allowed
+from .namespaces import confirm_rig_publishable
 from .publisher import Publisher
 from .usdchaser import ExportChaser, ExportChaserMode
 
@@ -64,6 +65,11 @@ class AnimPublisher(Publisher):
             return False
 
         self._rig_root = sel[0]
+
+        # Ahead of `confirm_anim_republish_allowed`, which builds the save path
+        # out of this name.
+        if not confirm_rig_publishable(self._window, self._rig_root):
+            return False
 
         # Select only this rig
         mc.select(self._rig_root, hierarchy=True)
