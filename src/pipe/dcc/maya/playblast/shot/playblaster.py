@@ -59,6 +59,9 @@ class MPlayblaster(Playblaster):
 
     def _write_images(self, shot: Shot, path: str) -> None:
         cut_in, cut_out = shot.frame_range
+        head, tail = (
+            self._current_shot_config.tails if self._current_shot_config else (0, 0)
+        )
         active_editor = self._resolve_active_editor()
         if active_editor:
             self._extra_kwargs["viewport_options"].update(
@@ -95,8 +98,8 @@ class MPlayblaster(Playblaster):
             width=width,
             height=height,
             filename=path,
-            start_frame=(cut_in - 5),
-            end_frame=(cut_out + 5),
+            start_frame=(cut_in - head),
+            end_frame=(cut_out + tail),
             format="image",
             compression="png",
             off_screen=True,
