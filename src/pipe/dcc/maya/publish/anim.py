@@ -106,25 +106,6 @@ class AnimPublisher(Publisher):
     def _get_confirm_message(self):
         return f"Animation has been exported to {self._publish_path}"
 
-    def _postpublish(self) -> None:
-        """Launch a Houdini process to compute the anim post-process HDA"""
-
-        # This might be useful later so I'll leave it here. Currently we aren't using it.
-
-        # post_script = ";".join(
-        #     [
-        #         "from pipe.dcc.houdini.shot.animpostprocess import AnimPostProcessor",
-        #         f"AnimPostProcessor().run('{self._shot.code}')",
-        #         "exit()",
-        #     ]
-        # )
-
-        # HoudiniLauncher(is_python_shell=True, extra_args=["-c", post_script]).launch()
-
-        # root_layer = Sdf.Layer.FindOrOpen(str(self._publish_path))
-        # root_layer.subLayerPaths.append("post-process.usd")
-        # root_layer.Save()
-
 
 def _set_origin_keyframes(start_frame: int, transition_length: int = 4) -> None:
     """

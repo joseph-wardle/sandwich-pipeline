@@ -5,8 +5,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pxr import Sdf
-
 if TYPE_CHECKING:
     from typing import Any
 
@@ -14,7 +12,6 @@ if TYPE_CHECKING:
 
 import maya.cmds as mc
 from pipe.core.util.paths import get_production_path
-from pipe.dcc.houdini.launch import HoudiniLauncher
 
 from pipe.core.ui import MessageDialog
 from pipe.dcc.maya.util.selection import maintain_selection
@@ -123,19 +120,3 @@ class AnimPublisher(Publisher):
 
     def _get_confirm_message(self):
         return f"Animation has been exported to {self._publish_path}"
-
-    def _postpublish(self) -> None:
-        """Launch a Houdini process to compute the anim post-process HDA"""
-        post_script = ";".join(
-            [
-                "from pipe.dcc.houdini.shot.animpostprocess import AnimPostProcessor",
-                f"AnimPostProcessor().run('{self._shot.code}')",
-                "exit()",
-            ]
-        )
-
-        HoudiniLauncher(is_python_shell=True, extra_args=["-c", post_script]).launch()
-
-        root_layer = Sdf.Layer.FindOrOpen(str(self._publish_path))
-        root_layer.subLayerPaths.append("post-process.usd")
-        root_layer.Save()
