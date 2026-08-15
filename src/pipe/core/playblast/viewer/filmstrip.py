@@ -22,6 +22,7 @@ THUMB_ROLE = cast(Qt.ItemDataRole, int(Qt.ItemDataRole.UserRole))
 STATUS_ROLE = cast(Qt.ItemDataRole, int(Qt.ItemDataRole.UserRole) + 1)
 
 _STATUS_TEXT: dict[PanelStatus, str] = {
+    PanelStatus.SKIPPED: "Skipped",
     PanelStatus.PENDING: "Pending",
     PanelStatus.RUNNING: "Running…",
     PanelStatus.CONFIRMED: "Confirmed",

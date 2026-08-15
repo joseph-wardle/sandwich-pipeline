@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from enum import Enum, auto
 from pathlib import Path
 
-from Qt.QtCore import QObject, QRunnable, QThreadPool, Signal
+from Qt.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
 from Qt.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -35,7 +35,9 @@ from pipe.core.playblast.confirm import (
     ChosenTake,
     ConfirmResult,
     confirm_clip,
+    failure_summary,
 )
+from pipe.core.playblast.errors import artist_reason
 from pipe.core.playblast.viewer import style
 from pipe.core.playblast.viewer.playlists import ReviewPlaylists
 from pipe.core.playblast.viewer.settings import (
@@ -56,11 +58,26 @@ class RowState(Enum):
 
 
 class PanelStatus(Enum):
-    VIEW_ONLY = auto()
+    SKIPPED = auto()
     PENDING = auto()
     RUNNING = auto()
     CONFIRMED = auto()
     FAILED = auto()
+
+
+def panel_status(
+    *, running: bool, rows: Sequence[tuple[RowState, bool]]
+) -> PanelStatus:
+    """A panel's status, from each row's `(state, is_checked)` pair."""
+    if running:
+        return PanelStatus.RUNNING
+    if any(state is RowState.FAILED for state, _ in rows):
+        return PanelStatus.FAILED
+    if any(state is RowState.IDLE and checked for state, checked in rows):
+        return PanelStatus.PENDING
+    if any(state is RowState.DELIVERED for state, _ in rows):
+        return PanelStatus.CONFIRMED
+    return PanelStatus.SKIPPED
 
 
 class _JobSignals(QObject):
@@ -87,7 +104,7 @@ class _ConfirmJob(QRunnable):
             self.signals.finished.emit(self._work())
         except Exception as exc:
             log.exception("Confirm failed before any delivery")
-            self.signals.failed.emit(str(exc) or exc.__class__.__name__)
+            self.signals.failed.emit(artist_reason(exc))
 
 
 class _Row(QWidget):
@@ -108,11 +125,22 @@ class _Row(QWidget):
         self.default_on = destination.default_on
         self._state = RowState.IDLE
         self._checkbox = QCheckBox(destination.name)
+        # Nothing here but the text fields takes focus: a control left focused
+        # by the last click would swallow the window's Space and arrow keys.
+        self._checkbox.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._checkbox.toggled.connect(lambda _checked: self._on_toggled())
         self._status = QLabel("")
+        self._status.setFixedWidth(style.STATUS_GLYPH_W)
+        self._status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._detail = QLabel("")
         self._detail.setWordWrap(True)
-        self._detail.setStyleSheet(style.FAIL_STYLE)
+        # Its text comes from exceptions and ShotGrid, which can carry angle
+        # brackets Qt would otherwise read as markup.
+        self._detail.setTextFormat(Qt.TextFormat.PlainText)
+        # Selectable so the artist can lift a delivered path out of the panel.
+        self._detail.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         self._detail.hide()
 
         self._header = QHBoxLayout()
@@ -125,6 +153,10 @@ class _Row(QWidget):
         self._column.addWidget(self._detail)
 
     def _on_toggled(self) -> None:
+        # Unchecking abandons the attempt, so its ✗ goes with it — otherwise the
+        # row keeps reporting a failure nobody is retrying.
+        if not self.is_checked and self._state is RowState.FAILED:
+            self.set_idle()
         self.toggled.emit()
 
     def chosen(self) -> ChosenDestination:
@@ -145,30 +177,43 @@ class _Row(QWidget):
     def set_checked(self, checked: bool) -> None:
         self._checkbox.setChecked(checked)
 
+    def _set_status(self, glyph: str, css: str) -> None:
+        # Glyph and color move together, so no state inherits an earlier color.
+        self._status.setText(glyph)
+        self._status.setStyleSheet(css)
+
+    def _set_detail(self, text: str, css: str, tooltip: str = "") -> None:
+        self._detail.setText(text)
+        self._detail.setStyleSheet(css)
+        self._detail.setToolTip(tooltip)
+        self._detail.setVisible(bool(text))
+
+    # Each setter fixes the glyph, the outcome line and whether the artist can
+    # still toggle the row, so none of the three can survive into a later state.
+
     def set_running(self) -> None:
         self._state = RowState.RUNNING
-        self._status.setText("…")
-        self._status.setStyleSheet("")
-        self._detail.hide()
+        self._set_status("…", "")
+        self._set_detail("", "")
+        self._checkbox.setEnabled(False)
 
     def set_idle(self) -> None:
         self._state = RowState.IDLE
-        self._status.setText("")
+        self._set_status("", "")
+        self._set_detail("", "")
+        self._checkbox.setEnabled(True)
 
-    def set_delivered(self, detail: str) -> None:
+    def set_delivered(self, detail: str, path: Path | None) -> None:
         self._state = RowState.DELIVERED
-        self._status.setText("✓")
-        self._status.setStyleSheet(style.OK_STYLE)
-        self._status.setToolTip(detail)
+        self._set_status("✓", style.OK_STYLE)
+        self._set_detail(detail, style.OK_STYLE, str(path) if path else "")
         self._checkbox.setEnabled(False)
-        self._detail.hide()
 
     def set_failed(self, detail: str) -> None:
         self._state = RowState.FAILED
-        self._status.setText("✗")
-        self._status.setStyleSheet(style.FAIL_STYLE)
-        self._detail.setText(detail)
-        self._detail.show()
+        self._set_status("✗", style.FAIL_STYLE)
+        self._set_detail(detail, style.FAIL_STYLE)
+        self._checkbox.setEnabled(True)
 
 
 class _FolderRow(_Row):
@@ -195,6 +240,7 @@ class _FolderRow(_Row):
         self._path_label = QLabel()
         self._show_directory()
         browse = QPushButton("Browse…")
+        browse.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         browse.clicked.connect(self._on_browse)
         self._options = QFrame()
         self._options.setFrameShape(QFrame.Shape.StyledPanel)
@@ -210,8 +256,8 @@ class _FolderRow(_Row):
     def chosen(self) -> ChosenDisk:
         return ChosenDisk(destination=self._destination, directory=self._directory)
 
-    def set_delivered(self, detail: str) -> None:
-        super().set_delivered(detail)
+    def set_delivered(self, detail: str, path: Path | None) -> None:
+        super().set_delivered(detail, path)
         # the folder can't be changed after the fact.
         if self._options is not None:
             self._options.setEnabled(False)
@@ -262,6 +308,7 @@ class _ShotGridRow(_Row):
         )
 
         self._playlist_check = QCheckBox("Add to review playlist")
+        self._playlist_check.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         if destination.playlist_required:
             self._playlist_check.setChecked(True)
             self._playlist_check.setToolTip(
@@ -273,8 +320,10 @@ class _ShotGridRow(_Row):
         self._search_field.setPlaceholderText("Filter playlists by name (press Enter)")
         self._search_field.returnPressed.connect(self._on_refresh)
         self._playlist_combo = QComboBox()
+        self._playlist_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._playlist_combo.activated.connect(lambda _index: self._remember_picked())
         self._refresh_button = QPushButton("Refresh")
+        self._refresh_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._refresh_button.clicked.connect(self._on_refresh)
         self._description = QLineEdit()
         self._description.setPlaceholderText("Description (optional)")
@@ -313,7 +362,11 @@ class _ShotGridRow(_Row):
         if not self._playlists.settled:
             return "Still loading review playlists — try Confirm again in a moment."
         if self._playlists.error is not None:
-            return f"Could not load review playlists — press Refresh to retry. {self._skip_hint()}"
+            # Why it failed is on the combo, next to the Refresh that retries it.
+            return (
+                "Could not load review playlists — press Refresh to retry. "
+                f"{self._skip_hint()}"
+            )
         if not self._playlists.options:
             if self._playlists.search:
                 return (
@@ -333,8 +386,8 @@ class _ShotGridRow(_Row):
             )
         return "Uncheck 'Add to review playlist' to upload without one."
 
-    def set_delivered(self, detail: str) -> None:
-        super().set_delivered(detail)
+    def set_delivered(self, detail: str, path: Path | None) -> None:
+        super().set_delivered(detail, path)
         self._sync_enabled()
 
     @property
@@ -374,6 +427,7 @@ class _ShotGridRow(_Row):
         if self._search_field.text() != self._playlists.search:
             self._search_field.setText(self._playlists.search)
         self._playlist_combo.clear()
+        self._playlist_combo.setToolTip(self._playlists.error or "")
         if not self._playlists.settled:
             self._playlist_combo.addItem("Loading reviews…", None)
             return
@@ -446,13 +500,15 @@ class ConfirmPanel(QWidget):
     """The Destinations checklist for one clip."""
 
     state_changed = Signal()
+    # Every checked destination landed — the window's cue to move on.
+    delivered = Signal()
 
     _clip: PreviewClip
     _pool: QThreadPool
     _basename: str | None
-    _running: bool
     _job: _ConfirmJob | None
     _rows: list[_Row]
+    _blocked: list[str]
     _error_label: QLabel
     _confirm_button: QPushButton
 
@@ -463,13 +519,15 @@ class ConfirmPanel(QWidget):
         self._clip = clip
         self._pool = pool
         self._basename = None
-        self._running = False
         self._job = None
+        self._blocked = []
         self._error_label = QLabel("")
         self._error_label.setWordWrap(True)
+        self._error_label.setTextFormat(Qt.TextFormat.PlainText)
         self._error_label.setStyleSheet(style.FAIL_STYLE)
         self._error_label.hide()
         self._confirm_button = QPushButton()
+        self._confirm_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._confirm_button.clicked.connect(self.request_confirm)
 
         self._rows = [
@@ -506,17 +564,15 @@ class ConfirmPanel(QWidget):
 
     @property
     def status(self) -> PanelStatus:
-        if not self.is_confirmable:
-            return PanelStatus.VIEW_ONLY
-        if self._running:
-            return PanelStatus.RUNNING
-        if any(row.is_checked and row.state is RowState.FAILED for row in self._rows):
-            return PanelStatus.FAILED
-        if any(row.is_checked and row.state is RowState.IDLE for row in self._rows):
-            return PanelStatus.PENDING
-        if any(row.state is RowState.DELIVERED for row in self._rows):
-            return PanelStatus.CONFIRMED
-        return PanelStatus.PENDING
+        return panel_status(
+            running=self._running,
+            rows=[(row.state, row.is_checked) for row in self._rows],
+        )
+
+    @property
+    def _running(self) -> bool:
+        """A job is in flight — the panel holds it until it reports back."""
+        return self._job is not None
 
     # ------------------------------------------------------------------
     # Confirm
@@ -539,7 +595,8 @@ class ConfirmPanel(QWidget):
             else:
                 blocked.append(error)
 
-        self._show_error("\n".join(blocked))
+        self._blocked = blocked
+        self._report()
         if not runnable:
             return
 
@@ -547,9 +604,6 @@ class ConfirmPanel(QWidget):
         chosen = tuple(row.chosen() for row in runnable)
         for row in runnable:
             row.set_running()
-        self._running = True
-        self._refresh_confirm_button()
-        self.state_changed.emit()
 
         job = _ConfirmJob(
             lambda: confirm_clip(self._clip, chosen, basename=self._basename)
@@ -557,11 +611,12 @@ class ConfirmPanel(QWidget):
         job.signals.finished.connect(self._on_confirm_finished)
         job.signals.failed.connect(self._on_confirm_error)
         self._job = job
+        self._refresh_confirm_button()
+        self.state_changed.emit()
         self._pool.start(job)
 
     def _on_confirm_finished(self, result: ConfirmResult) -> None:
         self._job = None
-        self._running = False
         self._basename = result.basename
         rows_by_id = {row.destination_id: row for row in self._rows}
         for outcome in result.outcomes:
@@ -569,19 +624,23 @@ class ConfirmPanel(QWidget):
             if row is None:
                 continue
             if outcome.ok:
-                row.set_delivered(outcome.detail)
+                row.set_delivered(outcome.detail, outcome.path)
             else:
                 row.set_failed(outcome.detail)
+        self._report(failure_summary(result))
         self._refresh_confirm_button()
         self.state_changed.emit()
+        if self.status is PanelStatus.CONFIRMED:
+            self.delivered.emit()
 
     def _on_confirm_error(self, reason: str) -> None:
+        # `confirm_clip` reports each destination's own failure, so an
+        # exception escaping it means nothing was attempted.
         self._job = None
-        self._running = False
         for row in self._rows:
             if row.state is RowState.RUNNING:
                 row.set_idle()
-        self._show_error(f"Could not confirm: {reason}")
+        self._report(f"Nothing was delivered. {reason}")
         self._refresh_confirm_button()
         self.state_changed.emit()
 
@@ -597,29 +656,55 @@ class ConfirmPanel(QWidget):
         ]
 
     def _on_row_toggled(self) -> None:
+        # A toggle may have answered a blocked reason; the next Confirm
+        # recomputes whichever still hold.
+        self._blocked = []
+        self._report()
         self._refresh_confirm_button()
         self.state_changed.emit()
 
     def _refresh_confirm_button(self) -> None:
         rows = self._rows_to_run()
         if self._running:
-            self._confirm_button.setEnabled(False)
-            self._confirm_button.setText("Confirming…")
-        elif rows:
-            self._confirm_button.setEnabled(True)
-            retrying = all(row.state is RowState.FAILED for row in rows)
-            self._confirm_button.setText("Retry failed" if retrying else "Confirm")
-        else:
-            self._confirm_button.setEnabled(False)
-            delivered = any(row.state is RowState.DELIVERED for row in self._rows)
-            self._confirm_button.setText("Confirmed ✓" if delivered else "Confirm")
-            self._confirm_button.setToolTip(
-                "" if delivered else "Check at least one destination."
+            self._set_confirm_button(
+                "Confirming…", "This clip is being delivered.", enabled=False
             )
+            return
+        if rows:
+            retrying = all(row.state is RowState.FAILED for row in rows)
+            self._set_confirm_button(
+                "Retry failed" if retrying else "Confirm",
+                "Try the destinations that failed again."
+                if retrying
+                else "Deliver this playblast to every checked destination.",
+                enabled=True,
+            )
+            return
+        delivered = any(row.state is RowState.DELIVERED for row in self._rows)
+        self._set_confirm_button(
+            "Confirmed ✓" if delivered else "Confirm",
+            "Every checked destination has been delivered."
+            if delivered
+            else "Check at least one destination first.",
+            enabled=False,
+        )
 
-    def _show_error(self, message: str) -> None:
-        self._error_label.setText(message)
-        self._error_label.setVisible(bool(message))
+    def _set_confirm_button(self, text: str, tooltip: str, *, enabled: bool) -> None:
+        # Set together, so an enabled button cannot keep the tooltip that
+        # explained why it was disabled.
+        self._confirm_button.setText(text)
+        self._confirm_button.setToolTip(tooltip)
+        self._confirm_button.setEnabled(enabled)
+
+    def _report(self, headline: str = "") -> None:
+        """Show `headline` over the reasons rows were blocked, if any.
+
+        `_blocked` outlives the Confirm that set it, so a result reporting on
+        the rows that *did* run cannot erase the rows that could not.
+        """
+        lines = [line for line in (headline, *self._blocked) if line]
+        self._error_label.setText("\n".join(lines))
+        self._error_label.setVisible(bool(lines))
 
     def _apply_remembered_toggles(self) -> None:
         remembered = load_checked_destinations(self._clip.settings_key)
@@ -636,4 +721,4 @@ class ConfirmPanel(QWidget):
         )
 
 
-__all__ = ["ConfirmPanel", "PanelStatus"]
+__all__ = ["ConfirmPanel", "PanelStatus", "RowState", "panel_status"]

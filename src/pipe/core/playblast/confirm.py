@@ -17,6 +17,7 @@ from pipe.core.playblast.clip import (
     ShotGridDestination,
 )
 from pipe.core.playblast.encoding import build_image_input_chain, encode_movie
+from pipe.core.playblast.errors import artist_reason
 from pipe.core.playblast.naming import existing_filenames, next_versioned_basename
 from pipe.core.playblast.presets import FFmpegPreset
 from pipe.core.playblast.review.versions import (
@@ -62,8 +63,8 @@ ChosenDestination = ChosenDisk | ChosenShotGrid | ChosenTake
 
 @attrs.frozen
 class DestinationOutcome:
-    """One delivery result. `detail` is what the artist reads; `path` is set
-    only where the movie landed somewhere it will stay."""
+    """One delivery result. `detail` is the user facing message; `path` is
+    set only where the movie landed somewhere it will stay."""
 
     id: DestinationId
     ok: bool
@@ -75,6 +76,17 @@ class DestinationOutcome:
 class ConfirmResult:
     basename: str
     outcomes: tuple[DestinationOutcome, ...]
+
+
+def failure_summary(result: ConfirmResult) -> str:
+    """How the attempt came out as a whole, or "" when the rows already say it."""
+    total = len(result.outcomes)
+    failed = sum(1 for outcome in result.outcomes if not outcome.ok)
+    if total < 2 or not failed:
+        return ""
+    if failed == total:
+        return f"All {total} destinations failed."
+    return f"{failed} of {total} destinations failed. {total - failed} delivered."
 
 
 def confirm_clip(
@@ -263,13 +275,11 @@ def _encoded_movie(clip: PreviewClip, preset: FFmpegPreset, basename: str) -> Pa
 
 
 def _delivered(destination: Destination, path: Path) -> DestinationOutcome:
-    return DestinationOutcome(id=destination.id, ok=True, detail=str(path), path=path)
+    return DestinationOutcome(id=destination.id, ok=True, detail=path.name, path=path)
 
 
 def _failed(destination: Destination, exc: Exception) -> DestinationOutcome:
-    return DestinationOutcome(
-        id=destination.id, ok=False, detail=str(exc) or exc.__class__.__name__
-    )
+    return DestinationOutcome(id=destination.id, ok=False, detail=artist_reason(exc))
 
 
 __all__ = [
@@ -280,4 +290,5 @@ __all__ = [
     "ConfirmResult",
     "DestinationOutcome",
     "confirm_clip",
+    "failure_summary",
 ]

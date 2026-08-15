@@ -6,6 +6,7 @@ import logging
 
 from Qt.QtCore import QObject, QRunnable, QThreadPool, Signal
 
+from pipe.core.playblast.errors import artist_reason
 from pipe.core.playblast.review.playlists import (
     PlayblastReviewPlaylistOption,
     list_review_playlists,
@@ -40,7 +41,7 @@ class _FetchJob(QRunnable):
             )
         except Exception as exc:
             log.exception("Could not load ShotGrid review playlists")
-            self.signals.failed.emit(str(exc) or exc.__class__.__name__)
+            self.signals.failed.emit(artist_reason(exc))
 
 
 class ReviewPlaylists(QObject):
