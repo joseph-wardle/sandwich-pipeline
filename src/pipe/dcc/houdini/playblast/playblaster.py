@@ -119,8 +119,10 @@ class HPlayblaster(Playblaster):
         ):
             _run_flipbook(scene_viewer, viewport, flip)
 
+    def _frame_rate(self) -> int:
+        return int(round(hou.fps()))
+
     def playblast(self) -> list[PreviewClip]:
-        self.fps = int(round(hou.fps()))
         return [super()._do_playblast(self._shot, tails=self._tails)]
 
 

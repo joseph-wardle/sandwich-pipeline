@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import logging
 import re
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
 from pipe.core.util.paths import get_edit_path
-
-log = logging.getLogger(__name__)
 
 _VERSION_PADDING = 3
 
@@ -39,18 +36,13 @@ def next_versioned_basename(
 
 
 def existing_filenames(directories: Iterable[Path | str]) -> list[str]:
-    """Every filename in the directories that exist and can be listed."""
+    """Every filename in the directories that exist."""
     names: list[str] = []
     for raw_path in directories:
         directory = Path(str(raw_path))
         if not directory.is_dir():
             continue
-        try:
-            names.extend(item.name for item in directory.iterdir() if item.is_file())
-        except OSError:
-            # Versioning past a folder we could not read risks overwriting what
-            # is in it, so say so rather than silently starting over at v001.
-            log.warning("Could not list %s", directory, exc_info=True)
+        names.extend(item.name for item in directory.iterdir() if item.is_file())
     return names
 
 

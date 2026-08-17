@@ -27,7 +27,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast, overload, TypeVar
 
@@ -73,13 +73,10 @@ _E = TypeVar("_E", bound=SGEntity)
 class SG_Config:
     """Credentials and project id needed to open a ShotGrid connection.
 
-    `sg_key` is equivalent to an admin password. Never commit it, never log
-    it, never include it in error messages. In production this is loaded from
-    the gitignored `env_sg.py` synced by the `post-checkout` git hook.
-    """
+    `sg_key` is equivalent to an admin password."""
 
     project_id: int
-    sg_key: str
+    sg_key: str = field(repr=False)
     sg_script: str
     sg_server: str
 
@@ -137,13 +134,7 @@ _SG_FIELDS_VERSION: tuple[str, ...] = (
     "sg_uploaded_movie",
     "description",
 )
-_SG_FIELDS_PLAYLIST: tuple[str, ...] = (
-    "id",
-    "code",
-    "versions",
-    "updated_at",
-    "created_at",
-)
+_SG_FIELDS_PLAYLIST: tuple[str, ...] = ("id", "code")
 
 # The fields the Version/Playlist writes below name. Reads project the
 # `_SG_FIELDS_*` tuples above.

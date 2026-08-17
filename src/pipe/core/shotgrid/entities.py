@@ -498,18 +498,3 @@ class Version(SGEntity):
 @attrs.define(eq=False)
 class Playlist(SGEntity):
     """A ShotGrid Playlist — a named collection of Versions for review."""
-
-    versions: list[Version] | None = field(
-        default=None,
-        kw_only=True,
-        metadata={
-            _SG_NAME: "versions",
-            _STRUCT_HOOK: lambda vv, _: (
-                [Version(id=v["id"], code=v.get("name")) for v in vv]
-                if vv is not None
-                else None
-            ),
-        },
-    )
-    updated_at: Any | None = field(default=None, kw_only=True)
-    created_at: Any | None = field(default=None, kw_only=True)

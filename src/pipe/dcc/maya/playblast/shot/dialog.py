@@ -567,7 +567,6 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         return (self._shot.code or "").strip()
 
     def _clip_destinations(self) -> tuple[Destination, ...]:
-        """Every row the viewer offers, in the order it shows them."""
         return (*self._clip_folders(), self._clip_shotgrid())
 
     def _clip_output_prefix(self) -> str:

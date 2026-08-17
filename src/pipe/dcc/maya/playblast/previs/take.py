@@ -41,8 +41,10 @@ class MTakePlayblaster(Playblaster):
         self._config = config
         return self
 
+    def _frame_rate(self) -> int:
+        return scene_frame_rate()
+
     def playblast(self) -> list[PreviewClip]:
-        self.fps = scene_frame_rate()
         with maintain_selection():
             mc.select(clear=True)
             virtual_shot = dummy_shot(

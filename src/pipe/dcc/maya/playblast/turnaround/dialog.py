@@ -343,7 +343,6 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         return ScratchEntity(self._asset_display_name())
 
     def _clip_destinations(self) -> tuple[Destination, ...]:
-        """Every row the viewer offers, in the order it shows them."""
         return (
             *self._clip_folders(),
             ShotGridDestination(entity=self._review_entity()),

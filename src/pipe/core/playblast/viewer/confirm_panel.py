@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from enum import Enum, auto
 from pathlib import Path
+from typing import assert_never
 
 from Qt.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
 from Qt.QtWidgets import (
@@ -65,21 +66,6 @@ class PanelStatus(Enum):
     RUNNING = auto()
     CONFIRMED = auto()
     FAILED = auto()
-
-
-def panel_status(
-    *, running: bool, rows: Sequence[tuple[RowState, bool]]
-) -> PanelStatus:
-    """A panel's status, from each row's `(state, is_checked)` pair."""
-    if running:
-        return PanelStatus.RUNNING
-    if any(state is RowState.FAILED for state, _ in rows):
-        return PanelStatus.FAILED
-    if any(state is RowState.IDLE and checked for state, checked in rows):
-        return PanelStatus.PENDING
-    if any(state is RowState.DELIVERED for state, _ in rows):
-        return PanelStatus.CONFIRMED
-    return PanelStatus.SKIPPED
 
 
 class _JobSignals(QObject):
@@ -266,6 +252,10 @@ class _FolderRow(_Row):
         row.addWidget(browse)
         self.add_options(row)
 
+    @property
+    def directory(self) -> Path:
+        return self._directory
+
     def chosen(self) -> ChosenDisk:
         return ChosenDisk(destination=self._destination, directory=self._directory)
 
@@ -381,10 +371,6 @@ class _ShotGridRow(_Row):
             )
         return "Uncheck 'Add to review playlist' to upload without one."
 
-    def set_delivered(self, detail: str, path: Path | None) -> None:
-        super().set_delivered(detail, path)
-        self._sync_enabled()
-
     @property
     def _playlist_id(self) -> int | None:
         if not self._playlist_check.isChecked():
@@ -399,16 +385,14 @@ class _ShotGridRow(_Row):
         super()._on_toggled()
 
     def _sync_enabled(self) -> None:
-        active = self.is_checked and self._state is not RowState.DELIVERED
-        self._playlist_check.setEnabled(
-            active and not self._destination.playlist_required
-        )
-        self._description.setEnabled(active)
-        playlist_on = active and self._playlist_check.isChecked()
-        self._search_field.setEnabled(playlist_on)
-        self._playlist_combo.setEnabled(playlist_on)
-        self._refresh_button.setEnabled(playlist_on)
-        if playlist_on:
+        """Keep the playlist controls in step with the checkbox above them.
+        Unchecked and delivered need no handling here."""
+        self._playlist_check.setEnabled(not self._destination.playlist_required)
+        picking = self._playlist_check.isChecked()
+        self._search_field.setEnabled(picking)
+        self._playlist_combo.setEnabled(picking)
+        self._refresh_button.setEnabled(picking)
+        if picking and self.is_checked:
             self._playlists.ensure_loaded()
 
     def _on_refresh(self) -> None:
@@ -486,7 +470,9 @@ def _build_row(destination: Destination, playlists: ReviewPlaylists) -> _Row:
         return _FolderRow(destination)
     if isinstance(destination, ShotGridDestination):
         return _ShotGridRow(destination, playlists)
-    return _SendToEditRow(destination)
+    if isinstance(destination, PrevisTakeDestination):
+        return _SendToEditRow(destination)
+    assert_never(destination)
 
 
 class ConfirmPanel(QWidget):
@@ -557,10 +543,15 @@ class ConfirmPanel(QWidget):
 
     @property
     def status(self) -> PanelStatus:
-        return panel_status(
-            running=self._running,
-            rows=[(row.state, row.is_checked) for row in self._rows],
-        )
+        if self._running:
+            return PanelStatus.RUNNING
+        if any(row.state is RowState.FAILED for row in self._rows):
+            return PanelStatus.FAILED
+        if self._rows_to_run():
+            return PanelStatus.PENDING
+        if any(row.state is RowState.DELIVERED for row in self._rows):
+            return PanelStatus.CONFIRMED
+        return PanelStatus.SKIPPED
 
     @property
     def _running(self) -> bool:
@@ -595,11 +586,14 @@ class ConfirmPanel(QWidget):
 
         self._remember_toggles()
         chosen = tuple(row.chosen() for row in runnable)
+        folders = tuple(
+            row.directory for row in self._rows if isinstance(row, _FolderRow)
+        )
         for row in runnable:
             row.set_running()
 
         job = _ConfirmJob(
-            lambda: confirm_clip(self._clip, chosen, basename=self._basename)
+            lambda: confirm_clip(self._clip, chosen, folders, basename=self._basename)
         )
         job.signals.finished.connect(self._on_confirm_finished)
         job.signals.failed.connect(self._on_confirm_error)
@@ -717,4 +711,4 @@ class ConfirmPanel(QWidget):
         )
 
 
-__all__ = ["ConfirmPanel", "PanelStatus", "RowState", "panel_status"]
+__all__ = ["ConfirmPanel", "PanelStatus"]

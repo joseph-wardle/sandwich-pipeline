@@ -140,8 +140,10 @@ class MPlayblaster(Playblaster):
             frame_start=start_frame,
         )
 
+    def _frame_rate(self) -> int:
+        return scene_frame_rate()
+
     def playblast(self) -> list[PreviewClip]:
-        self.fps = scene_frame_rate()
         with maintain_selection():
             mc.select(clear=True)
 

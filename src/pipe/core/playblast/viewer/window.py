@@ -56,8 +56,7 @@ _STEP_BUTTON = 34
 _STEP_ICON = 16
 _PLAY_ICON = 26
 
-# Clips that still want the artist's attention. RUNNING is deliberately absent:
-# closeEvent blocks on a running delivery rather than offering to discard it.
+# Clips that still have something to deliver.
 _UNCONFIRMED = (PanelStatus.PENDING, PanelStatus.FAILED)
 
 
@@ -173,8 +172,8 @@ class ViewerWindow(QMainWindow):
         sidebar.addWidget(self._clip_list)
         self._confirm_remaining_button = QPushButton("Confirm remaining")
         self._confirm_remaining_button.setToolTip(
-            "Deliver every clip that still has checked destinations, using the "
-            "choices already made on each one."
+            "Deliver every clip that still has work to do — including retrying "
+            "failures — using the choices already made on each one."
         )
         self._confirm_remaining_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._confirm_remaining_button.clicked.connect(self._confirm_remaining)
@@ -472,11 +471,10 @@ class ViewerWindow(QMainWindow):
         confirmable = [panel for panel in self._panels if panel.is_confirmable]
         self._confirm_remaining_button.setVisible(len(confirmable) > 1)
         self._confirm_remaining_button.setEnabled(
-            any(panel.status is PanelStatus.PENDING for panel in confirmable)
+            any(panel.status in _UNCONFIRMED for panel in confirmable)
         )
 
     def _advance_to_next_unconfirmed(self) -> None:
-        """Failed clips count as unconfirmed, so a ✗ is never skipped past."""
         count = len(self._panels)
         for offset in range(1, count):
             candidate = (self._current_index + offset) % count
@@ -491,7 +489,7 @@ class ViewerWindow(QMainWindow):
 
     def _confirm_remaining(self) -> None:
         for panel in self._panels:
-            if panel.status is PanelStatus.PENDING:
+            if panel.status in _UNCONFIRMED:
                 panel.request_confirm()
 
     # ------------------------------------------------------------------

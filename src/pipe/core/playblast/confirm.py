@@ -92,6 +92,7 @@ def failure_summary(result: ConfirmResult) -> str:
 def confirm_clip(
     clip: PreviewClip,
     chosen: tuple[ChosenDestination, ...],
+    folders: tuple[Path, ...],
     *,
     basename: str | None = None,
 ) -> ConfirmResult:
@@ -108,7 +109,13 @@ def confirm_clip(
         basename = basename or take_basename
 
     if basename is None:
-        basename = _next_basename(clip, chosen)
+        basename = next_versioned_basename(
+            clip.output_prefix,
+            [
+                *existing_filenames(folders),
+                *_shotgrid_version_codes(clip.output_prefix, chosen),
+            ],
+        )
 
     for choice in chosen:
         if isinstance(choice, ChosenDisk):
@@ -120,24 +127,6 @@ def confirm_clip(
             outcomes.append(_upload_to_shotgrid(clip, choice, basename, kept))
 
     return ConfirmResult(basename=basename, outcomes=tuple(outcomes))
-
-
-def _next_basename(clip: PreviewClip, chosen: tuple[ChosenDestination, ...]) -> str:
-    """Version past every folder the clip declares, not only the checked ones:
-    unchecking a folder must not rewind the count and overwrite what is in it."""
-    directories = {
-        destination.directory
-        for destination in clip.destinations
-        if isinstance(destination, DiskDestination)
-    } | {choice.directory for choice in chosen if isinstance(choice, ChosenDisk)}
-
-    return next_versioned_basename(
-        clip.output_prefix,
-        [
-            *existing_filenames(directories),
-            *_shotgrid_version_codes(clip.output_prefix, chosen),
-        ],
-    )
 
 
 def _shotgrid_version_codes(
