@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import cast
 
 import maya.cmds as mc
-from pxr import Sdf
 
 from pipe.core.previs import load_manifest
 from pipe.core.shotgrid import SGEntity, Shot, is_previs_shot_code
@@ -16,15 +14,11 @@ from pipe.core.util.filemanager import OpenFileDialog
 from pipe.core.util.paths import get_previs_path
 from pipe.core.versioning import VersionStreamSpec
 
+from pipe.dcc.maya.shotfile import stage
 from pipe.dcc.maya.shotfile.shotfile_manager import MShotFileManager
 
 from . import dialogs, file_ops, playback, state
 from .state import PrevisState
-
-log = logging.getLogger(__name__)
-
-_ROOT_LAYER_FILENAME = "maya_root.usd"
-_ROOT_LAYER_REF = "./" + _ROOT_LAYER_FILENAME
 
 
 class MPrevisFileManager(MShotFileManager):
@@ -114,26 +108,9 @@ class MPrevisFileManager(MShotFileManager):
         return True
 
     def _setup_scene(self) -> None:
-        # Sequence-level environment refs only. Per-shot env overrides remain
-        # the RLO's responsibility, so there's no shot-level edit-target layer here.
-        envs = list(self.shot.sets or [])
-        if not envs and self.shot.set:
-            envs = [self.shot.set]
-
-        stage = self.get_stage()
-        root_layer = stage.GetRootLayer()
-        for env in envs:
-            if env is None:
-                continue
-            env_layer = Sdf.Layer.FindOrOpenRelativeToLayer(
-                root_layer, env.environment_path
-            )
-            if env_layer is None:
-                log.warning("Could not open env layer: %s", env.environment_path)
-                continue
-            if env_layer.identifier not in root_layer.subLayerPaths:  # type: ignore[operator]
-                root_layer.subLayerPaths.append(env_layer.identifier)
-            env_layer.SetPermissionToSave(False)
+        # Sets only. Per-shot env overrides remain the RLO's responsibility, so a
+        # previs sequence has no shot-level override layer to scale or edit into.
+        stage.sublayer_environments(self.shot)
 
     def _setup_file(self, path: Path, entity: SGEntity) -> None:
         mc.file(newFile=True, force=True)
@@ -141,40 +118,22 @@ class MPrevisFileManager(MShotFileManager):
 
         self.shot = cast(Shot, entity)
         code = self.shot.code or ""
-        previs_dir = get_previs_path() / code
 
-        transform = mc.createNode("transform", name="stage_transform")
-        mc.createNode("mayaUsdProxyShape", name="stage", parent=transform)
-        stage_shape = self.get_stage_shape()
-        mc.connectAttr("time1.outTime", f"{stage_shape}.time")
-
-        self._attach_root_layer(previs_dir, stage_shape)
-
-        mc.optionVar(intValue=("mayaUsd_SerializedUsdEditsLocationPrompt", 0))
-        mc.optionVar(intValue=("mayaUsd_SerializedUsdEditsLocation", 2))
-
-        state.write_state(PrevisState.empty())
-        mc.fileInfo("code", code)
-        mc.file(save=True, force=True)
-
-    def _attach_root_layer(self, previs_dir: Path, stage_shape: str) -> None:
-        """Point the stage at the sequence's shared read-only maya_root.usd."""
-        root_layer_path = previs_dir / _ROOT_LAYER_FILENAME
-        is_new_root = not root_layer_path.exists()
-
-        root_layer = Sdf.Layer.FindOrOpen(str(root_layer_path)) or Sdf.Layer.CreateNew(
-            str(root_layer_path)
+        # The sequence's maya_root.usd is shared by every file in it, so it is only
+        # populated by whichever file creates it.
+        root_layer, created = stage.create_stage_proxy(
+            get_previs_path() / code / stage.ROOT_LAYER,
+            file_path_ref="./" + stage.ROOT_LAYER,
         )
-        if is_new_root:
-            # Land the empty root on disk so the proxy can compose it below.
-            root_layer.Save()
-
-        mc.setAttr(f"{stage_shape}.filePath", _ROOT_LAYER_REF, type="string")
-
-        if is_new_root:
+        if created:
             self._setup_scene()
             root_layer.Save()
         root_layer.SetPermissionToSave(False)
+
+        stage.serialize_usd_edits_into_scene()
+        state.write_state(PrevisState.empty())
+        mc.fileInfo("code", code)
+        mc.file(save=True, force=True)
 
     @classmethod
     def run_on_open(cls) -> None:

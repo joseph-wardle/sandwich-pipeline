@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import maya.cmds as mc
-from pxr import Usd, UsdGeom
+from pxr import Sdf, Usd, UsdGeom
 
 from pipe.dcc.maya.rig.utils import get_rig_filepath_from_asset
 from pipe.core.shot import maya_anim_stream, shot_owner_for
@@ -11,6 +11,7 @@ from pipe.core.shotgrid import SGEntity, Shot, is_previs_shot_code
 from pipe.core.versioning import VersionStreamSpec, path_matches_stream
 
 from .shotfile_manager import MShotFileManager
+from .stage import add_sublayer, get_stage, get_stage_shape, setup_environment
 
 log = logging.getLogger(__name__)
 
@@ -66,11 +67,11 @@ class MAnimShotFileManager(MShotFileManager):
         finally:
             camera_prim = next(
                 prim
-                for prim in cls.get_stage().Traverse(Usd.PrimIsDefined)
+                for prim in get_stage().Traverse(Usd.PrimIsDefined)
                 if cast(Any, prim).IsA(UsdGeom.Camera) and prim.GetName() == CAM_NAME
             )
             mc.mayaUsdEditAsMaya(  # type: ignore
-                cls.get_stage_shape() + "," + str(camera_prim.GetPrimPath())
+                get_stage_shape() + "," + str(camera_prim.GetPrimPath())
             )
             cam_path = _find_usd_shotcam()
             if cam_path:
@@ -95,7 +96,8 @@ class MAnimShotFileManager(MShotFileManager):
         return [e for e in entities if not is_previs_shot_code(e.code)]
 
     def _setup_scene(self) -> None:
-        self._import_camera()
+        # Sublayer order is strength order, and the shot camera outranks the set.
+        self._sublayer_camera()
 
         # Import Rigs. ``self.shot.assets`` carries partial Assets (id + code
         # only); accessing ``asset.is_rigged`` lazy-fetches the full record.
@@ -111,7 +113,17 @@ class MAnimShotFileManager(MShotFileManager):
                     f"Couldn't find the rig file for {asset.display_name} even though it's tagged as rigged"
                 )
 
-        self._import_env()
+        setup_environment(self.shot)
+
+    def _sublayer_camera(self) -> None:
+        root_layer = get_stage().GetRootLayer()
+        cam_layer = Sdf.Layer.FindOrOpenRelativeToLayer(
+            root_layer, "/".join((self.shot.shot_path, "cam", "cam.usd"))
+        )
+        if not cam_layer:
+            mc.warning("No exported camera found")
+            return
+        add_sublayer(root_layer, cam_layer)
 
     def _setup_file(self, path: Path, entity) -> None:
         mc.file(newFile=True, force=True)
