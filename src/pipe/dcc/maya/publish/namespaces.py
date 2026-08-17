@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, cast
 
+import attrs
 import maya.cmds as mc
 from pxr import Sdf
 
@@ -14,26 +15,48 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+@attrs.define(frozen=True)
+class UnpublishableReason:
+    """Why a rig cannot be published.
+
+    `summary` sits beside a rig's name in a table, so keep it about as short as a
+    commit subject; `detail` is the sentence a dialog or tooltip shows.
+    """
+
+    summary: str
+    detail: str
+
+
 def namespace_of(node: str) -> str:
     """The Maya namespace of a node name or DAG path, without a trailing colon."""
     return node.split("|")[-1].rpartition(":")[0]
 
 
-def unpublishable_reason(node: str) -> str | None:
+def unpublishable_reason(node: str) -> UnpublishableReason | None:
     """Why the animation export cannot publish this rig, or None if it can."""
     namespace = namespace_of(node)
     if Sdf.Path.IsValidIdentifier(namespace):
         return None
     if not namespace:
-        return "Imported into the scene instead of referenced"
+        return UnpublishableReason(
+            "imported, not referenced",
+            "Imported into the scene instead of referenced",
+        )
     if ":" in namespace:
         container = _containing_reference(node)
-        inside = f"'{container}'" if container else "another reference"
-        return f"Referenced inside {inside} rather than directly into the shot"
+        return UnpublishableReason(
+            f"inside {container}" if container else "inside another reference",
+            "Referenced inside {} rather than directly into the shot".format(
+                f"'{container}'" if container else "another reference"
+            ),
+        )
     # Maya rewrites or rejects namespaces that aren't valid identifiers, so
     # nothing should land here. A rig must not reach the export just because we
     # ran out of explanations for it.
-    return f"Namespace '{namespace}' is not a name USD can use"
+    return UnpublishableReason(
+        "unusable namespace",
+        f"Namespace '{namespace}' is not a name USD can use",
+    )
 
 
 def partition_publishable(nodes: list[str]) -> tuple[list[str], dict[str, list[str]]]:
@@ -49,7 +72,7 @@ def partition_publishable(nodes: list[str]) -> tuple[list[str], dict[str, list[s
         if reason is None:
             publishable.append(node)
         else:
-            skipped.setdefault(reason, []).append(namespace_of(node) or node)
+            skipped.setdefault(reason.detail, []).append(namespace_of(node) or node)
     return publishable, skipped
 
 
@@ -103,11 +126,11 @@ def confirm_rig_publishable(parent: QWidget | None, rig_root: str) -> bool:
     if reason is None:
         return True
 
-    log.warning("Cannot publish '%s': %s", rig_root, reason)
+    log.warning("Cannot publish '%s': %s", rig_root, reason.detail)
     MessageDialog(
         parent,
         f"'{rig_root.split('|')[-1]}' cannot be published.\n\n"
-        f"{reason}.\n\n"
+        f"{reason.detail}.\n\n"
         "Reference the rig directly into the shot and publish it again. "
         "Nothing was exported.",
         "Cannot Publish Rig",

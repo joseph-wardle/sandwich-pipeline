@@ -12,6 +12,13 @@ from pxr import Sdf, Usd
 
 from pipe.core.asset import paths_for_asset
 
+from ..prim_paths import (
+    ANIM_CLASS_PATH,
+    RIG_GEO_PATH,
+    RIG_ROOT_PATH,
+    RIG_SCOPE_PATH,
+    SHOT_CAM_PATH,
+)
 from .utils import (
     flatten_camera,
     make_topo_attrs_default,
@@ -38,16 +45,6 @@ from pipe.core.struct.timeline import Timeline
 from pipe.core.util import log_errors
 
 log = logging.getLogger(__name__)
-
-ANIM_CLASS_PATH = Sdf.Path("/__class__/anim")
-RIG_SCOPE_PATH = Sdf.Path("/rig")
-RIG_ROOT_PATH = Sdf.Path("/rig")
-RIG_GEO_PATH = Sdf.Path("/rig/geo")
-
-# Shot files locate the published camera by this prim name — see
-# `MAnimShotFileManager.run_on_open`. The `/cameras` scope is the prim Solaris
-# references the publish into and scales cm-to-m — see `SKD Import Camera`.
-SHOT_CAM_PATH = Sdf.Path("/cameras/shotCam")
 
 
 class ExportChaserMode(IntEnum):
