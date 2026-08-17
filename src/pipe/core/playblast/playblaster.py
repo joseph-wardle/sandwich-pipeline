@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import re
 from abc import ABCMeta, abstractmethod
 from pathlib import Path
@@ -15,8 +14,6 @@ from pipe.core.playblast.tempdir import create_preview_dir
 if TYPE_CHECKING:
     from pipe.core.shotgrid import Shot
 
-
-log = logging.getLogger(__name__)
 
 DEFAULT_RESOLUTION: tuple[int, int] = (1280, 720)
 
@@ -33,8 +30,11 @@ class PlayblastError(Exception):
 class Playblaster(metaclass=ABCMeta):
     """Cross-DCC playblast base."""
 
-    fps: int = 24
     resolution: tuple[int, int] = DEFAULT_RESOLUTION
+
+    @abstractmethod
+    def _frame_rate(self) -> int:
+        """The host scene's frame rate."""
 
     @abstractmethod
     def _write_images(self, shot: Shot, path: str) -> None:
@@ -58,6 +58,7 @@ class Playblaster(metaclass=ABCMeta):
         cut_in, cut_out = shot.frame_range
         frame_start = cut_in - tails[0]
         frame_end = cut_out + tails[1]
+        fps = self._frame_rate()
         hud_content = self._hud_content(shot, frame_start)
 
         with telemetry.record(
@@ -65,7 +66,7 @@ class Playblaster(metaclass=ABCMeta):
             payload={
                 "frame_start": frame_start,
                 "frame_end": frame_end,
-                "fps": max(1, int(self.fps)),
+                "fps": max(1, fps),
                 "preset": "frames",
                 "output_count": 0,
             },
@@ -86,7 +87,7 @@ class Playblaster(metaclass=ABCMeta):
             frames_basename=frames_basename,
             frame_start=frame_start,
             frame_end=frame_end,
-            fps=self.fps,
+            fps=fps,
         )
 
     @abstractmethod

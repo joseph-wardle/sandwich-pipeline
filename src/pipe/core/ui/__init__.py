@@ -5,6 +5,7 @@ from .dialogs import (
     FilteredListDialog,
     MessageDialog,
     MessageDialogCustomButtons,
+    set_tab_available,
 )
 from .progress import ProgressDialog, ProgressScope, progress_scope
 from .restore_conflict_dialog import (
@@ -14,9 +15,14 @@ from .restore_conflict_dialog import (
     prompt_restore_conflict,
 )
 from .save_version_dialog import SaveVersionDialog
+from .style import FAIL, FAIL_STYLE, OK, OK_STYLE
 from .version_browser import VersionBrowserWidget
 
 __all__ = [
+    "FAIL",
+    "FAIL_STYLE",
+    "OK",
+    "OK_STYLE",
     "RESTORE_CANCEL",
     "RESTORE_DISCARD",
     "RESTORE_SAVE_FIRST",
@@ -32,4 +38,5 @@ __all__ = [
     "VersionBrowserWidget",
     "progress_scope",
     "prompt_restore_conflict",
+    "set_tab_available",
 ]

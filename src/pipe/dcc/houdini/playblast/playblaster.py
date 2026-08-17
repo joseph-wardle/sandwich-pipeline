@@ -61,10 +61,6 @@ class HPlayblaster(Playblaster):
     def __init__(self) -> None:
         self._camera_path = None
         self._tails = (0, 0)
-        try:
-            self.fps = int(round(hou.fps()))
-        except Exception:
-            pass
 
     def configure(
         self,
@@ -122,6 +118,9 @@ class HPlayblaster(Playblaster):
             _clean_viewport(scene_viewer, viewport),
         ):
             _run_flipbook(scene_viewer, viewport, flip)
+
+    def _frame_rate(self) -> int:
+        return int(round(hou.fps()))
 
     def playblast(self) -> list[PreviewClip]:
         return [super()._do_playblast(self._shot, tails=self._tails)]

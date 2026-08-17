@@ -11,16 +11,21 @@ import hou
 from Qt import QtCore, QtWidgets
 
 from pipe.core.playblast import (
+    CURRENT_FOLDER_ID,
+    CUSTOM_FOLDER_ID,
+    EDIT_FOLDER_ID,
     Destination,
+    DiskDestination,
     FFmpegPreset,
     PreviewClip,
-    ShotGridUpload,
+    ReviewEntity,
+    ShotGridDestination,
+    shot_or_scratch,
 )
 from pipe.core.playblast.naming import build_edit_output_directory
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.shotgrid import ShotGridError
-from pipe.core.ui import DialogButtons
-from pipe.core.util.users import resolve_artist_display_name
+from pipe.core.ui import FAIL_STYLE, DialogButtons, set_tab_available
 
 if TYPE_CHECKING:
     from pipe.core.shotgrid import Shot, ShotGrid
@@ -32,6 +37,9 @@ SOURCE_MODE = Literal["shot", "custom"]
 
 # fx is the only department whose playblasts feed editorial.
 EDIT_DEPARTMENT = "fx"
+
+_SHOT_TAB_TIP = "Uses this file's shot camera and the ShotGrid cut range."
+_NO_SHOT_CONTEXT_TIP = "This .hip file is not in a shot. Use Custom Playblast instead."
 
 
 class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
@@ -76,8 +84,15 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         self._update_ui_state()
 
     @property
+    def shot(self) -> Shot | None:
+        """The shot resolved at construction, or None for a non-shot file."""
+        return self._shot
+
+    @property
     def shot_code(self) -> str:
-        return self._shot_code_value.text().strip()
+        if self._shot is None:
+            return ""
+        return (self._shot.code or "").strip()
 
     @property
     def selected_source_mode(self) -> SOURCE_MODE:
@@ -143,7 +158,7 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         source_layout.addWidget(self._source_tabs)
 
         self._validation_label = QtWidgets.QLabel()
-        self._validation_label.setStyleSheet("color: #b00020;")
+        self._validation_label.setStyleSheet(FAIL_STYLE)
         self._validation_label.setVisible(False)
         source_layout.addWidget(self._validation_label)
 
@@ -155,10 +170,6 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         source_tabs.addTab(self._build_custom_source_tab(), "Custom Playblast")
 
         tab_bar = source_tabs.tabBar()
-        tab_bar.setTabToolTip(
-            self.SHOT_TAB_INDEX,
-            "Uses detected shot context and ShotGrid cut range for this file.",
-        )
         tab_bar.setTabToolTip(
             self.CUSTOM_TAB_INDEX,
             "Uses manual camera and frame range for non-shot testing or exploratory output.",
@@ -264,7 +275,13 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
 
     def _set_default_source_tab(self) -> None:
         has_shot_context = self._shot is not None
-        self._source_tabs.setTabEnabled(self.SHOT_TAB_INDEX, has_shot_context)
+        set_tab_available(
+            self._source_tabs,
+            self.SHOT_TAB_INDEX,
+            available=has_shot_context,
+            tooltip=_SHOT_TAB_TIP,
+            reason=_NO_SHOT_CONTEXT_TIP,
+        )
         default_index = (
             self.SHOT_TAB_INDEX if has_shot_context else self.CUSTOM_TAB_INDEX
         )
@@ -332,23 +349,31 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
             output_prefix=self._clip_output_prefix(),
             settings_key=self.SETTINGS_KEY,
             destinations=self._clip_destinations(),
-            shotgrid=self._clip_shotgrid(),
         )
 
     def _clip_destinations(self) -> tuple[Destination, ...]:
         return (
-            Destination(
+            *self._clip_folders(),
+            ShotGridDestination(entity=self._review_entity()),
+        )
+
+    def _clip_folders(self) -> tuple[DiskDestination, ...]:
+        return (
+            DiskDestination(
+                id=EDIT_FOLDER_ID,
                 name="Send to Edit",
                 directory=build_edit_output_directory(EDIT_DEPARTMENT),
                 preset=FFmpegPreset.EDIT_SQ,
             ),
-            Destination(
+            DiskDestination(
+                id=CURRENT_FOLDER_ID,
                 name="Current Folder",
                 directory=self._current_scene_directory(),
                 preset=FFmpegPreset.WEB,
                 default_on=False,
             ),
-            Destination(
+            DiskDestination(
+                id=CUSTOM_FOLDER_ID,
                 name="Custom Folder",
                 directory=resolve_playblast_tempdir(),
                 preset=FFmpegPreset.WEB,
@@ -357,18 +382,10 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
             ),
         )
 
-    def _clip_shotgrid(self) -> ShotGridUpload | None:
-        """The clip's ShotGrid row. Only shot-mode playblasts have an entity."""
-        if self.selected_source_mode != "shot":
-            return None
-        code = self.shot_code
-        if not code or code == "-":
-            return None
-        return ShotGridUpload(
-            entity_kind="shot",
-            entity_value=code,
-            artist_display_name=resolve_artist_display_name().strip() or None,
-        )
+    def _review_entity(self) -> ReviewEntity:
+        """What this playblast's ShotGrid Version attaches to."""
+        code = self.shot_code if self.selected_source_mode == "shot" else ""
+        return shot_or_scratch(code, self.custom_shot_code)
 
     def _clip_output_prefix(self) -> str:
         if self.selected_source_mode == "shot":

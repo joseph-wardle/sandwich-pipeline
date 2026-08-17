@@ -8,38 +8,37 @@ from pathlib import Path
 
 from Qt.QtCore import QSettings
 
+from pipe.core.playblast.clip import DestinationId
+
 _SETTINGS_ORG = "sandwich-pipeline"
 _SETTINGS_APP = "playblast"
 _LAST_CUSTOM_FOLDER_KEY = "last_custom_folder"
-_CHECKED_KEY_PREFIX = "confirm_checked"
+_CHECKED_KEY_PREFIX = "confirm_checked_v3"
 
 
 def _settings() -> QSettings:
     return QSettings(_SETTINGS_ORG, _SETTINGS_APP)
 
 
-def load_checked_destinations(settings_key: str) -> frozenset[str] | None:
-    """Return the destination names checked on this tool's last Confirm, or
-    None if nothing is remembered (callers fall back to the spec's
-    `default_on` flags)."""
+def load_checked_destinations(settings_key: str) -> frozenset[DestinationId] | None:
+    """Return the destinations checked on this tool's last Confirm, or None if
+    nothing is remembered."""
     if not settings_key:
         return None
     raw = str(_settings().value(f"{_CHECKED_KEY_PREFIX}/{settings_key}", "") or "")
     if not raw:
         return None
     try:
-        return frozenset(str(name) for name in json.loads(raw))
+        return frozenset(DestinationId(str(item)) for item in json.loads(raw))
     except (ValueError, TypeError):
         return None
 
 
-def save_checked_destinations(settings_key: str, names: Iterable[str]) -> None:
+def save_checked_destinations(settings_key: str, ids: Iterable[DestinationId]) -> None:
     if not settings_key:
         return
     settings = _settings()
-    settings.setValue(
-        f"{_CHECKED_KEY_PREFIX}/{settings_key}", json.dumps(sorted(names))
-    )
+    settings.setValue(f"{_CHECKED_KEY_PREFIX}/{settings_key}", json.dumps(sorted(ids)))
     settings.sync()
 
 

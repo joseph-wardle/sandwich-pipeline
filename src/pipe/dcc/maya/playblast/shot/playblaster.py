@@ -20,6 +20,7 @@ from pipe.core.playblast import Playblaster, PreviewClip
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.maya.playblast.shot.config import MPlayblastConfig, MShotPlayblastConfig
 from pipe.dcc.maya.util.selection import maintain_selection
+from pipe.dcc.maya.util.time import scene_frame_rate
 
 if TYPE_CHECKING:
     from typing import Any
@@ -58,6 +59,9 @@ class MPlayblaster(Playblaster):
 
     def _write_images(self, shot: Shot, path: str) -> None:
         cut_in, cut_out = shot.frame_range
+        head, tail = (
+            self._current_shot_config.tails if self._current_shot_config else (0, 0)
+        )
         active_editor = self._resolve_active_editor()
         if active_editor:
             self._extra_kwargs["viewport_options"].update(
@@ -94,8 +98,8 @@ class MPlayblaster(Playblaster):
             width=width,
             height=height,
             filename=path,
-            start_frame=(cut_in - 5),
-            end_frame=(cut_out + 5),
+            start_frame=(cut_in - head),
+            end_frame=(cut_out + tail),
             format="image",
             compression="png",
             off_screen=True,
@@ -136,6 +140,9 @@ class MPlayblaster(Playblaster):
             frame_start=start_frame,
         )
 
+    def _frame_rate(self) -> int:
+        return scene_frame_rate()
+
     def playblast(self) -> list[PreviewClip]:
         with maintain_selection():
             mc.select(clear=True)
@@ -165,10 +172,7 @@ class MPlayblaster(Playblaster):
             clips: list[PreviewClip] = []
             for shot_config in self._config.shots:
                 self._extra_kwargs = copy.deepcopy(global_kwargs)
-                if shot_config.use_sequencer:
-                    self._extra_kwargs["use_camera_sequencer"] = True
-                else:
-                    self._extra_kwargs["camera"] = shot_config.camera
+                self._extra_kwargs["camera"] = shot_config.camera
 
                 # Stashed so `_hud_content` can read per-shot inputs when the
                 # base calls it back up the stack.
@@ -187,7 +191,7 @@ class MPlayblaster(Playblaster):
 def _camera_focal_lines(
     shot_config: MShotPlayblastConfig | None, start_frame: int, end_frame: int
 ) -> list[str | TimedText]:
-    if shot_config is None or not shot_config.camera or shot_config.use_sequencer:
+    if shot_config is None or not shot_config.camera:
         return []
     camera_path = str(shot_config.camera)
     lines: list[str | TimedText] = [

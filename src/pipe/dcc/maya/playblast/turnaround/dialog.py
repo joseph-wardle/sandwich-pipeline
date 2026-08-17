@@ -20,17 +20,21 @@ from Qt.QtWidgets import (
 )
 
 from pipe.core.playblast import (
+    CUSTOM_FOLDER_ID,
+    RENDER_FOLDER_ID,
+    AssetEntity,
     Destination,
+    DiskDestination,
     FFmpegPreset,
-    Playblaster,
     PreviewClip,
-    ShotGridUpload,
+    ReviewEntity,
+    ScratchEntity,
+    ShotGridDestination,
 )
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.playblast.viewer import open_viewer
 from pipe.core.shotgrid import normalize_display_name
-from pipe.core.ui import ButtonPair, MessageDialog
-from pipe.core.util.users import resolve_artist_display_name
+from pipe.core.ui import FAIL_STYLE, ButtonPair, MessageDialog
 from pipe.dcc.maya.assetfile import AssetMetadata, read_asset_metadata
 from pipe.dcc.maya.playblast.turnaround.config import (
     DEFAULT_FRAMES_PER_PASS,
@@ -41,6 +45,7 @@ from pipe.dcc.maya.playblast.turnaround.config import (
 )
 from pipe.dcc.maya.playblast.turnaround.playblaster import MTurnaroundPlayblaster
 from pipe.dcc.maya.runtime import get_main_qt_window
+from pipe.dcc.maya.util.time import scene_frame_rate
 
 log = logging.getLogger(__name__)
 
@@ -164,6 +169,10 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
 
     def _build_passes_section(self) -> None:
         passes_group = QGroupBox("Passes")
+        passes_group.setToolTip(
+            f"Each checked pass is one {DEFAULT_FRAMES_PER_PASS}-frame revolution, "
+            "appended to the same turnaround clip."
+        )
         passes_layout = QGridLayout(passes_group)
 
         passes_layout.addWidget(QLabel("Elevation"), 0, 0)
@@ -187,7 +196,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
 
     def _build_validation_label(self) -> None:
         self._validation_label = QLabel()
-        self._validation_label.setStyleSheet("color: #b00020;")
+        self._validation_label.setStyleSheet(FAIL_STYLE)
         self._validation_label.setVisible(False)
         self._main_layout.addWidget(self._validation_label)
 
@@ -221,22 +230,23 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
             )
             return None
 
-    def _asset_display_name(self) -> str:
-        if self._asset_metadata and self._asset_metadata.asset:
-            return self._asset_metadata.asset.display_name
-        if self._asset_metadata and self._asset_metadata.display_name:
-            return self._asset_metadata.display_name
-        scene_path = _scene_path()
-        if scene_path is not None:
-            return scene_path.stem
-        return "turnaround"
-
-    def _shotgrid_asset_display_name(self) -> str | None:
+    def _pipeline_display_name(self) -> str | None:
+        """The resolved pipeline asset's display name, if this scene has one."""
         if self._asset_metadata and self._asset_metadata.asset:
             return self._asset_metadata.asset.display_name
         if self._asset_metadata and self._asset_metadata.display_name:
             return self._asset_metadata.display_name
         return None
+
+    def _asset_display_name(self) -> str:
+        """What the artist and the HUD call this turnaround's subject."""
+        pipeline_name = self._pipeline_display_name()
+        if pipeline_name:
+            return pipeline_name
+        scene_path = _scene_path()
+        if scene_path is not None:
+            return scene_path.stem
+        return "turnaround"
 
     def _asset_filename_token(self) -> str:
         if self._asset_metadata and self._asset_metadata.asset:
@@ -261,7 +271,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         pass_count = len(self._selected_passes())
         if not pass_count:
             return "No passes selected"
-        seconds = pass_count * DEFAULT_FRAMES_PER_PASS / Playblaster.fps
+        seconds = pass_count * DEFAULT_FRAMES_PER_PASS / scene_frame_rate()
         noun = "pass" if pass_count == 1 else "passes"
         return f"{pass_count} {noun} · ~{seconds:.0f}s"
 
@@ -299,19 +309,21 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
     # Routing for the viewer's Confirm panel
     # ------------------------------------------------------------------
 
-    def _clip_destinations(self) -> tuple[Destination, ...]:
-        rows: list[Destination] = []
+    def _clip_folders(self) -> tuple[DiskDestination, ...]:
+        rows: list[DiskDestination] = []
         scene_path = _scene_path()
         if scene_path is not None:
             rows.append(
-                Destination(
+                DiskDestination(
+                    id=RENDER_FOLDER_ID,
                     name="Render Folder",
                     directory=scene_path.parent / "render",
                     preset=FFmpegPreset.WEB,
                 )
             )
         rows.append(
-            Destination(
+            DiskDestination(
+                id=CUSTOM_FOLDER_ID,
                 name="Custom Folder",
                 directory=resolve_playblast_tempdir(),
                 preset=FFmpegPreset.WEB,
@@ -323,17 +335,17 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         )
         return tuple(rows)
 
-    def _clip_shotgrid(self) -> ShotGridUpload | None:
-        """The clip's ShotGrid row: the Asset its Version attaches to.
-        Without resolvable asset metadata there is nothing to attach to,
-        so the viewer offers no ShotGrid row."""
-        display_name = self._shotgrid_asset_display_name()
-        if not display_name:
-            return None
-        return ShotGridUpload(
-            entity_kind="asset",
-            entity_value=display_name,
-            artist_display_name=resolve_artist_display_name().strip() or None,
+    def _review_entity(self) -> ReviewEntity:
+        """What this turnaround's ShotGrid Version attaches to."""
+        pipeline_name = self._pipeline_display_name()
+        if pipeline_name:
+            return AssetEntity(pipeline_name)
+        return ScratchEntity(self._asset_display_name())
+
+    def _clip_destinations(self) -> tuple[Destination, ...]:
+        return (
+            *self._clip_folders(),
+            ShotGridDestination(entity=self._review_entity()),
         )
 
     def _routed_clip(self, clip: PreviewClip) -> PreviewClip:
@@ -342,7 +354,6 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
             output_prefix=f"{self._asset_filename_token()}_turnaround",
             settings_key=self.SETTINGS_KEY,
             destinations=self._clip_destinations(),
-            shotgrid=self._clip_shotgrid(),
         )
 
     # ------------------------------------------------------------------
@@ -353,6 +364,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
         return TurnaroundPlayblastConfig(
             asset_label=self._asset_display_name(),
             review_roots=self._review_roots.roots,
+            frame_rate=scene_frame_rate(),
             hud_asset_details=self.HUD_ASSET_DETAILS,
             passes=self._selected_passes(),
         )

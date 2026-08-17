@@ -39,7 +39,7 @@ def launch_playblast() -> None:
         return
 
     try:
-        shot = _resolve_source_shot(conn, dialog)
+        shot = _resolve_source_shot(dialog)
     except Exception as exc:
         log.exception("Playblast config generation failed")
         MessageDialog(
@@ -80,7 +80,7 @@ def _resolve_connection_or_report(parent: QtWidgets.QWidget | None) -> ShotGrid 
         return None
 
 
-def _resolve_source_shot(conn: ShotGrid, dialog: HPlayblastDialog) -> Shot:
+def _resolve_source_shot(dialog: HPlayblastDialog) -> Shot:
     if dialog.selected_source_mode == "custom":
         cut_in, cut_out = dialog.custom_frame_range
         if cut_out < cut_in:
@@ -97,14 +97,13 @@ def _resolve_source_shot(conn: ShotGrid, dialog: HPlayblastDialog) -> Shot:
             sets=[],
         )
 
-    shot_code = dialog.shot_code
-    if not shot_code:
-        raise ValueError("No shot code was found for Shot Playblast.")
-    try:
-        return conn.get_shot(code=shot_code)
-    except Exception as exc:
-        log.error("Shot lookup failed for %s: %s", shot_code, exc, exc_info=True)
-        raise ValueError(f"Shot '{shot_code}' not found in ShotGrid.") from exc
+    shot = dialog.shot
+    if shot is None:
+        raise ValueError(
+            "No shot context was found for Shot Playblast. Switch to Custom "
+            "Playblast or open a pipeline shot scene."
+        )
+    return shot
 
 
 def _resolve_shot_code() -> str | None:

@@ -9,8 +9,8 @@ from Qt.QtGui import QColor, QPainter, QPalette, QPixmap
 from Qt.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from pipe.core.playblast.clip import PreviewClip
-from pipe.core.playblast.viewer import style
 from pipe.core.playblast.viewer.confirm_panel import PanelStatus
+from pipe.core.ui import FAIL, OK
 
 # Filmstrip thumbnail width; row height follows from the clip aspect ratio.
 THUMB_W = 80
@@ -22,6 +22,7 @@ THUMB_ROLE = cast(Qt.ItemDataRole, int(Qt.ItemDataRole.UserRole))
 STATUS_ROLE = cast(Qt.ItemDataRole, int(Qt.ItemDataRole.UserRole) + 1)
 
 _STATUS_TEXT: dict[PanelStatus, str] = {
+    PanelStatus.SKIPPED: "Skipped",
     PanelStatus.PENDING: "Pending",
     PanelStatus.RUNNING: "Running…",
     PanelStatus.CONFIRMED: "Confirmed",
@@ -32,9 +33,9 @@ _STATUS_TEXT: dict[PanelStatus, str] = {
 def _status_color(status: object, palette: QPalette) -> QColor:
     """Confirmed/failed carry semantic colors."""
     if status is PanelStatus.CONFIRMED:
-        return QColor(style.OK)
+        return QColor(OK)
     if status is PanelStatus.FAILED:
-        return QColor(style.FAIL)
+        return QColor(FAIL)
     if status is PanelStatus.RUNNING:
         return palette.highlight().color()
     return palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text)

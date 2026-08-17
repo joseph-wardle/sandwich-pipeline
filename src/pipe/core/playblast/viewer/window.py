@@ -17,6 +17,7 @@ from Qt.QtGui import (
     QFontDatabase,
     QIcon,
     QImageReader,
+    QKeyEvent,
     QKeySequence,
     QPalette,
     QPixmap,
@@ -26,6 +27,7 @@ from Qt.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -43,6 +45,7 @@ from pipe.core.playblast.clip import PreviewClip
 from pipe.core.playblast.playblaster import DEFAULT_RESOLUTION
 from pipe.core.playblast.viewer import filmstrip, icons, style
 from pipe.core.playblast.viewer.confirm_panel import ConfirmPanel, PanelStatus
+from pipe.core.playblast.viewer.playlists import ReviewPlaylists
 from pipe.core.playblast.viewer.scrub import TimelineSlider
 
 _SIDEBAR_WIDTH = 200
@@ -53,8 +56,7 @@ _STEP_BUTTON = 34
 _STEP_ICON = 16
 _PLAY_ICON = 26
 
-# RUNNING is deliberately absent: closeEvent blocks outright on a running
-# delivery rather than offering to discard it.
+# Clips that still have something to deliver.
 _UNCONFIRMED = (PanelStatus.PENDING, PanelStatus.FAILED)
 
 
@@ -89,6 +91,7 @@ class ViewerWindow(QMainWindow):
     _start_label: QLabel
     _end_label: QLabel
     _confirm_pool: QThreadPool
+    _playlists: ReviewPlaylists
     _panels: list[ConfirmPanel]
     _panel_stack: QStackedWidget
     _confirm_remaining_button: QPushButton
@@ -125,9 +128,9 @@ class ViewerWindow(QMainWindow):
         # host application's.
         self._confirm_pool = QThreadPool(self)
         self._confirm_pool.setMaxThreadCount(1)
+        self._playlists = ReviewPlaylists(self)
 
         self._build_ui()
-        self._build_shortcuts()
         self._size_to_video()
 
         self._load_clip(0)
@@ -147,6 +150,7 @@ class ViewerWindow(QMainWindow):
         self._clip_list.setFixedWidth(_SIDEBAR_WIDTH)
         self._clip_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._clip_list.setMouseTracking(True)  # so rows repaint on hover
+        self._clip_list.setToolTip("Up and Down move between clips.")
         width, height = self._resolution
         thumb_w = filmstrip.THUMB_W
         thumb_h = round(thumb_w * height / width) if width else thumb_w
@@ -157,7 +161,7 @@ class ViewerWindow(QMainWindow):
             item.setData(filmstrip.THUMB_ROLE, filmstrip.thumbnail(clip, thumb_size))
             item.setData(filmstrip.STATUS_ROLE, PanelStatus.PENDING)
             self._clip_list.addItem(item)
-        self._clip_list.currentRowChanged.connect(self._on_clip_selected)
+        self._clip_list.currentRowChanged.connect(self._go_to_clip)
 
         header = QLabel("Clips")
         header.setStyleSheet("font-weight: 600; padding: 0 2px;")
@@ -167,6 +171,11 @@ class ViewerWindow(QMainWindow):
         sidebar.addWidget(header)
         sidebar.addWidget(self._clip_list)
         self._confirm_remaining_button = QPushButton("Confirm remaining")
+        self._confirm_remaining_button.setToolTip(
+            "Deliver every clip that still has work to do — including retrying "
+            "failures — using the choices already made on each one."
+        )
+        self._confirm_remaining_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._confirm_remaining_button.clicked.connect(self._confirm_remaining)
         sidebar.addWidget(self._confirm_remaining_button)
         sidebar_widget = QWidget()
@@ -177,6 +186,11 @@ class ViewerWindow(QMainWindow):
         self._canvas = QLabel()
         self._canvas.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._canvas.setStyleSheet("background-color: black;")
+        # The video holds focus, so the transport keys work the moment the
+        # window opens and clicking the video takes them back from a text
+        # field. Left to itself Qt would focus the first field instead.
+        self._canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._canvas.setFocus()
         # Ignored: the layout owns the label's size — otherwise each painted
         # pixmap would raise the minimum size and block shrinking the window.
         self._canvas.setSizePolicy(
@@ -192,14 +206,22 @@ class ViewerWindow(QMainWindow):
         self._build_confirm_panels()
         layout.addWidget(self._panel_stack)
 
+        # Confirm is a shortcut rather than a keyPressEvent branch: a focused
+        # QLineEdit ignores Return, so the window would confirm *and* the field
+        # would fire its own returnPressed. A shortcut runs before either.
+        # Key_Enter is the keypad's, and needs its own sequence to match.
+        for sequence in ("Ctrl+Return", "Ctrl+Enter"):
+            QShortcut(QKeySequence(sequence), self, self._confirm_current)
+
     def _build_confirm_panels(self) -> None:
         self._panels = []
         self._panel_stack = QStackedWidget()
         self._panel_stack.setFixedWidth(_CONFIRM_PANEL_WIDTH)
         for index, clip in enumerate(self._clips):
-            panel = ConfirmPanel(clip, self._confirm_pool)
-            panel.state_changed.connect(
-                lambda clip_index=index: self._on_confirm_state_changed(clip_index)
+            panel = ConfirmPanel(clip, self._confirm_pool, self._playlists)
+            panel.state_changed.connect(self._refresh_sidebar)
+            panel.delivered.connect(
+                lambda clip_index=index: self._on_clip_delivered(clip_index)
             )
             self._panels.append(panel)
             self._panel_stack.addWidget(panel)
@@ -213,6 +235,7 @@ class ViewerWindow(QMainWindow):
         transport.setSpacing(style.GAP)
 
         self._scrub = TimelineSlider()
+        self._scrub.setToolTip("Home and End jump to the first and last frame.")
         self._scrub.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._scrub.sliderMoved.connect(self._on_scrub_moved)
         self._scrub.sliderPressed.connect(self._on_scrub_pressed)
@@ -249,7 +272,7 @@ class ViewerWindow(QMainWindow):
             self._transport_button(
                 icons.step_back(icon_color, _STEP_ICON),
                 "Step one frame back (Left)",
-                lambda: self._step_frames(-1),
+                lambda: self._go_to_frame(self._frame - 1),
             )
         )
         self._play_button = self._transport_button(
@@ -263,7 +286,7 @@ class ViewerWindow(QMainWindow):
             self._transport_button(
                 icons.step_forward(icon_color, _STEP_ICON),
                 "Step one frame forward (Right)",
-                lambda: self._step_frames(1),
+                lambda: self._go_to_frame(self._frame + 1),
             )
         )
 
@@ -297,22 +320,12 @@ class ViewerWindow(QMainWindow):
             button.setAutoRaise(True)
             button.setIconSize(QSize(_STEP_ICON, _STEP_ICON))
             button.setFixedSize(_STEP_BUTTON, _STEP_BUTTON)
-        # NoFocus keeps Space as the global play/pause shortcut instead of
-        # "press the focused button".
+        # Clicking a focusable button would leave focus on it, and the next
+        # Space would press it again instead of playing.
         button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         button.setToolTip(tooltip)
         button.clicked.connect(on_click)
         return button
-
-    def _build_shortcuts(self) -> None:
-        # int() because the stubs' QKeySequence overloads take an int, not a Key.
-        QShortcut(QKeySequence(int(Qt.Key.Key_Space)), self, self._toggle_playback)
-        QShortcut(
-            QKeySequence(int(Qt.Key.Key_Left)), self, lambda: self._step_frames(-1)
-        )
-        QShortcut(
-            QKeySequence(int(Qt.Key.Key_Right)), self, lambda: self._step_frames(1)
-        )
 
     def _size_to_video(self) -> None:
         width, height = self._resolution
@@ -412,9 +425,17 @@ class ViewerWindow(QMainWindow):
             self._show_frame(self._clip().frame_end)
             self._pause()
 
-    def _step_frames(self, delta: int) -> None:
+    def _go_to_frame(self, frame: int) -> None:
+        # Pause first: playback would drag the frame back within one tick.
+        # `_show_frame` clamps, so the clip's own ends are the limits.
         self._pause()
-        self._show_frame(self._frame + delta)
+        self._show_frame(frame)
+
+    def _go_to_clip(self, index: int) -> None:
+        """Also the clip list's selection handler. Out-of-range does nothing —
+        wrapping would make the two arrows indistinguishable on the last clip."""
+        if 0 <= index < len(self._clips) and index != self._current_index:
+            self._load_clip(index)
 
     # ------------------------------------------------------------------
     # Scrubbing
@@ -439,11 +460,9 @@ class ViewerWindow(QMainWindow):
     def _has_confirmables(self) -> bool:
         return any(panel.is_confirmable for panel in self._panels)
 
-    def _on_confirm_state_changed(self, index: int) -> None:
-        self._refresh_sidebar()
-        panel = self._panels[index]
-        if panel.status is PanelStatus.CONFIRMED and index == self._current_index:
-            self._advance_to_next_pending()
+    def _on_clip_delivered(self, index: int) -> None:
+        if index == self._current_index:
+            self._advance_to_next_unconfirmed()
 
     def _refresh_sidebar(self) -> None:
         for index, panel in enumerate(self._panels):
@@ -452,29 +471,30 @@ class ViewerWindow(QMainWindow):
         confirmable = [panel for panel in self._panels if panel.is_confirmable]
         self._confirm_remaining_button.setVisible(len(confirmable) > 1)
         self._confirm_remaining_button.setEnabled(
-            any(panel.status is PanelStatus.PENDING for panel in confirmable)
+            any(panel.status in _UNCONFIRMED for panel in confirmable)
         )
 
-    def _advance_to_next_pending(self) -> None:
+    def _advance_to_next_unconfirmed(self) -> None:
         count = len(self._panels)
         for offset in range(1, count):
             candidate = (self._current_index + offset) % count
-            if self._panels[candidate].status is PanelStatus.PENDING:
+            if self._panels[candidate].status in _UNCONFIRMED:
                 self._load_clip(candidate)
                 return
 
+    def _confirm_current(self) -> None:
+        """The keyboard's route to Confirm — the button never takes focus.
+        Inert on a panel with nothing to deliver, exactly as the button is."""
+        self._panels[self._current_index].request_confirm()
+
     def _confirm_remaining(self) -> None:
         for panel in self._panels:
-            if panel.status is PanelStatus.PENDING:
+            if panel.status in _UNCONFIRMED:
                 panel.request_confirm()
 
     # ------------------------------------------------------------------
     # Window events and failure reporting
     # ------------------------------------------------------------------
-
-    def _on_clip_selected(self, row: int) -> None:
-        if 0 <= row < len(self._clips) and row != self._current_index:
-            self._load_clip(row)
 
     def _set_play_icon(self, *, playing: bool) -> None:
         self._play_button.setIcon(self._pause_icon if playing else self._play_icon)
@@ -494,6 +514,37 @@ class ViewerWindow(QMainWindow):
             "The preview's temp files may have been cleaned up — close the "
             "viewer and playblast again.",
         )
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """Transport and clip navigation."""
+        if isinstance(self.focusWidget(), QLineEdit):
+            super().keyPressEvent(event)
+            return
+        # Keypad arrows carry KeypadModifier and mean the same thing; any other
+        # modifier makes the chord somebody else's.
+        if event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier:
+            super().keyPressEvent(event)
+            return
+        clip = self._clip()
+        key = event.key()
+        if key == Qt.Key.Key_Space:
+            # Held down, Space would strobe at the key-repeat rate.
+            if not event.isAutoRepeat():
+                self._toggle_playback()
+        elif key == Qt.Key.Key_Left:
+            self._go_to_frame(self._frame - 1)
+        elif key == Qt.Key.Key_Right:
+            self._go_to_frame(self._frame + 1)
+        elif key == Qt.Key.Key_Home:
+            self._go_to_frame(clip.frame_start)
+        elif key == Qt.Key.Key_End:
+            self._go_to_frame(clip.frame_end)
+        elif key == Qt.Key.Key_Up:
+            self._go_to_clip(self._current_index - 1)
+        elif key == Qt.Key.Key_Down:
+            self._go_to_clip(self._current_index + 1)
+        else:
+            super().keyPressEvent(event)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)

@@ -1,52 +1,40 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+import attrs
 
-from pipe.core.shotgrid import ShotGrid
+from pipe.core.playblast.review._connection import default_db_connection
 
 
-@dataclass(frozen=True)
+@attrs.frozen
 class PlayblastReviewPlaylistOption:
-    """Normalized review playlist option for UI selection lists."""
+    """One review playlist as the viewer's playlist picker needs it."""
 
     playlist_id: int
     code: str
-    updated_at: Any | None = None
-    created_at: Any | None = None
 
     @property
     def display_name(self) -> str:
-        code = self.code.strip()
-        if code:
-            return code
-        return f"Playlist {self.playlist_id}"
+        return self.code.strip() or f"Playlist {self.playlist_id}"
 
 
-def list_recent_review_playlists(
-    *,
-    conn: ShotGrid | None = None,
-    limit: int = 10,
+def list_review_playlists(
+    *, search: str = "", limit: int = 10
 ) -> tuple[PlayblastReviewPlaylistOption, ...]:
-    """Return recent review playlists as UI-friendly options."""
-    if conn is None:
-        from pipe.core.playblast.review._connection import default_db_connection
+    """Return up to `limit` playlists, most recently updated first, restricted to
+    those whose code contains `search`.
 
-        connection = default_db_connection()
-    else:
-        connection = conn
+    Every ShotGrid Playlist is a review list — there is no review-only subtype to
+    filter on — so `search` is the only way past the `limit` most recent ones.
+    """
     return tuple(
-        PlayblastReviewPlaylistOption(
-            playlist_id=playlist.id,
-            code=(playlist.code or "").strip(),
-            updated_at=playlist.updated_at,
-            created_at=playlist.created_at,
+        PlayblastReviewPlaylistOption(playlist_id=playlist.id, code=playlist.code or "")
+        for playlist in default_db_connection().find_playlists(
+            code_contains=search.strip() or None, limit=limit
         )
-        for playlist in connection.find_recent_playlists(limit=limit)
     )
 
 
 __all__ = [
     "PlayblastReviewPlaylistOption",
-    "list_recent_review_playlists",
+    "list_review_playlists",
 ]

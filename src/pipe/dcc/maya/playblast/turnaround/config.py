@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Iterable
 
 import maya.cmds as mc
-
-from pipe.core.playblast import Playblaster
-
-log = logging.getLogger(__name__)
 
 DEFAULT_WIDTH = 1920
 DEFAULT_HEIGHT = 1080
@@ -73,12 +68,12 @@ class TurnaroundPlayblastConfig:
 
     asset_label: str
     review_roots: tuple[str, ...]
+    frame_rate: int
     hud_asset_details: bool = True
     passes: tuple[TurnaroundPass, ...] = DEFAULT_PASSES
     width: int = DEFAULT_WIDTH
     height: int = DEFAULT_HEIGHT
     frames_per_pass: int = DEFAULT_FRAMES_PER_PASS
-    frame_rate: int = Playblaster.fps
     focal_length: float = DEFAULT_FOCAL_LENGTH
     camera_padding: float = DEFAULT_CAMERA_PADDING
 

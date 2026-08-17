@@ -24,11 +24,17 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.core.playblast import Destination, PreviewClip, ShotGridUpload
+from pipe.core.playblast import (
+    Destination,
+    DiskDestination,
+    PreviewClip,
+    ReviewEntity,
+    ShotGridDestination,
+    shot_or_scratch,
+)
 from pipe.core.playblast.viewer import open_viewer
 from pipe.core.shotgrid import ShotGrid, ShotGridError
-from pipe.core.ui import ButtonPair, MessageDialog
-from pipe.core.util.users import resolve_artist_display_name
+from pipe.core.ui import FAIL_STYLE, ButtonPair, MessageDialog, set_tab_available
 from pipe.dcc.maya.playblast.shot.config import (
     MPlayblastConfig,
     MShotPlayblastConfig,
@@ -44,6 +50,11 @@ log = logging.getLogger(__name__)
 
 _MODE_SHOT = "shot"
 _MODE_CUSTOM = "custom"
+
+_SHOT_TAB_TIP = "Uses this scene's shot code, camera, and frame range."
+_NO_SHOT_CONTEXT_TIP = (
+    "This scene has no shot code. Open a shot file, or use Custom Playblast."
+)
 
 
 class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
@@ -120,10 +131,6 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         self._source_tabs = QTabWidget()
         self._source_tabs.addTab(self._build_shot_source_tab(), "Shot Playblast")
         source_tab_bar = self._source_tabs.tabBar()
-        source_tab_bar.setTabToolTip(
-            self.SHOT_TAB_INDEX,
-            "Uses shot code metadata from this Maya scene and resolved shot camera/range.",
-        )
 
         self._add_custom_tabs(self._source_tabs)
 
@@ -142,7 +149,7 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             source_layout.addWidget(extra_options)
 
         self._validation_label = QLabel()
-        self._validation_label.setStyleSheet("color: #b00020;")
+        self._validation_label.setStyleSheet(FAIL_STYLE)
         self._validation_label.setVisible(False)
         source_layout.addWidget(self._validation_label)
 
@@ -233,9 +240,9 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             "Render viewport shadows in playblast.",
         )
         self._use_ssao = self._build_option_checkbox(
-            "Use Anti-aliasing",
+            "Use Ambient Occlusion",
             self._query_ssao(),
-            "Enable viewport anti-aliasing (SSAO/multi-sample setting).",
+            "Shade viewport contact areas with screen-space ambient occlusion.",
         )
         self._use_hardware_fog = self._build_option_checkbox(
             "Use Hardware Fog",
@@ -287,7 +294,13 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
 
     def _refresh_source_tab_availability(self) -> None:
         has_shot_context = self._shot is not None
-        self._source_tabs.setTabEnabled(self.SHOT_TAB_INDEX, has_shot_context)
+        set_tab_available(
+            self._source_tabs,
+            self.SHOT_TAB_INDEX,
+            available=has_shot_context,
+            tooltip=_SHOT_TAB_TIP,
+            reason=_NO_SHOT_CONTEXT_TIP,
+        )
         if self._selected_source_mode() == _MODE_SHOT and not has_shot_context:
             self._source_tabs.setCurrentIndex(self._default_source_tab_index())
 
@@ -529,7 +542,6 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
                 cut_out=custom_out,
                 cut_duration=max(0, custom_out - custom_in),
             ),
-            use_sequencer=False,
         )
 
     # ------------------------------------------------------------------
@@ -537,22 +549,25 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def _clip_destinations(self) -> tuple[Destination, ...]:
+    def _clip_folders(self) -> tuple[DiskDestination, ...]:
         """Folder rows the viewer's Confirm panel offers for this tool."""
         raise NotImplementedError
 
-    def _clip_shotgrid(self) -> ShotGridUpload | None:
-        """The clip's ShotGrid row. Only shot-mode playblasts have an entity."""
+    def _clip_shotgrid(self) -> ShotGridDestination:
+        return ShotGridDestination(entity=self._review_entity())
+
+    def _review_entity(self) -> ReviewEntity:
+        """What this playblast's ShotGrid Version attaches to."""
+        return shot_or_scratch(self._review_shot_code(), self._scene_stem())
+
+    def _review_shot_code(self) -> str:
+        """The pipeline shot this playblast reviews, or "" for a scratch scene."""
         if self._selected_source_mode() != _MODE_SHOT or self._shot is None:
-            return None
-        code = (self._shot.code or "").strip()
-        if not code:
-            return None
-        return ShotGridUpload(
-            entity_kind="shot",
-            entity_value=code,
-            artist_display_name=resolve_artist_display_name().strip() or None,
-        )
+            return ""
+        return (self._shot.code or "").strip()
+
+    def _clip_destinations(self) -> tuple[Destination, ...]:
+        return (*self._clip_folders(), self._clip_shotgrid())
 
     def _clip_output_prefix(self) -> str:
         """Basename prefix Confirm versions filenames from (`<prefix>_<date>.v###`)."""
@@ -571,7 +586,6 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             output_prefix=self._clip_output_prefix(),
             settings_key=self._clip_settings_key(),
             destinations=self._clip_destinations(),
-            shotgrid=self._clip_shotgrid(),
         )
 
     # ------------------------------------------------------------------

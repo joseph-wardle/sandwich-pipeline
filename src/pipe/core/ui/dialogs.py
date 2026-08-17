@@ -16,6 +16,19 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def set_tab_available(
+    tabs: QtWidgets.QTabWidget,
+    index: int,
+    *,
+    available: bool,
+    tooltip: str,
+    reason: str,
+) -> None:
+    """Enable or disable a tab, and say why in its tooltip when it is disabled."""
+    tabs.setTabEnabled(index, available)
+    tabs.tabBar().setTabToolTip(index, tooltip if available else reason)
+
+
 class ButtonPair:
     buttons: QtWidgets.QDialogButtonBox
 

@@ -8,14 +8,21 @@ from pathlib import Path
 
 import attrs
 
+from pipe.core.playblast.clip import (
+    Destination,
+    DestinationId,
+    DiskDestination,
+    PreviewClip,
+    PrevisTakeDestination,
+    ShotGridDestination,
+)
 from pipe.core.playblast.encoding import build_image_input_chain, encode_movie
-from pipe.core.playblast.naming import next_versioned_basename
+from pipe.core.playblast.errors import artist_reason
+from pipe.core.playblast.naming import existing_filenames, next_versioned_basename
 from pipe.core.playblast.presets import FFmpegPreset
-from pipe.core.playblast.clip import Destination, PreviewClip, PrevisStamp
 from pipe.core.playblast.review.versions import (
-    PlayblastEntity,
     PlayblastVersionUploadRequest,
-    UploadTarget,
+    find_playblast_version_codes,
     upload_playblast_version,
 )
 from pipe.core.previs import (
@@ -26,34 +33,43 @@ from pipe.core.previs import (
     utcnow_iso,
 )
 from pipe.core.previs.model import Take
+from pipe.core.util.users import resolve_artist_display_name
 
 log = logging.getLogger(__name__)
 
-SHOTGRID_DESTINATION_NAME = "ShotGrid"
-SEND_TO_EDIT_DESTINATION_NAME = "Send to Edit"
 
-_TAKE_PRESET = FFmpegPreset.EDIT_SQ
+@attrs.frozen
+class ChosenDisk:
+    destination: DiskDestination
+    # Browsable rows let the artist repoint the folder, so this can differ from
+    # the directory the DCC declared.
+    directory: Path
 
 
 @attrs.frozen
-class ConfirmChoices:
-    """What the artist checked in the Confirm panel for one clip."""
-
-    destinations: tuple[Destination, ...]
-    upload_to_shotgrid: bool = False
-    review_playlist_id: int | None = None
+class ChosenShotGrid:
+    destination: ShotGridDestination
+    playlist_id: int | None = None
     description: str | None = None
-    send_to_edit: bool = False
+
+
+@attrs.frozen
+class ChosenTake:
+    destination: PrevisTakeDestination
+
+
+ChosenDestination = ChosenDisk | ChosenShotGrid | ChosenTake
 
 
 @attrs.frozen
 class DestinationOutcome:
-    """One delivery result: `detail` is the final path (or upload message)
-    on success, the artist-facing reason on failure."""
+    """One delivery result. `detail` is the user facing message; `path` is
+    set only where the movie landed somewhere it will stay."""
 
-    name: str
+    id: DestinationId
     ok: bool
     detail: str
+    path: Path | None = None
 
 
 @attrs.frozen
@@ -61,14 +77,22 @@ class ConfirmResult:
     basename: str
     outcomes: tuple[DestinationOutcome, ...]
 
-    @property
-    def failed(self) -> tuple[DestinationOutcome, ...]:
-        return tuple(outcome for outcome in self.outcomes if not outcome.ok)
+
+def failure_summary(result: ConfirmResult) -> str:
+    """How the attempt came out as a whole, or "" when the rows already say it."""
+    total = len(result.outcomes)
+    failed = sum(1 for outcome in result.outcomes if not outcome.ok)
+    if total < 2 or not failed:
+        return ""
+    if failed == total:
+        return f"All {total} destinations failed."
+    return f"{failed} of {total} destinations failed. {total - failed} delivered."
 
 
 def confirm_clip(
     clip: PreviewClip,
-    choices: ConfirmChoices,
+    chosen: tuple[ChosenDestination, ...],
+    folders: tuple[Path, ...],
     *,
     basename: str | None = None,
 ) -> ConfirmResult:
@@ -76,9 +100,9 @@ def confirm_clip(
 
     outcomes: list[DestinationOutcome] = []
 
-    take_stamp = clip.previs_stamp if choices.send_to_edit else None
-    if take_stamp is not None:
-        take_outcome, take_basename = _deliver_take(clip, take_stamp)
+    take = next((choice for choice in chosen if isinstance(choice, ChosenTake)), None)
+    if take is not None:
+        take_outcome, take_basename = _deliver_take(clip, take.destination)
         outcomes.append(take_outcome)
         # A take that failed before it could allocate a version yields no
         # basename; the folders then version themselves as usual below.
@@ -87,63 +111,70 @@ def confirm_clip(
     if basename is None:
         basename = next_versioned_basename(
             clip.output_prefix,
-            [destination.directory for destination in choices.destinations],
+            [
+                *existing_filenames(folders),
+                *_shotgrid_version_codes(clip.output_prefix, chosen),
+            ],
         )
 
-    outcomes += [
-        _deliver_to_folder(clip, destination, basename)
-        for destination in choices.destinations
-    ]
-    if choices.upload_to_shotgrid:
-        outcomes.append(_upload_to_shotgrid(clip, choices, basename))
+    for choice in chosen:
+        if isinstance(choice, ChosenDisk):
+            outcomes.append(_deliver_to_folder(clip, choice, basename))
+
+    kept = next((outcome.path for outcome in outcomes if outcome.path), None)
+    for choice in chosen:
+        if isinstance(choice, ChosenShotGrid):
+            outcomes.append(_upload_to_shotgrid(clip, choice, basename, kept))
+
     return ConfirmResult(basename=basename, outcomes=tuple(outcomes))
 
 
+def _shotgrid_version_codes(
+    prefix: str, chosen: tuple[ChosenDestination, ...]
+) -> tuple[str, ...]:
+    """Queried only when ShotGrid is checked. Unlike a folder, a Version code
+    that repeats overwrites nothing, so an unchecked row is not worth a round
+    trip on the Confirm thread."""
+    if not any(isinstance(choice, ChosenShotGrid) for choice in chosen):
+        return ()
+    try:
+        return find_playblast_version_codes(prefix)
+    except Exception:
+        # Losing the delivery to a failed read is worse than a repeated code.
+        log.exception("Could not read existing ShotGrid Version codes for %s", prefix)
+        return ()
+
+
 def _deliver_take(
-    clip: PreviewClip, stamp: PrevisStamp
+    clip: PreviewClip, destination: PrevisTakeDestination
 ) -> tuple[DestinationOutcome, str | None]:
-    """Deliver the immutable previs take: encode, copy into the sequence's
-    playblasts dir, and stamp the manifest."""
+    """Returns the outcome and the version basename the take allocated."""
+    stamp = destination.stamp
     try:
         version = load_manifest(
             stamp.sequence_code, previs_root=stamp.previs_root
         ).next_take_version(stamp.shot_code)
     except Exception as exc:
         log.exception("Could not allocate a take version for %s", stamp.shot_code)
-        return (
-            DestinationOutcome(
-                SEND_TO_EDIT_DESTINATION_NAME, ok=False, detail=_reason(exc)
-            ),
-            None,
-        )
+        return _failed(destination, exc), None
 
     basename = naming.take_filename(stamp.shot_code, version).removesuffix(
         naming.TAKE_SUFFIX
     )
     directory = playblasts_dir(stamp.sequence_code, previs_root=stamp.previs_root)
     try:
-        final_path = _encode_and_copy(clip, directory, _TAKE_PRESET, basename)
-        _stamp_take(stamp, version)
+        final_path = _encode_and_copy(clip, directory, destination.preset, basename)
+        _stamp_take(destination, version)
     except Exception as exc:
         log.exception(
             "Send to Edit failed for take v%s of %s", version, stamp.shot_code
         )
-        return (
-            DestinationOutcome(
-                SEND_TO_EDIT_DESTINATION_NAME, ok=False, detail=_reason(exc)
-            ),
-            basename,
-        )
-    return (
-        DestinationOutcome(
-            SEND_TO_EDIT_DESTINATION_NAME, ok=True, detail=str(final_path)
-        ),
-        basename,
-    )
+        return _failed(destination, exc), basename
+    return _delivered(destination, final_path), basename
 
 
-def _stamp_take(stamp: PrevisStamp, version: int) -> None:
-    """Append the take to its shot and point the shot's current take at it."""
+def _stamp_take(destination: PrevisTakeDestination, version: int) -> None:
+    stamp = destination.stamp
     take = Take(
         version=version,
         source_filename=stamp.source_filename,
@@ -159,23 +190,22 @@ def _stamp_take(stamp: PrevisStamp, version: int) -> None:
 
 
 def _deliver_to_folder(
-    clip: PreviewClip, destination: Destination, basename: str
+    clip: PreviewClip, chosen: ChosenDisk, basename: str
 ) -> DestinationOutcome:
+    destination = chosen.destination
     try:
         final_path = _encode_and_copy(
-            clip, destination.directory, destination.preset, basename
+            clip, chosen.directory, destination.preset, basename
         )
     except Exception as exc:
         log.exception("Confirm delivery to '%s' failed", destination.name)
-        return DestinationOutcome(destination.name, ok=False, detail=_reason(exc))
-    return DestinationOutcome(destination.name, ok=True, detail=str(final_path))
+        return _failed(destination, exc)
+    return _delivered(destination, final_path)
 
 
 def _encode_and_copy(
     clip: PreviewClip, directory: Path, preset: FFmpegPreset, basename: str
 ) -> Path:
-    """Encode the clip to `preset` and copy it into `directory`, returning the
-    delivered path. Shared by folder deliveries and the previs take."""
     movie = _encoded_movie(clip, preset, basename)
     directory.mkdir(mode=0o770, parents=True, exist_ok=True)
     final_path = directory / movie.name
@@ -184,58 +214,42 @@ def _encode_and_copy(
 
 
 def _upload_to_shotgrid(
-    clip: PreviewClip, choices: ConfirmChoices, basename: str
+    clip: PreviewClip,
+    chosen: ChosenShotGrid,
+    basename: str,
+    disk_path: Path | None,
 ) -> DestinationOutcome:
-    shotgrid = clip.shotgrid
-    if shotgrid is None:
-        return DestinationOutcome(
-            SHOTGRID_DESTINATION_NAME,
-            ok=False,
-            detail="This preview has no ShotGrid entity to upload to.",
-        )
-
+    destination = chosen.destination
     try:
-        # ShotGrid transcodes whatever it receives, so the upload always
-        # uses the WEB encode — shared with any checked WEB folder row.
-        movie = _encoded_movie(clip, FFmpegPreset.WEB, basename)
         result = upload_playblast_version(
             PlayblastVersionUploadRequest(
-                entity=PlayblastEntity(
-                    kind=shotgrid.entity_kind, value=shotgrid.entity_value
-                ),
-                movie_path=movie,
+                entity=destination.entity,
+                movie_path=_encoded_movie(clip, destination.preset, basename),
                 version_name=basename,
-                description=choices.description,
-                artist_display_name=shotgrid.artist_display_name,
-                upload_target=(
-                    UploadTarget.REVIEW
-                    if choices.review_playlist_id is not None
-                    else UploadTarget.VERSION_ONLY
-                ),
-                review_playlist_id=choices.review_playlist_id,
+                description=chosen.description,
+                artist_display_name=resolve_artist_display_name().strip() or None,
+                review_playlist_id=chosen.playlist_id,
+                disk_path=disk_path,
             )
         )
     except Exception as exc:
-        log.exception(
-            "ShotGrid upload failed for %s '%s'",
-            shotgrid.entity_kind,
-            shotgrid.entity_value,
-        )
-        return DestinationOutcome(
-            SHOTGRID_DESTINATION_NAME, ok=False, detail=_reason(exc)
-        )
+        log.exception("ShotGrid upload failed for %s", destination.entity.description)
+        return _failed(destination, exc)
 
-    detail = " ".join([result.message, *result.warnings])
-    return DestinationOutcome(SHOTGRID_DESTINATION_NAME, ok=result.ok, detail=detail)
+    return DestinationOutcome(
+        id=destination.id,
+        ok=result.ok,
+        detail=" ".join([result.message, *result.warnings]),
+    )
 
 
 def _encoded_movie(clip: PreviewClip, preset: FFmpegPreset, basename: str) -> Path:
-    """Encode the clip's frames to `preset`, returning the movie in the
-    clip's tempdir. A retry (or a second destination sharing the preset)
-    reuses the movie already encoded for this basename."""
-    movie = clip.frames_dir / f"{basename}.{preset.ext}"
+    """Encode once per (preset, basename)"""
+    directory = clip.frames_dir / preset.name.lower()
+    movie = directory / f"{basename}.{preset.ext}"
     if movie.exists():
         return movie
+    directory.mkdir(parents=True, exist_ok=True)
     return encode_movie(
         build_image_input_chain(
             str(clip.frames_dir / clip.frames_basename) + ".%04d.png",
@@ -249,15 +263,21 @@ def _encoded_movie(clip: PreviewClip, preset: FFmpegPreset, basename: str) -> Pa
     )
 
 
-def _reason(exc: Exception) -> str:
-    return str(exc) or exc.__class__.__name__
+def _delivered(destination: Destination, path: Path) -> DestinationOutcome:
+    return DestinationOutcome(id=destination.id, ok=True, detail=path.name, path=path)
+
+
+def _failed(destination: Destination, exc: Exception) -> DestinationOutcome:
+    return DestinationOutcome(id=destination.id, ok=False, detail=artist_reason(exc))
 
 
 __all__ = [
-    "SEND_TO_EDIT_DESTINATION_NAME",
-    "SHOTGRID_DESTINATION_NAME",
-    "ConfirmChoices",
+    "ChosenDestination",
+    "ChosenDisk",
+    "ChosenShotGrid",
+    "ChosenTake",
     "ConfirmResult",
     "DestinationOutcome",
     "confirm_clip",
+    "failure_summary",
 ]
