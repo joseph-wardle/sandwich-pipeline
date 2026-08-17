@@ -76,33 +76,32 @@ def partition_publishable(nodes: list[str]) -> tuple[list[str], dict[str, list[s
     return publishable, skipped
 
 
+def confirm_any_publishable(parent: QWidget | None, nodes: list[str]) -> bool:
+    """Whether any rig here can be published. Explains it when none can."""
+    publishable, skipped = partition_publishable(nodes)
+    if publishable:
+        return True
+    _warn_nothing_publishable(parent, len(nodes), _describe_skipped(skipped))
+    return False
+
+
 def confirm_publishable(parent: QWidget | None, nodes: list[str]) -> list[str]:
     """The nodes to publish, or an empty list meaning stop."""
     publishable, skipped = partition_publishable(nodes)
     if not skipped:
         return publishable
 
-    details = "\n\n".join(
-        "{}:\n{}".format(reason, "\n".join(f"    {name}" for name in names))
-        for reason, names in skipped.items()
-    )
+    details = _describe_skipped(skipped)
+    if not publishable:
+        _warn_nothing_publishable(parent, len(nodes), details)
+        return []
+
     log.warning(
         "Skipping %d of %d rigs:\n%s",
         len(nodes) - len(publishable),
         len(nodes),
         details,
     )
-
-    if not publishable:
-        MessageDialog(
-            parent,
-            f"None of the {len(nodes)} rigs in this scene can be published:\n\n"
-            f"{details}\n\n"
-            "Reference character rigs directly into the shot to publish them. "
-            "Nothing was exported.",
-            "Cannot Publish Animation",
-        ).exec_()
-        return []
 
     keep_going = MessageDialogCustomButtons(
         parent,
@@ -136,6 +135,30 @@ def confirm_rig_publishable(parent: QWidget | None, rig_root: str) -> bool:
         "Cannot Publish Rig",
     ).exec_()
     return False
+
+
+def _describe_skipped(skipped: dict[str, list[str]]) -> str:
+    return "\n\n".join(
+        "{}:\n{}".format(reason, "\n".join(f"    {name}" for name in names))
+        for reason, names in skipped.items()
+    )
+
+
+def _warn_nothing_publishable(parent: QWidget | None, total: int, details: str) -> None:
+    headline = (
+        "The only rig in this scene cannot be published"
+        if total == 1
+        else f"None of the {total} rigs in this scene can be published"
+    )
+    log.warning("%s:\n%s", headline, details)
+    MessageDialog(
+        parent,
+        f"{headline}:\n\n"
+        f"{details}\n\n"
+        "Reference character rigs directly into the shot to publish them. "
+        "Nothing was exported.",
+        "Cannot Publish Animation",
+    ).exec_()
 
 
 def _containing_reference(node: str) -> str | None:
