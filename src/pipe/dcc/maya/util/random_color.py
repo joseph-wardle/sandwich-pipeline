@@ -1,4 +1,4 @@
-"""Blender-style per-material ID colors for the modeling viewport: a reversible toggle that answers "which faces share a material?" at a glance."""
+"""Flat per-material ID colors for the modeling viewport: a reversible toggle that answers "which faces share a material?" at a glance."""
 
 from __future__ import annotations
 
@@ -30,19 +30,24 @@ RESERVED_SHADING_ENGINES = frozenset({"initialShadingGroup", "initialParticleSE"
 
 
 # --- palette ---------------------------------------------------------------
-#
-# Colors are chosen when the mode is switched on, by greedy farthest-point
-# selection (Glasbey et al. 2007, "Colour Displays for Categorical Images")
+
 GRID_STEPS = 16
 GRID_TOP = 2.0
 
+# Widening this scores better by the metric below and looks worse: a near-black
+# material reads as shadow, a blown-out one as a specular hit.
 MIN_LIGHTNESS, MAX_LIGHTNESS = 0.40, 0.82
-MIN_CHROMA = 0.03
 
+# Separation every color keeps under simulated dichromacy. Costs nothing in
+# normal vision and roughly triples the worst-case gap for a colorblind artist.
 CVD_FLOOR = 0.030
 
-DEFAULT_SHADER_COLOR = (0.4, 0.4, 0.4)
+# What unassigned geometry looks like, and so what every ID color is kept away
+# from: `initialShadingGroup` is driven by `openPBR_shader1`, whose baseColor is
+# this grey at full baseWeight.
+UNASSIGNED_GREY = (0.4, 0.4, 0.4)
 
+# Deuteranopia and protanopia at full severity (Machado, Oliveira & Fernandes 2009).
 DICHROMAT_MATRICES = (
     (
         (0.367322, 0.860646, -0.227968),
@@ -64,8 +69,7 @@ def _transform(matrix: tuple[tuple[float, ...], ...], rgb: list[float]) -> list[
 
 
 def _oklab(linear_rgb: list[float]) -> _Lab:
-    """Oklab (Ottosson 2020), the space this tool measures in: euclidean distance in it
-    tracks how different two colors look, which plain RGB distance does not."""
+    """Oklab (Ottosson 2020): euclidean distance in it tracks how different two colors look, which distance in RGB does not."""
     r, g, b = (max(0.0, channel) for channel in linear_rgb)
     long = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3)
     medium = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b) ** (1 / 3)
@@ -78,8 +82,7 @@ def _oklab(linear_rgb: list[float]) -> _Lab:
 
 
 def _viewport_view() -> ocio.CPUProcessor | None:
-    """The color transform the viewport applies before you see anything, or None when
-    Maya is not color-managing."""
+    """The color transform the viewport applies before you see anything, or None when Maya is not color-managing."""
     try:
         if not mc.colorManagementPrefs(query=True, cmEnabled=True):
             return None
@@ -102,8 +105,7 @@ def _viewport_view() -> ocio.CPUProcessor | None:
 def _appearance(
     color: tuple[float, float, float], view: ocio.CPUProcessor | None
 ) -> tuple[_Lab, tuple[_Lab, ...]]:
-    """How a rendering-space color lands on screen, in Oklab: for normal vision,
-    then for each dichromat."""
+    """How a rendering-space color lands on screen, in Oklab: for normal vision, then for each dichromat."""
     displayed = view.applyRGB(list(color)) if view is not None else list(color)
     linear = [
         channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
@@ -116,7 +118,13 @@ def _appearance(
 
 
 def _palette(count: int) -> list[tuple[float, float, float]]:
-    """`count` rendering-space colors, each as far as the gamut allows from all the others and from Maya's default grey."""
+    """`count` rendering-space colors, each as far as the gamut allows from all the others and from unassigned-geometry grey.
+
+    Greedy farthest-point selection (Glasbey et al. 2007, "Colour Displays for
+    Categorical Images").
+    """
+    if count <= 0:
+        return []
     view = _viewport_view()
     axis = [((step / (GRID_STEPS - 1)) ** 2.2) * GRID_TOP for step in range(GRID_STEPS)]
     candidates = []
@@ -124,21 +132,20 @@ def _palette(count: int) -> list[tuple[float, float, float]]:
         for green in axis:
             for blue in axis:
                 normal, dichromat = _appearance((red, green, blue), view)
-                if not MIN_LIGHTNESS <= normal[0] <= MAX_LIGHTNESS:
-                    continue
-                if math.hypot(normal[1], normal[2]) < MIN_CHROMA:
-                    continue
-                candidates.append(((red, green, blue), normal, dichromat))
+                if MIN_LIGHTNESS <= normal[0] <= MAX_LIGHTNESS:
+                    candidates.append(((red, green, blue), normal, dichromat))
 
     def dichromat_gap(one: tuple[_Lab, ...], other: tuple[_Lab, ...]) -> float:
         return min(math.dist(a, b) for a, b in zip(one, other))
 
-    grey, grey_dichromat = _appearance(DEFAULT_SHADER_COLOR, view)
+    grey, grey_dichromat = _appearance(UNASSIGNED_GREY, view)
     gaps = [math.dist(normal, grey) for _, normal, _ in candidates]
     cvd_gaps = [dichromat_gap(d, grey_dichromat) for _, _, d in candidates]
 
     chosen: list[tuple[float, float, float]] = []
     for _ in range(count):
+        # Past the point where the gamut runs out of dichromat-safe colors, fall
+        # back to the whole pool rather than returning fewer colors than asked.
         safe = [index for index, gap in enumerate(cvd_gaps) if gap >= CVD_FLOOR]
         pick = max(safe or range(len(candidates)), key=lambda index: gaps[index])
         color, normal, dichromat = candidates[pick]
@@ -151,51 +158,24 @@ def _palette(count: int) -> list[tuple[float, float, float]]:
     return chosen
 
 
-def _paintable_shading_engines() -> tuple[list[str], int]:
-    """Scene shadingEngines this tool may rebind, plus how many were skipped for coming from a reference."""
-    paintable: list[str] = []
+# --- scene -----------------------------------------------------------------
+
+
+def _is_referenced(node: str) -> bool:
+    return bool(mc.referenceQuery(node, isNodeReferenced=True))
+
+
+def _paintable() -> tuple[list[tuple[str, str]], int]:
+    """Every shadingEngine this tool may rebind paired with the plug currently
+    driving it, plus how many a reference owns and we left alone."""
+    paintable: list[tuple[str, str]] = []
     skipped = 0
-    for shading_engine in mc.ls(type="shadingEngine") or []:
+    for shading_engine in sorted(mc.ls(type="shadingEngine") or []):
         if shading_engine in RESERVED_SHADING_ENGINES:
             continue
-        # Rebinding a referenced node writes a reference edit that outlives the
-        # toggle, so referenced materials keep their own look and are reported.
-        if mc.referenceQuery(shading_engine, isNodeReferenced=True):
+        if _is_referenced(shading_engine):
             skipped += 1
             continue
-        paintable.append(shading_engine)
-    return sorted(paintable), skipped
-
-
-def _stamped_shading_engines() -> list[str]:
-    return sorted(
-        shading_engine
-        for shading_engine in mc.ls(type="shadingEngine") or []
-        if mc.attributeQuery(SOURCE_PLUG_ATTR, node=shading_engine, exists=True)
-    )
-
-
-def is_random_color_active() -> bool:
-    """True while the scene is showing ID colors instead of its own shaders. Read by the asset publisher, which refuses to publish a stamped scene."""
-    return bool(_stamped_shading_engines())
-
-
-def _delete_stamp_shaders() -> None:
-    strays = [
-        node
-        for node in mc.ls(type="lambert") or []
-        if node.rpartition(":")[2].startswith(STAMP_SHADER_PREFIX)
-    ]
-    if strays:
-        mc.delete(strays)  # type: ignore
-
-
-def _stamp() -> tuple[int, int]:
-    """Point every paintable shadingEngine at a throwaway flat lambert, recording what it pointed at before. Mutates the scene. Returns the colored count and the referenced count left alone."""
-    shading_engines, skipped = _paintable_shading_engines()
-    palette = _palette(len(shading_engines))
-    stamped = 0
-    for shading_engine in shading_engines:
         source: list[str] = (
             mc.listConnections(
                 f"{shading_engine}.surfaceShader",
@@ -207,22 +187,50 @@ def _stamp() -> tuple[int, int]:
         )
         if not source:
             continue  # nothing drives it, so there is nothing to hide or restore
+        if _is_referenced(source[0].partition(".")[0]):
+            skipped += 1
+            continue
+        paintable.append((shading_engine, source[0]))
+    return paintable, skipped
 
+
+def _stamped_shading_engines() -> list[str]:
+    """Local shadingEngines currently showing an ID color. A referenced one carries
+    its own file's marker and is none of this scene's business."""
+    return sorted(
+        shading_engine
+        for shading_engine in mc.ls(type="shadingEngine") or []
+        if mc.attributeQuery(SOURCE_PLUG_ATTR, node=shading_engine, exists=True)
+        and not _is_referenced(shading_engine)
+    )
+
+
+def is_random_color_active() -> bool:
+    """True while this scene is showing ID colors instead of its own shaders. Read
+    by the asset publisher, which refuses to publish a stamped scene."""
+    return bool(_stamped_shading_engines())
+
+
+def _stamp() -> tuple[int, int]:
+    """Point every paintable shadingEngine at a throwaway flat lambert, recording what
+    it pointed at before. Mutates the scene. Returns the colored count and the referenced count left alone."""
+    paintable, skipped = _paintable()
+    palette = _palette(len(paintable))
+    for index, (shading_engine, source) in enumerate(paintable):
         shader: str = mc.shadingNode(
-            "lambert", asShader=True, name=f"{STAMP_SHADER_PREFIX}{stamped:02d}"
+            "lambert", asShader=True, name=f"{STAMP_SHADER_PREFIX}{index:02d}"
         )
-        mc.setAttr(f"{shader}.color", *palette[stamped], type="double3")  # type: ignore
+        mc.setAttr(f"{shader}.color", *palette[index], type="double3")  # type: ignore
         # Lambert dims diffuse to 0.8 by default; the viewport should show the
         # palette color, not four fifths of it.
         mc.setAttr(f"{shader}.diffuse", 1.0)  # type: ignore
 
         mc.addAttr(shading_engine, longName=SOURCE_PLUG_ATTR, dataType="string")
-        mc.setAttr(f"{shading_engine}.{SOURCE_PLUG_ATTR}", source[0], type="string")
+        mc.setAttr(f"{shading_engine}.{SOURCE_PLUG_ATTR}", source, type="string")
         mc.connectAttr(
             f"{shader}.outColor", f"{shading_engine}.surfaceShader", force=True
         )
-        stamped += 1
-    return stamped, skipped
+    return len(paintable), skipped
 
 
 def _restore() -> tuple[int, list[str]]:
@@ -238,7 +246,15 @@ def _restore() -> tuple[int, list[str]]:
             restored += 1
         else:
             orphaned.append(shading_engine)
-    _delete_stamp_shaders()
+
+    strays = [
+        node
+        for node in mc.ls(type="lambert") or []
+        if node.rpartition(":")[2].startswith(STAMP_SHADER_PREFIX)
+        and not _is_referenced(node)
+    ]
+    if strays:
+        mc.delete(strays)  # type: ignore
     return restored, orphaned
 
 
@@ -288,8 +304,8 @@ def random_colors() -> None:
 
     if not stamped:
         _warn(
-            f"Random Colors did nothing: this scene's only {skipped} material(s) come "
-            "from a reference, which this tool leaves alone."
+            f"Random Colors did nothing: this scene's only {skipped} material(s) are "
+            "owned by a reference, which this tool leaves alone."
             if skipped
             else "Random Colors did nothing: this scene has no materials of its own to color."
         )
