@@ -15,8 +15,6 @@ from .prim_paths import ANIM_CLASS_PATH, RIG_ROOT_PATH, RIG_SCOPE_PATH
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from pipe.core.struct.timeline import Timeline
-
 log = logging.getLogger(__name__)
 
 
@@ -39,14 +37,19 @@ class AnimStream(Enum):
         """Names `mr_yoon.anim.usd`, or `mr_yoon.spline.anim.usd` on Spline."""
         return "anim" if self is AnimStream.MAIN else f"{self.value}.anim"
 
-    def stitched_layer_name(self, namespace: str) -> str:
+    def stitched_layer_name(self, name: str) -> str:
         """Names `mr_yoon.usd`, or `mr_yoon.spline.usd` on Spline."""
-        return namespace if self is AnimStream.MAIN else f"{namespace}.{self.value}"
+        return name if self is AnimStream.MAIN else f"{name}.{self.value}"
 
 
-def index_key(namespace: str) -> str:
-    """A rig's identity in the index: its Maya namespace, lowercased."""
-    return namespace.lower()
+def index_key(name: str) -> str:
+    """A rig's identity in a shot's anim publish.
+
+    A rig is identified by its Maya namespace, folded to lower case because the
+    namespace also names files on disk. This is the only place that folding
+    happens: everything that matches a scene rig to a published one asks here.
+    """
+    return name.lower()
 
 
 @attrs.define(frozen=True)
@@ -61,20 +64,15 @@ class RigReference:
 class PublishedAnim:
     """One rig's entry in a shot's anim publish."""
 
-    namespace: str
+    name: str
     anim_layer: Path
     # None either because the publish predates the rig scope, or because
     # ShotGrid could not name the rig. Whoever indexes the entry says which.
     rig: RigReference | None
-    frames: tuple[int, int] | None
-    modified: float
-
-    def covers(self, timeline: Timeline) -> bool:
-        return self.frames == (timeline.preroll, timeline.end)
 
 
 def read_anim_index(publish_path: Path) -> dict[str, PublishedAnim]:
-    """What the shot's current anim publish holds, keyed by rig namespace."""
+    """What the shot's current anim publish holds, keyed by `index_key`."""
     if not publish_path.is_file():
         return {}
 
@@ -101,9 +99,7 @@ def read_anim_index(publish_path: Path) -> dict[str, PublishedAnim]:
             )
             continue
         anim_layer = folder / anim_reference.assetPath
-        try:
-            modified = anim_layer.stat().st_mtime
-        except OSError:
+        if not anim_layer.is_file():
             # The shot has already lost this rig's animation, so republishing is
             # the fix. Dropping it here is what makes the row say so.
             log.warning(
@@ -113,30 +109,30 @@ def read_anim_index(publish_path: Path) -> dict[str, PublishedAnim]:
                 anim_layer,
             )
             continue
-        entries[spec.name] = PublishedAnim(
-            namespace=spec.name,
+        # Keyed by `index_key`, but named as the publish named it: keeping a rig
+        # re-authors the entry the last publish wrote, never one derived now.
+        entries[index_key(spec.name)] = PublishedAnim(
+            name=spec.name,
             anim_layer=anim_layer,
             rig=_rig_reference_of(
                 layer.GetPrimAtPath(RIG_SCOPE_PATH.AppendChild(spec.name)), folder
             ),
-            frames=_published_frames(anim_layer),
-            modified=modified,
         )
     return entries
 
 
 def author_rig_entry(
     root_layer: Sdf.Layer,
-    namespace: str,
+    name: str,
     anim_layer: Path,
     rig: RigReference | None,
 ) -> None:
     """Index one rig: a class prim carrying its animation, and a def that
     references the rig and inherits that class."""
-    anim_path = ANIM_CLASS_PATH.AppendChild(namespace)
+    anim_path = ANIM_CLASS_PATH.AppendChild(name)
     if root_layer.GetPrimAtPath(anim_path):
         raise ValueError(
-            f"'{namespace}' is being indexed twice in one publish. A rig is "
+            f"'{name}' is being indexed twice in one publish. A rig is "
             "identified by its namespace, so two rigs cannot share one."
         )
 
@@ -151,9 +147,7 @@ def author_rig_entry(
     rig_scope_spec.specifier = Sdf.SpecifierDef
     rig_scope_spec.typeName = "Scope"
 
-    instance_spec = Sdf.CreatePrimInLayer(
-        root_layer, RIG_SCOPE_PATH.AppendChild(namespace)
-    )
+    instance_spec = Sdf.CreatePrimInLayer(root_layer, RIG_SCOPE_PATH.AppendChild(name))
     instance_spec.specifier = Sdf.SpecifierDef
     instance_spec.inheritPathList.Prepend(anim_path)
 
@@ -170,9 +164,17 @@ def verify_keepable(entries: Iterable[PublishedAnim]) -> None:
     for entry in entries:
         if not entry.anim_layer.is_file():
             raise FileNotFoundError(
-                f"'{entry.namespace}' was kept, but its animation is no longer at "
+                f"'{entry.name}' was kept, but its animation is no longer at "
                 f"'{entry.anim_layer}'. Publish that rig instead of keeping it."
             )
+
+
+def published_frames(anim_layer: Path) -> tuple[int, int] | None:
+    """The frame range `UsdUtils.StitchClips` stamped into a stitched layer."""
+    layer = _open_layer(anim_layer, metadata_only=True)
+    if layer is None or not (layer.HasStartTimeCode() and layer.HasEndTimeCode()):
+        return None
+    return int(layer.startTimeCode), int(layer.endTimeCode)
 
 
 def entries_to_json(entries: Iterable[PublishedAnim]) -> str:
@@ -214,11 +216,3 @@ def _rig_reference_of(spec: Sdf.PrimSpec | None, folder: Path) -> RigReference |
         asset_path=folder / reference.assetPath,
         prim_path=reference.primPath.pathString,
     )
-
-
-def _published_frames(anim_layer: Path) -> tuple[int, int] | None:
-    """The frame range `UsdUtils.StitchClips` stamped into a stitched layer."""
-    layer = _open_layer(anim_layer, metadata_only=True)
-    if layer is None or not (layer.HasStartTimeCode() and layer.HasEndTimeCode()):
-        return None
-    return int(layer.startTimeCode), int(layer.endTimeCode)

@@ -34,7 +34,9 @@ def is_shot_locked(
         return True
 
     shot = shot_code.strip().upper() if shot_code else ""
-    return any(shot.startswith(sequence) for sequence in locked)
+    return any(
+        shot == sequence or shot.startswith(f"{sequence}_") for sequence in locked
+    )
 
 
 def confirm_locked_republish(

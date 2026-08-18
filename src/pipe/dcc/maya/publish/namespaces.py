@@ -1,18 +1,10 @@
 from __future__ import annotations
 
-import logging
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import attrs
 import maya.cmds as mc
 from pxr import Sdf
-
-from pipe.core.ui import MessageDialog
-
-if TYPE_CHECKING:
-    from Qt.QtWidgets import QWidget
-
-log = logging.getLogger(__name__)
 
 
 @attrs.define(frozen=True)
@@ -64,53 +56,6 @@ def unpublishable_reason(cache_set: str) -> UnpublishableReason | None:
             "for animation publishing — check with rigging.",
         )
     return None
-
-
-def _partition_publishable(nodes: list[str]) -> tuple[list[str], dict[str, list[str]]]:
-    """The nodes the export can publish, and the rest grouped by why it cannot.
-
-    Both halves stay in scene order, and a reason a dozen rigs share is listed
-    once rather than a dozen times.
-    """
-    publishable: list[str] = []
-    skipped: dict[str, list[str]] = {}
-    for node in nodes:
-        reason = unpublishable_reason(node)
-        if reason is None:
-            publishable.append(node)
-        else:
-            skipped.setdefault(reason.detail, []).append(namespace_of(node) or node)
-    return publishable, skipped
-
-
-def confirm_any_publishable(parent: QWidget | None, nodes: list[str]) -> bool:
-    """Whether any rig here can be published. Explains it when none can."""
-    publishable, skipped = _partition_publishable(nodes)
-    if publishable:
-        return True
-    _warn_nothing_publishable(parent, len(nodes), _describe_skipped(skipped))
-    return False
-
-
-def _describe_skipped(skipped: dict[str, list[str]]) -> str:
-    return "\n\n".join(
-        "{}:\n{}".format(reason, "\n".join(f"    • {name}" for name in names))
-        for reason, names in skipped.items()
-    )
-
-
-def _warn_nothing_publishable(parent: QWidget | None, total: int, details: str) -> None:
-    headline = (
-        "The only rig in this scene cannot be published"
-        if total == 1
-        else f"None of the {total} rigs in this scene can be published"
-    )
-    log.warning("%s:\n%s", headline, details)
-    MessageDialog(
-        parent,
-        f"{headline}:\n\n{details}\n\nNothing was exported.",
-        "Cannot Publish Animation",
-    ).exec_()
 
 
 def _containing_reference(node: str) -> str | None:

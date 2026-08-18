@@ -292,6 +292,8 @@ def remove_namespace(
 def split_by_namespace(
     stage: Usd.Stage, suffix: str, path_dag_map: Mapping[Sdf.Path, MDagPath]
 ) -> dict[str, Sdf.Layer]:
+    """One saved layer per rig, keyed by `index_key`. Leaves the root layer as
+    it is — see `clear_root_prims`."""
     root_layer = stage.GetRootLayer()
     root_layer_path = Path(root_layer.realPath)
     stage.SetEditTarget(root_layer)
@@ -333,14 +335,15 @@ def split_by_namespace(
         layer.Save()
         layers.update({layer_name: layer})
 
-    # clear out root layer
-    edit = Sdf.BatchNamespaceEdit()
-    for prim in root_level_prims:
-        edit.Add(Sdf.NamespaceEdit.Remove(prim.GetPath()))
-    root_layer.Apply(edit)
-    root_layer.Save()
-
     return layers
+
+
+def clear_root_prims(root_layer: Sdf.Layer) -> None:
+    """Empty the layer of prims, keeping the stage metadata the export wrote."""
+    edit = Sdf.BatchNamespaceEdit()
+    for spec in root_layer.rootPrims:
+        edit.Add(Sdf.NamespaceEdit.Remove(spec.path))
+    root_layer.Apply(edit)
 
 
 def float_range_compare_factory(

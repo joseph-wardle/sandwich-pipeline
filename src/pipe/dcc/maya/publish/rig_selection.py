@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import Counter
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -24,8 +25,14 @@ from Qt.QtWidgets import (
 from pipe.core.ui import DialogButtons
 from pipe.core.util.paths import get_production_path
 
-from .anim_index import AnimStream, PublishedAnim, index_key, read_anim_index
-from .namespaces import confirm_any_publishable, namespace_of, unpublishable_reason
+from .anim_index import (
+    AnimStream,
+    PublishedAnim,
+    index_key,
+    published_frames,
+    read_anim_index,
+)
+from .namespaces import UnpublishableReason, namespace_of, unpublishable_reason
 
 if TYPE_CHECKING:
     from pipe.core.struct.timeline import Timeline
@@ -55,16 +62,21 @@ class RigState(Enum):
     NEVER_PUBLISHED = "never_published"
     RANGE_CHANGED = "range_changed"
     UNPUBLISHABLE = "unpublishable"
+    ABSENT = "absent"
 
     @property
     def included(self) -> bool:
         """Whether this rig starts out marked for publishing."""
-        return self is not RigState.UNPUBLISHABLE
+        return self not in (RigState.UNPUBLISHABLE, RigState.ABSENT)
 
     @property
     def locked(self) -> bool:
         """Whether the artist may change their mind about it."""
-        return self in (RigState.RANGE_CHANGED, RigState.UNPUBLISHABLE)
+        return self in (
+            RigState.RANGE_CHANGED,
+            RigState.UNPUBLISHABLE,
+            RigState.ABSENT,
+        )
 
 
 _STATUS_COLOR = {
@@ -72,24 +84,34 @@ _STATUS_COLOR = {
     RigState.NEVER_PUBLISHED: _DIM,
     RigState.RANGE_CHANGED: _ATTENTION,
     RigState.UNPUBLISHABLE: _BLOCKED,
+    RigState.ABSENT: _DIM,
 }
 
 # Main needs no note: it is what Publish means, and a line under every stream
 # turns a warning into wallpaper.
-_SPLINE_NOTE = "Smooth your animation first! publishing does not smooth it."
+_SPLINE_NOTE = "Smooth your animation first — publishing does not smooth it."
 
 _MERGE_BLURB = (
     "Checked rigs are republished. Unchecked rigs keep the animation they already have."
 )
 
+_SHARED_NAME = UnpublishableReason(
+    "shares a name with another rig",
+    "Another rig in this scene has the same name apart from capitals, and a rig "
+    "is identified by its name. Rename one of the references so each rig has "
+    "its own.",
+)
+
 
 @attrs.define(frozen=True)
 class RigRow:
-    cache_set: str
     label: str
     state: RigState
     status: str
     detail: str
+    # None when the shot's publish holds this rig but the scene does not, which
+    # is the one row the artist cannot republish.
+    cache_set: str | None
     published: PublishedAnim | None
 
 
@@ -110,9 +132,6 @@ def select_rigs_to_publish(
     timeline: Timeline,
 ) -> PublishSelection | None:
     """Ask which rigs to publish. Opens a dialog; None means do not publish."""
-    if not confirm_any_publishable(parent, cache_sets):
-        return None
-
     dialog = _RigSelectDialog(parent, cache_sets, shot_code, publish_dir, timeline)
     if not dialog.exec_():
         return None
@@ -225,7 +244,7 @@ class _RigSelectDialog(QDialog, DialogButtons):
         export: list[str] = []
         keep: list[PublishedAnim] = []
         for row, box in self._rows:
-            if box.isChecked():
+            if row.cache_set is not None and box.isChecked():
                 export.append(row.cache_set)
             elif row.published is not None:
                 keep.append(row.published)
@@ -272,15 +291,13 @@ class _RigSelectDialog(QDialog, DialogButtons):
         return container
 
     def _build_row(self, row: RigRow, last: bool) -> tuple[QFrame, QCheckBox]:
-        color = _STATUS_COLOR[row.state]
-
         box = QCheckBox(row.label)
         box.setChecked(row.state.included)
         box.setEnabled(not row.state.locked)
         box.toggled.connect(self._update_ready)
 
         status = QLabel(row.status)
-        status.setStyleSheet(f"color: {color};")
+        status.setStyleSheet(f"color: {_STATUS_COLOR[row.state]};")
 
         line = QHBoxLayout()
         line.addWidget(box)
@@ -316,7 +333,15 @@ class _RigSelectDialog(QDialog, DialogButtons):
         # Qt delivers no tooltip to a disabled widget, so the footer is where a
         # greyed-out Publish gets to say why.
         if not publishing:
-            self._summary.setText("Check a rig to publish.")
+            anything_publishable = any(
+                row.state is not RigState.UNPUBLISHABLE and row.cache_set is not None
+                for row, _ in self._rows
+            )
+            self._summary.setText(
+                "Check a rig to publish."
+                if anything_publishable
+                else "No rig in this scene can be published — hover a row to see why."
+            )
             self._summary.setStyleSheet(f"color: {_BLOCKED};")
             return
 
@@ -328,29 +353,48 @@ class _RigSelectDialog(QDialog, DialogButtons):
 def survey_rigs(
     cache_sets: list[str], publish_path: Path, timeline: Timeline
 ) -> list[RigRow]:
-    """One row per rig in the scene, in scene order."""
+    """One row per rig: the scene's rigs in scene order, then any the shot has
+    published that the scene no longer holds."""
     published = read_anim_index(publish_path)
-    return [_row_for(cache_set, published, timeline) for cache_set in cache_sets]
+    keys = {cache_set: index_key(namespace_of(cache_set)) for cache_set in cache_sets}
+    shared = {key for key, count in Counter(keys.values()).items() if count > 1}
+
+    rows = [
+        _row_for(
+            cache_set,
+            unpublishable_reason(cache_set)
+            or (_SHARED_NAME if keys[cache_set] in shared else None),
+            published.get(keys[cache_set]),
+            timeline,
+        )
+        for cache_set in cache_sets
+    ]
+    indexed = set(keys.values())
+    rows += [
+        _absent_row(entry) for key, entry in published.items() if key not in indexed
+    ]
+    return rows
 
 
 def _row_for(
-    cache_set: str, published: dict[str, PublishedAnim], timeline: Timeline
+    cache_set: str,
+    reason: UnpublishableReason | None,
+    entry: PublishedAnim | None,
+    timeline: Timeline,
 ) -> RigRow:
-    namespace = namespace_of(cache_set)
-    label = namespace or cache_set
+    label = namespace_of(cache_set) or cache_set
 
-    reason = unpublishable_reason(cache_set)
     if reason is not None:
+        kept = " Its published animation is kept as it is." if entry else ""
         return RigRow(
-            cache_set=cache_set,
             label=label,
             state=RigState.UNPUBLISHABLE,
             status=f"can't publish — {reason.summary}",
-            detail=reason.detail,
-            published=None,
+            detail=reason.detail + kept,
+            cache_set=cache_set,
+            published=entry,
         )
 
-    entry = published.get(index_key(namespace))
     if entry is None:
         state = RigState.NEVER_PUBLISHED
         status = "never published"
@@ -359,28 +403,47 @@ def _row_for(
             "out of the publish, which is what a rig referenced only for "
             "reference wants."
         )
-    elif not entry.covers(timeline):
+    elif (frames := published_frames(entry.anim_layer)) != (
+        timeline.preroll,
+        timeline.end,
+    ):
         state = RigState.RANGE_CHANGED
         status = "frame range changed — republishing"
         detail = (
-            f"Published over frames {_range_text(entry)}, but the shot now runs "
+            f"Published over frames {_range_text(frames)}, but the shot now runs "
             f"{timeline.preroll}–{timeline.end}. Republished so every rig in the "
             "shot stays on one timeline."
         )
     else:
         state = RigState.PUBLISHED
-        status = f"published {_age_text(entry.modified)}"
+        status = f"published {_age_text(entry.anim_layer)}"
         detail = (
-            f"Already published over frames {_range_text(entry)}. Leave it "
+            f"Already published over frames {_range_text(frames)}. Leave it "
             "unchecked to keep that animation exactly as it is."
         )
 
     return RigRow(
-        cache_set=cache_set,
         label=label,
         state=state,
         status=status,
         detail=detail,
+        cache_set=cache_set,
+        published=entry,
+    )
+
+
+def _absent_row(entry: PublishedAnim) -> RigRow:
+    return RigRow(
+        label=entry.name,
+        state=RigState.ABSENT,
+        status="not in this scene — keeping",
+        detail=(
+            "The shot has published animation for this rig, but it is not in "
+            "the scene — unloaded, or removed since it was published. The "
+            "publish carries its animation forward untouched. Load the "
+            "reference back in if you meant to replace it."
+        ),
+        cache_set=None,
         published=entry,
     )
 
@@ -397,13 +460,15 @@ def _shorten(publish_path: Path) -> str:
         return str(publish_path)
 
 
-def _range_text(entry: PublishedAnim) -> str:
-    if entry.frames is None:
-        return "an unrecorded range"
-    return "{}–{}".format(*entry.frames)
+def _range_text(frames: tuple[int, int] | None) -> str:
+    return "an unrecorded range" if frames is None else "{}–{}".format(*frames)
 
 
-def _age_text(modified: float) -> str:
+def _age_text(anim_layer: Path) -> str:
+    try:
+        modified = anim_layer.stat().st_mtime
+    except OSError:
+        return "at an unknown time"
     seconds = time.time() - modified
     if seconds < 90:
         return "just now"

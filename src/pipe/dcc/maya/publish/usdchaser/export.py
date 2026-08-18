@@ -22,6 +22,7 @@ from ..anim_index import (
 )
 from ..prim_paths import RIG_GEO_PATH, RIG_ROOT_PATH, RIG_SCOPE_PATH, SHOT_CAM_PATH
 from .utils import (
+    clear_root_prims,
     flatten_camera,
     make_topo_attrs_default,
     path_to_maya_dag_map,
@@ -101,9 +102,8 @@ class ExportChaser(mayaUsdLib.ExportChaser):
 
     def _post_export_anim(self, stream: AnimStream) -> None:
         assert self._chaser_args.timeline is not None
-        # `split_by_namespace` saves the root layer over the shot's index, so
-        # anything that would stop a kept rig being re-indexed has to be found
-        # before it runs. After it, failing loses every rig, not one.
+        # First, so that a rig the artist kept whose animation has since gone
+        # missing costs nothing but the message.
         verify_keepable(self._chaser_args.keep)
         if not self._stage.GetPseudoRoot().GetChildren():
             raise RuntimeError(
@@ -119,34 +119,46 @@ class ExportChaser(mayaUsdLib.ExportChaser):
         layers = split_by_namespace(
             self._stage, stream.anim_layer_suffix, path_dag_mapping
         )
-        root_layer = self._stage.GetRootLayer()
         conn = ShotGrid.connect(DB_Config)
 
-        for namespace, layer in layers.items():
-            stitched_layer = split_preroll(
-                layer,
-                stream.stitched_layer_name(namespace),
-                RIG_GEO_PATH,
-                self._chaser_args.timeline,
+        # Everything that can fail happens here, while the shot's previous index
+        # is still on disk. Stitching is the step that raises on a rig whose
+        # geometry does not meet the convention, and a rig that has never
+        # resolved to a ShotGrid asset is indexed unbound rather than refused.
+        published = [
+            (
+                name,
+                Path(
+                    split_preroll(
+                        layer,
+                        stream.stitched_layer_name(name),
+                        RIG_GEO_PATH,
+                        self._chaser_args.timeline,
+                    ).realPath
+                ),
+                _rig_reference(conn, name),
             )
-            author_rig_entry(
-                root_layer,
-                namespace,
-                Path(stitched_layer.realPath),
-                _rig_reference(conn, namespace),
-            )
+            for name, layer in layers.items()
+        ]
 
-        # This index is written from scratch on every publish, so the rigs the
-        # artist left unchecked are re-indexed here or lost.
         for kept in self._chaser_args.keep:
             if kept.rig is None:
                 log.warning(
                     "[chaser] '%s' was published before the index named rigs, so "
                     "keeping it carries its animation forward with no rig, and it "
                     "will appear downstream without materials or CFX",
-                    kept.namespace,
+                    kept.name,
                 )
-            author_rig_entry(root_layer, kept.namespace, kept.anim_layer, kept.rig)
+
+        # Past this line the shot's index is gone until it is rewritten, so
+        # nothing below may touch the scene, ShotGrid, or the filesystem.
+        root_layer = self._stage.GetRootLayer()
+        clear_root_prims(root_layer)
+        for name, anim_layer, rig in published:
+            author_rig_entry(root_layer, name, anim_layer, rig)
+        for kept in self._chaser_args.keep:
+            author_rig_entry(root_layer, kept.name, kept.anim_layer, kept.rig)
+        root_layer.Save()
 
     def _post_export_rig(self):
         scale_down_geo(self._stage)
@@ -162,20 +174,20 @@ class ExportChaser(mayaUsdLib.ExportChaser):
         flatten_camera(self._stage, SHOT_CAM_PATH)
 
 
-def _rig_reference(conn: ShotGrid, namespace: str) -> RigReference | None:
-    """The published rig this namespace's animation belongs to."""
+def _rig_reference(conn: ShotGrid, name: str) -> RigReference | None:
+    """The published rig a freshly exported rig's animation belongs to."""
     # Trailing digits distinguish two of the same rig in one scene.
     # TODO: Make this more robust by querying for asset metadata on the rig
     # instead of guessing from the namespace.
-    rig_name = re.sub(r"\d+$", "", namespace)
+    rig_name = re.sub(r"\d+$", "", name)
     try:
         asset_paths = paths_for_asset(conn.get_asset(name=rig_name))
     except Exception:
         log.exception(
-            "[chaser] could not find a rig asset named '%s' for the rig in "
-            "namespace '%s'. Please talk to the rigging team and let them know.",
+            "[chaser] could not find a rig asset named '%s' for the rig '%s'. "
+            "Please talk to the rigging team and let them know.",
             rig_name,
-            namespace,
+            name,
         )
         return None
     return RigReference(
