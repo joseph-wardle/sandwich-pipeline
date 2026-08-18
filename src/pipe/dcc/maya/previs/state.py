@@ -233,6 +233,14 @@ def write_state(state: PrevisState) -> None:
     _drop_legacy_fileinfo()
 
 
+def delete_state() -> None:
+    """Strip the scene of its sequencer state, so it stops being a previs file."""
+    node = _find_state_node()
+    if node is not None:
+        mc.delete(node)
+    _drop_legacy_fileinfo()
+
+
 def _find_state_node() -> str | None:
     nodes = mc.ls(STATE_NODE, type="network") or []
     return str(nodes[0]) if nodes else None
