@@ -7,7 +7,7 @@ import attrs
 import maya.cmds as mc
 from pxr import Sdf
 
-from pipe.core.ui import MessageDialog, MessageDialogCustomButtons
+from pipe.core.ui import MessageDialog
 
 if TYPE_CHECKING:
     from Qt.QtWidgets import QWidget
@@ -59,7 +59,7 @@ def unpublishable_reason(node: str) -> UnpublishableReason | None:
     )
 
 
-def partition_publishable(nodes: list[str]) -> tuple[list[str], dict[str, list[str]]]:
+def _partition_publishable(nodes: list[str]) -> tuple[list[str], dict[str, list[str]]]:
     """The nodes the export can publish, and the rest grouped by why it cannot.
 
     Both halves stay in scene order, and a reason a dozen rigs share is listed
@@ -78,45 +78,11 @@ def partition_publishable(nodes: list[str]) -> tuple[list[str], dict[str, list[s
 
 def confirm_any_publishable(parent: QWidget | None, nodes: list[str]) -> bool:
     """Whether any rig here can be published. Explains it when none can."""
-    publishable, skipped = partition_publishable(nodes)
+    publishable, skipped = _partition_publishable(nodes)
     if publishable:
         return True
     _warn_nothing_publishable(parent, len(nodes), _describe_skipped(skipped))
     return False
-
-
-def confirm_publishable(parent: QWidget | None, nodes: list[str]) -> list[str]:
-    """The nodes to publish, or an empty list meaning stop."""
-    publishable, skipped = partition_publishable(nodes)
-    if not skipped:
-        return publishable
-
-    details = _describe_skipped(skipped)
-    if not publishable:
-        _warn_nothing_publishable(parent, len(nodes), details)
-        return []
-
-    log.warning(
-        "Skipping %d of %d rigs:\n%s",
-        len(nodes) - len(publishable),
-        len(nodes),
-        details,
-    )
-
-    keep_going = MessageDialogCustomButtons(
-        parent,
-        f"{len(nodes) - len(publishable)} of {len(nodes)} rigs cannot be "
-        f"published and will be left out:\n\n{details}\n\n"
-        f"The other {len(publishable)} will be published as normal.",
-        "Some Rigs Cannot Be Published",
-        has_cancel_button=True,
-        ok_name="Skip and publish",
-        cancel_name="Cancel",
-    )
-    if not keep_going.exec_():
-        return []
-
-    return publishable
 
 
 def confirm_rig_publishable(parent: QWidget | None, rig_root: str) -> bool:

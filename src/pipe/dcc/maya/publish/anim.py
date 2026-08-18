@@ -6,24 +6,26 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from typing import Any, Generator
+    from collections.abc import Generator
+    from typing import Any
 
     from pipe.core.shotgrid import Shot
 
 import maya.cmds as mc
+
+from pipe.core.struct.timeline import Timeline
+from pipe.core.ui import MessageDialog
 from pipe.core.util.paths import get_production_path
 
-from pipe.core.ui import MessageDialog
-from pipe.core.struct.timeline import Timeline
-
 from .anim_lock import confirm_anim_republish_allowed
-from .namespaces import confirm_publishable
 from .publisher import Publisher
+from .rig_selection import AnimStream, PublishSelection, select_rigs_to_publish
 from .usdchaser import ExportChaser, ExportChaserMode
 
 log = logging.getLogger(__name__)
 
 CACHE_SET = "rig_geo_grp"
+
 
 # Frames of preroll spent blending animated channels from their default values
 # into the authored animation, so CFX sims warm up from a rig at the origin.
@@ -42,17 +44,25 @@ _TRS_DEFAULTS: dict[str, float] = {
 }
 
 
+def _chaser_mode(stream: AnimStream) -> ExportChaserMode:
+    match stream:
+        case AnimStream.MAIN:
+            return ExportChaserMode.ANIM
+        case AnimStream.SPLINE:
+            return ExportChaserMode.SPLINE_ANIM
+
+
 class AnimPublisher(Publisher):
     _PUBLISH_KIND = "anim"
 
     _shot: Shot
+    _shot_code: str
     _timeline: Timeline
     _init_success: bool
-    spline_publish: bool
+    _selection: PublishSelection
 
-    def __init__(self, spline_publish: bool = False) -> None:
+    def __init__(self) -> None:
         super().__init__(use_sg_entity=False)
-        self.spline_publish = spline_publish
 
         shot_codes = mc.fileInfo("code", query=True)
         if not shot_codes:
@@ -66,20 +76,13 @@ class AnimPublisher(Publisher):
             self._init_success = False
             return
 
-        self._shot = self._conn.get_shot(code=shot_codes[0])
+        self._shot_code = shot_codes[0]
+        self._shot = self._conn.get_shot(code=self._shot_code)
         self._timeline = Timeline.from_shot(self._shot)
         self._init_success = True
 
     def _prepublish(self) -> bool:
         if not self._init_success:
-            return False
-
-        if not confirm_anim_republish_allowed(
-            parent=self._window,
-            sequence_code=self._shot.sequence.code if self._shot.sequence else None,
-            shot_code=self._shot.code,
-            publish_path=self._get_save_path(),
-        ):
             return False
 
         cache_sets = mc.ls("::" + CACHE_SET, sets=True)
@@ -93,21 +96,38 @@ class AnimPublisher(Publisher):
             ).exec_()
             return False
 
-        publishable = confirm_publishable(self._window, cache_sets)
-        if not publishable:
-            # Stopping here is what keeps the publish safe: `mc.select` with
-            # nothing to select is a silent no-op, so falling through would
-            # export whatever the artist happened to have selected.
+        selection = select_rigs_to_publish(
+            self._window,
+            cache_sets,
+            self._shot_code,
+            self._publish_dir,
+            self._timeline,
+        )
+        if selection is None:
             return False
 
-        mc.select(*publishable, replace=True)
+        if not confirm_anim_republish_allowed(
+            parent=self._window,
+            sequence_code=self._shot.sequence.code if self._shot.sequence else None,
+            shot_code=self._shot_code,
+            publish_path=self._save_path_for(selection.stream),
+        ):
+            return False
+
+        self._selection = selection
+        mc.select(*selection.sets_to_export, replace=True)
 
         return True
 
+    @property
+    def _publish_dir(self) -> Path:
+        return get_production_path() / self._shot.shot_path / "anim/usd"
+
+    def _save_path_for(self, stream: AnimStream) -> Path:
+        return self._publish_dir / stream.publish_filename
+
     def _get_save_path(self) -> Path | None:
-        publish_path = get_production_path() / self._shot.shot_path / "anim/usd"
-        filename = "main.usd" if not self.spline_publish else "spline.usd"
-        return publish_path / filename
+        return self._save_path_for(self._selection.stream)
 
     def _do_publish_export(self) -> None:
         # The origin keys exist only while the export runs: every cancel path
@@ -117,15 +137,10 @@ class AnimPublisher(Publisher):
             super()._do_publish_export()
 
     def _get_mayausd_kwargs(self) -> dict[str, Any]:
-        chaser_mode = (
-            ExportChaserMode.ANIM
-            if not self.spline_publish
-            else ExportChaserMode.SPLINE_ANIM
-        )
         return {
             "chaser": [ExportChaser.ID],
             "chaserArgs": [
-                (ExportChaser.ID, "mode", chaser_mode),
+                (ExportChaser.ID, "mode", _chaser_mode(self._selection.stream)),
                 (ExportChaser.ID, "timeline", self._timeline.to_json()),
             ],
             "exportColorSets": False,
@@ -142,7 +157,15 @@ class AnimPublisher(Publisher):
         }
 
     def _get_confirm_message(self) -> str:
-        return f"Animation has been exported to {self._publish_path}"
+        count = len(self._selection.sets_to_export)
+        message = (
+            f"Published {self._selection.stream.value} animation for {count} "
+            f"{'rig' if count == 1 else 'rigs'} to {self._publish_path}"
+        )
+        if kept := self._selection.namespaces_to_keep:
+            message += "\n\nKept from the previous publish:\n"
+            message += "\n".join(f"    {namespace}" for namespace in kept)
+        return message
 
 
 @contextmanager

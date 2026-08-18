@@ -95,8 +95,8 @@ class PublishSelection:
     """What the artist chose in the publish dialog."""
 
     stream: AnimStream
-    sets_to_export: list[str]
-    namespaces_to_keep: list[str]
+    sets_to_export: tuple[str, ...] = attrs.field(validator=attrs.validators.min_len(1))
+    namespaces_to_keep: tuple[str, ...]
 
 
 def select_rigs_to_publish(
@@ -187,7 +187,9 @@ class _RigSelectDialog(QDialog, DialogButtons):
             elif row.published is not None:
                 keep.append(row.published.namespace)
         return PublishSelection(
-            stream=self._stream, sets_to_export=export, namespaces_to_keep=keep
+            stream=self._stream,
+            sets_to_export=tuple(export),
+            namespaces_to_keep=tuple(keep),
         )
 
     @property
