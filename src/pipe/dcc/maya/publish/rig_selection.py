@@ -32,7 +32,22 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-_DIM = "color: #8a8a8a;"
+_DIM = "#8a8a8a"
+_ATTENTION = "#e5b340"
+_BLOCKED = "#e08282"
+_RULE = "rgba(255, 255, 255, 0.13)"
+
+_DIM_STYLE = f"color: {_DIM};"
+
+_ROW_FRAME = "rigRow"
+
+# Only the opening size — the scroll area copes with whatever the fonts and the
+# shot's rig count really come to.
+_WIDTH = 560
+_CHROME_HEIGHT = 180
+_ROW_HEIGHT = 32
+_MIN_LIST_HEIGHT = 96
+_MAX_LIST_HEIGHT = 320
 
 
 class RigState(Enum):
@@ -49,7 +64,23 @@ class RigState(Enum):
     @property
     def locked(self) -> bool:
         """Whether the artist may change their mind about it."""
-        return self is not RigState.PUBLISHED
+        return self in (RigState.RANGE_CHANGED, RigState.UNPUBLISHABLE)
+
+
+_STATUS_COLOR = {
+    RigState.PUBLISHED: _DIM,
+    RigState.NEVER_PUBLISHED: _DIM,
+    RigState.RANGE_CHANGED: _ATTENTION,
+    RigState.UNPUBLISHABLE: _BLOCKED,
+}
+
+# Main needs no note: it is what Publish means, and a line under every stream
+# turns a warning into wallpaper.
+_SPLINE_NOTE = "Smooth your animation first! publishing does not smooth it."
+
+_MERGE_BLURB = (
+    "Checked rigs are republished. Unchecked rigs keep the animation they already have."
+)
 
 
 @attrs.define(frozen=True)
@@ -109,46 +140,86 @@ class _RigSelectDialog(QDialog, DialogButtons):
         self._publish = self.buttons.button(QDialogButtonBox.Ok)
         self.setWindowTitle(f"Publish Animation — {shot_code}")
         self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
-        self.resize(520, 400)
 
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.StyledPanel)
+        self._scroll.setStyleSheet(
+            f"QScrollArea {{ border: 1px solid {_RULE}; border-radius: 3px; }}"
+        )
+
+        self._summary = QLabel()
+        self._destination = QLabel()
+        self._destination.setStyleSheet(_DIM_STYLE)
+
+        footer = QHBoxLayout()
+        footer.addWidget(self._summary)
+        footer.addStretch()
+        footer.addWidget(self._destination)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
+        layout.addLayout(self._build_header(shot_code))
+        layout.addLayout(self._build_stream_picker())
+        layout.addWidget(self._scroll)
+        layout.addLayout(footer)
+        layout.addWidget(self.buttons)
+
+        self._reload()
+        self.resize(_WIDTH, _CHROME_HEIGHT + self._list_height())
+        # Otherwise the stream radio holds focus, where an arrow key silently
+        # republishes against the other stream.
+        self._publish.setFocus()
+
+    def _build_header(self, shot_code: str) -> QVBoxLayout:
+        title = QLabel("Publish Animation")
+        title.setStyleSheet("font-size: 15px; font-weight: 600;")
+        shot = QLabel(shot_code)
+        shot.setStyleSheet(_DIM_STYLE)
+
+        line = QHBoxLayout()
+        line.addWidget(title)
+        line.addStretch()
+        line.addWidget(shot)
+
+        blurb = QLabel(_MERGE_BLURB)
+        blurb.setStyleSheet(_DIM_STYLE)
+        blurb.setWordWrap(True)
+
+        header = QVBoxLayout()
+        header.setSpacing(2)
+        header.addLayout(line)
+        header.addWidget(blurb)
+        return header
+
+    def _build_stream_picker(self) -> QVBoxLayout:
         self._main = QRadioButton("Main")
-        self._spline = QRadioButton("Spline — smoothed copy for sims")
+        self._spline = QRadioButton("Spline")
         # Never sticky. A remembered Spline is how stepped animation reaches the
         # sim stream without anyone noticing.
         self._main.setChecked(True)
         self._spline.toggled.connect(self._reload)
 
-        streams = QHBoxLayout()
-        streams.addWidget(QLabel("Publish to:"))
-        streams.addWidget(self._main)
-        streams.addWidget(self._spline)
-        streams.addStretch()
+        line = QHBoxLayout()
+        line.addWidget(QLabel("Publish to:"))
+        line.addWidget(self._main)
+        line.addWidget(self._spline)
+        line.addStretch()
 
-        self._precondition = QLabel(
-            "Publishes your scene as it is now. Smooth your animation before "
-            "publishing."
+        self._stream_note = QLabel()
+        self._stream_note.setStyleSheet(_DIM_STYLE)
+        # Reserved rather than shown and hidden, so switching stream does not
+        # shunt the rig list up and down under the artist's cursor.
+        self._stream_note.setFixedHeight(
+            self._stream_note.fontMetrics().lineSpacing() + 2
         )
-        self._precondition.setStyleSheet(_DIM)
-        self._precondition.setWordWrap(True)
 
-        self._scroll = QScrollArea()
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QFrame.NoFrame)
-
-        self._footer = QLabel()
-        self._footer.setStyleSheet(_DIM)
-
-        layout = QVBoxLayout(self)
-        layout.addLayout(streams)
-        layout.addWidget(self._precondition)
-        layout.addWidget(self._scroll)
-        layout.addWidget(self._footer)
-        layout.addWidget(self.buttons)
-
-        self._reload()
-        # Otherwise the stream radio holds focus, where an arrow key silently
-        # republishes against the other stream.
-        self._publish.setFocus()
+        picker = QVBoxLayout()
+        picker.setSpacing(2)
+        picker.addLayout(line)
+        picker.addWidget(self._stream_note)
+        return picker
 
     def selection(self) -> PublishSelection:
         export: list[str] = []
@@ -174,8 +245,11 @@ class _RigSelectDialog(QDialog, DialogButtons):
 
     def _reload(self) -> None:
         """Re-read the chosen stream's publish and rebuild every row from it."""
-        self._precondition.setVisible(self._stream is AnimStream.SPLINE)
-        self._footer.setToolTip(str(self._publish_path))
+        self._stream_note.setText(
+            _SPLINE_NOTE if self._stream is AnimStream.SPLINE else ""
+        )
+        self._destination.setText(_shorten(self._publish_path))
+        self._destination.setToolTip(str(self._publish_path))
         # Setting the widget deletes the old rows, so a stream switch starts from
         # this stream's defaults rather than the boxes ticked against the other.
         self._scroll.setWidget(self._build_rows())
@@ -184,38 +258,71 @@ class _RigSelectDialog(QDialog, DialogButtons):
     def _build_rows(self) -> QWidget:
         container = QWidget()
         layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         self._rows = []
 
-        for row in survey_rigs(self._cache_sets, self._publish_path, self._timeline):
-            box = QCheckBox(row.label)
-            box.setChecked(row.state.included)
-            box.setEnabled(not row.state.locked)
-            box.setToolTip(row.detail)
-            box.toggled.connect(self._update_ready)
-
-            status = QLabel(row.status)
-            status.setStyleSheet(_DIM)
-            status.setToolTip(row.detail)
-
-            line = QHBoxLayout()
-            line.addWidget(box)
-            line.addStretch()
-            line.addWidget(status)
-            layout.addLayout(line)
-
+        rows = survey_rigs(self._cache_sets, self._publish_path, self._timeline)
+        for index, row in enumerate(rows):
+            frame, box = self._build_row(row, last=index == len(rows) - 1)
+            layout.addWidget(frame)
             self._rows.append((row, box))
 
         layout.addStretch()
         return container
 
+    def _build_row(self, row: RigRow, last: bool) -> tuple[QFrame, QCheckBox]:
+        color = _STATUS_COLOR[row.state]
+
+        box = QCheckBox(row.label)
+        box.setChecked(row.state.included)
+        box.setEnabled(not row.state.locked)
+        box.toggled.connect(self._update_ready)
+
+        status = QLabel(row.status)
+        status.setStyleSheet(f"color: {color};")
+
+        line = QHBoxLayout()
+        line.addWidget(box)
+        line.addStretch()
+        line.addWidget(status)
+
+        frame = QFrame()
+        frame.setObjectName(_ROW_FRAME)
+        # The status says what is happening to the rig; hovering anywhere on the
+        # row says why. On screen it would be a paragraph per rig nobody reads.
+        frame.setToolTip(row.detail)
+        if not last:
+            frame.setStyleSheet(
+                f"QFrame#{_ROW_FRAME} {{ border-bottom: 1px solid {_RULE}; }}"
+            )
+
+        column = QVBoxLayout(frame)
+        column.setContentsMargins(10, 6, 10, 6)
+        column.addLayout(line)
+        return frame, box
+
+    def _list_height(self) -> int:
+        listed = _ROW_HEIGHT * len(self._rows)
+        return min(max(listed, _MIN_LIST_HEIGHT), _MAX_LIST_HEIGHT)
+
     def _update_ready(self) -> None:
-        ready = any(box.isChecked() for _, box in self._rows)
-        self._publish.setEnabled(ready)
+        publishing = sum(1 for _, box in self._rows if box.isChecked())
+        keeping = sum(
+            1 for row, box in self._rows if not box.isChecked() and row.published
+        )
+        self._publish.setEnabled(bool(publishing))
+
         # Qt delivers no tooltip to a disabled widget, so the footer is where a
         # greyed-out Publish gets to say why.
-        self._footer.setText(
-            _shorten(self._publish_path) if ready else "Check a rig to publish."
-        )
+        if not publishing:
+            self._summary.setText("Check a rig to publish.")
+            self._summary.setStyleSheet(f"color: {_BLOCKED};")
+            return
+
+        kept = f", keeping {keeping}" if keeping else ""
+        self._summary.setText(f"Publishing {_rig_count(publishing)}{kept}")
+        self._summary.setStyleSheet(_DIM_STYLE)
 
 
 def survey_rigs(
@@ -238,11 +345,8 @@ def _row_for(
             cache_set=cache_set,
             label=label,
             state=RigState.UNPUBLISHABLE,
-            status=reason.summary,
-            detail=(
-                f"{reason.detail}, so its animation cannot be exported. "
-                "Reference the rig directly into the shot to publish it."
-            ),
+            status=f"can't publish — {reason.summary}",
+            detail=reason.detail,
             published=None,
         )
 
@@ -250,14 +354,18 @@ def _row_for(
     if entry is None:
         state = RigState.NEVER_PUBLISHED
         status = "never published"
-        detail = "This rig has no animation in the shot yet, so it is always included."
+        detail = (
+            "This rig has no animation in the shot yet. Uncheck it to leave it "
+            "out of the publish, which is what a rig referenced only for "
+            "reference wants."
+        )
     elif not entry.covers(timeline):
         state = RigState.RANGE_CHANGED
-        status = "frame range changed"
+        status = "frame range changed — republishing"
         detail = (
-            f"Published over frames {_range_text(entry)}, but this shot now runs "
-            f"{timeline.preroll}–{timeline.end}. It is always included so the "
-            "shot's rigs stay on one timeline."
+            f"Published over frames {_range_text(entry)}, but the shot now runs "
+            f"{timeline.preroll}–{timeline.end}. Republished so every rig in the "
+            "shot stays on one timeline."
         )
     else:
         state = RigState.PUBLISHED
@@ -275,6 +383,10 @@ def _row_for(
         detail=detail,
         published=entry,
     )
+
+
+def _rig_count(count: int) -> str:
+    return f"{count} rig" if count == 1 else f"{count} rigs"
 
 
 def _shorten(publish_path: Path) -> str:

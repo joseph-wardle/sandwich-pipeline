@@ -17,7 +17,7 @@ from pipe.core.struct.timeline import Timeline
 from pipe.core.ui import MessageDialog
 from pipe.core.util.paths import get_production_path
 
-from .anim_index import AnimStream, entries_to_json
+from .anim_index import AnimStream, entries_to_json, read_anim_index
 from .anim_lock import confirm_locked_republish
 from .publisher import Publisher
 from .rig_selection import PublishSelection, select_rigs_to_publish
@@ -167,7 +167,20 @@ class AnimPublisher(Publisher):
         )
         if kept := self._selection.anims_to_keep:
             message += "\n\nKept from the previous publish:\n"
-            message += "\n".join(f"    {entry.namespace}" for entry in kept)
+            message += "\n".join(f"    • {entry.namespace}" for entry in kept)
+
+        # Read back rather than predict: only the chaser knows which namespaces
+        # ShotGrid could name a rig for.
+        if unbound := [
+            entry.namespace
+            for entry in read_anim_index(self._publish_path).values()
+            if entry.rig is None
+        ]:
+            message += (
+                "\n\nNo rig asset matched these, so downstream will see their "
+                "animation with no materials or CFX:\n"
+            )
+            message += "\n".join(f"    • {namespace}" for namespace in unbound)
         return message
 
 

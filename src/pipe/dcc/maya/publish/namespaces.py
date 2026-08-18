@@ -32,31 +32,38 @@ def namespace_of(node: str) -> str:
     return node.split("|")[-1].rpartition(":")[0]
 
 
-def unpublishable_reason(node: str) -> UnpublishableReason | None:
+def unpublishable_reason(cache_set: str) -> UnpublishableReason | None:
     """Why the animation export cannot publish this rig, or None if it can."""
-    namespace = namespace_of(node)
-    if Sdf.Path.IsValidIdentifier(namespace):
-        return None
+    namespace = namespace_of(cache_set)
     if not namespace:
         return UnpublishableReason(
             "imported, not referenced",
-            "Imported into the scene instead of referenced",
+            "Imported into the scene instead of referenced. Reference the rig "
+            "directly into the shot to publish it.",
         )
     if ":" in namespace:
-        container = _containing_reference(node)
+        container = _containing_reference(cache_set)
         return UnpublishableReason(
             f"inside {container}" if container else "inside another reference",
-            "Referenced inside {} rather than directly into the shot".format(
+            "Referenced inside {} rather than directly into the shot. Reference "
+            "the rig directly into the shot to publish it.".format(
                 f"'{container}'" if container else "another reference"
             ),
         )
-    # Maya rewrites or rejects namespaces that aren't valid identifiers, so
-    # nothing should land here. A rig must not reach the export just because we
-    # ran out of explanations for it.
-    return UnpublishableReason(
-        "unusable namespace",
-        f"Namespace '{namespace}' is not a name USD can use",
-    )
+    if not Sdf.Path.IsValidIdentifier(namespace):
+        return UnpublishableReason(
+            "unusable namespace",
+            f"Namespace '{namespace}' is not a name USD can use.",
+        )
+    if not mc.sets(cache_set, query=True):
+        set_name = cache_set.rpartition(":")[2]
+        return UnpublishableReason(
+            "nothing to export",
+            f"Its '{set_name}' set is empty, so the export would have no "
+            "geometry to publish. Rigs built for previs are often not set up "
+            "for animation publishing — check with rigging.",
+        )
+    return None
 
 
 def _partition_publishable(nodes: list[str]) -> tuple[list[str], dict[str, list[str]]]:
@@ -85,27 +92,9 @@ def confirm_any_publishable(parent: QWidget | None, nodes: list[str]) -> bool:
     return False
 
 
-def confirm_rig_publishable(parent: QWidget | None, rig_root: str) -> bool:
-    """Whether this one rig can be published. Opens a dialog when it cannot."""
-    reason = unpublishable_reason(rig_root)
-    if reason is None:
-        return True
-
-    log.warning("Cannot publish '%s': %s", rig_root, reason.detail)
-    MessageDialog(
-        parent,
-        f"'{rig_root.split('|')[-1]}' cannot be published.\n\n"
-        f"{reason.detail}.\n\n"
-        "Reference the rig directly into the shot and publish it again. "
-        "Nothing was exported.",
-        "Cannot Publish Rig",
-    ).exec_()
-    return False
-
-
 def _describe_skipped(skipped: dict[str, list[str]]) -> str:
     return "\n\n".join(
-        "{}:\n{}".format(reason, "\n".join(f"    {name}" for name in names))
+        "{}:\n{}".format(reason, "\n".join(f"    • {name}" for name in names))
         for reason, names in skipped.items()
     )
 
@@ -119,10 +108,7 @@ def _warn_nothing_publishable(parent: QWidget | None, total: int, details: str) 
     log.warning("%s:\n%s", headline, details)
     MessageDialog(
         parent,
-        f"{headline}:\n\n"
-        f"{details}\n\n"
-        "Reference character rigs directly into the shot to publish them. "
-        "Nothing was exported.",
+        f"{headline}:\n\n{details}\n\nNothing was exported.",
         "Cannot Publish Animation",
     ).exec_()
 

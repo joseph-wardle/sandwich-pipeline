@@ -105,6 +105,12 @@ class ExportChaser(mayaUsdLib.ExportChaser):
         # anything that would stop a kept rig being re-indexed has to be found
         # before it runs. After it, failing loses every rig, not one.
         verify_keepable(self._chaser_args.keep)
+        if not self._stage.GetPseudoRoot().GetChildren():
+            raise RuntimeError(
+                "The animation export produced nothing, so the shot's publish was "
+                "left as it was. The rigs that were published have no geometry to "
+                "export."
+            )
 
         path_dag_mapping = path_to_maya_dag_map(self._dag_to_usd)
 
