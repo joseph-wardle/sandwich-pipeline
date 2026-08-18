@@ -9,7 +9,7 @@ package: `from pipe.core.shotgrid import ShotGrid, Asset, ShotGridNotFound, ...`
 
 from __future__ import annotations
 
-from pipe.core.shotgrid.client import SG_Config, ShotGrid
+from pipe.core.shotgrid.client import SG_Config, SHOT_TASK_TEMPLATE, ShotGrid
 from pipe.core.shotgrid.entities import (
     Asset,
     Environment,
@@ -40,6 +40,7 @@ from pipe.core.shotgrid.paths import (
 __all__ = [
     # Connection
     "SG_Config",
+    "SHOT_TASK_TEMPLATE",
     "ShotGrid",
     # Entities
     "Asset",

@@ -136,9 +136,16 @@ _SG_FIELDS_VERSION: tuple[str, ...] = (
 )
 _SG_FIELDS_PLAYLIST: tuple[str, ...] = ("id", "code")
 
-# The fields the Version/Playlist writes below name. Reads project the
+# The fields the Shot/Version/Playlist writes below name. Reads project the
 # `_SG_FIELDS_*` tuples above.
 _SG_PROJECT = "project"
+_SG_SHOT_CODE = "code"
+_SG_SHOT_DESCRIPTION = "description"
+_SG_SHOT_SEQUENCE = "sg_sequence"
+_SG_SHOT_CUT_IN = "sg_cut_in"
+_SG_SHOT_CUT_OUT = "sg_cut_out"
+_SG_SHOT_CUT_DURATION = "sg_cut_duration"
+_SG_SHOT_TASK_TEMPLATE = "task_template"
 _SG_VERSION_CODE = "code"
 _SG_VERSION_ENTITY = "entity"
 _SG_VERSION_USER = "user"
@@ -147,6 +154,12 @@ _SG_VERSION_DESCRIPTION = "description"
 _SG_VERSION_UPLOADED_MOVIE = "sg_uploaded_movie"
 _SG_VERSION_PATH_TO_FRAMES = "sg_path_to_frames"
 _SG_PLAYLIST_VERSIONS = "versions"
+
+# ShotGrid seeds a new Shot's task list from a template of this entity type.
+_SG_TASK_TEMPLATE_TYPE = "TaskTemplate"
+
+# The project's Shot task template. Named here so a schema rename is one edit.
+SHOT_TASK_TEMPLATE = "SKD_shot"
 
 # Active-record filters: skip records that are marked out-of-project / disabled.
 _SG_STATUS_ACTIVE_FILTER: tuple[str, str, str] = ("sg_status_list", "is_not", "oop")
@@ -841,6 +854,84 @@ class ShotGrid:
 
     # ---- writes: shots -----------------------------------------------------
 
+    def create_shot(
+        self,
+        *,
+        code: str,
+        sequence: Sequence,
+        cut_in: int,
+        cut_out: int,
+        description: str | None = None,
+        task_template: str | None = SHOT_TASK_TEMPLATE,
+    ) -> Shot:
+        """Create a Shot with its frame range and task list already in place.
+
+        Used by the previs break-out, which delivers shots production has not
+        registered yet. `task_template` names a ShotGrid Shot template whose
+        tasks are instantiated on the new Shot; pass `None` for no tasks.
+
+        Raises:
+            ValueError: `cut_out` precedes `cut_in`, or `code` is taken.
+            ShotGridWriteError: ShotGrid rejected the create.
+        """
+        self._require_unused_shot_code(code)
+        payload: dict[str, Any] = {
+            _SG_SHOT_CODE: code,
+            _SG_PROJECT: self._project_ref(),
+            _SG_SHOT_SEQUENCE: _entity_ref("Sequence", sequence),
+            **_cut_range_payload(cut_in, cut_out),
+        }
+        if description:
+            payload[_SG_SHOT_DESCRIPTION] = description
+        template = self._task_template_ref(task_template) if task_template else None
+        if template is not None:
+            payload[_SG_SHOT_TASK_TEMPLATE] = template
+        row = _write_or_raise(
+            lambda: self._sg.create("Shot", payload, list(_SG_FIELDS_SHOT)),
+            entity_type="Shot",
+            entity_id=None,
+            field=None,
+        )
+        invalidate(self)
+        return self._created(row, Shot)
+
+    def _require_unused_shot_code(self, code: str) -> None:
+        """Refuse a code some Shot already holds."""
+        rows = _read_or_raise(
+            lambda: self._sg.find(
+                "Shot", [self._project_filter(), (_SG_SHOT_CODE, "is", code)], ["id"]
+            ),
+            entity_type="Shot",
+            selector="code",
+            value=code,
+        )
+        if rows:
+            raise ValueError(
+                f"A shot named {code} already exists in ShotGrid "
+                f"(id {rows[0]['id']})."
+            )
+
+    def _task_template_ref(self, name: str) -> dict[str, Any] | None:
+        """The link-ref for the Shot task template `name`, or `None` if absent."""
+        rows = _read_or_raise(
+            lambda: self._sg.find(
+                _SG_TASK_TEMPLATE_TYPE,
+                [("code", "is", name), ("entity_type", "is", "Shot")],
+                ["id"],
+            ),
+            entity_type=_SG_TASK_TEMPLATE_TYPE,
+            selector="code",
+            value=name,
+        )
+        if not rows:
+            log.warning(f"No Shot task template named {name!r}; creating no tasks.")
+            return None
+        if len(rows) > 1:
+            log.warning(
+                f"Multiple Shot task templates named {name!r}; using the first."
+            )
+        return {"type": _SG_TASK_TEMPLATE_TYPE, "id": rows[0]["id"]}
+
     def set_shot_cut_range(self, shot: Shot, *, cut_in: int, cut_out: int) -> Shot:
         """Stamp `cut_in`/`cut_out` and the derived `cut_duration` onto `shot`.
 
@@ -852,18 +943,12 @@ class ShotGrid:
             ValueError: `cut_out` precedes `cut_in`.
             ShotGridWriteError: ShotGrid rejected the update.
         """
-        if cut_out < cut_in:
-            raise ValueError(f"cut_out ({cut_out}) precedes cut_in ({cut_in}).")
-        payload = {
-            "sg_cut_in": cut_in,
-            "sg_cut_out": cut_out,
-            "sg_cut_duration": cut_out - cut_in + 1,
-        }
+        payload = _cut_range_payload(cut_in, cut_out)
         _write_or_raise(
             lambda: self._sg.update("Shot", shot.id, payload),
             entity_type="Shot",
             entity_id=shot.id,
-            field="sg_cut_in",
+            field=_SG_SHOT_CUT_IN,
         )
         invalidate(self)
         return self.reload(shot)
@@ -937,11 +1022,8 @@ class ShotGrid:
             entity_id=None,
             field=None,
         )
-        version = Version.from_sg(row)
-        self._attach_db(version)
-        object.__setattr__(version, "_hydrated", True)
         invalidate(self)
-        return version
+        return self._created(row, Version)
 
     # ---- uploads -----------------------------------------------------------
 
@@ -1129,20 +1211,18 @@ class ShotGrid:
                 value=value,
                 matching_ids=[r["id"] for r in rows],
             )
-        entity = cls.from_sg(rows[0])
+        return self._created(rows[0], cls)
+
+    def _created(self, row: dict[str, Any], cls: type[_E]) -> _E:
+        """Structure one full ShotGrid row into an entity bound to this connection."""
+        entity = cls.from_sg(row)
         self._attach_db(entity)
-        # Root entities born from a full SG row never need to lazy-fetch
-        # themselves; only nested partial refs inside them do.
         object.__setattr__(entity, "_hydrated", True)
         return entity
 
     def _many(self, rows: list[dict[str, Any]], cls: type[_E]) -> list[_E]:
         """Structure a ShotGrid result list into entities with `_db` attached."""
-        result = [cls.from_sg(r) for r in rows]
-        for e in result:
-            self._attach_db(e)
-            object.__setattr__(e, "_hydrated", True)
-        return result
+        return [self._created(r, cls) for r in rows]
 
     # ---- internals: Houdini SSL workaround --------------------------------
     # DCC workaround: Houdini's bundled Python ships without modern SSL, so
@@ -1276,6 +1356,17 @@ def _selected(**selectors: object) -> tuple[str, object]:
             return name, value
     # _require_exactly_one_selector has already validated; this is unreachable.
     raise AssertionError("selector guard failed")
+
+
+def _cut_range_payload(cut_in: int, cut_out: int) -> dict[str, int]:
+    """The three cut fields ShotGrid must always see together."""
+    if cut_out < cut_in:
+        raise ValueError(f"cut_out ({cut_out}) precedes cut_in ({cut_in}).")
+    return {
+        _SG_SHOT_CUT_IN: cut_in,
+        _SG_SHOT_CUT_OUT: cut_out,
+        _SG_SHOT_CUT_DURATION: cut_out - cut_in + 1,
+    }
 
 
 def _entity_ref(sg_type: str, entity: SGEntity | None) -> dict[str, Any] | None:
