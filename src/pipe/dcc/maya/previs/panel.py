@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import maya.cmds as mc
+from env_sg import DB_Config
 from maya.app.general.mayaMixin import MayaQWidgetDockableMixin  # type: ignore
 from maya.OpenMayaUI import MQtUtil
 from Qt.QtCompat import wrapInstance
@@ -23,7 +24,7 @@ from Qt.QtWidgets import (
 
 from pipe.core.playblast.viewer import open_viewer
 from pipe.core.previs import codes, mutate_manifest
-from pipe.core.shotgrid import is_previs_shot_code
+from pipe.core.shotgrid import ShotGrid, ShotGridError, is_previs_shot_code
 from pipe.core.ui import MessageDialog
 from pipe.core.util.paths import get_previs_path
 
@@ -36,6 +37,7 @@ from . import (
     monitor,
     playback,
     playblast,
+    rlo,
     state,
     style,
 )
@@ -50,6 +52,7 @@ log = logging.getLogger(__name__)
 PANEL_OBJECT_NAME = "previsPanel"
 WORKSPACE_CONTROL_NAME = PANEL_OBJECT_NAME + "WorkspaceControl"
 _PLAYBLAST_TITLE = "Previs Playblast"
+_BREAK_OUT_TITLE = "Break Out Shot"
 
 _panel_instance: PrevisPanel | None = None
 
@@ -484,6 +487,58 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         shot = self._state.find_shot(shot_id)
         if shot is not None:
             self._launch_playblasts([shot])
+
+    def break_out_shot(self, shot_id: str) -> None:
+        """Deliver one previs shot to its RLO scene, then come back to previs."""
+        shot = self._state.find_shot(shot_id)
+        if shot is None or not self._guard_previs_file():
+            return
+        label = shot.code or shot.id
+        try:
+            conn = ShotGrid.connect(DB_Config)
+            plan = self._plan_break_out(shot, conn)
+            if plan is None or not dialogs.confirm_break_out(self, plan):
+                return
+            destination = rlo.deliver(plan, shot, self._state, conn)
+        except rlo.BreakOutError as exc:
+            MessageDialog(self, str(exc), _BREAK_OUT_TITLE).exec_()
+            return
+        except ShotGridError as exc:
+            log.exception("Could not read ShotGrid to break out %s.", label)
+            MessageDialog(
+                self,
+                f"Could not reach ShotGrid, so nothing was broken out:\n{exc}",
+                _BREAK_OUT_TITLE,
+            ).exec_()
+            return
+        except Exception as exc:
+            log.exception("Break-out of %s failed.", label)
+            MessageDialog(
+                self, f"Breaking out {label} failed:\n{exc}", _BREAK_OUT_TITLE
+            ).exec_()
+            return
+        # The scene on screen is the reopened previs file, so the panel re-reads it.
+        self._state = state.read_state() or PrevisState()
+        self.refresh()
+        MessageDialog(
+            self, f"Broke out {plan.code} to\n{destination}", _BREAK_OUT_TITLE
+        ).exec_()
+
+    def _plan_break_out(
+        self, shot: PrevisShot, conn: ShotGrid
+    ) -> rlo.DeliveryPlan | None:
+        """What breaking `shot` out would do, or None once the artist knows why not."""
+        sequence_code = self._sequence_code()
+        if sequence_code is None:
+            MessageDialog(
+                self,
+                "This file is not stamped with a previs sequence code, so break-out "
+                "cannot tell which sequence the shot belongs to. Reopen it through "
+                "Open Previs in the shelf.",
+                _BREAK_OUT_TITLE,
+            ).exec_()
+            return None
+        return rlo.plan_delivery(shot, conn.get_shot(code=sequence_code), conn)
 
     def playblast_all_shots(self) -> None:
         self._launch_playblasts(self._state.shots)

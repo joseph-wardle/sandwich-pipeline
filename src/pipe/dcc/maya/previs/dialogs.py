@@ -19,10 +19,12 @@ from Qt.QtWidgets import (
 )
 
 from pipe.core.previs import naming
-from pipe.core.ui import DialogButtons, FilteredListDialog
+from pipe.core.ui import DialogButtons, FilteredListDialog, MessageDialogCustomButtons
 
 if TYPE_CHECKING:
     from pipe.core.previs.model import FileRecord
+
+    from .rlo import DeliveryPlan
 
 
 def pick_scene_camera(parent: QWidget, candidates: Sequence[str]) -> str | None:
@@ -213,3 +215,62 @@ def show_orphan_warning(parent: QWidget, orphans: Iterable[tuple[str, str]]) -> 
         + "\n\nThey were probably renamed or removed externally. "
         "Re-add them through the panel to fix tracking.",
     )
+
+
+def confirm_break_out(parent: QWidget, plan: DeliveryPlan) -> bool:
+    """The single confirm break-out shows, whatever the delivery turns out to do."""
+    dialog = MessageDialogCustomButtons(
+        parent,
+        _break_out_message(plan),
+        "Break Out Shot",
+        has_cancel_button=True,
+        ok_name="Break out",
+        cancel_name="Cancel",
+    )
+    return bool(dialog.exec_())
+
+
+def _break_out_message(plan: DeliveryPlan) -> str:
+    """Name every consequence of `plan`, so one confirm covers all of them."""
+    lines = [
+        f"Break out {plan.code} — {plan.frames} frames, "
+        f"{plan.cut_in}–{plan.cut_out}.",
+        "",
+    ]
+    if plan.sg_shot is None:
+        lines.append(
+            f"  • Create shot {plan.code} in ShotGrid, in sequence "
+            f"{plan.sequence.code}, with its standard task list."
+        )
+    elif plan.recuts:
+        lines.append(
+            f"  • Re-cut {plan.code} in ShotGrid to " f"{plan.cut_in}–{plan.cut_out}."
+        )
+    if plan.replaces_rlo:
+        lines.append(
+            f"  • Replace {plan.destination.name}, keeping the one already "
+            "there as a version."
+        )
+    else:
+        lines.append(f"  • Write {plan.destination.name}.")
+    lines.append(
+        "  • Save this previs file, and reopen it when the break-out finishes."
+    )
+    return "\n".join([*lines, "", _sets_note(plan)])
+
+
+def _sets_note(plan: DeliveryPlan) -> str:
+    """What the delivered RLO will be dressed with, when previs shows otherwise."""
+    if plan.previs_sets == plan.rlo_sets:
+        return (
+            "Set dressing you moved in previs stays in previs — the RLO "
+            "composes its sets from ShotGrid."
+        )
+    return (
+        f"Heads up: previs is laid out against {_set_list(plan.previs_sets)}, but "
+        f"{plan.code}'s RLO will compose {_set_list(plan.rlo_sets)} from ShotGrid."
+    )
+
+
+def _set_list(codes: tuple[str, ...]) -> str:
+    return ", ".join(codes) if codes else "no set"

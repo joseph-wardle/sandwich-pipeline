@@ -136,6 +136,11 @@ class ShotHeader(QFrame):
         menu.addAction(
             "Playblast shot", lambda: self._controller.playblast_shot(self._shot.id)
         )
+        # Offered whether or not the dot is filled: the confirm names what a repeat
+        # delivery replaces, so the menu needs no rule about it.
+        menu.addAction(
+            "Break out shot…", lambda: self._controller.break_out_shot(self._shot.id)
+        )
         menu.addSeparator()
         menu.addAction(
             "Delete shot", lambda: self._controller.remove_shot(self._shot.id)

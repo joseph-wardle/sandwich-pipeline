@@ -1,17 +1,32 @@
-"""Break out a previs shot: cut the open scene down to one shot's content."""
+"""Break out a previs shot: plan the delivery, then carry it out."""
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
 import maya.cmds as mc
 
 from pipe.core.previs import codes
-from pipe.core.shotgrid import Shot, build_shot_path
+from pipe.core.shot import maya_rlo_stream, shot_owner_for
+from pipe.core.shotgrid import (
+    Environment,
+    Sequence,
+    Shot,
+    ShotGrid,
+    ShotGridError,
+    ShotGridNotFound,
+    build_shot_path,
+)
 from pipe.core.util.paths import get_production_path
-from pipe.dcc.maya.shotfile.stage import build_shot_stage, setup_environment
+from pipe.core.versioning import save_version
+from pipe.dcc.maya.shotfile.stage import (
+    build_shot_stage,
+    linked_environments,
+    setup_environment,
+)
 from pipe.dcc.maya.util.on_open import remove_on_open_node
 
 from . import cameras
@@ -30,6 +45,9 @@ _FAR_PAST = -1_000_000.0
 _FAR_FUTURE = 1_000_000.0
 
 _TIME_CURVE_TYPES = ("animCurveTA", "animCurveTL", "animCurveTT", "animCurveTU")
+
+# Titles the version an outgoing RLO scene is kept under when a delivery replaces it.
+_REPLACED_TITLE = "Before break-out"
 
 
 class BreakOutError(Exception):
@@ -57,27 +75,128 @@ def cut_range(shot: PrevisShot) -> tuple[int, int]:
     return FRAME_START, FRAME_START + shot.primary_duration - 1
 
 
-def break_out_shot(shot: PrevisShot, state: PrevisState, sg_shot: Shot) -> Path:
-    """Deliver `shot` as `sg_shot`'s RLO scene, and return to the previs file."""
-    code = check_deliverable(shot)  # refuse before writing anything, anywhere
-    destination = rlo_path(code)
-    previs_file = _commit_previs_scene()
+@dataclass(frozen=True)
+class DeliveryPlan:
+    """What one break-out will do, settled before anything is written."""
+
+    code: str
+    cut_in: int
+    cut_out: int
+    sequence: Sequence
+    previs_file: Path
+    # None until `deliver` creates it; break-out may register a shot production has not
+    sg_shot: Shot | None
+    # The range that Shot held when planning looked.
+    sg_cut: tuple[int | None, int | None] | None
+    # What previs is laid out against, and what the delivered RLO will compose.
+    previs_sets: tuple[str, ...]
+    rlo_sets: tuple[str, ...]
+    replaces_rlo: bool
+
+    @property
+    def destination(self) -> Path:
+        return rlo_path(self.code)
+
+    @property
+    def frames(self) -> int:
+        return self.cut_out - self.cut_in + 1
+
+    @property
+    def recuts(self) -> bool:
+        """True when ShotGrid already holds this shot at some other range."""
+        return self.sg_cut is not None and self.sg_cut != (self.cut_in, self.cut_out)
+
+
+def plan_delivery(shot: PrevisShot, proxy: Shot, conn: ShotGrid) -> DeliveryPlan:
+    """What delivering `shot` would do, or a `BreakOutError` naming what to fix.
+
+    Reads ShotGrid, the scene and the disk, and writes to none of them."""
+    previs_file = _require_saved_scene()
+    code = _require_code(shot)
+    _require_primary(shot)
+    sequence = _require_sequence(proxy)
+    sg_shot = _find_shot(conn, code)
+    cut_in, cut_out = cut_range(shot)
+    return DeliveryPlan(
+        code=code,
+        cut_in=cut_in,
+        cut_out=cut_out,
+        sequence=sequence,
+        previs_file=previs_file,
+        sg_shot=sg_shot,
+        sg_cut=None if sg_shot is None else (sg_shot.cut_in, sg_shot.cut_out),
+        previs_sets=_set_codes(linked_environments(proxy)),
+        rlo_sets=_set_codes(_rlo_environments(sequence, sg_shot)),
+        replaces_rlo=_has_outgoing_rlo(code, sg_shot),
+    )
+
+
+def deliver(
+    plan: DeliveryPlan, shot: PrevisShot, state: PrevisState, conn: ShotGrid
+) -> Path:
+    """Carry out a confirmed `plan`, and return the RLO scene it wrote."""
+    _save_previs_scene()
+    if plan.replaces_rlo and plan.sg_shot is not None:  # planning pairs the two
+        _keep_outgoing_rlo(plan.sg_shot, plan.destination)
+    sg_shot = _register_shot(plan, conn)
+    return break_out_shot(plan, shot, state, sg_shot)
+
+
+def _find_shot(conn: ShotGrid, code: str) -> Shot | None:
     try:
-        _slice_scene_to_shot(shot, state, code)
-        _save_as_rlo(sg_shot, destination)
-    finally:
-        _restore_previs_session(previs_file)
-    return destination
+        return conn.get_shot(code=code)
+    except ShotGridNotFound:
+        return None
 
 
-def _commit_previs_scene() -> Path:
-    """Put the session on disk, and hand back the file to come home to."""
+def _require_sequence(proxy: Shot) -> Sequence:
+    if proxy.sequence is None:
+        raise BreakOutError(
+            f"The previs sequence {proxy.code} is not linked to a sequence in "
+            "ShotGrid, so a shot broken out of it would have nowhere to live. Ask "
+            "production to fill in its Sequence field."
+        )
+    return proxy.sequence
+
+
+def _require_saved_scene() -> Path:
+    """The previs file break-out will save, cut up, and come home to."""
     scene = mc.file(query=True, sceneName=True)
     if not scene:
         raise BreakOutError(
             "This previs scene has never been saved, so there would be nothing to "
             "come back to after breaking out. Save it first."
         )
+    return Path(str(scene))
+
+
+def _has_outgoing_rlo(code: str, sg_shot: Shot | None) -> bool:
+    """Whether an RLO scene is already there, refusing the one we cannot keep."""
+    if not rlo_path(code).exists():
+        return False
+    if sg_shot is None:
+        raise BreakOutError(
+            f"There is already an RLO scene for {code}, but ShotGrid has no shot "
+            f"{code} to keep it under. Ask production to restore the shot before "
+            "breaking this one out."
+        )
+    return True
+
+
+def _rlo_environments(sequence: Sequence, sg_shot: Shot | None) -> list[Environment]:
+    """The sets `setup_environment` will compose in the delivered RLO."""
+    if sg_shot is not None:
+        return linked_environments(sg_shot)
+    return [sequence.set] if sequence.set else []
+
+
+def _set_codes(environments: list[Environment]) -> tuple[str, ...]:
+    return tuple(sorted(env.code or "?" for env in environments))
+
+
+def _save_previs_scene() -> None:
+    """A `mayaUsdProxyShape` marks every previs scene modified the moment it
+    opens, so there is no dirty state worth testing."""
     try:
         mc.file(save=True, force=True)
     except RuntimeError as exc:
@@ -86,7 +205,54 @@ def _commit_previs_scene() -> Path:
             "Could not save this previs scene before breaking out, so nothing "
             "was cut. Check the file is not read-only, then try again."
         ) from exc
-    return Path(str(scene))
+
+
+def _keep_outgoing_rlo(sg_shot: Shot, destination: Path) -> None:
+    """Version the RLO scene about to be replaced, so a delivery is never a loss."""
+    stream = maya_rlo_stream(sg_shot, owner=shot_owner_for(sg_shot))
+    try:
+        record = save_version(destination, stream, title=_REPLACED_TITLE)
+    except Exception as exc:
+        log.exception("Could not version %s before replacing it.", destination)
+        raise BreakOutError(
+            f"Could not keep a copy of the RLO scene already at {destination.name}, "
+            "so it was left alone and nothing was cut."
+        ) from exc
+    log.info("Kept %s as version %s before breaking out.", destination, record.version)
+
+
+def _register_shot(plan: DeliveryPlan, conn: ShotGrid) -> Shot:
+    """Create or re-cut the ShotGrid Shot the RLO's stage is built from."""
+    try:
+        if plan.sg_shot is None:
+            return conn.create_shot(
+                code=plan.code,
+                sequence=plan.sequence,
+                cut_in=plan.cut_in,
+                cut_out=plan.cut_out,
+            )
+        if plan.recuts:
+            return conn.set_shot_cut_range(
+                plan.sg_shot, cut_in=plan.cut_in, cut_out=plan.cut_out
+            )
+    except (ShotGridError, ValueError) as exc:
+        log.exception("ShotGrid refused the break-out of %s.", plan.code)
+        raise BreakOutError(
+            f"ShotGrid would not take shot {plan.code}: {exc} Nothing was cut."
+        ) from exc
+    return plan.sg_shot
+
+
+def break_out_shot(
+    plan: DeliveryPlan, shot: PrevisShot, state: PrevisState, sg_shot: Shot
+) -> Path:
+    """Cut the open scene down to `shot`, save it as `sg_shot`'s RLO, come home."""
+    try:
+        _slice_scene_to_shot(shot, state, plan.code)
+        _save_as_rlo(sg_shot, plan.destination)
+    finally:
+        _restore_previs_session(plan.previs_file)
+    return plan.destination
 
 
 def _restore_previs_session(previs_file: Path) -> None:
@@ -108,16 +274,6 @@ def _save_as_rlo(sg_shot: Shot, destination: Path) -> None:
     mc.file(rename=str(destination))
     build_shot_stage(sg_shot, populate=lambda: setup_environment(sg_shot))
     mc.file(save=True, force=True)
-
-
-def check_deliverable(shot: PrevisShot) -> str:
-    """The shot's canonical code, or a `BreakOutError` naming what to fix.
-
-    Runs ahead of the first mutation so a refusal costs the artist nothing.
-    """
-    code = _require_code(shot)
-    _require_primary(shot)
-    return code
 
 
 def _slice_scene_to_shot(shot: PrevisShot, state: PrevisState, code: str) -> None:
@@ -144,7 +300,7 @@ def _require_code(shot: PrevisShot) -> str:
         raise BreakOutError(str(exc)) from exc
 
 
-def _require_primary(shot: PrevisShot) -> str:
+def _require_primary(shot: PrevisShot) -> None:
     label = shot.code or shot.id
     if not shot.primary:
         raise BreakOutError(
@@ -155,7 +311,6 @@ def _require_primary(shot: PrevisShot) -> str:
             f"Shot {label}'s primary camera ({shot.primary}) is no longer in the "
             "scene. Promote another take, or re-create the camera."
         )
-    return shot.primary
 
 
 def _drop_other_shot_cameras(shot: PrevisShot, state: PrevisState) -> None:
@@ -259,9 +414,11 @@ def _frame_playback(shot: PrevisShot) -> None:
 __all__ = [
     "HANDLE_FRAMES",
     "BreakOutError",
+    "DeliveryPlan",
     "break_out_shot",
-    "check_deliverable",
     "cut_range",
+    "deliver",
     "is_broken_out",
+    "plan_delivery",
     "rlo_path",
 ]

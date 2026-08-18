@@ -86,7 +86,7 @@ def add_sets(shot: Shot) -> None:
     with Usd.EditContext(stage, stage.GetRootLayer()):
         stage.RemovePrim(_SETS_PRIM)
         UsdGeom.Xform.Define(stage, _SETS_PRIM).AddScaleOp().Set(_SET_SCALE)
-        for env in _linked_environments(shot):
+        for env in linked_environments(shot):
             _payload_set(stage, env)
 
 
@@ -148,7 +148,7 @@ def _target_override_layer(stage: Usd.Stage, root_layer: Sdf.Layer, shot: Shot) 
     stage.SetEditTarget(Usd.EditTarget(override_layer))
 
 
-def _linked_environments(shot: Shot) -> list[Environment]:
+def linked_environments(shot: Shot) -> list[Environment]:
     """The shot's sets, falling back to the one linked on its sequence.
 
     These arrive partial from ShotGrid; reading `environment_path` lazy-fetches.
@@ -169,6 +169,7 @@ __all__ = [
     "create_stage_proxy",
     "get_stage",
     "get_stage_shape",
+    "linked_environments",
     "serialize_usd_edits_into_scene",
     "setup_environment",
     "shot_override_layer_path",
