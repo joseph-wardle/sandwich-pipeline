@@ -48,7 +48,7 @@ EVENT_DEFINITIONS: Final[tuple[EventDefinition, ...]] = (
         event_type=EVENT_PUBLISH_USD,
         description=(
             "USD publish terminal event. The `kind` payload field discriminates "
-            "asset / anim / camera / customanim / previs_asset publishes."
+            "asset / anim / camera / previs_asset publishes."
         ),
         required_payload_fields=("kind", "publish_path"),
         has_duration=True,

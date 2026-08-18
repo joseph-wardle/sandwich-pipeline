@@ -18,7 +18,7 @@ from pipe.core.ui import MessageDialog
 from pipe.core.util.paths import get_production_path
 
 from .anim_index import AnimStream, entries_to_json
-from .anim_lock import confirm_anim_republish_allowed
+from .anim_lock import confirm_locked_republish
 from .publisher import Publisher
 from .rig_selection import PublishSelection, select_rigs_to_publish
 from .usdchaser import ExportChaser, ExportChaserMode
@@ -86,6 +86,14 @@ class AnimPublisher(Publisher):
         if not self._init_success:
             return False
 
+        # First: a locked sequence has nothing to ask the artist about.
+        if not confirm_locked_republish(
+            parent=self._window,
+            sequence_code=self._shot.sequence.code if self._shot.sequence else None,
+            shot_code=self._shot_code,
+        ):
+            return False
+
         cache_sets = mc.ls("::" + CACHE_SET, sets=True)
         if not cache_sets:
             MessageDialog(
@@ -107,14 +115,6 @@ class AnimPublisher(Publisher):
         if selection is None:
             return False
 
-        if not confirm_anim_republish_allowed(
-            parent=self._window,
-            sequence_code=self._shot.sequence.code if self._shot.sequence else None,
-            shot_code=self._shot_code,
-            publish_path=self._save_path_for(selection.stream),
-        ):
-            return False
-
         self._selection = selection
         mc.select(*selection.sets_to_export, replace=True)
 
@@ -124,11 +124,8 @@ class AnimPublisher(Publisher):
     def _publish_dir(self) -> Path:
         return get_production_path() / self._shot.shot_path / "anim/usd"
 
-    def _save_path_for(self, stream: AnimStream) -> Path:
-        return self._publish_dir / stream.publish_filename
-
     def _get_save_path(self) -> Path | None:
-        return self._save_path_for(self._selection.stream)
+        return self._publish_dir / self._selection.stream.publish_filename
 
     def _do_publish_export(self) -> None:
         # The origin keys exist only while the export runs: every cancel path
