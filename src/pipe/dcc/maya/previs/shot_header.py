@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pipe.core.util.paths import get_production_path
 from Qt import QtCore, QtGui
 from Qt.QtWidgets import (
     QFrame,
@@ -37,7 +36,7 @@ class ShotHeader(QFrame):
         self._shot = shot
         self._controller = controller
 
-        self._broken_out = rlo.is_broken_out(shot, get_production_path())
+        self._broken_out = rlo.is_broken_out(shot)
 
         self.setFixedHeight(HEADER_HEIGHT)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)

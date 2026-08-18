@@ -1,13 +1,4 @@
-"""Break out a previs shot: cut the open scene down to one shot's content.
-
-Break-out re-stages the previs session in place rather than exporting from it,
-so this module is the surgery half. It leaves a scene holding exactly what the
-shot delivers, retimed to open on 1001 and stripped of everything that made the
-file a previs sequence. Building the RLO stage and saving it is the caller's job.
-
-Nothing here writes to disk; every function either answers a question about the
-shot or mutates the open Maya scene.
-"""
+"""Break out a previs shot: cut the open scene down to one shot's content."""
 
 from __future__ import annotations
 
@@ -18,7 +9,9 @@ from typing import cast
 import maya.cmds as mc
 
 from pipe.core.previs import codes
-from pipe.core.shotgrid.paths import build_shot_path
+from pipe.core.shotgrid import Shot, build_shot_path
+from pipe.core.util.paths import get_production_path
+from pipe.dcc.maya.shotfile.stage import build_shot_stage, setup_environment
 from pipe.dcc.maya.util.on_open import remove_on_open_node
 
 from . import cameras
@@ -43,18 +36,20 @@ class BreakOutError(Exception):
     """A failure an artist can act on; its message is safe to show in a dialog."""
 
 
-def rlo_path(shot_code: str, prod_root: Path) -> Path:
+def rlo_path(shot_code: str) -> Path:
     """Spelled out from a sticky code rather than reused from `maya_rlo_stream`,
     which needs a ShotGrid `Shot` the panel would have to fetch."""
-    return prod_root / build_shot_path(shot_code) / "rlo" / f"{shot_code}.mb"
+    return (
+        get_production_path() / build_shot_path(shot_code) / "rlo" / f"{shot_code}.mb"
+    )
 
 
-def is_broken_out(shot: PrevisShot, prod_root: Path) -> bool:
+def is_broken_out(shot: PrevisShot) -> bool:
     """True once an RLO scene exists on disk for this shot's sticky code.
 
     Says nothing about whether it still matches the live previs scene.
     """
-    return bool(shot.code) and rlo_path(shot.code, prod_root).exists()
+    return bool(shot.code) and rlo_path(shot.code).exists()
 
 
 def cut_range(shot: PrevisShot) -> tuple[int, int]:
@@ -62,13 +57,73 @@ def cut_range(shot: PrevisShot) -> tuple[int, int]:
     return FRAME_START, FRAME_START + shot.primary_duration - 1
 
 
-def slice_scene_to_shot(shot: PrevisShot, state: PrevisState) -> None:
-    """Cut the open scene down to `shot`, retimed to start at `FRAME_START`."""
-    code = _require_code(shot)
-    primary = _require_primary(shot)
+def break_out_shot(shot: PrevisShot, state: PrevisState, sg_shot: Shot) -> Path:
+    """Deliver `shot` as `sg_shot`'s RLO scene, and return to the previs file."""
+    code = check_deliverable(shot)  # refuse before writing anything, anywhere
+    destination = rlo_path(code)
+    previs_file = _commit_previs_scene()
+    try:
+        _slice_scene_to_shot(shot, state, code)
+        _save_as_rlo(sg_shot, destination)
+    finally:
+        _restore_previs_session(previs_file)
+    return destination
 
+
+def _commit_previs_scene() -> Path:
+    """Put the session on disk, and hand back the file to come home to."""
+    scene = mc.file(query=True, sceneName=True)
+    if not scene:
+        raise BreakOutError(
+            "This previs scene has never been saved, so there would be nothing to "
+            "come back to after breaking out. Save it first."
+        )
+    try:
+        mc.file(save=True, force=True)
+    except RuntimeError as exc:
+        log.exception("Could not save the previs scene before break-out.")
+        raise BreakOutError(
+            "Could not save this previs scene before breaking out, so nothing "
+            "was cut. Check the file is not read-only, then try again."
+        ) from exc
+    return Path(str(scene))
+
+
+def _restore_previs_session(previs_file: Path) -> None:
+    try:
+        mc.file(str(previs_file), open=True, force=True)
+    except RuntimeError as exc:
+        mc.file(rename="")
+        log.exception("Could not reopen the previs file after break-out.")
+        raise BreakOutError(
+            f"Could not reopen {previs_file.name} after breaking out. The scene on "
+            "screen is no longer your previs file — do not save it. Open "
+            f"{previs_file} again to carry on."
+        ) from exc
+
+
+def _save_as_rlo(sg_shot: Shot, destination: Path) -> None:
+    """Re-stage the sliced scene as the shot's RLO file and write it."""
+    destination.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
+    mc.file(rename=str(destination))
+    build_shot_stage(sg_shot, populate=lambda: setup_environment(sg_shot))
+    mc.file(save=True, force=True)
+
+
+def check_deliverable(shot: PrevisShot) -> str:
+    """The shot's canonical code, or a `BreakOutError` naming what to fix.
+
+    Runs ahead of the first mutation so a refusal costs the artist nothing.
+    """
+    code = _require_code(shot)
+    _require_primary(shot)
+    return code
+
+
+def _slice_scene_to_shot(shot: PrevisShot, state: PrevisState, code: str) -> None:
+    """Cut the open scene down to `shot`, retimed to start at `FRAME_START`."""
     _drop_other_shot_cameras(shot, state)
-    _rename_primary(primary, code)
+    _rename_primary(shot.primary, code)
 
     mc.currentTime(shot.source_in)
     _trim_keys(shot.source_in - HANDLE_FRAMES, shot.source_out + HANDLE_FRAMES)
@@ -204,8 +259,9 @@ def _frame_playback(shot: PrevisShot) -> None:
 __all__ = [
     "HANDLE_FRAMES",
     "BreakOutError",
+    "break_out_shot",
+    "check_deliverable",
     "cut_range",
     "is_broken_out",
     "rlo_path",
-    "slice_scene_to_shot",
 ]
