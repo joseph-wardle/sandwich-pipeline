@@ -47,6 +47,7 @@ from pipe.dcc.maya.assetfile import (
     resolve_asset_from_scene_path,
     write_asset_metadata,
 )
+from pipe.dcc.maya.util.random_color import is_random_color_active
 from pipe.dcc.maya.util.selection import maintain_selection
 
 from .publisher import PublishCopyError, Publisher, USDExportError
@@ -490,6 +491,16 @@ class AssetPublisher(Publisher):
         return name, base_name
 
     def _prepublish(self) -> bool:
+        if is_random_color_active():
+            MessageDialog(
+                self._window,
+                "Random Colors is on, so every material in this scene is showing an "
+                "ID color instead of its own shader. Press the Random Colors shelf "
+                "button to turn it off, then publish again.",
+                "Cannot export: Random Colors",
+            ).exec_()
+            return False
+
         checker = ModelChecker.get()
         self._override = False
         if not checker.check_selected():

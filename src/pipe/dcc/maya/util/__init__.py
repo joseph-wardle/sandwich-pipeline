@@ -5,6 +5,7 @@ from __future__ import annotations
 from . import (
     optionvar,
     picker,
+    random_color,
     reload,
     scale_reference,
     selection,
@@ -17,6 +18,7 @@ from . import (
 __all__ = [
     "optionvar",
     "picker",
+    "random_color",
     "reload",
     "scale_reference",
     "selection",
