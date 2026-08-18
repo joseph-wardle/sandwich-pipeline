@@ -47,6 +47,7 @@ from pipe.dcc.maya.assetfile import (
     resolve_asset_from_scene_path,
     write_asset_metadata,
 )
+from pipe.dcc.maya.util.random_color import is_random_color_active
 from pipe.dcc.maya.util.selection import maintain_selection
 
 from .publisher import PublishCopyError, Publisher, USDExportError
@@ -513,6 +514,19 @@ class AssetPublisher(Publisher):
                 return False
 
         if not self.check_material_bindings_of_selected():
+            return False
+
+        # Random Colors rebinds every shadingEngine to a throwaway lambert, so a
+        # stamped scene would publish the wrong shaders. Restoring is instant, so
+        # there is no legitimate reason to override this.
+        if is_random_color_active():
+            MessageDialog(
+                self._window,
+                "Random Colors is on, so every material in this scene is showing an "
+                "ID color instead of its own shader. Press the Random Colors shelf "
+                "button to turn it off, then publish again.",
+                "Cannot export: Random Colors",
+            ).exec_()
             return False
 
         self._configure_dialog_for_scene()

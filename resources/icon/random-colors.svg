@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="32" y1="28" x2="224" y2="228" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#314b57"/>
+      <stop offset="1" stop-color="#1d2830"/>
+    </linearGradient>
+  </defs>
+  <rect x="20" y="20" width="216" height="216" rx="42" fill="url(#bg)"/>
+  <!-- One faceted solid split into material-ID patches, in the tool's own palette. -->
+  <g stroke="#f8ecd2" stroke-width="7" stroke-linejoin="round">
+    <path d="M128 56l60 34v76l-60 34-60-34V90z" fill="#56B4E9"/>
+    <path d="M128 56l60 34-60 34-60-34z" fill="#E69F00"/>
+    <path d="M128 124v76l60-34V90z" fill="#009E73"/>
+  </g>
+  <path d="M128 124v76L68 166V90z" fill="none" stroke="#f8ecd2" stroke-width="7" stroke-linejoin="round"/>
+</svg>
