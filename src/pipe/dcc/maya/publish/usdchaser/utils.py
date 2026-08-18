@@ -23,6 +23,8 @@ from pipe.core.util.paths import get_production_path
 from pipe.core.shotgrid import Asset
 from pipe.core.struct.timeline import Timeline
 
+from ..anim_index import index_key
+
 
 def get_frames_from_attr(attr: TimeSampleble) -> Iterable[Usd.TimeCode]:
     return (
@@ -310,7 +312,7 @@ def split_by_namespace(
 
     layers: dict[str, Sdf.Layer] = dict()
     for namespace in namespaces:  # Create a layer for each rig (namespace)
-        layer_name = namespace.lower()
+        layer_name = index_key(namespace)
         layer_path = str(root_layer_path.parent / f"{layer_name}.{suffix}.usd")
         layer = create_or_clear_layer(layer_path)
         layer.TransferContent(root_layer)

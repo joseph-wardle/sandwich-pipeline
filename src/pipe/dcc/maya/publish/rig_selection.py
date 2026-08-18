@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import attrs
-from pxr import Sdf
 from Qt import QtCore
 from Qt.QtWidgets import (
     QCheckBox,
@@ -25,8 +24,8 @@ from Qt.QtWidgets import (
 from pipe.core.ui import DialogButtons
 from pipe.core.util.paths import get_production_path
 
+from .anim_index import AnimStream, PublishedAnim, index_key, read_anim_index
 from .namespaces import confirm_any_publishable, namespace_of, unpublishable_reason
-from .prim_paths import ANIM_CLASS_PATH, RIG_SCOPE_PATH
 
 if TYPE_CHECKING:
     from pipe.core.struct.timeline import Timeline
@@ -34,17 +33,6 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 _DIM = "color: #8a8a8a;"
-
-
-class AnimStream(Enum):
-    """Which of the two parallel anim publishes a run writes."""
-
-    MAIN = "main"
-    SPLINE = "spline"
-
-    @property
-    def publish_filename(self) -> str:
-        return f"{self.value}.usd"
 
 
 class RigState(Enum):
@@ -65,22 +53,6 @@ class RigState(Enum):
 
 
 @attrs.define(frozen=True)
-class PublishedAnim:
-    """One rig's entry in a shot's existing anim publish."""
-
-    namespace: str
-    anim_layer: Path
-    # Publishes made before the index gained its rig scope hold animation but
-    # record no rig asset.
-    rig_asset: Path | None
-    frames: tuple[int, int] | None
-    modified: float
-
-    def covers(self, timeline: Timeline) -> bool:
-        return self.frames == (timeline.preroll, timeline.end)
-
-
-@attrs.define(frozen=True)
 class RigRow:
     cache_set: str
     label: str
@@ -96,7 +68,7 @@ class PublishSelection:
 
     stream: AnimStream
     sets_to_export: tuple[str, ...] = attrs.field(validator=attrs.validators.min_len(1))
-    namespaces_to_keep: tuple[str, ...]
+    anims_to_keep: tuple[PublishedAnim, ...]
 
 
 def select_rigs_to_publish(
@@ -180,16 +152,16 @@ class _RigSelectDialog(QDialog, DialogButtons):
 
     def selection(self) -> PublishSelection:
         export: list[str] = []
-        keep: list[str] = []
+        keep: list[PublishedAnim] = []
         for row, box in self._rows:
             if box.isChecked():
                 export.append(row.cache_set)
             elif row.published is not None:
-                keep.append(row.published.namespace)
+                keep.append(row.published)
         return PublishSelection(
             stream=self._stream,
             sets_to_export=tuple(export),
-            namespaces_to_keep=tuple(keep),
+            anims_to_keep=tuple(keep),
         )
 
     @property
@@ -250,59 +222,8 @@ def survey_rigs(
     cache_sets: list[str], publish_path: Path, timeline: Timeline
 ) -> list[RigRow]:
     """One row per rig in the scene, in scene order."""
-    published = read_published_anim(publish_path)
+    published = read_anim_index(publish_path)
     return [_row_for(cache_set, published, timeline) for cache_set in cache_sets]
-
-
-def read_published_anim(publish_path: Path) -> dict[str, PublishedAnim]:
-    """What the shot's current anim publish holds, keyed by rig namespace."""
-    if not publish_path.is_file():
-        return {}
-
-    layer = _open_layer(publish_path)
-    if layer is None:
-        return {}
-
-    anim_scope = layer.GetPrimAtPath(ANIM_CLASS_PATH)
-    if anim_scope is None:
-        log.warning(
-            "'%s' has no %s — treating it as empty", publish_path, ANIM_CLASS_PATH
-        )
-        return {}
-
-    folder = publish_path.parent
-    entries: dict[str, PublishedAnim] = {}
-    for spec in anim_scope.nameChildren:
-        anim_layer = _referenced_asset(spec, folder)
-        if anim_layer is None:
-            log.warning(
-                "'%s' indexes rig '%s' without referencing any animation; ignoring it",
-                publish_path,
-                spec.name,
-            )
-            continue
-        try:
-            modified = anim_layer.stat().st_mtime
-        except OSError:
-            # The shot has already lost this rig's animation, so republishing is
-            # the fix. Dropping it here is what makes the row say so.
-            log.warning(
-                "'%s' indexes rig '%s' as '%s', which is not on disk; ignoring it",
-                publish_path,
-                spec.name,
-                anim_layer,
-            )
-            continue
-        entries[spec.name] = PublishedAnim(
-            namespace=spec.name,
-            anim_layer=anim_layer,
-            rig_asset=_referenced_asset(
-                layer.GetPrimAtPath(RIG_SCOPE_PATH.AppendChild(spec.name)), folder
-            ),
-            frames=_published_frames(anim_layer),
-            modified=modified,
-        )
-    return entries
 
 
 def _row_for(
@@ -325,7 +246,7 @@ def _row_for(
             published=None,
         )
 
-    entry = published.get(namespace)
+    entry = published.get(index_key(namespace))
     if entry is None:
         state = RigState.NEVER_PUBLISHED
         status = "never published"
@@ -354,34 +275,6 @@ def _row_for(
         detail=detail,
         published=entry,
     )
-
-
-def _open_layer(path: Path, *, metadata_only: bool = False) -> Sdf.Layer | None:
-    """The layer as it is on disk."""
-    try:
-        layer = Sdf.Layer.OpenAsAnonymous(str(path), metadataOnly=metadata_only)
-    except Exception:
-        log.warning("Could not open '%s'", path, exc_info=True)
-        return None
-    return layer or None
-
-
-def _referenced_asset(spec: Sdf.PrimSpec | None, folder: Path) -> Path | None:
-    """The first asset a prim references, resolved against the publish's folder."""
-    if spec is None:
-        return None
-    for reference in spec.referenceList.GetAddedOrExplicitItems():
-        if reference.assetPath:
-            return folder / reference.assetPath
-    return None
-
-
-def _published_frames(anim_layer: Path) -> tuple[int, int] | None:
-    """The frame range `UsdUtils.StitchClips` stamped into a stitched layer."""
-    layer = _open_layer(anim_layer, metadata_only=True)
-    if layer is None or not (layer.HasStartTimeCode() and layer.HasEndTimeCode()):
-        return None
-    return int(layer.startTimeCode), int(layer.endTimeCode)
 
 
 def _shorten(publish_path: Path) -> str:

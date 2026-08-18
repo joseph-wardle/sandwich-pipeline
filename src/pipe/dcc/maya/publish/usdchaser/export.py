@@ -8,17 +8,19 @@ from typing import TYPE_CHECKING
 
 import attrs
 import mayaUsd.lib as mayaUsdLib
-from pxr import Sdf, Usd
+from pxr import Usd
 
 from pipe.core.asset import paths_for_asset
 
-from ..prim_paths import (
-    ANIM_CLASS_PATH,
-    RIG_GEO_PATH,
-    RIG_ROOT_PATH,
-    RIG_SCOPE_PATH,
-    SHOT_CAM_PATH,
+from ..anim_index import (
+    AnimStream,
+    PublishedAnim,
+    RigReference,
+    author_rig_entry,
+    entries_from_json,
+    verify_keepable,
 )
+from ..prim_paths import RIG_GEO_PATH, RIG_ROOT_PATH, RIG_SCOPE_PATH, SHOT_CAM_PATH
 from .utils import (
     flatten_camera,
     make_topo_attrs_default,
@@ -62,6 +64,11 @@ class ChaserArgs:
         kw_only=True,
         converter=lambda t: Timeline.from_json(t) if t else None,
     )
+    keep: tuple[PublishedAnim, ...] = attrs.field(
+        default=(),
+        kw_only=True,
+        converter=lambda k: entries_from_json(k) if k else (),
+    )
 
 
 class ExportChaser(mayaUsdLib.ExportChaser):
@@ -81,101 +88,59 @@ class ExportChaser(mayaUsdLib.ExportChaser):
 
     @log_errors
     def PostExport(self) -> bool:
-        if self._chaser_args.mode == ExportChaserMode.ANIM:
-            self._post_export_anim()
-        elif self._chaser_args.mode == ExportChaserMode.SPLINE_ANIM:
-            self._post_export_anim(suffix="spline")
-        elif self._chaser_args.mode == ExportChaserMode.RIG:
-            self._post_export_rig()
-        elif self._chaser_args.mode == ExportChaserMode.CAM:
-            self._post_export_cam()
-        else:
-            raise ValueError(
-                f"{self._chaser_args.mode} is not a valid SKD chaser mode."
-            )
+        match self._chaser_args.mode:
+            case ExportChaserMode.ANIM:
+                self._post_export_anim(AnimStream.MAIN)
+            case ExportChaserMode.SPLINE_ANIM:
+                self._post_export_anim(AnimStream.SPLINE)
+            case ExportChaserMode.RIG:
+                self._post_export_rig()
+            case ExportChaserMode.CAM:
+                self._post_export_cam()
         return True
 
-    def _post_export_anim(self, suffix: str | None = None):
+    def _post_export_anim(self, stream: AnimStream) -> None:
         assert self._chaser_args.timeline is not None
+        # `split_by_namespace` saves the root layer over the shot's index, so
+        # anything that would stop a kept rig being re-indexed has to be found
+        # before it runs. After it, failing loses every rig, not one.
+        verify_keepable(self._chaser_args.keep)
+
         path_dag_mapping = path_to_maya_dag_map(self._dag_to_usd)
 
         scale_down_geo(self._stage)
         make_topo_attrs_default(self._stage)
-        namespace_layer_suffix = "anim" if not suffix else f"{suffix}.anim"
         layers = split_by_namespace(
-            self._stage, namespace_layer_suffix, path_dag_mapping
+            self._stage, stream.anim_layer_suffix, path_dag_mapping
         )
         root_layer = self._stage.GetRootLayer()
-
         conn = ShotGrid.connect(DB_Config)
 
         for namespace, layer in layers.items():
-            # Try and get the name of the rig from the namespace (strip trailing digits in case of multiple of the same rig in one scene)
-            # TODO: Make this more robust by querying for asset metadata on the rig instead of guessing from the namespace.
-            rig_name = re.sub(r"\d+$", "", namespace)
-
-            # The path to the root of the animated geometry.
-            preroll_name = namespace if not suffix else f"{namespace}.{suffix}"
             stitched_layer = split_preroll(
-                layer, preroll_name, RIG_GEO_PATH, self._chaser_args.timeline
+                layer,
+                stream.stitched_layer_name(namespace),
+                RIG_GEO_PATH,
+                self._chaser_args.timeline,
+            )
+            author_rig_entry(
+                root_layer,
+                namespace,
+                Path(stitched_layer.realPath),
+                _rig_reference(conn, namespace),
             )
 
-            # Create prim that will hold the animation and be inherited by the rig in shots.
-            # Eg. /__class__/anim/rig_namespace
-            namespace_anim_path = ANIM_CLASS_PATH.AppendChild(namespace)
-            anim_prim_spec = Sdf.CreatePrimInLayer(root_layer, namespace_anim_path)
-            anim_prim_spec.specifier = Sdf.SpecifierClass
-
-            anim_reference = Sdf.Reference(
-                Sdf.ComputeAssetPathRelativeToLayer(
-                    root_layer, stitched_layer.realPath
-                ),
-                RIG_ROOT_PATH,
-            )
-            anim_prim_spec.referenceList.Append(anim_reference)
-
-            # Attempt to get the path of the published rig USD to reference
-            rig_usd_filepath: Path | None = None
-            try:
-                asset = conn.get_asset(name=rig_name)
-                asset_paths = paths_for_asset(asset)
-                rig_usd_filepath = asset_paths.rig_path / "usd/main.usd"
-            except Exception:
-                log.error(
-                    f"[chaser] couldn't determine asset for rig in namespace '{namespace}'. "
-                    f"asset={getattr(asset, 'asset_path', None)} rig_path={rig_usd_filepath}",
-                    exc_info=True,
+        # This index is written from scratch on every publish, so the rigs the
+        # artist left unchecked are re-indexed here or lost.
+        for kept in self._chaser_args.keep:
+            if kept.rig is None:
+                log.warning(
+                    "[chaser] '%s' was published before the index named rigs, so "
+                    "keeping it carries its animation forward with no rig, and it "
+                    "will appear downstream without materials or CFX",
+                    kept.namespace,
                 )
-
-            # The rig scope needs to be defined not just an "over"
-            rig_prim_spec = Sdf.CreatePrimInLayer(root_layer, RIG_SCOPE_PATH)
-            rig_prim_spec.specifier = Sdf.SpecifierDef
-            rig_prim_spec.typeName = "Scope"
-
-            # Define the rig and have it inherit the animation
-            instance_prim_path = RIG_SCOPE_PATH.AppendChild(namespace)
-            instance_prim_spec = Sdf.CreatePrimInLayer(root_layer, instance_prim_path)
-            instance_prim_spec.specifier = Sdf.SpecifierDef
-            instance_prim_spec.inheritPathList.Prepend(
-                ANIM_CLASS_PATH.AppendChild(namespace)
-            )
-
-            # Reference the rig USD so we have materials, CFX, etc
-            rig_prim_path = RIG_SCOPE_PATH.AppendChild(rig_name)
-            if rig_usd_filepath:
-                rig_relative_usd_filepath = Sdf.ComputeAssetPathRelativeToLayer(
-                    root_layer, rig_usd_filepath.as_posix()
-                )
-                instance_reference = Sdf.Reference(
-                    rig_relative_usd_filepath, rig_prim_path
-                )
-                instance_prim_spec.referenceList.Append(instance_reference)
-            else:
-                log.error(
-                    f"[chaser] had no asset path for the rig in namespace '{namespace}'. "
-                    "It was not referenced into the scene, it may still appear but will be improperly configured. "
-                    "Please talk to the rigging team and let them know."
-                )
+            author_rig_entry(root_layer, kept.namespace, kept.anim_layer, kept.rig)
 
     def _post_export_rig(self):
         scale_down_geo(self._stage)
@@ -189,3 +154,25 @@ class ExportChaser(mayaUsdLib.ExportChaser):
         # back into Maya. Instead we'll scale it down when we import it into
         # Solaris.
         flatten_camera(self._stage, SHOT_CAM_PATH)
+
+
+def _rig_reference(conn: ShotGrid, namespace: str) -> RigReference | None:
+    """The published rig this namespace's animation belongs to."""
+    # Trailing digits distinguish two of the same rig in one scene.
+    # TODO: Make this more robust by querying for asset metadata on the rig
+    # instead of guessing from the namespace.
+    rig_name = re.sub(r"\d+$", "", namespace)
+    try:
+        asset_paths = paths_for_asset(conn.get_asset(name=rig_name))
+    except Exception:
+        log.exception(
+            "[chaser] could not find a rig asset named '%s' for the rig in "
+            "namespace '%s'. Please talk to the rigging team and let them know.",
+            rig_name,
+            namespace,
+        )
+        return None
+    return RigReference(
+        asset_path=asset_paths.rig_path / "usd/main.usd",
+        prim_path=RIG_SCOPE_PATH.AppendChild(rig_name).pathString,
+    )

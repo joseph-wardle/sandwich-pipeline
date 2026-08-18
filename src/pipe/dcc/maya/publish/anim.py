@@ -17,9 +17,10 @@ from pipe.core.struct.timeline import Timeline
 from pipe.core.ui import MessageDialog
 from pipe.core.util.paths import get_production_path
 
+from .anim_index import AnimStream, entries_to_json
 from .anim_lock import confirm_anim_republish_allowed
 from .publisher import Publisher
-from .rig_selection import AnimStream, PublishSelection, select_rigs_to_publish
+from .rig_selection import PublishSelection, select_rigs_to_publish
 from .usdchaser import ExportChaser, ExportChaserMode
 
 log = logging.getLogger(__name__)
@@ -142,6 +143,11 @@ class AnimPublisher(Publisher):
             "chaserArgs": [
                 (ExportChaser.ID, "mode", _chaser_mode(self._selection.stream)),
                 (ExportChaser.ID, "timeline", self._timeline.to_json()),
+                (
+                    ExportChaser.ID,
+                    "keep",
+                    entries_to_json(self._selection.anims_to_keep),
+                ),
             ],
             "exportColorSets": False,
             "exportComponentTags": False,
@@ -162,9 +168,9 @@ class AnimPublisher(Publisher):
             f"Published {self._selection.stream.value} animation for {count} "
             f"{'rig' if count == 1 else 'rigs'} to {self._publish_path}"
         )
-        if kept := self._selection.namespaces_to_keep:
+        if kept := self._selection.anims_to_keep:
             message += "\n\nKept from the previous publish:\n"
-            message += "\n".join(f"    {namespace}" for namespace in kept)
+            message += "\n".join(f"    {entry.namespace}" for entry in kept)
         return message
 
 
