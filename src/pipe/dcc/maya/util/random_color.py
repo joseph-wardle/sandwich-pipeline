@@ -26,27 +26,40 @@ STAMP_SHADER_PREFIX = "SKD_randomColor_"
 # Maya's default grey and stays readable as "no material" against every ID color.
 RESERVED_SHADING_ENGINES = frozenset({"initialShadingGroup", "initialParticleSE"})
 
-# sRGB hex. The first seven are the Okabe-Ito colorblind-safe set. The last five
-# were picked by maximizing the minimum Oklab distance -- under normal,
-# deuteranope and protanope vision, and after the show's ACEScg -> OpenDRT view
-# transform -- against each other and against the grey of Maya's default shader,
-# which unassigned geometry keeps. They cost nothing: the closest pair across all
-# twelve is one of the Okabe-Ito seven, which bound the set either way. Scenes
-# with more materials than this cycle, because twelve is already past the point
-# where a human separates flat colors.
+
 PALETTE_SRGB: tuple[str, ...] = (
-    "E69F00",  # orange
-    "56B4E9",  # sky blue
-    "009E73",  # bluish green
-    "F0E442",  # yellow
-    "0072B2",  # blue
-    "D55E00",  # vermillion
-    "CC79A7",  # reddish purple
-    "A00060",  # magenta
-    "2000E0",  # violet
-    "2080FF",  # azure
-    "C02000",  # red
-    "80FFFF",  # pale cyan
+    "000088",  # navy
+    "BB2211",  # brick
+    "7700FF",  # violet
+    "338800",  # forest
+    "00FF00",  # green
+    "EE00AA",  # magenta
+    "334400",  # olive
+    "FFFF88",  # cream
+    "771188",  # purple
+    "116688",  # teal
+    "FF7722",  # orange
+    "11BB66",  # emerald
+    "887766",  # taupe
+    "0099FF",  # azure
+    "552244",  # plum
+    "0022CC",  # blue
+    "33EEAA",  # mint
+    "FFBBFF",  # pink
+    "BBBB00",  # yellow
+    "665544",  # umber
+    "BB66DD",  # lilac
+    "FF0055",  # crimson
+    "AA00CC",  # orchid
+    "009988",  # sea green
+    "AA2277",  # wine
+    "00CCFF",  # cyan
+    "224466",  # slate
+    "FFBB77",  # apricot
+    "FF8888",  # salmon
+    "226600",  # moss
+    "7777BB",  # periwinkle
+    "6644AA",  # indigo
 )
 
 # Rec.709/D65 -> AP1/D60 with Bradford adaptation. Verified against the show
