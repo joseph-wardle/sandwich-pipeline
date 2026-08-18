@@ -39,7 +39,7 @@ from . import (
     state,
     style,
 )
-from .state import PrevisShot, PrevisState
+from .state import PrevisShot, PrevisState, ShotTake
 from .timeline import PrevisTimeline
 
 if TYPE_CHECKING:
@@ -61,7 +61,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self.setWindowTitle("Previs Sequencer")
         self.setStyleSheet(f"#{PANEL_OBJECT_NAME} {{ background: {style.PANEL_BG}; }}")
 
-        self._state = state.read_state() or PrevisState.empty()
+        self._state = state.read_state() or PrevisState()
 
         self._build_ui()
         self.refresh()
@@ -257,10 +257,9 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self._timeline.sync_playhead()
 
     def jump_to_shot(self, shot_id: str) -> None:
-        ranges = playback.compute_shot_ranges(self._state)
-        shot_range = ranges.get(shot_id)
-        if shot_range is not None:
-            self.scrub_to_frame(shot_range[0])
+        shot = self._state.find_shot(shot_id)
+        if shot is not None:
+            self.scrub_to_frame(shot.source_in)
 
     def add_shot(self) -> None:
         if not self._guard_previs_file():
@@ -269,8 +268,9 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         new_shot = PrevisShot(
             id=state.next_shot_id(),
             code=self._suggest_code(),
+            source_in=self._state.next_source_in(),
+            takes=[ShotTake(ns)],
             primary=ns,
-            durations={ns: state.DEFAULT_SHOT_DURATION},
         )
         self._state.shots.append(new_shot)
         self._persist()
@@ -312,28 +312,25 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self._state.shots = [s for s in self._state.shots if s.id != shot_id]
         self._persist()
 
-    def add_alternate_new_rig(self, shot_id: str) -> None:
+    def add_take_new_rig(self, shot_id: str) -> None:
         shot = self._state.find_shot(shot_id)
         if shot is None:
             return
-        ns = cameras.add_new_rig_reference()
-        shot.alternates.append(ns)
-        shot.durations[ns] = state.DEFAULT_SHOT_DURATION
+        shot.takes.append(ShotTake(cameras.add_new_rig_reference()))
         self._persist()
 
-    def add_alternate_duplicate_primary(self, shot_id: str) -> None:
+    def add_take_duplicate_primary(self, shot_id: str) -> None:
         shot = self._state.find_shot(shot_id)
         if shot is None:
             return
         new_ns = cameras.duplicate_primary(shot)
         if new_ns is None:
             return
-        shot.alternates.append(new_ns)
-        # Inherit the primary's duration — the duplicate IS the primary, at this moment.
-        shot.durations[new_ns] = shot.primary_duration
+        # A copy of the primary's keys starts out the same length as the primary.
+        shot.takes.append(ShotTake(new_ns, shot.primary_duration))
         self._persist()
 
-    def add_alternate_existing_camera(self, shot_id: str) -> None:
+    def add_take_existing_camera(self, shot_id: str) -> None:
         shot = self._state.find_shot(shot_id)
         if shot is None:
             return
@@ -341,8 +338,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         chosen = dialogs.pick_scene_camera(self, candidates)
         if not chosen:
             return
-        shot.alternates.append(chosen)
-        shot.durations[chosen] = state.DEFAULT_SHOT_DURATION
+        shot.takes.append(ShotTake(chosen))
         self._persist()
 
     def look_through_under_cursor(self, namespace: str) -> None:
@@ -371,11 +367,8 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         shot = self._state.find_shot(shot_id)
         if shot is None or shot.primary == namespace:
             return
-        if namespace not in shot.alternates:
+        if shot.find_take(namespace) is None:
             return
-        shot.alternates.remove(namespace)
-        if shot.primary:
-            shot.alternates.insert(0, shot.primary)
         shot.primary = namespace
         self._persist()
 
@@ -385,9 +378,10 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         shot = self._state.find_shot(shot_id)
         if shot is None or new_length_frames <= 0:
             return
-        if shot.duration_of(namespace) == new_length_frames:
+        take = shot.find_take(namespace)
+        if take is None or take.duration == new_length_frames:
             return
-        shot.durations[namespace] = new_length_frames
+        take.duration = new_length_frames
         self._persist()
 
     def preview_resize_camera(
@@ -400,7 +394,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         shot = self._state.find_shot(shot_id)
         if shot is None:
             return
-        cameras.remove_camera_from_shot(shot, namespace)
+        shot.drop_take(namespace)
         self._persist()
 
     def rename_camera(self, shot_id: str, namespace: str) -> None:
@@ -417,11 +411,11 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         shot = self._state.find_shot(shot_id)
         if shot is None:
             return
+        take = shot.find_take(namespace)
+        if take is not None:
+            take.namespace = new_name
         if shot.primary == namespace:
             shot.primary = new_name
-        shot.alternates = [new_name if a == namespace else a for a in shot.alternates]
-        if namespace in shot.durations:
-            shot.durations[new_name] = shot.durations.pop(namespace)
         self._persist()
 
     def declare_code(self, shot_id: str) -> None:
@@ -509,7 +503,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
 
         try:
             batch = playblast.build_shot_playblasts(
-                self._state, shots, sequence_code, previs_root=get_previs_path()
+                shots, sequence_code, previs_root=get_previs_path()
             )
         except Exception as exc:
             log.exception("Previs playblast render failed")

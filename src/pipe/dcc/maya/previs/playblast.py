@@ -22,8 +22,7 @@ from pipe.core.previs import codes, playblasts_dir
 
 from pipe.dcc.maya.playblast.previs.take import MTakeConfig, MTakePlayblaster
 
-from .playback import FRAME_START, compute_shot_ranges
-from .state import PrevisShot, PrevisState
+from .state import PrevisShot
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +48,6 @@ class ShotPlayblastBatch:
 
 
 def build_shot_playblasts(
-    state: PrevisState,
     shots: list[PrevisShot],
     sequence_code: str,
     *,
@@ -57,7 +55,6 @@ def build_shot_playblasts(
 ) -> ShotPlayblastBatch:
     """Render every shot in `shots`, reporting per-shot failures instead of
     aborting the batch."""
-    ranges = compute_shot_ranges(state)
     playblaster = MTakePlayblaster()
     destination = DiskDestination(
         id=EDIT_FOLDER_ID,
@@ -68,12 +65,9 @@ def build_shot_playblasts(
     clips: list[PreviewClip] = []
     failed: list[tuple[str, str]] = []
     for shot in shots:
-        cut_in, cut_out = ranges.get(shot.id, (FRAME_START, FRAME_START))
         label = shot.code or shot.id
         try:
-            clips.append(
-                _render_shot_playblast(shot, cut_in, cut_out, playblaster, destination)
-            )
+            clips.append(_render_shot_playblast(shot, playblaster, destination))
         except PrevisPlayblastError as exc:
             failed.append((label, str(exc)))
         except Exception as exc:  # a render crash on one shot must not abort the rest
@@ -84,18 +78,21 @@ def build_shot_playblasts(
 
 def _render_shot_playblast(
     previs_shot: PrevisShot,
-    cut_in: int,
-    cut_out: int,
     playblaster: MTakePlayblaster,
     destination: DiskDestination,
 ) -> PreviewClip:
-    """Render `previs_shot`'s primary take over `[cut_in, cut_out]`."""
+    """Render `previs_shot`'s primary take over its authored source range."""
     code = _require_code(previs_shot)
     if not previs_shot.primary:
         raise PrevisPlayblastError(f"Shot {code} has no primary camera to render from.")
 
+    # `MTakeConfig` names its range cut_in/cut_out, but a playblast samples scene
+    # frames — so it gets the shot's source range.
     config = MTakeConfig(
-        camera=previs_shot.primary, code=code, cut_in=cut_in, cut_out=cut_out
+        camera=previs_shot.primary,
+        code=code,
+        cut_in=previs_shot.source_in,
+        cut_out=previs_shot.source_out,
     )
     clips = playblaster.configure(config).playblast()
     if not clips:

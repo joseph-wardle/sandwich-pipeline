@@ -130,7 +130,7 @@ class MPrevisFileManager(MShotFileManager):
         root_layer.SetPermissionToSave(False)
 
         stage.serialize_usd_edits_into_scene()
-        state.write_state(PrevisState.empty())
+        state.write_state(PrevisState())
         mc.fileInfo("code", code)
         mc.file(save=True, force=True)
 

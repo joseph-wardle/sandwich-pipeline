@@ -20,13 +20,13 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from . import _qt, dialogs, playback, style
+from . import _qt, dialogs, style
 from .add_alt_button import AddAltButton
 from .cam_block import BLOCK_HEIGHT, CamBlock
 from .playhead import Playhead
 from .ruler import RULER_HEIGHT, Ruler
 from .shot_header import HEADER_HEIGHT, ShotHeader
-from .state import PrevisShot, PrevisState
+from .state import FRAME_START, PrevisShot, PrevisState, ShotTake
 
 if TYPE_CHECKING:
     from .panel import PrevisPanel
@@ -118,14 +118,13 @@ class PrevisTimeline(QWidget):
 
         shots = state.shots
         column_lengths = [s.primary_duration for s in shots]
-        ranges = playback.compute_shot_ranges(state)
-        first_frame = playback.FRAME_START
+        first_frame = FRAME_START
         last_frame = first_frame + sum(column_lengths) - 1
 
         self._apply_column_widths(column_lengths)
         self._add_ruler_row(first_frame, last_frame, num_shots=len(shots))
         self._add_header_row(shots)
-        deepest_row = self._add_track_rows(shots, ranges)
+        deepest_row = self._add_track_rows(shots)
         self._apply_trailing_stretches(len(shots), deepest_row)
         self.sync_playhead()
 
@@ -135,7 +134,7 @@ class PrevisTimeline(QWidget):
             self._playhead.hide()
             return
         frame = int(mc.currentTime(query=True))
-        x = TRACK_LABEL_WIDTH + (frame - playback.FRAME_START) * self._px_per_frame
+        x = TRACK_LABEL_WIDTH + (frame - FRAME_START) * self._px_per_frame
         self._playhead.move_to(x, self._inner.height())
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
@@ -198,23 +197,16 @@ class PrevisTimeline(QWidget):
                 index + 1,
             )
 
-    def _add_track_rows(
-        self,
-        shots: list[PrevisShot],
-        ranges: dict[str, tuple[int, int]],
-    ) -> int:
+    def _add_track_rows(self, shots: list[PrevisShot]) -> int:
         """Build the primary row, alt rows, and per-shot add-alt cell. Returns the deepest row index used."""
-        max_alts = max((len(s.alternates) for s in shots), default=0)
+        max_alts = max((len(s.other_takes) for s in shots), default=0)
 
         # Primary row
         self._grid.addWidget(_track_label("Primary", is_primary=True), _ROW_PRIMARY, 0)
         self._grid.setRowMinimumHeight(_ROW_PRIMARY, self._row_height)
         for index, shot in enumerate(shots):
-            shot_start = ranges[shot.id][0]
             self._grid.addLayout(
-                self._cell_for_camera(
-                    shot, shot.primary, is_primary=True, shot_start=shot_start
-                ),
+                self._cell_for_camera(shot, shot.primary_take, is_primary=True),
                 _ROW_PRIMARY,
                 index + 1,
             )
@@ -225,14 +217,11 @@ class PrevisTimeline(QWidget):
             self._grid.addWidget(_track_label("", is_primary=False), grid_row, 0)
             self._grid.setRowMinimumHeight(grid_row, self._row_height)
             for index, shot in enumerate(shots):
-                if alt_index < len(shot.alternates):
-                    namespace = shot.alternates[alt_index]
+                others = shot.other_takes
+                if alt_index < len(others):
                     self._grid.addLayout(
                         self._cell_for_camera(
-                            shot,
-                            namespace,
-                            is_primary=False,
-                            shot_start=ranges[shot.id][0],
+                            shot, others[alt_index], is_primary=False
                         ),
                         grid_row,
                         index + 1,
@@ -240,7 +229,7 @@ class PrevisTimeline(QWidget):
 
         # Add-alt row: one cell per shot, positioned right under that shot's last alt.
         for index, shot in enumerate(shots):
-            grid_row = _ROW_PRIMARY + 1 + len(shot.alternates)
+            grid_row = _ROW_PRIMARY + 1 + len(shot.other_takes)
             self._grid.setRowMinimumHeight(grid_row, self._row_height)
             if not self._grid.itemAtPosition(grid_row, 0):
                 self._grid.addWidget(_track_label("", is_primary=False), grid_row, 0)
@@ -250,30 +239,29 @@ class PrevisTimeline(QWidget):
                 index + 1,
             )
 
-        return max(_ROW_PRIMARY + 1 + len(s.alternates) for s in shots)
+        return max(_ROW_PRIMARY + 1 + len(s.other_takes) for s in shots)
 
     def _cell_for_camera(
         self,
         shot: PrevisShot,
-        namespace: str,
+        take: ShotTake | None,
         *,
         is_primary: bool,
-        shot_start: int,
     ) -> QHBoxLayout:
         cell = QHBoxLayout()
         cell.setContentsMargins(1, 4, 1, 4)
         cell.setSpacing(0)
-        if not namespace:
+        if take is None:
             cell.addStretch(1)
             return cell
 
-        cam_length = shot.duration_of(namespace)
-        primary_length = max(shot.primary_duration, 1)
+        cam_length = take.duration
+        primary_length = shot.primary_duration
         block = CamBlock(
-            namespace=namespace,
+            namespace=take.namespace,
             is_primary=is_primary,
             length_frames=cam_length,
-            start_frame=shot_start,
+            start_frame=shot.source_in,
             shot_id=shot.id,
             controller=self._controller,
             height=self._block_height(),
@@ -326,11 +314,9 @@ class PrevisTimeline(QWidget):
     def _open_add_alt(self, shot_id: str) -> None:
         dialogs.show_add_alternate_menu(
             self,
-            on_new_rig=lambda: self._controller.add_alternate_new_rig(shot_id),
-            on_duplicate=lambda: self._controller.add_alternate_duplicate_primary(
-                shot_id
-            ),
-            on_existing=lambda: self._controller.add_alternate_existing_camera(shot_id),
+            on_new_rig=lambda: self._controller.add_take_new_rig(shot_id),
+            on_duplicate=lambda: self._controller.add_take_duplicate_primary(shot_id),
+            on_existing=lambda: self._controller.add_take_existing_camera(shot_id),
         )
 
     # ----- live preview (driven by CamBlock during drag) -------------------
@@ -364,9 +350,7 @@ class PrevisTimeline(QWidget):
                 new_length if i == index else s.primary_duration
                 for i, s in enumerate(self._last_state.shots)
             )
-            self._ruler.set_range(
-                playback.FRAME_START, playback.FRAME_START + total_frames - 1
-            )
+            self._ruler.set_range(FRAME_START, FRAME_START + total_frames - 1)
             self._ruler.update()
 
     # ----- wheel zoom ------------------------------------------------------

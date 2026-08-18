@@ -94,7 +94,7 @@ def focal_length(namespace: str) -> float | None:
 
 def find_scene_cameras_outside_state(state: PrevisState) -> list[str]:
     """Camera-bearing namespaces in the scene that aren't already tracked by `state`."""
-    in_state: set[str] = {ns for shot in state.shots for ns in shot.all_cameras}
+    in_state: set[str] = {ns for shot in state.shots for ns in shot.namespaces}
     candidates: set[str] = set()
     for cam_shape in mc.ls(type="camera", long=True) or []:
         leaf = cam_shape.rsplit("|", 1)[-1]
@@ -115,7 +115,7 @@ def find_orphan_cameras(state: PrevisState) -> list[tuple[str, str]]:
     """`(shot_id, namespace)` for every camera in `state` whose namespace is gone from the scene."""
     orphans: list[tuple[str, str]] = []
     for shot in state.shots:
-        for ns in shot.all_cameras:
+        for ns in shot.namespaces:
             if not is_live(ns):
                 orphans.append((shot.id, ns))
     return orphans
@@ -128,12 +128,3 @@ def rename_camera(old_ns: str, new_ns: str) -> bool:
         return False
     mc.namespace(rename=(old_ns, new_ns))
     return True
-
-
-def remove_camera_from_shot(shot: PrevisShot, namespace: str) -> None:
-    """Drop `namespace` from the shot's schema. The scene node itself is left untouched."""
-    if shot.primary == namespace:
-        shot.primary = ""
-    if namespace in shot.alternates:
-        shot.alternates.remove(namespace)
-    shot.durations.pop(namespace, None)
