@@ -117,8 +117,10 @@ class MAnimShotFileManager(MShotFileManager):
 
     def _sublayer_camera(self) -> None:
         root_layer = get_stage().GetRootLayer()
-        cam_layer = Sdf.Layer.FindOrOpenRelativeToLayer(
-            root_layer, "/".join((self.shot.shot_path, "cam", "cam.usd"))
+        # Production-root-relative, resolved by `PXR_AR_DEFAULT_SEARCH_PATH` — not
+        # relative to the root layer, which lives a directory deeper.
+        cam_layer = Sdf.Layer.FindOrOpen(
+            "/".join((self.shot.shot_path, "cam", "cam.usd"))
         )
         if not cam_layer:
             mc.warning("No exported camera found")

@@ -8,7 +8,7 @@ from typing import Callable
 
 import maya.cmds as mc
 import mayaUsd  # type: ignore[import-not-found]
-from pxr import Sdf, Usd, UsdGeom
+from pxr import Sdf, Tf, Usd, UsdGeom
 
 from pipe.core.shotgrid import Environment, Shot, build_shot_path
 from pipe.core.util.paths import get_production_path
@@ -18,8 +18,11 @@ log = logging.getLogger(__name__)
 ROOT_LAYER = "maya_root.usd"
 _MAYA_OVERRIDE = "maya_override.usd"
 
-# Environment USD is authored in metres and Maya shot scenes are in centimetres.
-_ENVIRONMENT_SCALE = (100.0, 100.0, 100.0)
+# Sets are authored in metres and Maya shot scenes are in centimetres. The stage is
+# unit-mixed so the conversion is scoped to the prim the pipeline owns rather than
+# applied stage-wide.
+_SETS_PRIM = Sdf.Path("/sets")
+_SET_SCALE = (100.0, 100.0, 100.0)
 
 
 def get_stage_shape() -> str:
@@ -72,25 +75,19 @@ def create_stage_proxy(
 
 def setup_environment(shot: Shot) -> None:
     stage = get_stage()
-    root_layer = stage.GetRootLayer()
-
-    _scale_environment(stage, root_layer)
-    # The override layer is sublayered ahead of the sets so it outranks them.
-    _target_override_layer(stage, root_layer, shot)
-    sublayer_environments(shot)
+    add_sets(shot)
+    # Last, so the scene's edit target is left on the override layer.
+    _target_override_layer(stage, stage.GetRootLayer(), shot)
 
 
-def sublayer_environments(shot: Shot) -> None:
-    """Sublayer the shot's linked sets, read-only."""
-    root_layer = get_stage().GetRootLayer()
-    for env in _linked_environments(shot):
-        env_path = env.environment_path
-        env_layer = Sdf.Layer.FindOrOpenRelativeToLayer(root_layer, env_path)
-        if not env_layer:
-            log.warning("Could not open environment layer at %s", env_path)
-            continue
-        add_sublayer(root_layer, env_layer)
-        env_layer.SetPermissionToSave(False)
+def add_sets(shot: Shot) -> None:
+    """Payload the shot's linked sets under `/sets`, converted to centimetres."""
+    stage = get_stage()
+    with Usd.EditContext(stage, stage.GetRootLayer()):
+        stage.RemovePrim(_SETS_PRIM)
+        UsdGeom.Xform.Define(stage, _SETS_PRIM).AddScaleOp().Set(_SET_SCALE)
+        for env in _linked_environments(shot):
+            _payload_set(stage, env)
 
 
 def serialize_usd_edits_into_scene() -> None:
@@ -118,11 +115,20 @@ def build_shot_stage(shot: Shot, *, populate: Callable[[], None]) -> None:
     mc.fileInfo("code", shot.code or "")
 
 
-def _scale_environment(stage: Usd.Stage, root_layer: Sdf.Layer) -> None:
-    stage.SetEditTarget(Usd.EditTarget(root_layer))
-    env_xformable = UsdGeom.Xformable(stage.OverridePrim(Sdf.Path("/environment")))
-    env_xformable.ClearXformOpOrder()
-    env_xformable.AddScaleOp().Set(_ENVIRONMENT_SCALE)
+def _payload_set(stage: Usd.Stage, env: Environment) -> None:
+    # `environment_path` names a directory; the layer is always its `main.usd`. The
+    # path is authored verbatim, resolved by `PXR_AR_DEFAULT_SEARCH_PATH`.
+    asset_path = f"{env.environment_path}/main.usd"
+    set_layer = Sdf.Layer.FindOrOpen(asset_path)
+    if not set_layer:
+        log.warning("Could not open set layer at %s", asset_path)
+        return
+    scope = _SETS_PRIM.AppendChild(Tf.MakeValidIdentifier(Path(asset_path).parent.name))
+    for name in set_layer.rootPrims.keys():
+        prim = stage.DefinePrim(scope.AppendChild(name))
+        prim.GetPayloads().AddPayload(
+            asset_path, Sdf.Path.absoluteRootPath.AppendChild(name)
+        )
 
 
 def _target_override_layer(stage: Usd.Stage, root_layer: Sdf.Layer, shot: Shot) -> None:
@@ -157,6 +163,7 @@ def _linked_environments(shot: Shot) -> list[Environment]:
 
 __all__ = [
     "ROOT_LAYER",
+    "add_sets",
     "add_sublayer",
     "build_shot_stage",
     "create_stage_proxy",
@@ -165,5 +172,4 @@ __all__ = [
     "serialize_usd_edits_into_scene",
     "setup_environment",
     "shot_override_layer_path",
-    "sublayer_environments",
 ]

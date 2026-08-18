@@ -109,8 +109,8 @@ class MPrevisFileManager(MShotFileManager):
 
     def _setup_scene(self) -> None:
         # Sets only. Per-shot env overrides remain the RLO's responsibility, so a
-        # previs sequence has no shot-level override layer to scale or edit into.
-        stage.sublayer_environments(self.shot)
+        # previs sequence has no shot-level override layer to edit into.
+        stage.add_sets(self.shot)
 
     def _setup_file(self, path: Path, entity: SGEntity) -> None:
         mc.file(newFile=True, force=True)
@@ -119,15 +119,14 @@ class MPrevisFileManager(MShotFileManager):
         self.shot = cast(Shot, entity)
         code = self.shot.code or ""
 
-        # The sequence's maya_root.usd is shared by every file in it, so it is only
-        # populated by whichever file creates it.
-        root_layer, created = stage.create_stage_proxy(
+        # The sequence's maya_root.usd is shared by every file in it, so creating a
+        # file is also when its sets are reconciled against ShotGrid.
+        root_layer, _ = stage.create_stage_proxy(
             get_previs_path() / code / stage.ROOT_LAYER,
             file_path_ref="./" + stage.ROOT_LAYER,
         )
-        if created:
-            self._setup_scene()
-            root_layer.Save()
+        self._setup_scene()
+        root_layer.Save()
         root_layer.SetPermissionToSave(False)
 
         stage.serialize_usd_edits_into_scene()
