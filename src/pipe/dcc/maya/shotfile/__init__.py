@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import importlib
 
-# Everything in-tree imports the submodule it wants; these two names exist for the
-# `shelf_SKD_RLO` / `shelf_SKD_Animation` buttons, which import them off the package.
 _MANAGERS = {"MAnimShotFileManager": "anim", "MRLOShotFileManager": "rlo"}
 
 __all__ = [*_MANAGERS]

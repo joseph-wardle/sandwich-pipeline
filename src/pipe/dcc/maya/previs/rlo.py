@@ -54,7 +54,7 @@ class BreakOutError(Exception):
     """A failure an artist can act on; its message is safe to show in a dialog."""
 
 
-def rlo_path(shot_code: str) -> Path:
+def _rlo_path(shot_code: str) -> Path:
     """Spelled out from a sticky code rather than reused from `maya_rlo_stream`,
     which needs a ShotGrid `Shot` the panel would have to fetch."""
     return (
@@ -67,10 +67,10 @@ def is_broken_out(shot: PrevisShot) -> bool:
 
     Says nothing about whether it still matches the live previs scene.
     """
-    return bool(shot.code) and rlo_path(shot.code).exists()
+    return bool(shot.code) and _rlo_path(shot.code).exists()
 
 
-def cut_range(shot: PrevisShot) -> tuple[int, int]:
+def _cut_range(shot: PrevisShot) -> tuple[int, int]:
     """The shot's frame range once delivered (handles excluded)."""
     return FRAME_START, FRAME_START + shot.primary_duration - 1
 
@@ -84,27 +84,32 @@ class DeliveryPlan:
     cut_out: int
     sequence: Sequence
     previs_file: Path
-    # None until `deliver` creates it; break-out may register a shot production has not
+    # The shot as ShotGrid held it when planning looked, or None when production
+    # has never registered it and `deliver` will.
     sg_shot: Shot | None
-    # The range that Shot held when planning looked.
-    sg_cut: tuple[int | None, int | None] | None
+    # Settled here rather than derived on demand: a `Shot` hydrates in place, so a
+    # plan that re-read the range would stop describing the delivery that was
+    # confirmed.
+    recuts: bool
+    # The shot whose outgoing RLO this delivery keeps before replacing it. Carries
+    # the shot rather than a flag so a delivery cannot claim a replacement it has
+    # nowhere to file.
+    replaces: Shot | None
     # What previs is laid out against, and what the delivered RLO will compose.
     previs_sets: tuple[str, ...]
     rlo_sets: tuple[str, ...]
-    replaces_rlo: bool
 
     @property
     def destination(self) -> Path:
-        return rlo_path(self.code)
+        return _rlo_path(self.code)
 
     @property
     def frames(self) -> int:
         return self.cut_out - self.cut_in + 1
 
     @property
-    def recuts(self) -> bool:
-        """True when ShotGrid already holds this shot at some other range."""
-        return self.sg_cut is not None and self.sg_cut != (self.cut_in, self.cut_out)
+    def replaces_rlo(self) -> bool:
+        return self.replaces is not None
 
 
 def plan_delivery(shot: PrevisShot, proxy: Shot, conn: ShotGrid) -> DeliveryPlan:
@@ -116,7 +121,8 @@ def plan_delivery(shot: PrevisShot, proxy: Shot, conn: ShotGrid) -> DeliveryPlan
     _require_primary(shot)
     sequence = _require_sequence(proxy)
     sg_shot = _find_shot(conn, code)
-    cut_in, cut_out = cut_range(shot)
+    cut_in, cut_out = _cut_range(shot)
+    held_cut = None if sg_shot is None else (sg_shot.cut_in, sg_shot.cut_out)
     return DeliveryPlan(
         code=code,
         cut_in=cut_in,
@@ -124,10 +130,10 @@ def plan_delivery(shot: PrevisShot, proxy: Shot, conn: ShotGrid) -> DeliveryPlan
         sequence=sequence,
         previs_file=previs_file,
         sg_shot=sg_shot,
-        sg_cut=None if sg_shot is None else (sg_shot.cut_in, sg_shot.cut_out),
+        recuts=held_cut is not None and held_cut != (cut_in, cut_out),
+        replaces=_outgoing_rlo(code, sg_shot),
         previs_sets=_set_codes(linked_environments(proxy)),
         rlo_sets=_set_codes(_rlo_environments(sequence, sg_shot)),
-        replaces_rlo=_has_outgoing_rlo(code, sg_shot),
     )
 
 
@@ -136,10 +142,15 @@ def deliver(
 ) -> Path:
     """Carry out a confirmed `plan`, and return the RLO scene it wrote."""
     _save_previs_scene()
-    if plan.replaces_rlo and plan.sg_shot is not None:  # planning pairs the two
-        _keep_outgoing_rlo(plan.sg_shot, plan.destination)
+    if plan.replaces is not None:
+        _keep_outgoing_rlo(plan.replaces, plan.destination)
     sg_shot = _register_shot(plan, conn)
-    return break_out_shot(plan, shot, state, sg_shot)
+    try:
+        _slice_scene_to_shot(plan, shot, state)
+        _save_as_rlo(sg_shot, plan.destination)
+    finally:
+        _restore_previs_session(plan.previs_file)
+    return plan.destination
 
 
 def _find_shot(conn: ShotGrid, code: str) -> Shot | None:
@@ -170,17 +181,17 @@ def _require_saved_scene() -> Path:
     return Path(str(scene))
 
 
-def _has_outgoing_rlo(code: str, sg_shot: Shot | None) -> bool:
-    """Whether an RLO scene is already there, refusing the one we cannot keep."""
-    if not rlo_path(code).exists():
-        return False
+def _outgoing_rlo(code: str, sg_shot: Shot | None) -> Shot | None:
+    """The shot an RLO already sitting at the destination is kept under."""
+    if not _rlo_path(code).exists():
+        return None
     if sg_shot is None:
         raise BreakOutError(
             f"There is already an RLO scene for {code}, but ShotGrid has no shot "
             f"{code} to keep it under. Ask production to restore the shot before "
             "breaking this one out."
         )
-    return True
+    return sg_shot
 
 
 def _rlo_environments(sequence: Sequence, sg_shot: Shot | None) -> list[Environment]:
@@ -243,18 +254,6 @@ def _register_shot(plan: DeliveryPlan, conn: ShotGrid) -> Shot:
     return plan.sg_shot
 
 
-def break_out_shot(
-    plan: DeliveryPlan, shot: PrevisShot, state: PrevisState, sg_shot: Shot
-) -> Path:
-    """Cut the open scene down to `shot`, save it as `sg_shot`'s RLO, come home."""
-    try:
-        _slice_scene_to_shot(shot, state, plan.code)
-        _save_as_rlo(sg_shot, plan.destination)
-    finally:
-        _restore_previs_session(plan.previs_file)
-    return plan.destination
-
-
 def _restore_previs_session(previs_file: Path) -> None:
     try:
         mc.file(str(previs_file), open=True, force=True)
@@ -276,16 +275,20 @@ def _save_as_rlo(sg_shot: Shot, destination: Path) -> None:
     mc.file(save=True, force=True)
 
 
-def _slice_scene_to_shot(shot: PrevisShot, state: PrevisState, code: str) -> None:
+def _slice_scene_to_shot(
+    plan: DeliveryPlan, shot: PrevisShot, state: PrevisState
+) -> None:
     """Cut the open scene down to `shot`, retimed to start at `FRAME_START`."""
     _drop_other_shot_cameras(shot, state)
-    _rename_primary(shot.primary, code)
+    _rename_primary(shot.primary, plan.code)
 
+    # Cutting keys leaves each plug holding whatever the scene last evaluated, so
+    # the scene sits on the shot's opening frame before anything is trimmed.
     mc.currentTime(shot.source_in)
     _trim_keys(shot.source_in - HANDLE_FRAMES, shot.source_out + HANDLE_FRAMES)
     _retime(FRAME_START - shot.source_in)
     _strip_previs_scaffold()
-    _frame_playback(shot)
+    _frame_playback(plan)
 
 
 def _require_code(shot: PrevisShot) -> str:
@@ -353,11 +356,12 @@ def _rename_primary(namespace: str, code: str) -> None:
 
 def _trim_keys(keep_start: int, keep_end: int) -> None:
     """Drop every key outside the handled range, on every curve in the scene."""
-    _warn_referenced_animation()
+    curves = _anim_curves()
+    _warn_referenced_animation(curves)
+    if not curves:
+        return
     for span in ((_FAR_PAST, keep_start - _EPS), (keep_end + _EPS, _FAR_FUTURE)):
-        curves = _anim_curves()
-        if curves:
-            mc.cutKey(*curves, time=span, clear=True)
+        mc.cutKey(*curves, time=span, clear=True)
 
 
 def _retime(offset: int) -> None:
@@ -373,12 +377,10 @@ def _anim_curves() -> list[str]:
     return curves
 
 
-def _warn_referenced_animation() -> None:
+def _warn_referenced_animation(curves: list[str]) -> None:
     """Maya refuses to trim or retime a curve that lives inside a reference, and
     does it silently."""
-    referenced = [
-        c for c in _anim_curves() if mc.referenceQuery(c, isNodeReferenced=True)
-    ]
+    referenced = [c for c in curves if mc.referenceQuery(c, isNodeReferenced=True)]
     if referenced:
         log.warning(
             "%d referenced animation curves cannot be retimed and will keep their "
@@ -401,24 +403,19 @@ def _strip_previs_scaffold() -> None:
                 mc.delete(parent)
 
 
-def _frame_playback(shot: PrevisShot) -> None:
+def _frame_playback(plan: DeliveryPlan) -> None:
     """Frame what actually travelled, handles included."""
-    cut_in, cut_out = cut_range(shot)
-    start, end = cut_in - HANDLE_FRAMES, cut_out + HANDLE_FRAMES
+    start, end = plan.cut_in - HANDLE_FRAMES, plan.cut_out + HANDLE_FRAMES
     mc.playbackOptions(
         animationStartTime=start, animationEndTime=end, minTime=start, maxTime=end
     )
-    mc.currentTime(cut_in)
+    mc.currentTime(plan.cut_in)
 
 
 __all__ = [
-    "HANDLE_FRAMES",
     "BreakOutError",
     "DeliveryPlan",
-    "break_out_shot",
-    "cut_range",
     "deliver",
     "is_broken_out",
     "plan_delivery",
-    "rlo_path",
 ]

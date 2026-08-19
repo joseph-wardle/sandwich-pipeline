@@ -497,7 +497,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         try:
             conn = ShotGrid.connect(DB_Config)
             plan = self._plan_break_out(shot, conn)
-            if plan is None or not dialogs.confirm_break_out(self, plan):
+            if not dialogs.confirm_break_out(self, plan):
                 return
             destination = rlo.deliver(plan, shot, self._state, conn)
         except rlo.BreakOutError as exc:
@@ -524,20 +524,15 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             self, f"Broke out {plan.code} to\n{destination}", _BREAK_OUT_TITLE
         ).exec_()
 
-    def _plan_break_out(
-        self, shot: PrevisShot, conn: ShotGrid
-    ) -> rlo.DeliveryPlan | None:
-        """What breaking `shot` out would do, or None once the artist knows why not."""
+    def _plan_break_out(self, shot: PrevisShot, conn: ShotGrid) -> rlo.DeliveryPlan:
+        """What breaking `shot` out would do."""
         sequence_code = self._sequence_code()
         if sequence_code is None:
-            MessageDialog(
-                self,
+            raise rlo.BreakOutError(
                 "This file is not stamped with a previs sequence code, so break-out "
                 "cannot tell which sequence the shot belongs to. Reopen it through "
-                "Open Previs in the shelf.",
-                _BREAK_OUT_TITLE,
-            ).exec_()
-            return None
+                "Open Previs in the shelf."
+            )
         return rlo.plan_delivery(shot, conn.get_shot(code=sequence_code), conn)
 
     def playblast_all_shots(self) -> None:
