@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -13,7 +13,6 @@ from Qt.QtWidgets import (
     QInputDialog,
     QLineEdit,
     QMenu,
-    QMessageBox,
     QVBoxLayout,
     QWidget,
 )
@@ -201,20 +200,31 @@ def show_add_alternate_menu(
     menu.exec_(QCursor.pos())
 
 
-def show_orphan_warning(parent: QWidget, orphans: Iterable[tuple[str, str]]) -> None:
-    """Non-blocking warning listing every (shot_id, namespace) gone missing."""
-    items = list(orphans)
-    if not items:
-        return
-    lines = [f"  • {ns}  (shot {shot_id})" for shot_id, ns in items]
-    QMessageBox.warning(
+def confirm_delete_shot(
+    parent: QWidget, *, label: str, namespaces: Sequence[str], undoable: bool
+) -> bool:
+    """Confirm deleting a shot, naming the cameras that go with it."""
+    lines = [f"Delete {label}?", ""]
+    if namespaces:
+        lines.append("Its cameras are removed from the scene too:")
+        lines.extend(f"  • {ns}" for ns in namespaces)
+    else:
+        lines.append("None of its cameras are still in the scene.")
+    if not undoable:
+        lines += [
+            "",
+            "Maya clears the undo queue when a referenced rig is removed, so this "
+            "cannot be undone.",
+        ]
+    dialog = MessageDialogCustomButtons(
         parent,
-        "Missing cameras",
-        "These tracked cameras are missing from the scene:\n\n"
-        + "\n".join(lines)
-        + "\n\nThey were probably renamed or removed externally. "
-        "Re-add them through the panel to fix tracking.",
+        "\n".join(lines),
+        "Delete Shot",
+        has_cancel_button=True,
+        ok_name="Delete",
+        cancel_name="Cancel",
     )
+    return bool(dialog.exec_())
 
 
 def confirm_break_out(parent: QWidget, plan: DeliveryPlan) -> bool:

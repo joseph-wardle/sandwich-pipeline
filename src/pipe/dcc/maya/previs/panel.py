@@ -28,6 +28,7 @@ from pipe.core.shotgrid import ShotGrid, ShotGridError, is_previs_shot_code
 from pipe.core.ui import MessageDialog
 from pipe.core.util.paths import get_previs_path
 
+from pipe.dcc.maya.command import undo_chunk
 from pipe.dcc.maya.runtime import get_main_qt_window
 
 from . import (
@@ -148,7 +149,6 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self._update_status_text()
         self._update_monitor_label()
         self._update_branch_button()
-        self._warn_orphans()
 
     def _update_branch_button(self) -> None:
         """Branch only makes sense on an open previs file."""
@@ -219,10 +219,14 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             return f"{seq}  ·  no shots"
         total_frames = sum(s.primary_duration for s in shots)
         plural = "s" if len(shots) != 1 else ""
-        return (
+        line = (
             f"{seq}  ·  {len(shots)} shot{plural}"
             f"  ·  {total_frames}f  ·  {total_frames / 24.0:.1f}s @ 24fps"
         )
+        missing = len(cameras.find_orphan_cameras(self._state))
+        if missing:
+            return f"{line}  ·  {missing} camera{'s' if missing != 1 else ''} missing"
+        return line
 
     def _sequence_code(self) -> str | None:
         """Sequence-proxy code from `fileInfo` (e.g. `A_previs`), or None if absent/invalid."""
@@ -242,11 +246,6 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
     def _update_monitor_label(self) -> None:
         panel = monitor.get_monitor()
         self._monitor_label.setText(f"monitor: {panel}" if panel else "")
-
-    def _warn_orphans(self) -> None:
-        orphans = cameras.find_orphan_cameras(self._state)
-        if orphans:
-            dialogs.show_orphan_warning(self, orphans)
 
     # ---------- controller methods (called by child widgets) ----------
 
@@ -312,8 +311,23 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         ).exec_()
 
     def remove_shot(self, shot_id: str) -> None:
-        self._state.shots = [s for s in self._state.shots if s.id != shot_id]
-        self._persist()
+        """Delete a shot and the cameras it owns, once the artist confirms both."""
+        shot = self._state.find_shot(shot_id)
+        if shot is None:
+            return
+        live = [ns for ns in shot.namespaces if cameras.is_live(ns)]
+        if not dialogs.confirm_delete_shot(
+            self,
+            label=shot.code or "this shot",
+            namespaces=live,
+            undoable=not any(cameras.is_referenced(ns) for ns in live),
+        ):
+            return
+        with undo_chunk("previsDeleteShot"):
+            for namespace in live:
+                cameras.delete_camera_rig(namespace)
+            self._state.shots = [s for s in self._state.shots if s.id != shot_id]
+            self._persist()
 
     def add_take_new_rig(self, shot_id: str) -> None:
         shot = self._state.find_shot(shot_id)
@@ -398,6 +412,31 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         if shot is None:
             return
         shot.drop_take(namespace)
+        self._persist()
+
+    def relink_camera(self, shot_id: str, namespace: str) -> None:
+        """Repoint a take at a camera that is actually in the scene, keeping its length."""
+        shot = self._state.find_shot(shot_id)
+        if shot is None:
+            return
+        take = shot.find_take(namespace)
+        if take is None:
+            return
+        candidates = cameras.find_scene_cameras_outside_state(self._state)
+        if not candidates:
+            MessageDialog(
+                self,
+                f"There is no untracked camera in the scene to re-link {namespace} to. "
+                "Add the camera back, or delete the take.",
+                "Re-link Camera",
+            ).exec_()
+            return
+        chosen = dialogs.pick_scene_camera(self, candidates)
+        if not chosen:
+            return
+        take.namespace = chosen
+        if shot.primary == namespace:
+            shot.primary = chosen
         self._persist()
 
     def rename_camera(self, shot_id: str, namespace: str) -> None:

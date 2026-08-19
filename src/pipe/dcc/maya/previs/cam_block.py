@@ -101,6 +101,7 @@ class CamBlock(QFrame):
         height: int = BLOCK_HEIGHT,
         px_per_frame: int = 4,
         truncated: bool = False,
+        missing: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -110,6 +111,7 @@ class CamBlock(QFrame):
         self._length_frames = length_frames
         self._start_frame = start_frame
         self._truncated = truncated
+        self._missing = missing
         # Taken verbatim from the timeline so drag math stays stable —
         # deriving px-per-frame from self.width() drifts because the block is
         # being live-resized during the drag.
@@ -125,13 +127,11 @@ class CamBlock(QFrame):
         # Without WA_StyledBackground, Qt's native style ignores stylesheet
         # background-color and shows outline-only.
         self.setAttribute(_qt.STYLED_BACKGROUND, True)
+        self.setStyleSheet(self._block_style())
         if is_primary:
-            self.setStyleSheet(style.CAM_BLOCK_PRIMARY)
+            # A missing primary still takes drops: promoting a live alt onto it is
+            # one of the two ways an artist repairs the shot.
             self.setAcceptDrops(True)
-        elif truncated:
-            self.setStyleSheet(style.CAM_BLOCK_ALT_TRUNC)
-        else:
-            self.setStyleSheet(style.CAM_BLOCK_ALT)
 
         outer = QHBoxLayout(self)
         # Right margin 0 on primary: the resize handle owns that strip.
@@ -144,6 +144,13 @@ class CamBlock(QFrame):
             outer.addWidget(self._handle)
 
         self.setToolTip(self._tooltip_text())
+
+    def _block_style(self) -> str:
+        if self._missing:
+            return style.CAM_BLOCK_MISSING
+        if self._is_primary:
+            return style.CAM_BLOCK_PRIMARY
+        return style.CAM_BLOCK_ALT_TRUNC if self._truncated else style.CAM_BLOCK_ALT
 
     def minimumSizeHint(self) -> QtCore.QSize:
         # Both hints must override the default that cascades from child label
@@ -169,6 +176,10 @@ class CamBlock(QFrame):
         self._name_label = QLabel(self._namespace, self)
         self._name_label.setObjectName("name")
         self._name_label.setAttribute(_qt.TRANSPARENT_FOR_MOUSE, True)
+        if self._missing:
+            font = self._name_label.font()
+            font.setStrikeOut(True)
+            self._name_label.setFont(font)
         col.addWidget(self._name_label)
 
         col.addLayout(self._build_frame_row())
@@ -201,11 +212,13 @@ class CamBlock(QFrame):
 
     def _tooltip_text(self) -> str:
         suffix = "  (longer than primary)" if self._truncated else ""
-        return (
-            f"{self._namespace}\n"
-            f"{self._start_frame} → {self._end_frame()}  ({self._length_frames}f)"
-            f"{suffix}"
-        )
+        lines = [
+            self._namespace,
+            f"{self._start_frame} → {self._end_frame()}  ({self._length_frames}f){suffix}",
+        ]
+        if self._missing:
+            lines.append("camera missing from the scene — right-click to re-link")
+        return "\n".join(lines)
 
     @property
     def length_frames(self) -> int:
@@ -216,9 +229,7 @@ class CamBlock(QFrame):
         if truncated == self._truncated:
             return
         self._truncated = truncated
-        self.setStyleSheet(
-            style.CAM_BLOCK_ALT_TRUNC if truncated else style.CAM_BLOCK_ALT
-        )
+        self.setStyleSheet(self._block_style())
         self._end_label.setText(self._end_label_text())
         self.setToolTip(self._tooltip_text())
 
@@ -332,7 +343,7 @@ class CamBlock(QFrame):
 
     def dragLeaveEvent(self, event: QtGui.QDragLeaveEvent) -> None:
         if self._is_primary:
-            self.setStyleSheet(style.CAM_BLOCK_PRIMARY)
+            self.setStyleSheet(self._block_style())
         super().dragLeaveEvent(event)
 
     def dropEvent(self, event: QtGui.QDropEvent) -> None:
@@ -341,7 +352,7 @@ class CamBlock(QFrame):
             event.ignore()
             return
         _shot_id, namespace = payload
-        self.setStyleSheet(style.CAM_BLOCK_PRIMARY)
+        self.setStyleSheet(self._block_style())
         event.acceptProposedAction()
         self._controller.promote_to_primary(self._shot_id, namespace)
 
@@ -366,6 +377,11 @@ class CamBlock(QFrame):
 
     def contextMenuEvent(self, event: QtGui.QContextMenuEvent) -> None:
         menu = QMenu(self)
+        if self._missing:
+            menu.addAction(
+                "Re-link…",
+                lambda: self._controller.relink_camera(self._shot_id, self._namespace),
+            )
         if not self._is_primary:
             menu.addAction(
                 "Promote to primary",

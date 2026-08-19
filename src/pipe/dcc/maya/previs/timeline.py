@@ -20,7 +20,7 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from . import _qt, dialogs, style
+from . import _qt, cameras, dialogs, style
 from .add_alt_button import AddAltButton
 from .cam_block import BLOCK_HEIGHT, CamBlock
 from .playhead import Playhead
@@ -267,6 +267,7 @@ class PrevisTimeline(QWidget):
             height=self._block_height(),
             px_per_frame=self._px_per_frame,
             truncated=(not is_primary) and cam_length > primary_length,
+            missing=not cameras.is_live(take.namespace),
             parent=self._inner,
         )
 

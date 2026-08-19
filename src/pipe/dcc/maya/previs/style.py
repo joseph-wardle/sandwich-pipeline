@@ -26,6 +26,8 @@ SHOT_ALT = "#3A3A3A"
 SHOT_ALT_EDGE = "#555555"
 SHOT_ALT_TEXT = "#C8C0B0"
 SHOT_EMPTY_EDGE = "#4A4A4A"
+MISSING_EDGE = "#8A5A5A"  # the take's namespace is gone from the scene
+MISSING_TEXT = "#C9A0A0"
 TRUNC_EDGE = "#C97D52"
 TRUNC_TEXT = "#F4D4BE"
 
@@ -246,6 +248,23 @@ QFrame#camBlock QLabel#lengthBadge {{
     padding: 1px 6px;
     border-radius: 2px;
 }}
+"""
+
+# A take whose namespace has left the scene. Hollow and dashed, matching the
+# panel's other "not there yet" outline (the pending break-out dot), so absence
+# reads the same way everywhere.
+CAM_BLOCK_MISSING = f"""
+QFrame#camBlock {{
+    background-color: transparent;
+    border: 1px dashed {MISSING_EDGE};
+    border-radius: 2px;
+}}
+QFrame#camBlock QLabel#name {{
+    color: {MISSING_TEXT};
+    font-size: 12px;
+    background: transparent;
+}}
+{_FRAME_LABELS_ALT}
 """
 
 ADD_ALT_CELL = f"""

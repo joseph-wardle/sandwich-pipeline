@@ -111,6 +111,31 @@ def is_live(namespace: str) -> bool:
     return bool(namespace) and bool(mc.namespace(exists=f":{namespace}"))
 
 
+def _reference_node(namespace: str) -> str | None:
+    """The reference node that brought `namespace` in, or None if it was made in-scene."""
+    for node in mc.ls(f"{namespace}:*", long=True) or []:
+        if mc.referenceQuery(node, isNodeReferenced=True):
+            return cast(str, mc.referenceQuery(node, referenceNode=True))
+    return None
+
+
+def is_referenced(namespace: str) -> bool:
+    return _reference_node(namespace) is not None
+
+
+def delete_camera_rig(namespace: str) -> None:
+    """Remove `namespace` and everything under it from the scene."""
+    reference_node = _reference_node(namespace)
+    if reference_node is not None:
+        mc.file(removeReference=True, referenceNode=reference_node)
+    else:
+        nodes = mc.ls(f"{namespace}:*", long=True) or []
+        if nodes:
+            mc.delete(*nodes)
+    if mc.namespace(exists=f":{namespace}"):
+        mc.namespace(removeNamespace=f":{namespace}", deleteNamespaceContent=True)
+
+
 def find_orphan_cameras(state: PrevisState) -> list[tuple[str, str]]:
     """`(shot_id, namespace)` for every camera in `state` whose namespace is gone from the scene."""
     orphans: list[tuple[str, str]] = []
