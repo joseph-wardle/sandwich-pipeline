@@ -12,12 +12,14 @@ from maya.app.general.mayaMixin import MayaQWidgetDockableMixin  # type: ignore
 from maya.OpenMayaUI import MQtUtil
 from Qt.QtCompat import wrapInstance
 from Qt.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QPushButton,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -42,8 +44,9 @@ from . import (
     state,
     style,
 )
+from .cut_view import CutView
 from .state import PrevisShot, PrevisState, ShotTake
-from .timeline import PrevisTimeline
+from .timeline_view import TimelineView
 
 if TYPE_CHECKING:
     from pipe.core.previs.model import SequenceManifest
@@ -77,8 +80,15 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         root.addWidget(self._build_top_bar())
-        self._timeline = PrevisTimeline(self, parent=self)
-        root.addWidget(self._timeline, 1)
+        self._cut_view = CutView(self, parent=self)
+        self._timeline_view = TimelineView(self, parent=self)
+        self._views = QStackedWidget(self)
+        self._views.addWidget(self._cut_view)
+        self._views.addWidget(self._timeline_view)
+        root.addWidget(self._views, 1)
+        # Not persisted: the cut is what the panel is for, so every session opens
+        # on it regardless of where the last one ended.
+        self._view: CutView | TimelineView = self._cut_view
 
     def _build_top_bar(self) -> QFrame:
         bar = QFrame(self)
@@ -103,6 +113,27 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self._info = QLabel("", bar)
         self._info.setObjectName("info")
         row.addWidget(self._info)
+
+        self._cut_btn = _view_button(
+            bar, "cut", "Shots in edit order — horizontal position is cut position"
+        )
+        self._cut_btn.clicked.connect(lambda: self._show_view(self._cut_view))
+        row.addWidget(self._cut_btn)
+
+        self._timeline_btn = _view_button(
+            bar,
+            "timeline",
+            "Shots where their animation lives. Horizontal position is scene time",
+        )
+        self._timeline_btn.clicked.connect(lambda: self._show_view(self._timeline_view))
+        row.addWidget(self._timeline_btn)
+
+        # Exclusive group, so "which button is lit" cannot drift from each other
+        # and clicking the lit one cannot leave the pair unlit.
+        self._view_group = QButtonGroup(bar)
+        self._view_group.addButton(self._cut_btn)
+        self._view_group.addButton(self._timeline_btn)
+        self._cut_btn.setChecked(True)
 
         row.addStretch(1)
 
@@ -144,8 +175,21 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         row.addWidget(playblast_btn)
         return bar
 
+    def _show_view(self, view: CutView | TimelineView) -> None:
+        """Swap which axis is on screen."""
+        if view is self._view:
+            return
+        self._view = view
+        self._views.setCurrentWidget(view)
+        # Redundant after a click (the button checked itself), but keeps the
+        # lit button honest if this is ever called from anywhere else.
+        (self._cut_btn if view is self._cut_view else self._timeline_btn).setChecked(
+            True
+        )
+        view.set_state(self._state)
+
     def refresh(self) -> None:
-        self._timeline.set_state(self._state)
+        self._view.set_state(self._state)
         self._update_status_text()
         self._update_monitor_label()
         self._update_branch_button()
@@ -161,9 +205,12 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         deliberately separate from active.py's file-scoped monitor job.
         """
         mc.scriptJob(
-            event=("timeChanged", self._timeline.sync_playhead),
+            event=("timeChanged", self._sync_playhead),
             parent=WORKSPACE_CONTROL_NAME,
         )
+
+    def _sync_playhead(self) -> None:
+        self._view.sync_playhead()
 
     def _persist(self) -> None:
         state.write_state(self._state)
@@ -256,15 +303,15 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         instead, since that job is coalesced and lags an interactive scrub.
         """
         mc.currentTime(frame)
-        self._timeline.sync_playhead()
+        self._sync_playhead()
 
     def select_shot(self, shot_id: str) -> None:
         """Make `shot_id` the shot that wins an overlap."""
         if active.selected_shot_id() == shot_id:
             return
         active.set_selected_shot(shot_id)
-        self._timeline.apply_selection(shot_id)
-        self._timeline.sync_playhead()
+        self._view.apply_selection(shot_id)
+        self._view.sync_playhead()
         active.sync_monitor()
 
     def jump_to_shot(self, shot_id: str) -> None:
@@ -423,8 +470,8 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
     def preview_resize_camera(
         self, shot_id: str, namespace: str, new_length_frames: int
     ) -> None:
-        """Live column-width preview during a resize drag; no state mutation."""
-        self._timeline.preview_column_width(shot_id, namespace, new_length_frames)
+        """Live width preview during a resize drag; no state mutation."""
+        self._view.preview_resize(shot_id, namespace, new_length_frames)
 
     def remove_camera(self, shot_id: str, namespace: str) -> None:
         shot = self._state.find_shot(shot_id)
@@ -650,6 +697,14 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             "No Previs File",
         ).exec_()
         return False
+
+
+def _view_button(parent: QWidget, text: str, tooltip: str) -> QPushButton:
+    btn = QPushButton(text, parent)
+    btn.setCheckable(True)
+    btn.setStyleSheet(style.TOOLBAR_BUTTON)
+    btn.setToolTip(tooltip)
+    return btn
 
 
 def _summarize_skipped(failed: list[tuple[str, str]]) -> str:

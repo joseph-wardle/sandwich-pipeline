@@ -44,6 +44,14 @@ PLAYHEAD = "#E5484D"  # head + current-frame line spanning every track
 TIER_NARROW = 40  # below: only the colored sliver; tooltip carries the info
 TIER_COMPACT = 110  # below: drop name + start/end labels, keep the length pill
 
+ROW_HEIGHT_DEFAULT = 44
+ROW_HEIGHT_MIN = 32
+ROW_HEIGHT_MAX = 96
+PX_PER_FRAME_DEFAULT = 4
+PX_PER_FRAME_MIN = 2
+PX_PER_FRAME_MAX = 16
+MIN_WIDTH_PX = 4  # a one-frame shot still has to be clickable
+
 # --- stylesheets ------------------------------------------------------------
 
 PANEL_ROOT = f"background: {PANEL_BG}; color: {PANEL_TEXT};"
@@ -76,6 +84,11 @@ QPushButton {{
     letter-spacing: 1px;
 }}
 QPushButton:hover {{ border-color: {ACCENT_EDGE}; color: {ACCENT_TEXT}; }}
+QPushButton:checked {{
+    background: {ACCENT};
+    border-color: {ACCENT_EDGE};
+    color: {ACCENT_TEXT};
+}}
 QPushButton:disabled {{ color: {PANEL_TEXT_DIM}; border-color: {PANEL_BORDER_SOFT}; }}
 """
 
@@ -208,6 +221,21 @@ QFrame#camBlock QLabel#name {{
 {_FRAME_LABELS_PRIMARY}
 """
 
+CAM_BLOCK_PRIMARY_SELECTED = f"""
+QFrame#camBlock {{
+    background-color: {ACCENT};
+    border: 2px solid {ACCENT_TEXT};
+    border-radius: 2px;
+}}
+QFrame#camBlock QLabel#name {{
+    color: {ACCENT_TEXT};
+    font-size: 12px;
+    font-weight: 500;
+    background: transparent;
+}}
+{_FRAME_LABELS_PRIMARY}
+"""
+
 CAM_BLOCK_ALT = f"""
 QFrame#camBlock {{
     background-color: {SHOT_ALT};
@@ -282,6 +310,28 @@ QFrame#camBlock QLabel#name {{
     background: transparent;
 }}
 {_FRAME_LABELS_ALT}
+"""
+
+CUT_BADGE = f"""
+QLabel {{
+    background: rgba(0,0,0,0.35);
+    color: {ACCENT_TEXT};
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    padding: 0px 5px;
+    border-radius: 2px;
+}}
+"""
+
+EMPTY_SHOT_BLOCK = f"""
+QLabel {{
+    border: 1px dashed {MISSING_EDGE};
+    border-radius: 2px;
+    color: {MISSING_TEXT};
+    font-size: 11px;
+    font-style: italic;
+}}
 """
 
 ADD_ALT_CELL = f"""

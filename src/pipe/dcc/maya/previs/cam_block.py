@@ -102,6 +102,7 @@ class CamBlock(QFrame):
         px_per_frame: int = 4,
         truncated: bool = False,
         missing: bool = False,
+        badge: str = "",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -112,6 +113,9 @@ class CamBlock(QFrame):
         self._start_frame = start_frame
         self._truncated = truncated
         self._missing = missing
+        self._badge = badge
+        self._selected = False
+        self._badge_label: QLabel | None = None
         # Taken verbatim from the timeline so drag math stays stable —
         # deriving px-per-frame from self.width() drifts because the block is
         # being live-resized during the drag.
@@ -149,8 +153,19 @@ class CamBlock(QFrame):
         if self._missing:
             return style.CAM_BLOCK_MISSING
         if self._is_primary:
-            return style.CAM_BLOCK_PRIMARY
+            return (
+                style.CAM_BLOCK_PRIMARY_SELECTED
+                if self._selected
+                else style.CAM_BLOCK_PRIMARY
+            )
         return style.CAM_BLOCK_ALT_TRUNC if self._truncated else style.CAM_BLOCK_ALT
+
+    def set_selected(self, selected: bool) -> None:
+        """Mark this block as the shot that wins an overlap."""
+        if selected == self._selected:
+            return
+        self._selected = selected
+        self.setStyleSheet(self._block_style())
 
     def minimumSizeHint(self) -> QtCore.QSize:
         # Both hints must override the default that cascades from child label
@@ -171,6 +186,21 @@ class CamBlock(QFrame):
         col.setContentsMargins(0, 4, 0, 4)
         col.setSpacing(2)
 
+        col.addLayout(self._build_name_row())
+        col.addLayout(self._build_frame_row())
+        return col
+
+    def _build_name_row(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+
+        if self._badge:
+            self._badge_label = QLabel(self._badge, self)
+            self._badge_label.setAttribute(_qt.TRANSPARENT_FOR_MOUSE, True)
+            self._badge_label.setStyleSheet(style.CUT_BADGE)
+            row.addWidget(self._badge_label)
+
         # Decorative labels — `WA_TransparentForMouseEvents` lets presses fall
         # through to the QFrame so the block's own mousePressEvent fires.
         self._name_label = QLabel(self._namespace, self)
@@ -180,10 +210,8 @@ class CamBlock(QFrame):
             font = self._name_label.font()
             font.setStrikeOut(True)
             self._name_label.setFont(font)
-        col.addWidget(self._name_label)
-
-        col.addLayout(self._build_frame_row())
-        return col
+        row.addWidget(self._name_label, 1)
+        return row
 
     def _build_frame_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -210,12 +238,15 @@ class CamBlock(QFrame):
         text = str(self._end_frame())
         return f"{text} ›››" if self._truncated else text
 
-    def _tooltip_text(self) -> str:
+    def _tooltip_text(self, *, length: int | None = None) -> str:
+        """Block tooltip; `length` overrides the stored one mid-resize-drag."""
+        frames = self._length_frames if length is None else length
+        end = self._start_frame + max(frames - 1, 0)
         suffix = "  (longer than primary)" if self._truncated else ""
-        lines = [
-            self._namespace,
-            f"{self._start_frame} → {self._end_frame()}  ({self._length_frames}f){suffix}",
-        ]
+        lines = [self._namespace]
+        if self._badge:
+            lines.append(f"cut {self._badge}")
+        lines.append(f"{self._start_frame} → {end}  ({frames}f){suffix}")
         if self._missing:
             lines.append("camera missing from the scene — right-click to re-link")
         return "\n".join(lines)
@@ -247,6 +278,8 @@ class CamBlock(QFrame):
             self._handle.setVisible(w >= _HANDLE_MIN_BLOCK_WIDTH)
         full = w >= style.TIER_COMPACT
         compact = w >= style.TIER_NARROW
+        if self._badge_label is not None:
+            self._badge_label.setVisible(compact)
         self._name_label.setVisible(full)
         self._start_label.setVisible(full)
         self._end_label.setVisible(full)
@@ -258,7 +291,12 @@ class CamBlock(QFrame):
         outer_left = 8 if self._is_primary else 10
         outer_right = 0 if self._is_primary else 10
         handle_w = _HANDLE_WIDTH if (self._handle and self._handle.isVisible()) else 0
-        available = self.width() - outer_left - outer_right - handle_w
+        badge_w = (
+            self._badge_label.sizeHint().width() + 6
+            if self._badge_label is not None
+            else 0
+        )
+        available = self.width() - outer_left - outer_right - handle_w - badge_w
         if available <= 0:
             return
         fm = self._name_label.fontMetrics()
@@ -274,9 +312,7 @@ class CamBlock(QFrame):
         end = self._start_frame + max(new_length - 1, 0)
         self._end_label.setText(f"{end} ›››" if self._truncated else str(end))
         # Tooltip carries the in-flight numbers so a paused drag still reads true.
-        self.setToolTip(
-            f"{self._namespace}\n{self._start_frame} → {end}  ({new_length}f)"
-        )
+        self.setToolTip(self._tooltip_text(length=new_length))
         self._controller.preview_resize_camera(
             self._shot_id, self._namespace, new_length
         )
