@@ -17,7 +17,7 @@ from pipe.core.versioning import VersionStreamSpec
 from pipe.dcc.maya.shotfile import stage
 from pipe.dcc.maya.shotfile.shotfile_manager import MShotFileManager
 
-from . import dialogs, file_ops, playback, state
+from . import active, dialogs, file_ops, state
 from .state import PrevisState
 
 
@@ -140,7 +140,7 @@ class MPrevisFileManager(MShotFileManager):
         mc.setAttr("defaultResolution.height", 1080)  # type: ignore
         mc.setAttr("defaultResolution.pixelAspect", 1.0)  # type: ignore
         mc.setAttr("defaultResolution.deviceAspectRatio", 1920 / 1080)  # type: ignore
-        playback.install_camera_callback()
+        active.install_camera_callback()
 
     def _resolve_current_stream(
         self, scene_path: Path

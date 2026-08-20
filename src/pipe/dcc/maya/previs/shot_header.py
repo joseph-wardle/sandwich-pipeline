@@ -42,10 +42,7 @@ class ShotHeader(QFrame):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setAutoFillBackground(True)
         self.setCursor(_qt.POINTING_HAND)  # clicking the header jumps the playhead here
-        self.setStyleSheet(
-            f"ShotHeader {{ background: {style.PANEL_BG_HEADER}; "
-            f"border-right: 1px solid {style.PANEL_BORDER_SOFT}; }}"
-        )
+        self.setStyleSheet(style.SHOT_HEADER)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 0, 4, 0)
@@ -59,6 +56,11 @@ class ShotHeader(QFrame):
         layout.addWidget(self._menu_btn)
 
         self.setToolTip(self._tooltip_text())
+
+    def set_selected(self, selected: bool) -> None:
+        self.setStyleSheet(
+            style.SHOT_HEADER_SELECTED if selected else style.SHOT_HEADER
+        )
 
     # Both hints return width=1 so the column shrinks to its setColumnMinimumWidth.
     # See CamBlock.minimumSizeHint for the QGridLayout gotcha this avoids.

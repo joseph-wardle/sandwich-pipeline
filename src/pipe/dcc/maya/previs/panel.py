@@ -32,11 +32,11 @@ from pipe.dcc.maya.command import undo_chunk
 from pipe.dcc.maya.runtime import get_main_qt_window
 
 from . import (
+    active,
     cameras,
     dialogs,
     file_ops,
     monitor,
-    playback,
     playblast,
     rlo,
     state,
@@ -158,7 +158,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         """Resync the playhead on every scene time change, for the panel's lifetime.
 
         Parented to the workspaceControl so Maya kills the job when the panel closes —
-        deliberately separate from playback.py's file-scoped monitor job.
+        deliberately separate from active.py's file-scoped monitor job.
         """
         mc.scriptJob(
             event=("timeChanged", self._timeline.sync_playhead),
@@ -241,7 +241,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
 
     def _on_monitor_bound(self, panel: str) -> None:
         self._update_monitor_label()
-        playback.sync_monitor()  # show the current shot's camera immediately
+        active.sync_monitor()  # show the active shot's camera immediately
 
     def _update_monitor_label(self) -> None:
         panel = monitor.get_monitor()
@@ -258,24 +258,38 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         mc.currentTime(frame)
         self._timeline.sync_playhead()
 
+    def select_shot(self, shot_id: str) -> None:
+        """Make `shot_id` the shot that wins an overlap."""
+        if active.selected_shot_id() == shot_id:
+            return
+        active.set_selected_shot(shot_id)
+        self._timeline.apply_selection(shot_id)
+        self._timeline.sync_playhead()
+        active.sync_monitor()
+
     def jump_to_shot(self, shot_id: str) -> None:
         shot = self._state.find_shot(shot_id)
-        if shot is not None:
-            self.scrub_to_frame(shot.source_in)
+        if shot is None:
+            return
+        self.select_shot(shot_id)
+        self.scrub_to_frame(shot.source_in)
 
     def add_shot(self) -> None:
         if not self._guard_previs_file():
             return
-        ns = cameras.add_new_rig_reference()
-        new_shot = PrevisShot(
-            id=state.next_shot_id(),
-            code=self._suggest_code(),
-            source_in=self._state.next_source_in(),
-            takes=[ShotTake(ns)],
-            primary=ns,
-        )
-        self._state.shots.append(new_shot)
-        self._persist()
+        # The rig reference joins the undo chunk
+        with undo_chunk("previsAddShot"):
+            ns = cameras.add_new_rig_reference()
+            self._state.shots.append(
+                PrevisShot(
+                    id=state.next_shot_id(),
+                    code=self._suggest_code(),
+                    source_in=self._state.next_source_in(),
+                    takes=[ShotTake(ns)],
+                    primary=ns,
+                )
+            )
+            self._persist()
 
     def _suggest_code(self) -> str:
         """Next free sticky code for this sequence, or "" if the letter can't resolve."""
@@ -333,19 +347,21 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         shot = self._state.find_shot(shot_id)
         if shot is None:
             return
-        shot.takes.append(ShotTake(cameras.add_new_rig_reference()))
-        self._persist()
+        with undo_chunk("previsAddTake"):
+            shot.takes.append(ShotTake(cameras.add_new_rig_reference()))
+            self._persist()
 
     def add_take_duplicate_primary(self, shot_id: str) -> None:
         shot = self._state.find_shot(shot_id)
         if shot is None:
             return
-        new_ns = cameras.duplicate_primary(shot)
-        if new_ns is None:
-            return
-        # A copy of the primary's keys starts out the same length as the primary.
-        shot.takes.append(ShotTake(new_ns, shot.primary_duration))
-        self._persist()
+        # The rig reference and its copied keys belong to the same edit as the take.
+        with undo_chunk("previsDuplicateTake"):
+            new_ns = cameras.duplicate_primary(shot)
+            if new_ns is not None:
+                # A copy of the primary's keys starts out the primary's length.
+                shot.takes.append(ShotTake(new_ns, shot.primary_duration))
+                self._persist()
 
     def add_take_existing_camera(self, shot_id: str) -> None:
         shot = self._state.find_shot(shot_id)
@@ -355,8 +371,9 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         chosen = dialogs.pick_scene_camera(self, candidates)
         if not chosen:
             return
-        shot.takes.append(ShotTake(chosen))
-        self._persist()
+        with undo_chunk("previsAddTake"):
+            shot.takes.append(ShotTake(chosen))
+            self._persist()
 
     def look_through_under_cursor(self, namespace: str) -> None:
         """Aim the work viewport under the cursor at `namespace`'s camera.
@@ -386,8 +403,9 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             return
         if shot.find_take(namespace) is None:
             return
-        shot.primary = namespace
-        self._persist()
+        with undo_chunk("previsPromoteTake"):
+            shot.primary = namespace
+            self._persist()
 
     def resize_camera(
         self, shot_id: str, namespace: str, new_length_frames: int
@@ -398,8 +416,9 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         take = shot.find_take(namespace)
         if take is None or take.duration == new_length_frames:
             return
-        take.duration = new_length_frames
-        self._persist()
+        with undo_chunk("previsResizeShot"):
+            take.duration = new_length_frames
+            self._persist()
 
     def preview_resize_camera(
         self, shot_id: str, namespace: str, new_length_frames: int
@@ -411,8 +430,9 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         shot = self._state.find_shot(shot_id)
         if shot is None:
             return
-        shot.drop_take(namespace)
-        self._persist()
+        with undo_chunk("previsRemoveTake"):
+            shot.drop_take(namespace)
+            self._persist()
 
     def relink_camera(self, shot_id: str, namespace: str) -> None:
         """Repoint a take at a camera that is actually in the scene, keeping its length."""
@@ -434,31 +454,35 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         chosen = dialogs.pick_scene_camera(self, candidates)
         if not chosen:
             return
-        take.namespace = chosen
-        if shot.primary == namespace:
-            shot.primary = chosen
-        self._persist()
+        with undo_chunk("previsRelinkTake"):
+            take.namespace = chosen
+            if shot.primary == namespace:
+                shot.primary = chosen
+            self._persist()
 
     def rename_camera(self, shot_id: str, namespace: str) -> None:
+        shot = self._state.find_shot(shot_id)
+        if shot is None:
+            return
         new_name = dialogs.prompt_rename(self, namespace)
         if not new_name:
             return
-        if not cameras.rename_camera(namespace, new_name):
+        # Renaming the namespace and repointing the takes at it is one edit
+        with undo_chunk("previsRenameTake"):
+            renamed = cameras.rename_camera(namespace, new_name)
+            if renamed:
+                take = shot.find_take(namespace)
+                if take is not None:
+                    take.namespace = new_name
+                if shot.primary == namespace:
+                    shot.primary = new_name
+                self._persist()
+        if not renamed:
             MessageDialog(
                 self,
                 f"Could not rename {namespace} to {new_name} (name in use or namespace missing).",
                 "Rename Failed",
             ).exec_()
-            return
-        shot = self._state.find_shot(shot_id)
-        if shot is None:
-            return
-        take = shot.find_take(namespace)
-        if take is not None:
-            take.namespace = new_name
-        if shot.primary == namespace:
-            shot.primary = new_name
-        self._persist()
 
     def declare_code(self, shot_id: str) -> None:
         """Declare a shot's sticky code from free text
@@ -507,8 +531,9 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
                 "Set Shot Code",
             ).exec_()
             return
-        shot.code = new_code
-        self._persist()
+        with undo_chunk("previsSetShotCode"):
+            shot.code = new_code
+            self._persist()
 
     def move_shot(self, shot_id: str, delta: int) -> None:
         shots = self._state.shots
@@ -518,8 +543,9 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         new_index = max(0, min(len(shots) - 1, index + delta))
         if new_index == index:
             return
-        shots[index], shots[new_index] = shots[new_index], shots[index]
-        self._persist()
+        with undo_chunk("previsMoveShot"):
+            shots[index], shots[new_index] = shots[new_index], shots[index]
+            self._persist()
 
     def playblast_shot(self, shot_id: str) -> None:
         """Render one shot's primary to a preview and open it in the viewer."""

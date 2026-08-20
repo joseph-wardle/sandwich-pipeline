@@ -1,7 +1,4 @@
-"""Sequence-wide grid: a single QGridLayout shared by ruler, headers, primary and alt tracks.
-
-All tracks use the same column stretches, so shots line up vertically across rows.
-"""
+"""The cut view: shots as columns in edit order, takes stacked vertically."""
 
 from __future__ import annotations
 
@@ -20,7 +17,7 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from . import _qt, cameras, dialogs, style
+from . import _qt, active, cameras, dialogs, style
 from .add_alt_button import AddAltButton
 from .cam_block import BLOCK_HEIGHT, CamBlock
 from .playhead import Playhead
@@ -88,6 +85,10 @@ class PrevisTimeline(QWidget):
         self._prior_shot_count = 0
         self._prior_deepest_row = _ROW_PRIMARY
         self._ruler: Ruler | None = None  # held so resize previews can reflow ticks
+        # Headers carry the selection highlight; cut starts map a shot to its
+        # place on the cut axis. Both are rebuilt with the grid.
+        self._headers_by_shot: dict[str, ShotHeader] = {}
+        self._cut_starts: dict[str, int] = {}
         # Alt blocks per shot, kept so a primary resize-drag can re-pin each
         # alt's width and toggle truncated styling live without rebuilding.
         self._alt_blocks_by_shot: dict[str, list[CamBlock]] = {}
@@ -106,6 +107,8 @@ class PrevisTimeline(QWidget):
         self._clear()
         self._reset_layout_overrides()
         self._alt_blocks_by_shot = {}
+        self._headers_by_shot = {}
+        self._cut_starts = state.cut_starts()
         if not state.shots:
             empty = QLabel("No shots yet.  Click  + shot  to create one.", self._inner)
             empty.setStyleSheet(
@@ -126,16 +129,39 @@ class PrevisTimeline(QWidget):
         self._add_header_row(shots)
         deepest_row = self._add_track_rows(shots)
         self._apply_trailing_stretches(len(shots), deepest_row)
+        self.apply_selection(active.selected_shot_id())
         self.sync_playhead()
 
+    def apply_selection(self, shot_id: str | None) -> None:
+        for candidate_id, header in self._headers_by_shot.items():
+            header.set_selected(candidate_id == shot_id)
+
     def sync_playhead(self) -> None:
-        """Move the playhead to the current scene frame; hide it when there's no sequence."""
-        if self._last_state is None or not self._last_state.shots:
+        """Draw the playhead inside the active shot's column; hide it in a gap."""
+        state = self._last_state
+        if state is None or not state.shots:
             self._playhead.hide()
             return
         frame = int(mc.currentTime(query=True))
-        x = TRACK_LABEL_WIDTH + (frame - FRAME_START) * self._px_per_frame
+        shot = active.active_shot(state, frame)
+        cut_frame = None if shot is None else state.cut_frame(shot, frame)
+        if cut_frame is None:
+            self._playhead.hide()
+            return
+        x = TRACK_LABEL_WIDTH + (cut_frame - FRAME_START) * self._px_per_frame
         self._playhead.move_to(x, self._inner.height())
+
+    def _scrub_from_cut(self, cut_frame: int) -> None:
+        """Ruler click: find the shot at that cut frame, then scrub to its scene frame."""
+        state = self._last_state
+        found = None if state is None else state.shot_at_cut(cut_frame)
+        if found is None:
+            return
+        shot, source_frame = found
+        # Select first: the shot the artist just clicked is the one that should
+        # own the frame, even where several shots overlap it.
+        self._controller.select_shot(shot.id)
+        self._controller.scrub_to_frame(source_frame)
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -173,7 +199,7 @@ class PrevisTimeline(QWidget):
         )
         self._grid.addWidget(spacer, _ROW_RULER, 0)
 
-        ruler = Ruler(self._inner, on_scrub=self._controller.scrub_to_frame)
+        ruler = Ruler(self._inner, on_scrub=self._scrub_from_cut)
         ruler.set_range(first_frame, last_frame)
         self._grid.addWidget(ruler, _ROW_RULER, 1, 1, num_shots)
         self._ruler = ruler
@@ -187,15 +213,13 @@ class PrevisTimeline(QWidget):
         )
         self._grid.addWidget(spacer, _ROW_HEADERS, 0)
         for index, shot in enumerate(shots):
-            self._grid.addWidget(
-                ShotHeader(
-                    shot=shot,
-                    controller=self._controller,
-                    parent=self._inner,
-                ),
-                _ROW_HEADERS,
-                index + 1,
+            header = ShotHeader(
+                shot=shot,
+                controller=self._controller,
+                parent=self._inner,
             )
+            self._grid.addWidget(header, _ROW_HEADERS, index + 1)
+            self._headers_by_shot[shot.id] = header
 
     def _add_track_rows(self, shots: list[PrevisShot]) -> int:
         """Build the primary row, alt rows, and per-shot add-alt cell. Returns the deepest row index used."""
@@ -261,7 +285,9 @@ class PrevisTimeline(QWidget):
             namespace=take.namespace,
             is_primary=is_primary,
             length_frames=cam_length,
-            start_frame=shot.source_in,
+            # Every label this block prints counts up from here, and it is
+            # measured against a cut ruler — so a scene frame here would lie.
+            start_frame=self._cut_starts.get(shot.id, FRAME_START),
             shot_id=shot.id,
             controller=self._controller,
             height=self._block_height(),

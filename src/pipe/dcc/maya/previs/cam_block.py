@@ -292,6 +292,7 @@ class CamBlock(QFrame):
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         if event.button() == _qt.LEFT_BUTTON:
+            self._controller.select_shot(self._shot_id)
             self._press_pos = event.pos()
             event.accept()
             return

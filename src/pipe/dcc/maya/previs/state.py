@@ -125,6 +125,30 @@ class PrevisState:
     def find_shot(self, shot_id: str) -> PrevisShot | None:
         return next((s for s in self.shots if s.id == shot_id), None)
 
+    def cut_starts(self) -> dict[str, int]:
+        """Cut position per shot id."""
+        starts: dict[str, int] = {}
+        cursor = FRAME_START
+        for shot in self.shots:
+            starts[shot.id] = cursor
+            cursor += shot.primary_duration
+        return starts
+
+    def cut_frame(self, shot: PrevisShot, source_frame: int) -> int | None:
+        """Where `source_frame` of `shot` lands on the cut axis. None if `shot` is
+        not in this state."""
+        start = self.cut_starts().get(shot.id)
+        return None if start is None else start + (source_frame - shot.source_in)
+
+    def shot_at_cut(self, cut_frame: int) -> tuple[PrevisShot, int] | None:
+        """The shot occupying `cut_frame`, and the source frame it plays there."""
+        starts = self.cut_starts()
+        for shot in self.shots:
+            start = starts[shot.id]
+            if start <= cut_frame < start + shot.primary_duration:
+                return shot, shot.source_in + (cut_frame - start)
+        return None
+
     def next_source_in(self) -> int:
         """First frame free of every existing shot — shots may overlap, so list
         order says nothing about which one ends latest."""

@@ -17,11 +17,12 @@ PANEL_TEXT_DIM = "#8E867A"
 PANEL_BORDER = "#444444"
 PANEL_BORDER_SOFT = "#383838"
 
+ACCENT = "#2D5566"
+ACCENT_EDGE = "#4A9DB8"
+ACCENT_TEXT = "#E8F4F8"
+
 # --- shot blocks ------------------------------------------------------------
 
-SHOT_ACTIVE = "#2D5566"
-SHOT_ACTIVE_EDGE = "#4A9DB8"
-SHOT_ACTIVE_TEXT = "#E8F4F8"
 SHOT_ALT = "#3A3A3A"
 SHOT_ALT_EDGE = "#555555"
 SHOT_ALT_TEXT = "#C8C0B0"
@@ -74,7 +75,7 @@ QPushButton {{
     font-size: 11px;
     letter-spacing: 1px;
 }}
-QPushButton:hover {{ border-color: {SHOT_ACTIVE_EDGE}; color: {SHOT_ACTIVE_TEXT}; }}
+QPushButton:hover {{ border-color: {ACCENT_EDGE}; color: {ACCENT_TEXT}; }}
 QPushButton:disabled {{ color: {PANEL_TEXT_DIM}; border-color: {PANEL_BORDER_SOFT}; }}
 """
 
@@ -92,10 +93,26 @@ QCheckBox::indicator {{
     border-radius: 2px;
     background: {PANEL_BG};
 }}
-QCheckBox::indicator:hover {{ border-color: {SHOT_ACTIVE_EDGE}; }}
+QCheckBox::indicator:hover {{ border-color: {ACCENT_EDGE}; }}
 QCheckBox::indicator:checked {{
-    background: {SHOT_ACTIVE_EDGE};
-    border-color: {SHOT_ACTIVE_EDGE};
+    background: {ACCENT_EDGE};
+    border-color: {ACCENT_EDGE};
+}}
+"""
+
+SHOT_HEADER = f"""
+ShotHeader {{
+    background: {PANEL_BG_HEADER};
+    border-right: 1px solid {PANEL_BORDER_SOFT};
+    border-top: 2px solid transparent;
+}}
+"""
+
+SHOT_HEADER_SELECTED = f"""
+ShotHeader {{
+    background: {ACCENT};
+    border-right: 1px solid {PANEL_BORDER_SOFT};
+    border-top: 2px solid {ACCENT_EDGE};
 }}
 """
 
@@ -158,15 +175,15 @@ QFrame#camBlock QLabel#lengthBadge {
 
 CAM_BLOCK_PRIMARY = f"""
 QFrame#camBlock {{
-    background-color: {SHOT_ACTIVE};
-    border-top: 1px solid {SHOT_ACTIVE_EDGE};
-    border-right: 1px solid {SHOT_ACTIVE_EDGE};
-    border-bottom: 1px solid {SHOT_ACTIVE_EDGE};
-    border-left: 3px solid {SHOT_ACTIVE_EDGE};
+    background-color: {ACCENT};
+    border-top: 1px solid {ACCENT_EDGE};
+    border-right: 1px solid {ACCENT_EDGE};
+    border-bottom: 1px solid {ACCENT_EDGE};
+    border-left: 3px solid {ACCENT_EDGE};
     border-radius: 2px;
 }}
 QFrame#camBlock QLabel#name {{
-    color: {SHOT_ACTIVE_TEXT};
+    color: {ACCENT_TEXT};
     font-size: 12px;
     font-weight: 500;
     background: transparent;
@@ -178,12 +195,12 @@ QFrame#camBlock QLabel#name {{
 # while an alternate is being dragged onto it.
 CAM_BLOCK_PRIMARY_DROP = f"""
 QFrame#camBlock {{
-    background-color: {SHOT_ACTIVE};
-    border: 2px dashed {SHOT_ACTIVE_TEXT};
+    background-color: {ACCENT};
+    border: 2px dashed {ACCENT_TEXT};
     border-radius: 2px;
 }}
 QFrame#camBlock QLabel#name {{
-    color: {SHOT_ACTIVE_TEXT};
+    color: {ACCENT_TEXT};
     font-size: 12px;
     font-weight: 500;
     background: transparent;
@@ -279,8 +296,8 @@ QPushButton#addAlt {{
     text-align: center;
 }}
 QPushButton#addAlt:hover {{
-    border-color: {SHOT_ACTIVE_EDGE};
-    color: {SHOT_ACTIVE_EDGE};
+    border-color: {ACCENT_EDGE};
+    color: {ACCENT_EDGE};
 }}
 QPushButton#addAlt:disabled {{
     color: {PANEL_BORDER_SOFT};
@@ -300,20 +317,20 @@ QFrame#resizeHandle {
 RESIZE_HANDLE_HOVER = f"""
 QFrame#resizeHandle {{
     background: rgba(74,157,184,0.55);
-    border-left: 1px solid {SHOT_ACTIVE_EDGE};
+    border-left: 1px solid {ACCENT_EDGE};
 }}
 """
 
 RESIZE_HANDLE_ACTIVE = f"""
 QFrame#resizeHandle {{
-    background: {SHOT_ACTIVE_EDGE};
-    border-left: 1px solid {SHOT_ACTIVE_TEXT};
+    background: {ACCENT_EDGE};
+    border-left: 1px solid {ACCENT_TEXT};
 }}
 """
 
 TOP_BAR_DOT = f"""
 QFrame#topBarDot {{
-    background: {SHOT_ACTIVE_EDGE};
+    background: {ACCENT_EDGE};
     border-radius: 4px;
 }}
 """
