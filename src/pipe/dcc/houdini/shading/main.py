@@ -1,1174 +1,681 @@
+"""SKD MatLib: build RenderMan and USD Preview materials from published textures.
+
+The flow is one straight line:
+
+    published texture files   (textures.published_materials)
+    -> MaterialSpec per texture set
+    -> MaterialGraphBuilder creates only the nodes each spec needs
+    -> the HDA's `errors` LOP checks every texture path still relocates
+
+`matlib_*` and `MatlibErrorChecker` are the SKD_MatLib HDA's entry points; see
+the note on `MatlibErrorChecker` before renaming any of them.
+"""
+
 from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from enum import Enum, auto
 from pathlib import Path
-from typing import Any, cast
 
 import hou
-
-from pipe.core.shotgrid import Asset, ShotGrid
-from pipe.core.struct.material import MaterialInfo
 from env_sg import DB_Config
 
-from . import variants
+from pipe.core.shotgrid import Asset, ShotGrid
+
+from . import textures, variants
 
 log = logging.getLogger(__name__)
 
+_MATLIB_TYPE = "materiallibrary"
 _MATLIB_NAME = "Material_Library"
 _NO_TEXTURES = "NO_EXPORTED_TEXTURES"
 
-_AUTO_TAG_KEY = "skd_matlib_generated"
-_AUTO_TAG_VALUE = "1"
-_BUILDER_OUTPUT_NODE_NAMES = (
-    "output_collect",
-    "output_collect1",
-    "suboutput1",
-    "output1",
-    "OUT_material",
-    "OUT",
+_GENERATED_KEY = "skd_matlib_generated"
+_GENERATED_VALUE = "1"
+
+# RenderMan's material builder ships exactly one output node of type `collect`.
+_BUILDER_OUTPUT = "output_collect"
+# PxrLayerMixer mixes a base layer plus this many stacked layers.
+_MIXER_SLOTS = 4
+
+_MATERIAL_Y_STEP = 3.5
+_LAYER_Y_STEP = 8.0
+_PREVIEW_UV_PRIMVAR = "preview_uv"
+
+# RenderMan colour-config aliases. Published `.tex` colour maps are already
+# ACEScg, so they are tagged "rendering" rather than converted on read.
+_COLOR_SPACE = "rendering"
+_DATA_SPACE = "data"
+
+_NODE_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_]+")
+
+
+@dataclass(frozen=True)
+class _PreviewInput:
+    """How one published preview map drives UsdPreviewSurface.
+
+    `connections` pairs a UsdPreviewSurface input with a usduvtexture output.
+    `source_colorspace` is a USD Preview Material spec token, not an OCIO name.
+    """
+
+    map_name: str
+    connections: tuple[tuple[str, str], ...]
+    source_colorspace: str
+    row_offset: float
+    scale: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
+    bias: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+
+
+_PREVIEW_INPUTS = (
+    _PreviewInput("DiffuseColor", (("diffuseColor", "rgb"),), "sRGB", 2.0),
+    _PreviewInput(
+        "ORM",
+        (("occlusion", "r"), ("roughness", "g"), ("metallic", "b")),
+        "raw",
+        0.0,
+    ),
+    _PreviewInput("Emissive", (("emissiveColor", "rgb"),), "sRGB", -2.0),
+    # Normal maps store 0..1; UsdPreviewSurface wants -1..1 tangent space.
+    _PreviewInput(
+        "NormalDX",
+        (("normal", "rgb"),),
+        "raw",
+        -4.0,
+        scale=(2.0, 2.0, 2.0, 1.0),
+        bias=(-1.0, -1.0, -1.0, 0.0),
+    ),
 )
-_MATERIAL_BUILDER_Y_STEP = 3.5
-
-_RENDER_MAPS = ("BaseColor", "SpecularRoughness", "Normal", "Metallic")
-_PREVIEW_MAPS = ("DiffuseColor", "ORM", "Emissive", "NormalDX")
-_SUPPORTED_MAPS = tuple(sorted({*_RENDER_MAPS, *_PREVIEW_MAPS}))
-_SORTED_SUPPORTED_MAPS = [
-    str(name) for name in sorted(_SUPPORTED_MAPS, key=len, reverse=True)
-]
-_MAP_NAME_LOOKUP = {name.lower(): name for name in _SUPPORTED_MAPS}
-_NODE_SAFE_RE = re.compile(r"[^A-Za-z0-9_]+")
-_UDIM_RE = re.compile(r"\.(?P<udim>\d{4})(?=\.[^.]+$)")
-_MAP_PATTERN = "|".join(_SORTED_SUPPORTED_MAPS)
-_TEX_FILE_RE = re.compile(
-    rf"^(?P<tex_set>.+?)_(?P<map>{_MAP_PATTERN})(?:_[^.]+)?"
-    rf"(?:\.(?P<udim>\d{{4}}))?\.(?P<ext>[A-Za-z0-9]+)$",
-    flags=re.IGNORECASE,
-)
 
 
-def _sanitize_node_name(name: str) -> str:
-    cleaned = _NODE_SAFE_RE.sub("_", name.strip())
-    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+if {preview.map_name for preview in _PREVIEW_INPUTS} != set(textures.PREVIEW.maps):
+    # Drift here is silent: a discovered map with no entry is simply never wired.
+    raise ImportError(
+        "_PREVIEW_INPUTS and textures.PREVIEW.maps disagree, so a published "
+        "preview map would be discovered and then dropped"
+    )
+
+
+def _parm(node: hou.Node, name: str) -> hou.Parm:
+    """A parameter the node type guarantees.
+
+    Missing means the DCC changed under us, so fail loudly with the node path
+    rather than silently building a material with the value left at default.
+    """
+    parm = node.parm(name)
+    if parm is None:
+        raise hou.OperationFailed(
+            f"{node.path()} ({node.type().name()}) has no '{name}' parameter"
+        )
+    return parm
+
+
+def _parm_tuple(node: hou.Node, name: str) -> hou.ParmTuple:
+    parm_tuple = node.parmTuple(name)
+    if parm_tuple is None:
+        raise hou.OperationFailed(
+            f"{node.path()} ({node.type().name()}) has no '{name}' parameter"
+        )
+    return parm_tuple
+
+
+def _node_name(value: str) -> str:
+    """Node-safe form of a texture-set or layer name, preserving case."""
+    cleaned = re.sub(r"_+", "_", _NODE_UNSAFE_RE.sub("_", value.strip())).strip("_")
     if not cleaned:
         return "material"
-    if cleaned[0].isdigit():
-        return f"m_{cleaned}"
-    return cleaned
+    return f"m_{cleaned}" if cleaned[0].isdigit() else cleaned
 
 
-def _asset_menu_format(values: list[str]) -> list[str]:
-    return [entry for value in values for entry in (value, value)]
+class MaterialGraphBuilder:
+    """Creates the generated material graphs inside a `materiallibrary` LOP.
 
-
-@dataclass(frozen=True)
-class TextureCandidate:
-    tex_set: str
-    map_name: str
-    path: Path
-    extension: str
-    udim: str | None
-    priority: int
-
-
-@dataclass(frozen=True)
-class LayerDiscovery:
-    name: str
-    path: Path
-    metadata_texture_sets: frozenset[str]
-    render_candidates: tuple[TextureCandidate, ...]
-    preview_candidates: tuple[TextureCandidate, ...]
-
-
-@dataclass(frozen=True)
-class LayerMaterialSpec:
-    name: str
-    render_maps: dict[str, str]
-
-
-@dataclass(frozen=True)
-class MaterialSpec:
-    texture_set: str
-    layers: tuple[LayerMaterialSpec, ...]
-    preview_maps: dict[str, str]
-
-
-@dataclass(frozen=True)
-class MaterialLibrarySpec:
-    geo_variant: str
-    mat_variant: str
-    materials: tuple[MaterialSpec, ...]
-
-
-class MatlibDiscovery:
-    """Discovery layer: read publish/tex + mat.json and collect map candidates."""
-
-    def __init__(self, hip_root: Path, geo_variant: str, mat_variant: str) -> None:
-        self._hip_root = hip_root
-        self._geo_variant = geo_variant.strip()
-        self._mat_variant = mat_variant.strip()
-
-    @property
-    def variant_root(self) -> Path:
-        return (
-            self._hip_root / "publish" / "tex" / self._geo_variant / self._mat_variant
-        )
-
-    def discover_layers(self) -> list[LayerDiscovery]:
-        root = self.variant_root
-        if not root.exists():
-            log.warning("Texture publish path does not exist: %s", root)
-            return []
-
-        layer_dirs = [
-            p
-            for p in sorted(root.iterdir(), key=lambda path: path.name.casefold())
-            if p.is_dir() and not p.name.startswith(".")
-        ]
-        discoveries: list[LayerDiscovery] = []
-        for layer_dir in layer_dirs:
-            discoveries.append(self._discover_layer(layer_dir))
-        return discoveries
-
-    def _discover_layer(self, layer_dir: Path) -> LayerDiscovery:
-        metadata_texture_sets = self._read_mat_info(layer_dir / "mat.json")
-
-        render_candidates: list[TextureCandidate] = []
-        render_candidates.extend(
-            self._parse_candidates(
-                layer_dir, priority=0, allowed_maps=set(_RENDER_MAPS)
-            )
-        )
-        render_candidates.extend(
-            self._parse_candidates(
-                layer_dir / "_src", priority=1, allowed_maps=set(_RENDER_MAPS)
-            )
-        )
-
-        preview_candidates: list[TextureCandidate] = []
-        preview_candidates.extend(
-            self._parse_candidates(
-                layer_dir / "_preview", priority=0, allowed_maps=set(_PREVIEW_MAPS)
-            )
-        )
-        preview_candidates.extend(
-            self._parse_candidates(
-                layer_dir / "_src", priority=1, allowed_maps=set(_PREVIEW_MAPS)
-            )
-        )
-
-        return LayerDiscovery(
-            name=layer_dir.name,
-            path=layer_dir,
-            metadata_texture_sets=frozenset(metadata_texture_sets),
-            render_candidates=tuple(render_candidates),
-            preview_candidates=tuple(preview_candidates),
-        )
-
-    @staticmethod
-    def _read_mat_info(path: Path) -> set[str]:
-        if not path.exists():
-            return set()
-        try:
-            return set(
-                MaterialInfo.from_json(path.read_text(encoding="utf-8")).tex_sets
-            )
-        except Exception:
-            log.exception("Failed to parse mat.json at %s", path)
-            return set()
-
-    @staticmethod
-    def _parse_candidates(
-        directory: Path, *, priority: int, allowed_maps: set[str]
-    ) -> list[TextureCandidate]:
-        if not directory.exists() or not directory.is_dir():
-            return []
-
-        parsed: list[TextureCandidate] = []
-        for item in sorted(directory.iterdir(), key=lambda path: path.name.casefold()):
-            if not item.is_file():
-                continue
-
-            candidate = MatlibDiscovery._parse_texture_file(item, priority=priority)
-            if candidate is None:
-                continue
-            if candidate.map_name not in allowed_maps:
-                continue
-
-            parsed.append(candidate)
-        return parsed
-
-    @staticmethod
-    def _parse_texture_file(path: Path, *, priority: int) -> TextureCandidate | None:
-        match = _TEX_FILE_RE.match(path.name)
-        if not match:
-            return None
-
-        tex_set = match.group("tex_set").strip()
-        raw_map = match.group("map").strip().lower()
-        map_name = _MAP_NAME_LOOKUP.get(raw_map)
-        if not tex_set or map_name is None:
-            return None
-
-        return TextureCandidate(
-            tex_set=tex_set,
-            map_name=map_name,
-            path=path,
-            extension=(path.suffix.lstrip(".").lower()),
-            udim=match.group("udim"),
-            priority=priority,
-        )
-
-
-class MatlibSpecBuilder:
-    """Spec layer: convert discovered files into deterministic material specs."""
-
-    def __init__(self, hip_root: Path) -> None:
-        self._hip_root = hip_root
-
-    def build(
-        self,
-        *,
-        geo_variant: str,
-        mat_variant: str,
-        layers: list[LayerDiscovery],
-    ) -> MaterialLibrarySpec:
-        ordered_layers = sorted(layers, key=lambda layer: layer.name.casefold())
-        texture_sets = sorted(
-            self._collect_texture_sets(ordered_layers), key=str.casefold
-        )
-
-        materials: list[MaterialSpec] = []
-        for tex_set in texture_sets:
-            layer_specs: list[LayerMaterialSpec] = []
-            for layer in ordered_layers:
-                layer_maps = self._render_maps_for_layer(layer, tex_set)
-                if layer_maps:
-                    layer_specs.append(
-                        LayerMaterialSpec(name=layer.name, render_maps=layer_maps)
-                    )
-
-            if not layer_specs:
-                log.warning(
-                    "No render maps found for texture set %s (geo=%s mat=%s)",
-                    tex_set,
-                    geo_variant,
-                    mat_variant,
-                )
-                continue
-
-            preview_maps = self._preview_maps_for_tex_set(ordered_layers, tex_set)
-            materials.append(
-                MaterialSpec(
-                    texture_set=tex_set,
-                    layers=tuple(layer_specs),
-                    preview_maps=preview_maps,
-                )
-            )
-
-        return MaterialLibrarySpec(
-            geo_variant=geo_variant,
-            mat_variant=mat_variant,
-            materials=tuple(materials),
-        )
-
-    def _collect_texture_sets(self, layers: list[LayerDiscovery]) -> set[str]:
-        texture_sets: set[str] = set()
-        for layer in layers:
-            texture_sets.update(layer.metadata_texture_sets)
-            texture_sets.update(
-                candidate.tex_set for candidate in layer.render_candidates
-            )
-            texture_sets.update(
-                candidate.tex_set for candidate in layer.preview_candidates
-            )
-        return texture_sets
-
-    def _render_maps_for_layer(
-        self, layer: LayerDiscovery, tex_set: str
-    ) -> dict[str, str]:
-        maps: dict[str, str] = {}
-        for map_name in _RENDER_MAPS:
-            candidates = [
-                candidate
-                for candidate in layer.render_candidates
-                if candidate.tex_set == tex_set and candidate.map_name == map_name
-            ]
-            chosen = self._select_candidate(candidates, map_name)
-            if chosen:
-                maps[map_name] = self._candidate_path(chosen)
-        return maps
-
-    def _preview_maps_for_tex_set(
-        self, layers: list[LayerDiscovery], tex_set: str
-    ) -> dict[str, str]:
-        preview_maps: dict[str, str] = {}
-        for layer in layers:
-            for map_name in _PREVIEW_MAPS:
-                candidates = [
-                    candidate
-                    for candidate in layer.preview_candidates
-                    if candidate.tex_set == tex_set and candidate.map_name == map_name
-                ]
-                chosen = self._select_candidate(candidates, map_name)
-                if chosen:
-                    # Later layers deterministically override earlier layers.
-                    preview_maps[map_name] = self._candidate_path(chosen)
-        return preview_maps
-
-    def _candidate_path(self, candidate: TextureCandidate) -> str:
-        expression = self._to_hip_expression(candidate.path)
-        if candidate.udim:
-            return _UDIM_RE.sub(".<UDIM>", expression)
-        return expression
-
-    def _to_hip_expression(self, path: Path) -> str:
-        try:
-            relative = path.relative_to(self._hip_root)
-            return f"$HIP/{relative.as_posix()}"
-        except ValueError:
-            return path.as_posix()
-
-    @staticmethod
-    def _select_candidate(
-        candidates: list[TextureCandidate], map_name: str
-    ) -> TextureCandidate | None:
-        if not candidates:
-            return None
-
-        def rank(candidate: TextureCandidate) -> tuple[int, int, str]:
-            return (
-                candidate.priority,
-                MatlibSpecBuilder._extension_rank(map_name, candidate.extension),
-                candidate.path.name.casefold(),
-            )
-
-        return min(candidates, key=rank)
-
-    @staticmethod
-    def _extension_rank(map_name: str, extension: str) -> int:
-        ext = extension.lower()
-        if map_name in _PREVIEW_MAPS:
-            order = ("jpeg", "jpg", "png", "exr", "tex")
-        else:
-            order = ("tex", "exr", "png", "jpg", "jpeg")
-        try:
-            return order.index(ext)
-        except ValueError:
-            return len(order)
-
-
-class MatlibNodeBuilder:
-    """Node-builder layer: create deterministic material graphs in Material_Library."""
+    Every node it creates is tagged, and every rebuild destroys the previous
+    generation first. Materials an artist authored by hand are left alone.
+    """
 
     def __init__(self, matlib: hou.Node) -> None:
         self._matlib = matlib
 
-    def rebuild(self, spec: MaterialLibrarySpec, *, build_preview: bool) -> None:
-        self._clear_generated_nodes()
-        self._clear_generated_network_boxes()
-        if not spec.materials:
-            log.warning(
-                "No materials discovered for geo=%s mat=%s",
-                spec.geo_variant,
-                spec.mat_variant,
+    def rebuild(
+        self, materials: Sequence[textures.MaterialSpec], *, build_preview: bool
+    ) -> None:
+        for child in self._matlib.children():
+            if child.userData(_GENERATED_KEY) == _GENERATED_VALUE:
+                child.destroy()
+        for index, material in enumerate(materials):
+            self._build_material(
+                material, y=-index * _MATERIAL_Y_STEP, build_preview=build_preview
             )
-            return
 
-        y_cursor = 0.0
-        for material in spec.materials:
-            builder = self._create_material_builder(material, y=-y_cursor)
-            rm_surface, rm_nodes = self._build_renderman_graph(
-                builder, material, row_y=0
-            )
-            preview_row_y = -(len(material.layers) * 8 + 6)
-            preview_surface, preview_nodes = (
-                self._build_preview_graph(builder, material, preview_row_y)
-                if build_preview
-                else (None, [])
-            )
-            collect = self._build_material_collect(
-                builder,
-                row_y=0,
-                rm_surface=rm_surface,
-                preview_surface=preview_surface,
-            )
-            if not self._is_builder_output_collect(collect):
-                self._wire_material_builder_output(builder, collect)
-            self._build_navigation_groups(
-                builder, material, rm_nodes + [collect], preview_nodes
-            )
-            y_cursor += _MATERIAL_BUILDER_Y_STEP
-
-    def _clear_generated_nodes(self) -> None:
-        generated = [
-            child
-            for child in self._matlib.children()
-            if child.userData(_AUTO_TAG_KEY) == _AUTO_TAG_VALUE
-        ]
-        for node in generated:
-            node.destroy()
-
-    def _clear_generated_network_boxes(self) -> None:
-        if not hasattr(self._matlib, "networkBoxes"):
-            return
-
-        for net_box in self._matlib.networkBoxes():
-            try:
-                marked = cast(Any, net_box).userData(_AUTO_TAG_KEY) == _AUTO_TAG_VALUE
-            except Exception:
-                marked = False
-            if marked:
-                net_box.destroy()
-
-    def _create_material_builder(self, material: MaterialSpec, *, y: float) -> hou.Node:
-        tex_set_id = _sanitize_node_name(material.texture_set)
-        mat_name = f"MAT_{tex_set_id}"
-        builder = self._create_first_supported_node(
+    def _build_material(
+        self, material: textures.MaterialSpec, *, y: float, build_preview: bool
+    ) -> None:
+        builder = self._create(
             self._matlib,
-            ("pxrmaterialbuilder::3.0", "pxrmaterialbuilder"),
-            mat_name,
+            "pxrmaterialbuilder",
+            f"MAT_{_node_name(material.texture_set)}",
+            (0.0, y),
         )
-        if builder is None:
-            log.warning(
-                "pxrmaterialbuilder unavailable; falling back to subnet for %s",
-                mat_name,
-            )
-            builder = self._create_node(self._matlib, "subnet", mat_name)
+        # The HDA's Material Library collects material-flagged children (matflag1).
+        builder.setMaterialFlag(True)  # ty:ignore[unresolved-attribute]
+        output = self._material_output(builder)
 
-        builder.setPosition(hou.Vector2(0, y))
-        self._set_material_flag(builder, True)
-        self._prune_material_builder(builder)
-        return builder
+        surface, shader_nodes = self._build_renderman_shader(builder, material)
+        preview_row = -(len(material.layers) * _LAYER_Y_STEP + 6.0)
+        preview_surface, preview_nodes = (
+            self._build_preview_shader(builder, material, preview_row)
+            if build_preview
+            else (None, [])
+        )
 
-    def _build_renderman_graph(
-        self, parent: hou.Node, material: MaterialSpec, row_y: int
+        output.setInput(0, surface, 0)
+        if preview_surface is not None:
+            output.setInput(1, preview_surface, 0)
+
+        self._group(builder, "RenderMan", (0.22, 0.40, 0.78), [*shader_nodes, output])
+        self._group(builder, "UsdPreview", (0.86, 0.78, 0.28), preview_nodes)
+
+    def _build_renderman_shader(
+        self, builder: hou.Node, material: textures.MaterialSpec
     ) -> tuple[hou.Node, list[hou.Node]]:
-        tex_set_id = _sanitize_node_name(material.texture_set)
-        mixer = self._create_node(
-            parent, "pxrlayermixer::3.0", f"{tex_set_id}_LayerMixer"
+        suffix = _node_name(material.texture_set)
+        mixer = self._create(
+            builder, "pxrlayermixer::3.0", f"{suffix}_LayerMixer", (8.0, 0.0)
         )
-        surface = self._create_node(
-            parent, "pxrlayersurface::3.0", f"{tex_set_id}_PxrLayerSurface"
+        surface = self._create(
+            builder, "pxrlayersurface::3.0", f"{suffix}_PxrLayerSurface", (11.0, 0.0)
         )
-        mixer.setPosition(hou.Vector2(8, row_y))
-        surface.setPosition(hou.Vector2(11, row_y))
         surface.setInput(0, mixer, 0)
 
-        all_nodes: list[hou.Node] = [mixer, surface]
-        for layer_index, layer_spec in enumerate(material.layers):
-            layer_node, layer_nodes = self._build_layer(
-                parent, material.texture_set, layer_spec, row_y, layer_index
+        layer_specs = material.layers
+        if len(layer_specs) > _MIXER_SLOTS + 1:
+            log.warning(
+                "Texture set '%s' publishes %d layers but PxrLayerMixer mixes %d; "
+                "the remaining layers are not shaded.",
+                material.texture_set,
+                len(layer_specs),
+                _MIXER_SLOTS + 1,
             )
-            all_nodes.extend(layer_nodes)
-            if layer_index == 0:
-                mixer.setNamedInput("baselayer", layer_node, "pxrMaterialOut")
-                self._set_parm_if_exists(mixer, "layer1Enabled", False)
-            else:
-                input_name = f"layer{layer_index}"
-                mixer.setNamedInput(input_name, layer_node, "pxrMaterialOut")
-                self._set_parm_if_exists(mixer, f"{input_name}Enabled", True)
-        return surface, all_nodes
+            layer_specs = layer_specs[: _MIXER_SLOTS + 1]
+
+        nodes = [mixer, surface]
+        for index, layer_spec in enumerate(layer_specs):
+            layer, layer_nodes = self._build_layer(
+                builder,
+                layer_spec,
+                f"{suffix}_{_node_name(layer_spec.name)}",
+                y=-index * _LAYER_Y_STEP,
+            )
+            nodes.extend(layer_nodes)
+            slot = "baselayer" if index == 0 else f"layer{index}"
+            mixer.setNamedInput(slot, layer, "pxrMaterialOut")
+
+        # Stated for every slot so an unconnected one can never stay enabled.
+        for slot in range(1, _MIXER_SLOTS + 1):
+            _parm(mixer, f"layer{slot}Enabled").set(slot < len(layer_specs))
+        return surface, nodes
 
     def _build_layer(
         self,
-        parent: hou.Node,
-        tex_set_name: str,
-        layer_spec: LayerMaterialSpec,
-        row_y: int,
-        layer_index: int,
+        builder: hou.Node,
+        layer_spec: textures.LayerSpec,
+        suffix: str,
+        *,
+        y: float,
     ) -> tuple[hou.Node, list[hou.Node]]:
-        tex_set_id = _sanitize_node_name(tex_set_name)
-        layer_id = _sanitize_node_name(layer_spec.name)
-        layer_suffix = f"{tex_set_id}_{layer_id}"
-        y = row_y - layer_index * 8
+        """A PxrLayer and the texture chain feeding it.
 
-        roughness = self._create_node(
-            parent, "pxrtexture::3.0", f"Roughness_{layer_suffix}"
-        )
-        roughness_remap = self._create_node(
-            parent, "pxrremap::3.0", f"RoughnessRemap_{layer_suffix}"
-        )
-        color = self._create_node(
-            parent, "pxrtexture::3.0", f"BaseColor_{layer_suffix}"
-        )
-        normal = self._create_node(
-            parent, "pxrnormalmap::3.0", f"Normal_{layer_suffix}"
-        )
-        layer = self._create_node(parent, "pxrlayer::3.0", f"Layer_{layer_suffix}")
-        metallic_workflow = self._create_node(
-            parent, "pxrmetallicworkflow::3.0", f"MetallicWorkflow_{layer_suffix}"
-        )
-        metallic = self._create_node(
-            parent, "pxrtexture::3.0", f"Metallic_{layer_suffix}"
-        )
+        A map that was never published gets no node at all: an empty texture node
+        renders black and reads as a broken filepath to the shipping check.
+        """
+        maps = layer_spec.render_maps
+        layer = self._create(builder, "pxrlayer::3.0", f"Layer_{suffix}", (1.0, y))
+        _parm(layer, "enableSpecular").set(True)
+        _parm(layer, "specularGain").set(1.0)
 
-        roughness.setPosition(hou.Vector2(-8, y - 2))
-        roughness_remap.setPosition(hou.Vector2(-5, y - 2))
-        color.setPosition(hou.Vector2(-5, y + 3))
-        metallic.setPosition(hou.Vector2(-5, y + 0.5))
-        metallic_workflow.setPosition(hou.Vector2(-2, y + 1))
-        normal.setPosition(hou.Vector2(-2, y - 3.5))
-        layer.setPosition(hou.Vector2(1, y))
-        roughness_remap.setNamedInput("inputRGB", roughness, "resultRGB")
-        metallic_workflow.setNamedInput("baseColor", color, "resultRGB")
-        metallic_workflow.setNamedInput("metallic", metallic, "resultR")
-        layer.setNamedInput("diffuseColor", metallic_workflow, "resultDiffuseRGB")
-        layer.setNamedInput(
-            "specularFaceColor", metallic_workflow, "resultSpecularFaceRGB"
+        base_color = self._texture(
+            builder,
+            "pxrtexture::3.0",
+            f"BaseColor_{suffix}",
+            maps.get("BaseColor"),
+            (-5.0, y + 3.0),
+            colorspace=_COLOR_SPACE,
         )
-        layer.setNamedInput(
-            "specularEdgeColor", metallic_workflow, "resultSpecularEdgeRGB"
+        metallic = self._texture(
+            builder,
+            "pxrtexture::3.0",
+            f"Metallic_{suffix}",
+            maps.get("Metallic"),
+            (-5.0, y + 0.5),
+            colorspace=_DATA_SPACE,
         )
-        layer.setNamedInput("specularRoughness", roughness_remap, "resultR")
-        layer.setNamedInput("bumpNormal", normal, "resultN")
-
-        self._set_texture_filename(
-            color, layer_spec.render_maps.get("BaseColor"), is_color=True
+        roughness = self._texture(
+            builder,
+            "pxrtexture::3.0",
+            f"Roughness_{suffix}",
+            maps.get("SpecularRoughness"),
+            (-8.0, y - 2.0),
+            colorspace=_DATA_SPACE,
         )
-        self._set_texture_filename(
-            roughness, layer_spec.render_maps.get("SpecularRoughness"), is_color=False
-        )
-        self._set_texture_filename(
-            normal, layer_spec.render_maps.get("Normal"), is_color=False
-        )
-        self._set_texture_filename(
-            metallic, layer_spec.render_maps.get("Metallic"), is_color=False
+        normal = self._texture(
+            builder,
+            "pxrnormalmap::3.0",
+            f"Normal_{suffix}",
+            maps.get("Normal"),
+            (-2.0, y - 3.5),
+            colorspace=_DATA_SPACE,
         )
 
-        self._set_parm_if_exists(layer, "enableSpecular", True)
-        self._set_parm_if_exists(layer, "specularGain", 1.0)
-        return layer, [
-            roughness,
-            roughness_remap,
-            color,
-            normal,
-            layer,
-            metallic_workflow,
-            metallic,
-        ]
+        nodes: list[hou.Node | None] = [layer, base_color, metallic, roughness, normal]
+        if base_color is not None or metallic is not None:
+            nodes.append(
+                self._insert_metallic_workflow(
+                    builder, layer, suffix, y, base_color, metallic
+                )
+            )
+        if roughness is not None:
+            nodes.append(
+                self._insert_roughness_remap(builder, layer, suffix, y, roughness)
+            )
+        if normal is not None:
+            layer.setNamedInput("bumpNormal", normal, "resultN")
+        return layer, [node for node in nodes if node is not None]
 
-    def _build_preview_graph(
-        self, parent: hou.Node, material: MaterialSpec, row_y: int
+    def _insert_metallic_workflow(
+        self,
+        builder: hou.Node,
+        layer: hou.Node,
+        suffix: str,
+        y: float,
+        base_color: hou.Node | None,
+        metallic: hou.Node | None,
+    ) -> hou.Node:
+        """Split base colour and metallic into PxrLayer's diffuse/specular inputs."""
+        workflow = self._create(
+            builder,
+            "pxrmetallicworkflow::3.0",
+            f"MetallicWorkflow_{suffix}",
+            (-2.0, y + 1.0),
+        )
+        if base_color is not None:
+            workflow.setNamedInput("baseColor", base_color, "resultRGB")
+        else:
+            # PxrMetallicWorkflow.baseColor defaults to RenderMan's placeholder
+            # blue, and we are about to drive the layer's diffuse from it. Hand
+            # it the layer's own default so an unpublished base colour changes
+            # nothing except the specular response.
+            _parm_tuple(workflow, "baseColor").set(
+                _parm_tuple(layer, "diffuseColor").evalAsFloats()
+            )
+        if metallic is not None:
+            workflow.setNamedInput("metallic", metallic, "resultR")
+        layer.setNamedInput("diffuseColor", workflow, "resultDiffuseRGB")
+        layer.setNamedInput("specularFaceColor", workflow, "resultSpecularFaceRGB")
+        layer.setNamedInput("specularEdgeColor", workflow, "resultSpecularEdgeRGB")
+        return workflow
+
+    def _insert_roughness_remap(
+        self,
+        builder: hou.Node,
+        layer: hou.Node,
+        suffix: str,
+        y: float,
+        roughness: hou.Node,
+    ) -> hou.Node:
+        remap = self._create(
+            builder, "pxrremap::3.0", f"RoughnessRemap_{suffix}", (-5.0, y - 2.0)
+        )
+        remap.setNamedInput("inputRGB", roughness, "resultRGB")
+        layer.setNamedInput("specularRoughness", remap, "resultR")
+        return remap
+
+    def _build_preview_shader(
+        self, builder: hou.Node, material: textures.MaterialSpec, row_y: float
     ) -> tuple[hou.Node | None, list[hou.Node]]:
         if not material.preview_maps:
             return None, []
 
-        tex_set_id = _sanitize_node_name(material.texture_set)
-        preview_surface = self._create_first_supported_node(
-            parent,
-            ("usdpreviewsurface", "usdpreviewsurface::2.0"),
-            f"{tex_set_id}_UsdPreviewSurface",
+        suffix = _node_name(material.texture_set)
+        surface = self._create(
+            builder, "usdpreviewsurface", f"{suffix}_UsdPreviewSurface", (11.0, row_y)
         )
-        if preview_surface is None:
-            log.warning(
-                "USD Preview Surface node type unavailable; skipping preview graph"
-            )
-            return None, []
+        uv_reader = self._create(
+            builder, "usdprimvarreader", f"{suffix}_PreviewUv", (3.0, row_y)
+        )
+        # "float2" is the signature token that makes the output a UV pair; a token
+        # Houdini does not recognise silently leaves the output a single float.
+        _parm(uv_reader, "signature").set("float2")
+        _parm(uv_reader, "varname").set(_PREVIEW_UV_PRIMVAR)
 
-        preview_surface.setPosition(hou.Vector2(11, row_y))
+        nodes = [surface, uv_reader]
+        for preview in _PREVIEW_INPUTS:
+            path = material.preview_maps.get(preview.map_name)
+            if path is None:
+                continue
+            texture = self._create(
+                builder,
+                "usduvtexture::2.0",
+                f"{preview.map_name}_{suffix}_PreviewTex",
+                (6.0, row_y + preview.row_offset),
+            )
+            _parm(texture, "file").set(path)
+            _parm(texture, "sourceColorSpace").set(preview.source_colorspace)
+            _parm_tuple(texture, "scale").set(preview.scale)
+            _parm_tuple(texture, "bias").set(preview.bias)
+            texture.setNamedInput("st", uv_reader, "result")
+            for surface_input, texture_output in preview.connections:
+                surface.setNamedInput(surface_input, texture, texture_output)
+            nodes.append(texture)
+        return surface, nodes
 
-        preview_uv = self._create_primvar_reader(
-            parent=parent,
-            varname="preview_uv",
-            name="preview_uv",
-            y=row_y,
-            signature="Float 2",
-        )
-
-        diffuse = self._create_preview_texture(
-            parent,
-            tex_set_id,
-            "Diffuse",
-            material.preview_maps.get("DiffuseColor"),
-            row_y + 2,
-            color=True,
-        )
-        orm = self._create_preview_texture(
-            parent,
-            tex_set_id,
-            "ORM",
-            material.preview_maps.get("ORM"),
-            row_y + 0,
-            color=False,
-        )
-        emissive = self._create_preview_texture(
-            parent,
-            tex_set_id,
-            "Emissive",
-            material.preview_maps.get("Emissive"),
-            row_y - 2,
-            color=True,
-        )
-        normal = self._create_preview_texture(
-            parent,
-            tex_set_id,
-            "Normal",
-            material.preview_maps.get("NormalDX"),
-            row_y - 4,
-            color=False,
-        )
-
-        if diffuse:
-            self._connect_named(
-                preview_surface, "diffuseColor", diffuse, ("rgb", "resultRGB", "result")
-            )
-            if preview_uv:
-                self._connect_named(diffuse, "st", preview_uv, ("result",))
-        if emissive:
-            self._connect_named(
-                preview_surface,
-                "emissiveColor",
-                emissive,
-                ("rgb", "resultRGB", "result"),
-            )
-            if preview_uv:
-                self._connect_named(emissive, "st", preview_uv, ("result",))
-        if orm:
-            self._connect_named(
-                preview_surface, "occlusion", orm, ("r", "outR", "resultR")
-            )
-            self._connect_named(
-                preview_surface, "roughness", orm, ("g", "outG", "resultG")
-            )
-            self._connect_named(
-                preview_surface, "metallic", orm, ("b", "outB", "resultB")
-            )
-            if preview_uv:
-                self._connect_named(orm, "st", preview_uv, ("result",))
-        if normal:
-            self._connect_named(
-                preview_surface, "normal", normal, ("rgb", "resultRGB", "result")
-            )
-            # Scale the 0-1 RGB space to -1 to 1 tangent space
-            self._set_parm_tuple_if_exists(normal, "scale", (2, 2, 2, 1))
-            self._set_parm_tuple_if_exists(normal, "bias", (-1, -1, -1, 0))
-            if preview_uv:
-                self._connect_named(normal, "st", preview_uv, ("result",))
-        preview_nodes = [preview_surface]
-        preview_nodes.extend(
-            [node for node in (diffuse, orm, emissive, normal, preview_uv) if node]
-        )
-        return preview_surface, preview_nodes
-
-    def _build_material_collect(
+    def _texture(
         self,
-        parent: hou.Node,
-        row_y: int,
-        rm_surface: hou.Node,
-        preview_surface: hou.Node | None,
-    ) -> hou.Node:
-        existing_collect = self._find_builder_output_collect(parent)
-        if existing_collect is not None:
-            existing_collect.setPosition(hou.Vector2(14, row_y))
-            self._disconnect_inputs(existing_collect)
-            existing_collect.setInput(0, rm_surface, 0)
-            if preview_surface is not None:
-                existing_collect.setInput(1, preview_surface, 0)
-            return existing_collect
-
-        collect = self._create_first_supported_node(
-            parent, ("collect",), "FinalCollect"
-        )
-        if collect is None:
-            # Fallback: if collect is unavailable, expose RenderMan surface directly.
-            self._set_material_flag(rm_surface, True)
-            return rm_surface
-
-        collect.setPosition(hou.Vector2(14, row_y))
-        collect.setInput(0, rm_surface, 0)
-        if preview_surface is not None:
-            collect.setInput(1, preview_surface, 0)
-
-        return collect
-
-    def _find_builder_output_collect(self, builder: hou.Node) -> hou.Node | None:
-        for node_name in ("output_collect", "output_collect1"):
-            node = builder.node(node_name)
-            if node is not None:
-                return node
-        return None
-
-    def _is_builder_output_collect(self, node: hou.Node) -> bool:
-        return node.name() in {"output_collect", "output_collect1"}
-
-    def _build_navigation_groups(
-        self,
-        parent: hou.Node,
-        material: MaterialSpec,
-        rm_nodes: list[hou.Node],
-        preview_nodes: list[hou.Node],
-    ) -> None:
-        tex_set_id = _sanitize_node_name(material.texture_set)
-
-        rm_box = self._create_network_box(parent, f"{tex_set_id}_PxrSurface_Group")
-        if rm_box is not None:
-            rm_box.setColor(hou.Color((0.22, 0.40, 0.78)))
-            self._set_network_box_label(rm_box, "RenderMan Shader")
-            for node in rm_nodes:
-                rm_box.addItem(node)
-            self._fit_network_box(rm_box)
-
-        if preview_nodes:
-            preview_box = self._create_network_box(
-                parent, f"{tex_set_id}_UsdPreviewSurface_Group"
-            )
-            if preview_box is not None:
-                preview_box.setColor(hou.Color((0.86, 0.78, 0.28)))
-                self._set_network_box_label(preview_box, "USD Preview Shader")
-                for node in preview_nodes:
-                    preview_box.addItem(node)
-                self._fit_network_box(preview_box)
-
-    def _wire_material_builder_output(
-        self, builder: hou.Node, source_material: hou.Node
-    ) -> None:
-        # Typical pxrmaterialbuilder includes one or more output nodes.
-        wired = False
-        for output in self._builder_outputs(builder):
-            if output.path() == source_material.path():
-                continue
-            try:
-                output.setInput(0, source_material, 0)
-                wired = True
-                # Keep wiring all outputs we find so legacy and current outputs stay aligned.
-            except (hou.OperationFailed, hou.InvalidInput):
-                continue
-        if not wired:
-            log.warning(
-                "Could not find builder output node for %s; material may not export correctly",
-                builder.path(),
-            )
-
-    def _builder_outputs(self, builder: hou.Node) -> list[hou.Node]:
-        outputs: list[hou.Node] = []
-        seen: set[str] = set()
-
-        for output_name in _BUILDER_OUTPUT_NODE_NAMES:
-            output = builder.node(output_name)
-            if output is None:
-                continue
-            outputs.append(output)
-            seen.add(output.path())
-
-        # Fallback heuristic by node type/name.
-        for child in builder.children():
-            tname = child.type().name().lower()
-            nname = child.name().lower()
-            if (
-                "output" not in tname
-                and "suboutput" not in tname
-                and "output" not in nname
-            ):
-                continue
-            if child.path() in seen:
-                continue
-            outputs.append(child)
-            seen.add(child.path())
-
-        return outputs
-
-    def _prune_material_builder(self, builder: hou.Node) -> None:
-        outputs = {node.path() for node in self._builder_outputs(builder)}
-        for child in list(builder.children()):
-            if child.path() in outputs:
-                continue
-            try:
-                child.destroy()
-            except hou.OperationFailed:
-                log.debug("Could not prune default builder node: %s", child.path())
-            except Exception:
-                log.debug("Could not prune default builder node: %s", child.path())
-
-        if not hasattr(builder, "networkBoxes"):
-            return
-        for net_box in builder.networkBoxes():
-            try:
-                net_box.destroy()
-            except Exception:
-                continue
-
-    @staticmethod
-    def _disconnect_inputs(node: hou.Node) -> None:
-        for connection in node.inputConnections():
-            try:
-                node.setInput(connection.inputIndex(), None)
-            except (hou.OperationFailed, hou.InvalidInput):
-                continue
-
-    def _create_primvar_reader(
-        self,
-        parent: hou.Node,
-        varname: str,
+        builder: hou.Node,
+        node_type: str,
         name: str,
-        y: int,
+        path: str | None,
+        position: tuple[float, float],
         *,
-        signature: str,
+        colorspace: str,
     ) -> hou.Node | None:
-        node = self._create_first_supported_node(
-            parent,
-            ("usdprimvarreader", "usdprimvarreader"),
-            f"{name}_primvar",
-        )
-        if node is None:
-            log.warning(
-                f"USD PrimVar node type unavailable; skipping {name} primvar reader"
-            )
+        """None when the map was never published, so the caller wires nothing."""
+        if path is None:
             return None
-        node.setPosition(hou.Vector2(3, y))
-
-        self._set_parm_if_exists(node, "signature", signature)
-        self._set_parm_if_exists(node, "varname", varname)
+        node = self._create(builder, node_type, name, position)
+        _parm(node, "filename").set(path)
+        _parm(node, "filename_colorspace").set(colorspace)
         return node
 
-    def _create_preview_texture(
+    @staticmethod
+    def _material_output(builder: hou.Node) -> hou.Node:
+        """The output RenderMan's builder ships with.
+
+        Substituting our own `collect` would build a material that looks right
+        and carries an unknown output contract, so refuse before anything is
+        wired instead.
+        """
+        output = builder.node(_BUILDER_OUTPUT)
+        if output is None:
+            raise hou.OperationFailed(
+                f"{builder.path()} ({builder.type().name()}) has no "
+                f"'{_BUILDER_OUTPUT}' child; this RenderMan build is unsupported"
+            )
+        return output
+
+    @staticmethod
+    def _group(
+        builder: hou.Node,
+        name: str,
+        color: tuple[float, float, float],
+        nodes: Sequence[hou.Node],
+    ) -> None:
+        """Box the nodes for navigation."""
+        if not nodes:
+            return
+        box = builder.createNetworkBox()
+        box.setName(name, unique_name=True)
+        box.setComment(name)
+        box.setColor(hou.Color(color))
+        for node in nodes:
+            box.addItem(node)
+        box.fitAroundContents()
+
+    def _create(
         self,
         parent: hou.Node,
-        tex_set_id: str,
-        token: str,
-        texture_path: str | None,
-        y: int,
-        *,
-        color: bool,
-    ) -> hou.Node | None:
-        if not texture_path:
-            return None
-        node = self._create_first_supported_node(
-            parent,
-            ("usduvtexture::2.0", "usduvtexture"),
-            f"{token}_{tex_set_id}_PreviewTex",
-        )
-        if node is None:
-            log.warning(
-                "USD UV Texture node type unavailable; skipping %s preview map", token
-            )
-            return None
-        node.setPosition(hou.Vector2(6, y))
-
-        self._set_parm_if_exists(node, "file", texture_path)
-        self._set_parm_if_exists(node, "filename", texture_path)
-        # USD Preview Material spec tokens (not OCIO names): "sRGB", "raw", or "auto"
-        self._set_parm_if_exists(node, "sourceColorSpace", "sRGB" if color else "raw")
-        self._set_parm_if_exists(node, "sourcecolorspace", "sRGB" if color else "raw")
-        return node
-
-    def _set_texture_filename(
-        self, node: hou.Node, path: str | None, *, is_color: bool
-    ) -> None:
-        if not path:
-            return
-        self._set_parm_if_exists(node, "filename", path)
-        alias = "rendering" if is_color else "data"
-        self._set_parm_if_exists(node, "filename_colorspace", alias)
-
-    @staticmethod
-    def _set_parm_if_exists(node: hou.Node, parm_name: str, value) -> None:
-        parm = node.parm(parm_name)
-        if parm is None:
-            return
-        parm.set(value)
-
-    @staticmethod
-    def _set_parm_tuple_if_exists(node: hou.Node, parm_name: str, value: tuple) -> None:
-        parm = node.parmTuple(parm_name)
-        if parm is None:
-            return
-        parm.set(value)
-
-    def _connect_named(
-        self,
-        dest: hou.Node,
-        input_name: str,
-        src: hou.Node,
-        output_names: tuple[str, ...],
-    ) -> bool:
-        for output_name in output_names:
-            try:
-                dest.setNamedInput(input_name, src, output_name)
-                return True
-            except hou.OperationFailed:
-                continue
-        return False
-
-    def _create_first_supported_node(
-        self, parent: hou.Node, type_names: tuple[str, ...], name: str
-    ) -> hou.Node | None:
-        for node_type in type_names:
-            try:
-                return self._create_node(parent, node_type, name)
-            except hou.OperationFailed:
-                continue
-        return None
-
-    def _create_node(self, parent: hou.Node, node_type: str, name: str) -> hou.Node:
+        node_type: str,
+        name: str,
+        position: tuple[float, float],
+    ) -> hou.Node:
         node = parent.createNode(node_type)
         node.setName(name, unique_name=True)
-        node.setUserData(_AUTO_TAG_KEY, _AUTO_TAG_VALUE)
+        node.setUserData(_GENERATED_KEY, _GENERATED_VALUE)
+        node.setPosition(hou.Vector2(*position))
         return node
 
-    def _create_network_box(self, parent: hou.Node, name: str):
-        try:
-            net_box = parent.createNetworkBox()
-        except Exception:
-            return None
-        net_box.setName(name, unique_name=True)
-        try:
-            cast(Any, net_box).setUserData(_AUTO_TAG_KEY, _AUTO_TAG_VALUE)
-        except Exception:
-            pass
-        return net_box
 
-    @staticmethod
-    def _fit_network_box(net_box) -> None:
-        try:
-            net_box.fitAroundContents()
-        except Exception:
-            pass
+class PathFault(Enum):
+    """Why a texture path will not survive the asset being moved or shared."""
 
-    @staticmethod
-    def _set_network_box_label(net_box, label: str) -> None:
-        if hasattr(net_box, "setComment"):
-            try:
-                net_box.setComment(label)
-                return
-            except Exception:
-                pass
-        if hasattr(net_box, "setLabel"):
-            try:
-                net_box.setLabel(label)
-            except Exception:
-                pass
-
-    @staticmethod
-    def _set_material_flag(node: hou.Node, state: bool) -> None:
-        try:
-            if hasattr(node, "setMaterialFlag"):
-                node.setMaterialFlag(state)  # ty:ignore[call-non-callable]
-        except hou.OperationFailed:
-            pass
+    NOT_PORTABLE = auto()
+    OUTSIDE_ASSET = auto()
 
 
-class MatlibManager:
-    _conn: ShotGrid
-    _bound_node: hou.LopNode | None
+@dataclass(frozen=True)
+class TexturePathProblem:
+    """One offending texture parm, as facts. Rendering lives in the message."""
 
-    def __init__(
-        self, node: hou.LopNode | None = None, *, init_defaults: bool = False
-    ) -> None:
-        self._conn = ShotGrid.connect(DB_Config)
-        self._bound_node = node
-        if node and init_defaults:
-            try:
-                self._init_hda(node)
-            except Exception:
-                log.exception("Failed to initialize MatLib defaults on %s", node.path())
+    node_path: str
+    parm_name: str
+    authored: str
+    resolved: str
+    fault: PathFault
 
-    @property
-    def node(self) -> hou.LopNode:
-        if self._bound_node:
-            return self._bound_node
-        node = hou.node("./")
-        assert isinstance(node, hou.LopNode)
-        return node
 
-    @property
-    def _asset(self) -> Asset:
-        asset_name = str(hou.contextOption("ASSET"))
-        return self._conn.get_asset(name=asset_name)
+_ASSET_ROOT_VARIABLES = ("$HIP", "$JOB")
+_PORTABLE_PREFIXES = ("$HIP/", "$JOB/", "${HIP}/", "${JOB}/")
+_MAX_REPORTED = 10
+_FAULT_TEXT = {
+    PathFault.NOT_PORTABLE: "must start with $HIP or $JOB",
+    PathFault.OUTSIDE_ASSET: "resolves outside this asset",
+}
 
-    def _get_asset_or_none(self) -> Asset | None:
-        try:
-            return self._asset
-        except Exception:
-            log.exception("Failed to resolve ASSET context option for MatLib")
-            return None
 
-    @property
-    def _hip(self) -> Path:
-        return Path(hou.hscriptStringExpression("$HIP"))
+def texture_path_problems(matlib: hou.Node) -> list[TexturePathProblem]:
+    """Texture parms under `matlib` that will not resolve if the asset moves."""
+    roots = _asset_roots()
+    problems: list[TexturePathProblem] = []
+    for node in (matlib, *matlib.allSubChildren()):
+        for parm in _file_reference_parms(node):
+            authored = parm.unexpandedString().strip()
+            resolved = str(parm.eval()).strip()
+            fault = _path_fault(authored, resolved, roots)
+            if fault is not None:
+                problems.append(
+                    TexturePathProblem(
+                        node_path=matlib.relativePathTo(node),
+                        parm_name=parm.name(),
+                        authored=authored,
+                        resolved=resolved,
+                        fault=fault,
+                    )
+                )
+    return problems
 
-    @property
-    def geo_variant_name(self) -> str:
-        geo_var_name = self.node.parm("geo_var")
-        if geo_var_name is None:
-            return "main"
-        return geo_var_name.evalAsString().strip() or "main"
 
-    @property
-    def mat_variant_name(self) -> str:
-        mat_var_name = self.node.parm("mat_var")
-        if mat_var_name is None:
-            return _NO_TEXTURES
-        return mat_var_name.evalAsString().strip() or _NO_TEXTURES
+def matlib_path_error(matlib: hou.Node) -> str:
+    """Artist-facing message for the HDA's error LOP; empty when every path is fine."""
+    problems = texture_path_problems(matlib)
+    if not problems:
+        return ""
 
-    def _init_hda(self, node: hou.LopNode) -> None:
-        self._update_default_mat_var(node=node)
-        self._update_default_geo_var(node=node)
-
-    def _update_default_geo_var(self, node: hou.LopNode | None = None) -> None:
-        curr_node = node or self.node
-        geo_var = curr_node.parm("geo_var")
-        if geo_var is None:
-            return
-
-        asset = self._get_asset_or_none()
-        variants = (
-            sorted((v for v in (asset.geometry_variants or ()) if v), key=str.casefold)
-            if asset
-            else []
+    lines = [
+        f"{len(problems)} texture path(s) will break when this asset is moved or "
+        "opened by someone else. Every texture must be read through $HIP or $JOB.",
+        "",
+    ]
+    for problem in problems[:_MAX_REPORTED]:
+        detail = problem.authored
+        if problem.resolved and problem.resolved != problem.authored:
+            detail = f"{problem.authored}  ->  {problem.resolved}"
+        lines.append(
+            f"    {problem.node_path} ({problem.parm_name}) "
+            f"{_FAULT_TEXT[problem.fault]}:"
         )
-        geo_var.set(variants[0] if variants else "main")
+        lines.append(f"        {detail}")
+    if len(problems) > _MAX_REPORTED:
+        lines.append(f"    ...and {len(problems) - _MAX_REPORTED} more.")
+    lines.append("")
+    lines.append(
+        "Republish these textures into this asset's publish/tex folder, "
+        "then press Rebuild Materials."
+    )
+    return "\n".join(lines)
 
-    def _update_default_mat_var(self, node: hou.LopNode | None = None) -> None:
-        curr_node = node or self.node
-        mat_var = curr_node.parm("mat_var")
-        if mat_var is None:
-            return
 
-        asset = self._get_asset_or_none()
-        variants = (
-            sorted((v for v in (asset.material_variants or ()) if v), key=str.casefold)
-            if asset
-            else []
-        )
-        mat_var.set(variants[0] if variants else _NO_TEXTURES)
-
-    def _find_material_library(
-        self, node: hou.LopNode | None = None
-    ) -> hou.Node | None:
-        root = node or self.node
-        by_name = root.node(f"./{_MATLIB_NAME}")
-        if by_name:
-            return by_name
-
-        for child in root.children():
-            if child.type().name() == "materiallibrary":
-                return child
+def _path_fault(
+    authored: str, resolved: str, roots: Sequence[Path]
+) -> PathFault | None:
+    """Portability and containment are separate faults; the authored one wins."""
+    if not authored:
+        # No texture assigned. That map was never published, which is a lookdev
+        # gap rather than a path that breaks when the asset moves.
         return None
-
-    @staticmethod
-    def _configure_material_library(
-        matlib: hou.Node, *, geo_variant: str, mat_variant: str
-    ) -> None:
-        # Component Material expects materials under
-        # /ASSET/mtl/g_<geoVariant>/v_<matVariant>/MAT_<texset>.
-        material_prefix = variants.material_scope_path(
-            mat_variant, geo_variant=geo_variant
-        )
-        for parm_name, value in (
-            ("matpathprefix", material_prefix),
-            ("materialpathprefix", material_prefix),
-            ("matnodepattern", "MAT_*"),
-        ):
-            parm = matlib.parm(parm_name)
-            if parm is not None:
-                parm.set(value)
-
-    def _build_preview_toggle(self, node: hou.LopNode) -> bool:
-        parm = node.parm("build_usd_preview")
-        if parm is None:
-            return True
-        return bool(parm.evalAsInt())
-
-    def _auto_rebuild_enabled(self, node: hou.LopNode) -> bool:
-        parm = node.parm("auto_rebuild")
-        if parm is None:
-            return False
-        return bool(parm.evalAsInt())
-
-    def get_geo_variant_list(self) -> list[str]:
-        asset = self._get_asset_or_none()
-        variants = (
-            sorted((v for v in (asset.geometry_variants or ()) if v), key=str.casefold)
-            if asset
-            else []
-        )
-        if not variants:
-            variants = ["main"]
-        return _asset_menu_format(variants)
-
-    def get_mat_variant_list(self) -> list[str]:
-        asset = self._get_asset_or_none()
-        variants = (
-            sorted((v for v in (asset.material_variants or ()) if v), key=str.casefold)
-            if asset
-            else []
-        )
-        if not variants:
-            variants = [_NO_TEXTURES]
-        return _asset_menu_format(variants)
-
-    def on_variant_changed(self, node: hou.LopNode | None = None) -> None:
-        curr_node = node or self.node
-        if self._auto_rebuild_enabled(curr_node):
-            self.rebuild(node=curr_node)
-
-    def rebuild(self, node: hou.LopNode | None = None) -> None:
-        curr_node = node or self.node
-        matlib = self._find_material_library(curr_node)
-        if matlib is None:
-            log.error("No materiallibrary node found inside %s", curr_node.path())
-            return
-        self._configure_material_library(
-            matlib,
-            geo_variant=self.geo_variant_name,
-            mat_variant=self.mat_variant_name,
-        )
-
-        discovery = MatlibDiscovery(
-            self._hip, self.geo_variant_name, self.mat_variant_name
-        )
-        layers = discovery.discover_layers()
-        spec = MatlibSpecBuilder(self._hip).build(
-            geo_variant=self.geo_variant_name,
-            mat_variant=self.mat_variant_name,
-            layers=layers,
-        )
-
-        builder = MatlibNodeBuilder(matlib)
-        builder.rebuild(spec, build_preview=self._build_preview_toggle(curr_node))
-
-    def create_matnet(
-        self,
-        houdini_filepath: str | None = None,
-        node: hou.LopNode | None = None,
-    ) -> None:
-        self.rebuild(node=node)
+    if not authored.startswith(_PORTABLE_PREFIXES):
+        return PathFault.NOT_PORTABLE
+    if resolved and roots and not any(_is_within(resolved, root) for root in roots):
+        return PathFault.OUTSIDE_ASSET
+    return None
 
 
-def matlib_on_created(node: hou.LopNode) -> None:
-    MatlibManager(node=node, init_defaults=True)
+def _is_within(path: str, root: Path) -> bool:
+    return Path(path).resolve().is_relative_to(root)
 
 
-def matlib_geo_variant_menu(node: hou.LopNode) -> list[str]:
-    return MatlibManager(node=node).get_geo_variant_list()
+def _asset_roots() -> list[Path]:
+    """Resolved $HIP and $JOB: the folders a published texture may live under."""
+    expanded = (hou.hscriptStringExpression(name) for name in _ASSET_ROOT_VARIABLES)
+    return [Path(value).resolve() for value in expanded if value.strip()]
 
 
-def matlib_mat_variant_menu(node: hou.LopNode) -> list[str]:
-    return MatlibManager(node=node).get_mat_variant_list()
-
-
-def matlib_on_variant_changed(node: hou.LopNode) -> None:
-    MatlibManager(node=node).on_variant_changed(node)
-
-
-def matlib_rebuild(node: hou.LopNode) -> None:
-    MatlibManager(node=node).rebuild(node)
+def _file_reference_parms(node: hou.Node) -> list[hou.Parm]:
+    """Every parm Houdini types as a file reference."""
+    return [
+        parm
+        for parm in node.parms()
+        if isinstance(template := parm.parmTemplate(), hou.StringParmTemplate)
+        and template.stringType() == hou.stringParmType.FileReference
+        and not parm.isAtDefault()
+    ]
 
 
 class MatlibErrorChecker:
-    @staticmethod
-    def CheckFilepathsRelative(matlib: hou.Node) -> int:
-        """Returns 1 if there are any absolute filepaths in generated textures."""
-        nodes: list[hou.Node] = [matlib]
-        try:
-            nodes.extend(matlib.allSubChildren())
-        except Exception:
-            nodes.extend(matlib.children())
+    """Entry point for the HDA's `errors` LOP. Do not rename."""
 
-        for node in nodes:
-            if (fn := node.parm("filename")) is not None:
-                if not fn.unexpandedString().startswith("$"):
-                    return 1
-        return 0
+    @staticmethod
+    def CheckFilepathsRelative(matlib: hou.Node) -> int:  # noqa: N802
+        return 1 if texture_path_problems(matlib) else 0
+
+
+class MatlibManager:
+    """Backs the SKD_MatLib HDA's parameters and its Rebuild Materials button."""
+
+    def __init__(self, node: hou.LopNode) -> None:
+        self._node = node
+
+    def geo_variants(self) -> list[str]:
+        asset = self._asset()
+        return _variant_names(asset.geometry_variants if asset else None, "main")
+
+    def mat_variants(self) -> list[str]:
+        asset = self._asset()
+        return _variant_names(asset.material_variants if asset else None, _NO_TEXTURES)
+
+    def initialize_defaults(self) -> None:
+        _set_string_parm(self._node, "geo_var", self.geo_variants()[0])
+        _set_string_parm(self._node, "mat_var", self.mat_variants()[0])
+
+    def rebuild(self) -> None:
+        matlib = self._material_library()
+        if matlib is None:
+            log.error(
+                "No %s node inside %s, so there is nothing to rebuild.",
+                _MATLIB_TYPE,
+                self._node.path(),
+            )
+            return
+
+        geo_variant = _string_parm(self._node, "geo_var", "main")
+        mat_variant = _string_parm(self._node, "mat_var", _NO_TEXTURES)
+        # Component Material expects /ASSET/mtl/g_<geo>/v_<mat>/MAT_<texset>.
+        _parm(matlib, "matpathprefix").set(
+            variants.material_scope_path(mat_variant, geo_variant=geo_variant)
+        )
+
+        hip_root = Path(hou.hscriptStringExpression("$HIP"))
+        tex_root = hip_root / variants.TEX_SOURCE_DIR / geo_variant / mat_variant
+        materials = textures.published_materials(tex_root, hip_root=hip_root)
+        if not materials:
+            log.warning("No materials to build from %s", tex_root)
+
+        MaterialGraphBuilder(matlib).rebuild(
+            materials,
+            build_preview=_toggle(self._node, "build_usd_preview", default=True),
+        )
+
+    def _asset(self) -> Asset | None:
+        try:
+            connection = ShotGrid.connect(DB_Config)
+            return connection.get_asset(name=str(hou.contextOption("ASSET")))
+        except Exception:
+            # Variant menus and defaults must still work when ShotGrid is
+            # unreachable; the artist can type a variant name by hand.
+            log.exception(
+                "Could not resolve the ASSET context option for %s", self._node.path()
+            )
+            return None
+
+    def _material_library(self) -> hou.Node | None:
+        by_name = self._node.node(_MATLIB_NAME)
+        if by_name is not None and by_name.type().name() == _MATLIB_TYPE:
+            return by_name
+        return next(
+            (
+                child
+                for child in self._node.children()
+                if child.type().name() == _MATLIB_TYPE
+            ),
+            None,
+        )
+
+
+def _variant_names(declared: Iterable[str] | None, fallback: str) -> list[str]:
+    named = sorted((name for name in (declared or ()) if name), key=str.casefold)
+    return named or [fallback]
+
+
+def _menu_entries(values: list[str]) -> list[str]:
+    """Houdini menus want alternating token and label entries."""
+    return [entry for value in values for entry in (value, value)]
+
+
+def _string_parm(node: hou.LopNode, name: str, fallback: str) -> str:
+    parm = node.parm(name)
+    if parm is None:
+        return fallback
+    return parm.evalAsString().strip() or fallback
+
+
+def _set_string_parm(node: hou.LopNode, name: str, value: str) -> None:
+    parm = node.parm(name)
+    if parm is not None:
+        parm.set(value)
+
+
+def _toggle(node: hou.LopNode, name: str, *, default: bool) -> bool:
+    parm = node.parm(name)
+    return default if parm is None else bool(parm.evalAsInt())
+
+
+def matlib_on_created(node: hou.LopNode) -> None:
+    MatlibManager(node).initialize_defaults()
+
+
+def matlib_geo_variant_menu(node: hou.LopNode) -> list[str]:
+    return _menu_entries(MatlibManager(node).geo_variants())
+
+
+def matlib_mat_variant_menu(node: hou.LopNode) -> list[str]:
+    return _menu_entries(MatlibManager(node).mat_variants())
+
+
+def matlib_on_variant_changed(node: hou.LopNode) -> None:
+    if _toggle(node, "auto_rebuild", default=False):
+        MatlibManager(node).rebuild()
+
+
+def matlib_rebuild(node: hou.LopNode) -> None:
+    MatlibManager(node).rebuild()
