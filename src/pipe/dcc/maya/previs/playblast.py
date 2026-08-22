@@ -16,7 +16,14 @@ from pipe.core.playblast import (
     FFmpegPreset,
     PreviewClip,
     ScratchEntity,
+    ShotEntity,
     ShotGridDestination,
+)
+from pipe.core.playblast.confirm import (
+    ChosenDisk,
+    ChosenShotGrid,
+    confirm_clip,
+    failure_summary,
 )
 from pipe.core.previs import codes, playblasts_dir
 
@@ -56,12 +63,7 @@ def build_shot_playblasts(
     """Render every shot in `shots`, reporting per-shot failures instead of
     aborting the batch."""
     playblaster = MTakePlayblaster()
-    destination = DiskDestination(
-        id=EDIT_FOLDER_ID,
-        name=PLAYBLASTS_DESTINATION_NAME,
-        directory=playblasts_dir(sequence_code, previs_root=previs_root),
-        preset=FFmpegPreset.EDIT_SQ,
-    )
+    destination = _playblasts_folder(sequence_code, previs_root=previs_root)
     clips: list[PreviewClip] = []
     failed: list[tuple[str, str]] = []
     for shot in shots:
@@ -76,10 +78,42 @@ def build_shot_playblasts(
     return ShotPlayblastBatch(clips=clips, failed=failed)
 
 
+def deliver_break_out_version(
+    shot: PrevisShot, sequence_code: str, *, previs_root: Path
+) -> str:
+    """Render `shot` and publish it as a ShotGrid Version on its own Shot."""
+    folder = _playblasts_folder(sequence_code, previs_root=previs_root)
+    clip = _render_shot_playblast(shot, MTakePlayblaster(), folder, linked=True)
+    review = next(d for d in clip.destinations if isinstance(d, ShotGridDestination))
+    result = confirm_clip(
+        clip,
+        (
+            ChosenDisk(destination=folder, directory=folder.directory),
+            ChosenShotGrid(destination=review),
+        ),
+        (folder.directory,),
+    )
+    summary = failure_summary(result)
+    if summary:
+        return f"{summary} {' '.join(o.detail for o in result.outcomes if not o.ok)}"
+    return f"Published {result.basename} to ShotGrid."
+
+
+def _playblasts_folder(sequence_code: str, *, previs_root: Path) -> DiskDestination:
+    return DiskDestination(
+        id=EDIT_FOLDER_ID,
+        name=PLAYBLASTS_DESTINATION_NAME,
+        directory=playblasts_dir(sequence_code, previs_root=previs_root),
+        preset=FFmpegPreset.EDIT_SQ,
+    )
+
+
 def _render_shot_playblast(
     previs_shot: PrevisShot,
     playblaster: MTakePlayblaster,
     destination: DiskDestination,
+    *,
+    linked: bool = False,
 ) -> PreviewClip:
     """Render `previs_shot`'s primary take over its authored source range."""
     code = _require_code(previs_shot)
@@ -103,20 +137,16 @@ def _render_shot_playblast(
         label=code,
         output_prefix=code,
         settings_key=PLAYBLAST_SETTINGS_KEY,
-        destinations=_destinations_for(code, destination),
+        destinations=_destinations_for(code, destination, linked=linked),
     )
 
 
-def _destinations_for(code: str, folder: DiskDestination) -> tuple[Destination, ...]:
-    """The shot's delivery folder, plus an optional ShotGrid Version.
-
-    Previs shot codes are not ShotGrid Shots (only the `<letter>_previs` proxy
-    is), so the Version attaches unlinked and is offered rather than pre-checked.
-    """
-    return (
-        folder,
-        ShotGridDestination(entity=ScratchEntity(code), default_on=False),
-    )
+def _destinations_for(
+    code: str, folder: DiskDestination, *, linked: bool
+) -> tuple[Destination, ...]:
+    """The shot's delivery folder, plus its ShotGrid Version."""
+    entity = ShotEntity(code) if linked else ScratchEntity(code)
+    return (folder, ShotGridDestination(entity=entity, default_on=linked))
 
 
 def _require_code(previs_shot: PrevisShot) -> str:
@@ -138,4 +168,5 @@ __all__ = [
     "PrevisPlayblastError",
     "ShotPlayblastBatch",
     "build_shot_playblasts",
+    "deliver_break_out_version",
 ]

@@ -7,7 +7,14 @@ from typing import TYPE_CHECKING
 
 import maya.cmds as mc
 from Qt import QtGui
-from Qt.QtWidgets import QFrame, QLabel, QScrollArea, QVBoxLayout, QWidget
+from Qt.QtWidgets import (
+    QApplication,
+    QFrame,
+    QLabel,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 
 from . import _qt, active, cameras, packing, style
 from .cam_block import BLOCK_HEIGHT, CamBlock
@@ -38,6 +45,13 @@ def track_height(row_height: int) -> int:
     return max(row_height, BLOCK_HEIGHT + 2 * _BLOCK_MARGIN_Y)
 
 
+def block_span(
+    source_in: int, duration: int, *, first_frame: int, px_per_frame: int
+) -> tuple[int, int]:
+    """`(x, width)` for a source range. The sole frame-to-pixel authority on this axis."""
+    return frame_to_x(source_in, first_frame, px_per_frame), duration * px_per_frame
+
+
 def block_rect(
     shot: PrevisShot,
     track: int,
@@ -46,12 +60,18 @@ def block_rect(
     px_per_frame: int,
     row_height: int,
 ) -> tuple[int, int, int, int]:
-    """`(x, y, w, h)` for one shot's block. The sole frame-to-pixel authority here."""
+    """`(x, y, w, h)` for one shot's block, on the track packing gave it."""
     pitch = track_height(row_height)
+    x, width = block_span(
+        shot.source_in,
+        shot.primary_duration,
+        first_frame=first_frame,
+        px_per_frame=px_per_frame,
+    )
     return (
-        frame_to_x(shot.source_in, first_frame, px_per_frame),
+        x,
         RULER_HEIGHT + track * pitch + _BLOCK_MARGIN_Y,
-        max(style.MIN_WIDTH_PX, shot.primary_duration * px_per_frame),
+        width,
         pitch - 2 * _BLOCK_MARGIN_Y,
     )
 
@@ -116,7 +136,10 @@ class TimelineView(QWidget):
         self._px_per_frame = style.PX_PER_FRAME_DEFAULT
         self._last_state: PrevisState | None = None
 
-        self.setToolTip("Ctrl+Wheel: zoom vertically · Shift+Wheel: zoom horizontally")
+        self.setToolTip(
+            "Drag a block to move its source in · drag its left edge to trim the head\n"
+            "Ctrl+Wheel: zoom vertically · Shift+Wheel: zoom horizontally"
+        )
 
     def set_state(self, state: PrevisState) -> None:
         self._last_state = state
@@ -166,24 +189,46 @@ class TimelineView(QWidget):
         )
 
     def preview_resize(self, shot_id: str, namespace: str, new_length: int) -> None:
-        """Live block width during a right-edge drag."""
-        block = self._blocks_by_shot.get(shot_id)
-        shot = None if self._last_state is None else self._last_state.find_shot(shot_id)
-        if block is None or shot is None or shot.primary != namespace:
+        """Live block width during a right-edge drag; the left edge is pinned."""
+        shot = self._shot(shot_id)
+        if shot is None or shot.primary != namespace:
             return
-        geometry = block.geometry()
-        block.setGeometry(
-            geometry.x(),
-            geometry.y(),
-            max(style.MIN_WIDTH_PX, new_length * self._px_per_frame),
-            geometry.height(),
-        )
+        self._preview_block(shot_id, source_in=shot.source_in, length=new_length)
+
+    def preview_span(
+        self, shot_id: str, *, start_delta: int, length_delta: int
+    ) -> None:
+        """Live block geometry for a proposed source range: body drag or head trim."""
+        shot = self._shot(shot_id)
+        if shot is not None:
+            self._preview_block(
+                shot_id,
+                source_in=shot.source_in + start_delta,
+                length=shot.primary_duration + length_delta,
+            )
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         super().resizeEvent(event)
         self.sync_playhead()  # keep the line spanning the (re)sized track stack
 
     # ----- private ---------------------------------------------------------
+
+    def _shot(self, shot_id: str) -> PrevisShot | None:
+        return None if self._last_state is None else self._last_state.find_shot(shot_id)
+
+    def _preview_block(self, shot_id: str, *, source_in: int, length: int) -> None:
+        """Redraw one block from in-flight numbers, without touching state."""
+        block = self._blocks_by_shot.get(shot_id)
+        if block is None:
+            return
+        geometry = block.geometry()
+        x, width = block_span(
+            source_in,
+            length,
+            first_frame=self._span[0],
+            px_per_frame=self._px_per_frame,
+        )
+        block.setGeometry(x, geometry.y(), width, geometry.height())
 
     def _add_ruler(self, width: int) -> None:
         ruler = Ruler(self._inner, on_scrub=self._controller.scrub_to_frame)
@@ -215,6 +260,9 @@ class TimelineView(QWidget):
                 # Geometry here says nothing about edit order, so the block has
                 # to carry it.
                 badge=badge,
+                # Unlocks body-drag and the head handle: on this axis both edit
+                # a number the block is already showing.
+                source_axis=True,
                 parent=self._inner,
             )
             self._blocks_by_shot[shot.id] = block
@@ -247,23 +295,23 @@ class TimelineView(QWidget):
         return track_height(self._row_height) - 2 * _BLOCK_MARGIN_Y
 
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
+        # A zoom rebuilds every block, so mid-drag it would delete the widget that
+        # still owes us a release. Asked of Qt, so the guard cannot get stuck.
+        if QApplication.mouseButtons():
+            event.accept()
+            return
         mods = event.modifiers()
         ctrl = bool(mods & _qt.CONTROL)
         shift = bool(mods & _qt.SHIFT)
         if not (ctrl or shift):
             super().wheelEvent(event)
             return
-        step = 1 if event.angleDelta().y() > 0 else -1
-        if ctrl:
-            new_h = self._row_height + step * 6
-            self._row_height = max(
-                style.ROW_HEIGHT_MIN, min(style.ROW_HEIGHT_MAX, new_h)
-            )
-        else:  # shift
-            new_p = self._px_per_frame + step
-            self._px_per_frame = max(
-                style.PX_PER_FRAME_MIN, min(style.PX_PER_FRAME_MAX, new_p)
-            )
+        self._row_height, self._px_per_frame = style.zoom_step(
+            self._row_height,
+            self._px_per_frame,
+            vertical=ctrl,
+            up=event.angleDelta().y() > 0,
+        )
         if self._last_state is not None:
             self.set_state(self._last_state)
         event.accept()

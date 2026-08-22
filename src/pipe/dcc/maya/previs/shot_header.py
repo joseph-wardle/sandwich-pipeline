@@ -129,6 +129,11 @@ class ShotHeader(QFrame):
         )
         menu.addSeparator()
         menu.addAction(
+            "Set source in to current frame",
+            lambda: self._controller.set_source_in_to_current(self._shot.id),
+        )
+        menu.addSeparator()
+        menu.addAction(
             "Move left", lambda: self._controller.move_shot(self._shot.id, -1)
         )
         menu.addAction(

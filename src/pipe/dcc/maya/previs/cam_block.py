@@ -1,14 +1,13 @@
-"""Single camera block. Drag a block onto a Maya viewport to look through that
-camera; drag an alternate onto its column's primary to promote; double-click an
-alt for the same; right-click for menu; drag the right-edge handle on primaries
-to resize the shot.
+"""Single camera block.
 
-The resize handle is a dedicated child widget rather than edge-detection inside
-the QFrame so mouse events land unambiguously.
+Double-click a primary to look through it or an alt to promote it,
+drag an alt onto its column's primary to promote, right-click for a menu, drag
+the right edge to set the shot's length.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from Qt import QtCore, QtGui
@@ -34,23 +33,36 @@ BLOCK_HEIGHT = 32
 _HANDLE_WIDTH = 10
 _MIME_TYPE = "application/x-previs-camera"  # payload: f"{shot_id}|{namespace}"
 
-# Hide the resize handle below this width — there's no room to grab it anyway,
-# and the handle's stripes would crowd out the colored sliver.
-_HANDLE_MIN_BLOCK_WIDTH = 28
+# Content the block must keep beyond its handles, below which there is nothing
+# left to grab from and the handles' stripes crowd out the colored sliver.
+_HANDLE_MIN_CONTENT = 18
 
 
-class _ResizeHandle(QFrame):
-    """Right-edge grabber for primary blocks. Owns its own mouse events."""
+class _EdgeHandle(QFrame):
+    """Edge grabber for primary blocks, reporting its drag in pixels."""
 
-    def __init__(self, block: CamBlock, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        block: CamBlock,
+        *,
+        preview: Callable[[int], None],
+        commit: Callable[[int], None],
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._block = block
+        self._preview = preview
+        self._commit = commit
         self.setObjectName("resizeHandle")
         self.setFixedWidth(_HANDLE_WIDTH)
         self.setCursor(QCursor(_qt.SIZE_HOR))
         self.setStyleSheet(style.RESIZE_HANDLE_IDLE)
         self._drag_active = False
         self._drag_start_global_x = 0
+
+    @property
+    def is_dragging(self) -> bool:
+        return self._drag_active
 
     def enterEvent(self, event: QtCore.QEvent) -> None:
         if not self._drag_active:
@@ -69,13 +81,14 @@ class _ResizeHandle(QFrame):
         self._drag_active = True
         self._drag_start_global_x = event.globalPos().x()
         self.setStyleSheet(style.RESIZE_HANDLE_ACTIVE)
+        self._block.select()
         event.accept()
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         if not self._drag_active:
             super().mouseMoveEvent(event)
             return
-        self._block.preview_resize(event.globalPos().x() - self._drag_start_global_x)
+        self._preview(event.globalPos().x() - self._drag_start_global_x)
         event.accept()
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
@@ -84,7 +97,11 @@ class _ResizeHandle(QFrame):
             return
         self._drag_active = False
         self.setStyleSheet(style.RESIZE_HANDLE_IDLE)
-        self._block.commit_resize(event.globalPos().x() - self._drag_start_global_x)
+        delta_px = event.globalPos().x() - self._drag_start_global_x
+        # Preview first so a drag that rounded back to zero still lands its
+        # labels on the real numbers; a commit rebuilds the block anyway.
+        self._preview(delta_px)
+        self._commit(delta_px)
         event.accept()
 
 
@@ -103,6 +120,7 @@ class CamBlock(QFrame):
         truncated: bool = False,
         missing: bool = False,
         badge: str = "",
+        source_axis: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -114,6 +132,7 @@ class CamBlock(QFrame):
         self._truncated = truncated
         self._missing = missing
         self._badge = badge
+        self._source_axis = source_axis
         self._selected = False
         self._badge_label: QLabel | None = None
         # Taken verbatim from the timeline so drag math stays stable —
@@ -123,8 +142,10 @@ class CamBlock(QFrame):
         self._shot_id = shot_id
         self._controller = controller
         self._height_hint = height  # used by minimumSizeHint before geometry resolves
-        self._handle: _ResizeHandle | None = None
+        self._handles: list[_EdgeHandle] = []
         self._press_pos: QtCore.QPoint | None = None
+        self._press_global_x = 0
+        self._body_drag_active = False
 
         self.setFixedHeight(height)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -137,17 +158,42 @@ class CamBlock(QFrame):
             # one of the two ways an artist repairs the shot.
             self.setAcceptDrops(True)
 
+        self._head_handle = is_primary and source_axis
+        if source_axis:
+            self.setCursor(QCursor(_qt.SIZE_ALL))  # the body is draggable here
+
+        left, right = self._content_margins()
         outer = QHBoxLayout(self)
-        # Right margin 0 on primary: the resize handle owns that strip.
-        # Left margin reduced on primary: the thick border-left already eats ~2px.
-        outer.setContentsMargins(8 if is_primary else 10, 0, 0 if is_primary else 10, 0)
+        outer.setContentsMargins(left, 0, right, 0)
         outer.setSpacing(0)
+        if self._head_handle:
+            outer.addWidget(
+                self._add_handle(self.preview_head_drag, self.commit_head_drag)
+            )
         outer.addLayout(self._build_content(), 1)
         if is_primary:
-            self._handle = _ResizeHandle(self, self)
-            outer.addWidget(self._handle)
+            outer.addWidget(
+                self._add_handle(self.preview_tail_drag, self.commit_tail_drag)
+            )
 
-        self.setToolTip(self._tooltip_text())
+        self.setToolTip(self._tooltip_text(self._start_frame, self._length_frames))
+
+    def _add_handle(
+        self, preview: Callable[[int], None], commit: Callable[[int], None]
+    ) -> _EdgeHandle:
+        handle = _EdgeHandle(self, preview=preview, commit=commit, parent=self)
+        self._handles.append(handle)
+        return handle
+
+    def _content_margins(self) -> tuple[int, int]:
+        """Left/right padding; a handle's side gives up its margin to the handle.
+
+        The primary's thick border-left already eats ~2px, so it asks for less.
+        """
+        return (
+            0 if self._head_handle else (8 if self._is_primary else 10),
+            0 if self._is_primary else 10,
+        )
 
     def _block_style(self) -> str:
         if self._missing:
@@ -222,7 +268,9 @@ class CamBlock(QFrame):
         self._length_label = _frame_label(
             "lengthBadge", f"{self._length_frames}f", self
         )
-        self._end_label = _frame_label("endFrame", self._end_label_text(), self)
+        self._end_label = _frame_label(
+            "endFrame", self._end_text(self._end_frame()), self
+        )
 
         row.addWidget(self._start_label)
         row.addStretch(1)
@@ -234,19 +282,16 @@ class CamBlock(QFrame):
     def _end_frame(self) -> int:
         return self._start_frame + max(self._length_frames - 1, 0)
 
-    def _end_label_text(self) -> str:
-        text = str(self._end_frame())
-        return f"{text} ›››" if self._truncated else text
+    def _end_text(self, end: int) -> str:
+        return f"{end} ›››" if self._truncated else str(end)
 
-    def _tooltip_text(self, *, length: int | None = None) -> str:
-        """Block tooltip; `length` overrides the stored one mid-resize-drag."""
-        frames = self._length_frames if length is None else length
-        end = self._start_frame + max(frames - 1, 0)
+    def _tooltip_text(self, start: int, length: int) -> str:
+        end = start + max(length - 1, 0)
         suffix = "  (longer than primary)" if self._truncated else ""
         lines = [self._namespace]
         if self._badge:
             lines.append(f"cut {self._badge}")
-        lines.append(f"{self._start_frame} → {end}  ({frames}f){suffix}")
+        lines.append(f"{start} → {end}  ({length}f){suffix}")
         if self._missing:
             lines.append("camera missing from the scene — right-click to re-link")
         return "\n".join(lines)
@@ -261,21 +306,22 @@ class CamBlock(QFrame):
             return
         self._truncated = truncated
         self.setStyleSheet(self._block_style())
-        self._end_label.setText(self._end_label_text())
-        self.setToolTip(self._tooltip_text())
+        self._show_frames(self._start_frame, self._length_frames)
 
     # --- tier-based progressive disclosure ---------------------------------
 
     def _apply_tier(self) -> None:
-        """Show/hide labels and the resize handle based on current width.
+        """Show/hide labels and the edge handles based on current width.
 
         - ≥ COMPACT: full layout, name elided to fit.
         - NARROW–COMPACT: only the centered duration pill.
         - < NARROW: just a colored sliver; hover tooltip carries the info.
         """
         w = self.width()
-        if self._handle is not None:
-            self._handle.setVisible(w >= _HANDLE_MIN_BLOCK_WIDTH)
+        # Tail first, so when only one handle fits it is the one every block has.
+        for depth, handle in enumerate(reversed(self._handles), start=1):
+            room = _HANDLE_WIDTH * depth + _HANDLE_MIN_CONTENT
+            handle.setVisible(handle.is_dragging or w >= room)
         full = w >= style.TIER_COMPACT
         compact = w >= style.TIER_NARROW
         if self._badge_label is not None:
@@ -288,9 +334,8 @@ class CamBlock(QFrame):
             self._elide_name()
 
     def _elide_name(self) -> None:
-        outer_left = 8 if self._is_primary else 10
-        outer_right = 0 if self._is_primary else 10
-        handle_w = _HANDLE_WIDTH if (self._handle and self._handle.isVisible()) else 0
+        outer_left, outer_right = self._content_margins()
+        handle_w = sum(_HANDLE_WIDTH for h in self._handles if h.isVisible())
         badge_w = (
             self._badge_label.sizeHint().width() + 6
             if self._badge_label is not None
@@ -304,55 +349,111 @@ class CamBlock(QFrame):
             fm.elidedText(self._namespace, _qt.ELIDE_RIGHT, available)
         )
 
-    # --- resize hooks (called by _ResizeHandle) -----------------------------
+    def preview_tail_drag(self, delta_px: int) -> None:
+        length = self._new_length(delta_px)
+        self._show_frames(self._start_frame, length)
+        self._controller.preview_resize_camera(self._shot_id, self._namespace, length)
 
-    def preview_resize(self, delta_px: int) -> None:
-        new_length = self._compute_new_length(delta_px)
-        self._length_label.setText(f"{new_length}f")
-        end = self._start_frame + max(new_length - 1, 0)
-        self._end_label.setText(f"{end} ›››" if self._truncated else str(end))
-        # Tooltip carries the in-flight numbers so a paused drag still reads true.
-        self.setToolTip(self._tooltip_text(length=new_length))
-        self._controller.preview_resize_camera(
-            self._shot_id, self._namespace, new_length
+    def commit_tail_drag(self, delta_px: int) -> None:
+        length = self._new_length(delta_px)
+        if length != self._length_frames:
+            self._controller.resize_camera(self._shot_id, self._namespace, length)
+
+    def preview_head_drag(self, delta_px: int) -> None:
+        delta = self._trim_frames(delta_px)
+        self._preview_span(start_delta=delta, length_delta=-delta)
+
+    def commit_head_drag(self, delta_px: int) -> None:
+        delta = self._trim_frames(delta_px)
+        if delta:
+            self._controller.trim_head(self._shot_id, delta)
+
+    def preview_body_drag(self, delta_px: int) -> None:
+        self._preview_span(start_delta=self._delta_frames(delta_px), length_delta=0)
+
+    def commit_body_drag(self, delta_px: int) -> None:
+        delta = self._delta_frames(delta_px)
+        if delta:
+            self._controller.set_source_in(self._shot_id, self._start_frame + delta)
+
+    def _preview_span(self, *, start_delta: int, length_delta: int) -> None:
+        """Both source-axis drags: a proposed source range, with state untouched."""
+        self._show_frames(
+            self._start_frame + start_delta, self._length_frames + length_delta
+        )
+        self._controller.preview_span(
+            self._shot_id, start_delta=start_delta, length_delta=length_delta
         )
 
-    def commit_resize(self, delta_px: int) -> None:
-        new_length = self._compute_new_length(delta_px)
-        if new_length != self._length_frames:
-            self._controller.resize_camera(self._shot_id, self._namespace, new_length)
+    def _show_frames(self, start: int, length: int) -> None:
+        """Point the frame labels at a range, stored or merely proposed."""
+        self._start_label.setText(str(start))
+        self._length_label.setText(f"{length}f")
+        self._end_label.setText(self._end_text(start + max(length - 1, 0)))
+        self.setToolTip(self._tooltip_text(start, length))
 
-    def _compute_new_length(self, delta_px: int) -> int:
-        delta_frames = int(round(delta_px / self._px_per_frame))
-        return max(1, self._length_frames + delta_frames)
+    def _delta_frames(self, delta_px: int) -> int:
+        return int(round(delta_px / self._px_per_frame))
+
+    def _new_length(self, delta_px: int) -> int:
+        return max(1, self._length_frames + self._delta_frames(delta_px))
+
+    def _trim_frames(self, delta_px: int) -> int:
+        """Head movement in frames, floored so the shot always keeps one frame."""
+        return min(self._length_frames - 1, self._delta_frames(delta_px))
+
+    def select(self) -> None:
+        """Make this block's shot the one that wins an overlap."""
+        self._controller.select_shot(self._shot_id)
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         if event.button() == _qt.LEFT_BUTTON:
-            self._controller.select_shot(self._shot_id)
+            self.select()
             self._press_pos = event.pos()
+            self._press_global_x = event.globalPos().x()
             event.accept()
             return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        if self._body_drag_active:
+            self.preview_body_drag(event.globalPos().x() - self._press_global_x)
+            event.accept()
+            return
         if self._press_pos is not None and event.buttons() & _qt.LEFT_BUTTON:
             travel = (event.pos() - self._press_pos).manhattanLength()
             if travel >= QApplication.startDragDistance():
-                self._start_drag()
-                self._press_pos = None
+                if self._source_axis:
+                    self._body_drag_active = True
+                    self.preview_body_drag(event.globalPos().x() - self._press_global_x)
+                else:
+                    self._start_drag()
+                    self._press_pos = None
+                event.accept()
                 return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
+        if self._body_drag_active:
+            self._body_drag_active = False
+            delta_px = event.globalPos().x() - self._press_global_x
+            self.preview_body_drag(delta_px)  # a drag that rounded to zero still lands
+            self.commit_body_drag(delta_px)
+            self._press_pos = None
+            event.accept()
+            return
         self._press_pos = None
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
-        if event.button() == _qt.LEFT_BUTTON and not self._is_primary:
-            self._controller.promote_to_primary(self._shot_id, self._namespace)
-            event.accept()
+        if event.button() != _qt.LEFT_BUTTON:
+            super().mouseDoubleClickEvent(event)
             return
-        super().mouseDoubleClickEvent(event)
+        if self._is_primary:
+            self._controller.look_through(self._namespace)
+        else:
+            self._controller.promote_to_primary(self._shot_id, self._namespace)
+        event.accept()
 
     def _start_drag(self) -> None:
         drag = QDrag(self)

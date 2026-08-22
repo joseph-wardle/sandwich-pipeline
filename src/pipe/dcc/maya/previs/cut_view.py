@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import maya.cmds as mc
 from Qt import QtGui
 from Qt.QtWidgets import (
+    QApplication,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -140,7 +141,7 @@ class CutView(QWidget):
         if cut_frame is None:
             self._playhead.hide()
             return
-        x = TRACK_LABEL_WIDTH + (cut_frame - FRAME_START) * self._px_per_frame
+        x = TRACK_LABEL_WIDTH + self._cut_width(cut_frame - FRAME_START)
         self._playhead.move_to(x, self._inner.height())
 
     def _scrub_from_cut(self, cut_frame: int) -> None:
@@ -166,10 +167,13 @@ class CutView(QWidget):
             self._grid.setColumnStretch(col, 0)
         self._grid.setRowStretch(self._prior_deepest_row + 1, 0)
 
+    def _cut_width(self, frames: int) -> int:
+        """The cut axis' only frame-to-pixel map."""
+        return frames * self._px_per_frame
+
     def _apply_column_widths(self, shot_lengths: list[int]) -> None:
         for index, length in enumerate(shot_lengths):
-            width = max(style.MIN_WIDTH_PX, length * self._px_per_frame)
-            self._grid.setColumnMinimumWidth(index + 1, width)
+            self._grid.setColumnMinimumWidth(index + 1, self._cut_width(length))
 
     def _apply_trailing_stretches(self, num_shots: int, deepest_row: int) -> None:
         """Trailing col + row absorb slack; otherwise QGridLayout stretches content."""
@@ -303,13 +307,10 @@ class CutView(QWidget):
     def _alt_visual_width(self, primary_length: int, cam_length: int) -> int:
         """Pixel width for an alt block sharing a column sized to `primary_length`.
 
-        Shorter alts shrink to their share of the column; exact and truncated
-        alts fill the column edge-to-edge.
+        Shorter alts show their real length; exact and truncated alts fill the
+        column edge-to-edge and say the rest with a chevron.
         """
-        column_w = max(style.MIN_WIDTH_PX, primary_length * self._px_per_frame)
-        if cam_length >= primary_length:
-            return column_w
-        return max(style.MIN_WIDTH_PX, round(column_w * cam_length / primary_length))
+        return self._cut_width(min(cam_length, primary_length))
 
     def _add_alt_cell(self, shot_id: str, *, enabled: bool) -> QHBoxLayout:
         cell = QHBoxLayout()
@@ -354,8 +355,7 @@ class CutView(QWidget):
         shot = self._last_state.shots[index]
         if shot.primary != namespace:
             return  # alt resize — column unchanged
-        width = max(style.MIN_WIDTH_PX, new_length * self._px_per_frame)
-        self._grid.setColumnMinimumWidth(index + 1, width)
+        self._grid.setColumnMinimumWidth(index + 1, self._cut_width(new_length))
         for alt_block in self._alt_blocks_by_shot.get(shot_id, []):
             alt_length = alt_block.length_frames
             alt_block.setFixedWidth(self._alt_visual_width(new_length, alt_length))
@@ -371,23 +371,23 @@ class CutView(QWidget):
     # ----- wheel zoom ------------------------------------------------------
 
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
+        # A zoom rebuilds every block, so mid-drag it would delete the widget that
+        # still owes us a release. Asked of Qt, so the guard cannot get stuck.
+        if QApplication.mouseButtons():
+            event.accept()
+            return
         mods = event.modifiers()
         ctrl = bool(mods & _qt.CONTROL)
         shift = bool(mods & _qt.SHIFT)
         if not (ctrl or shift):
             super().wheelEvent(event)
             return
-        step = 1 if event.angleDelta().y() > 0 else -1
-        if ctrl:
-            new_h = self._row_height + step * 6
-            self._row_height = max(
-                style.ROW_HEIGHT_MIN, min(style.ROW_HEIGHT_MAX, new_h)
-            )
-        else:  # shift
-            new_p = self._px_per_frame + step
-            self._px_per_frame = max(
-                style.PX_PER_FRAME_MIN, min(style.PX_PER_FRAME_MAX, new_p)
-            )
+        self._row_height, self._px_per_frame = style.zoom_step(
+            self._row_height,
+            self._px_per_frame,
+            vertical=ctrl,
+            up=event.angleDelta().y() > 0,
+        )
         if self._last_state is not None:
             self.set_state(self._last_state)
         event.accept()

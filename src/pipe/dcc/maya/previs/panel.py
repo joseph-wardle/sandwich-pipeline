@@ -198,19 +198,39 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         """Branch only makes sense on an open previs file."""
         self._branch_btn.setEnabled(self._is_previs_file())
 
-    def install_playhead_callback(self) -> None:
-        """Resync the playhead on every scene time change, for the panel's lifetime.
+    def install_scene_callbacks(self) -> None:
+        """Follow the scene for the panel's lifetime.
 
-        Parented to the workspaceControl so Maya kills the job when the panel closes —
-        deliberately separate from active.py's file-scoped monitor job.
+        The scene node is the state; `self._state` is only a copy of it, so every
+        event that can move the node behind the panel's back has to be here.
         """
-        mc.scriptJob(
-            event=("timeChanged", self._sync_playhead),
-            parent=WORKSPACE_CONTROL_NAME,
-        )
+        for event, handler in (
+            ("timeChanged", self._sync_playhead),
+            ("Undo", self._reload_state),
+            ("Redo", self._reload_state),
+            ("SceneOpened", self._adopt_scene),
+            ("NewSceneOpened", self._adopt_scene),
+        ):
+            mc.scriptJob(event=(event, handler), parent=WORKSPACE_CONTROL_NAME)
 
     def _sync_playhead(self) -> None:
         self._view.sync_playhead()
+
+    def _reload_state(self) -> None:
+        """Adopt whatever the scene now says, discarding the panel's copy."""
+        scene_state = state.read_state() or PrevisState()
+        if scene_state.to_dict() == self._state.to_dict():
+            return
+        self._state = scene_state
+        self.refresh()
+        # The undone edit may have handed the current frame to a different shot.
+        active.sync_monitor()
+
+    def _adopt_scene(self) -> None:
+        """A different file is on screen, so this panel's shots and selection are gone."""
+        active.set_selected_shot(None)
+        self._state = state.read_state() or PrevisState()
+        self.refresh()
 
     def _persist(self) -> None:
         state.write_state(self._state)
@@ -434,15 +454,34 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         if panel == monitor.get_monitor():
             # The monitor re-aims at the active shot on every time change, so an aim
             # here would just revert
-            mc.inViewMessage(
-                assistMessage="The monitor follows the active shot; drop on a work viewport.",
-                position="midCenter",
-                fade=True,
+            _assist("The monitor follows the active shot; drop on a work viewport.")
+            return
+        self._aim_viewport(panel, namespace)
+
+    def look_through(self, namespace: str) -> None:
+        """Aim a work viewport at `namespace`'s camera."""
+        visible = mc.getPanel(visiblePanels=True) or []
+        panels = [
+            p
+            for p in (mc.getPanel(type="modelPanel") or [])
+            if p in visible and p != monitor.get_monitor()
+        ]
+        if not panels:
+            _assist(
+                "The monitor follows the active shot; open another viewport to "
+                "look through this camera."
+                if monitor.get_monitor()
+                else "No model viewport open to look through."
             )
             return
+        self._aim_viewport(panels[0], namespace)
+
+    def _aim_viewport(self, panel: str, namespace: str) -> None:
         camera_shape = cameras.camera_shape_for_namespace(namespace)
-        if camera_shape:
-            mc.lookThru(panel, camera_shape)
+        if not camera_shape:
+            _assist(f"{namespace} has no camera in the scene — right-click to re-link.")
+            return
+        mc.lookThru(panel, camera_shape)
 
     def promote_to_primary(self, shot_id: str, namespace: str) -> None:
         shot = self._state.find_shot(shot_id)
@@ -467,11 +506,47 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             take.duration = new_length_frames
             self._persist()
 
+    def set_source_in(self, shot_id: str, frame: int) -> None:
+        """Move where this shot's material sits in scene time."""
+        shot = self._state.find_shot(shot_id)
+        if shot is None or shot.source_in == int(frame):
+            return
+        with undo_chunk("previsSetSourceIn"):
+            shot.source_in = int(frame)
+            self._persist()
+
+    def set_source_in_to_current(self, shot_id: str) -> None:
+        """Menu path to the exact frame a four-pixels-per-frame drag can't land on."""
+        self.set_source_in(shot_id, int(mc.currentTime(query=True)))
+
+    def trim_head(self, shot_id: str, delta_frames: int) -> None:
+        """Move the shot's head by `delta_frames`, holding `source_out` still."""
+        shot = self._state.find_shot(shot_id)
+        if shot is None or delta_frames == 0:
+            return
+        take = shot.primary_take
+        # Both unreachable from the UI — a takeless shot draws as an inert
+        # placeholder, and the handle clamps the drag to leave one frame.
+        if take is None or take.duration - delta_frames <= 0:
+            return
+        with undo_chunk("previsTrimHead"):
+            shot.source_in += delta_frames
+            take.duration -= delta_frames
+            self._persist()
+
     def preview_resize_camera(
         self, shot_id: str, namespace: str, new_length_frames: int
     ) -> None:
         """Live width preview during a resize drag; no state mutation."""
         self._view.preview_resize(shot_id, namespace, new_length_frames)
+
+    def preview_span(
+        self, shot_id: str, *, start_delta: int, length_delta: int
+    ) -> None:
+        """Live block geometry during a source-axis drag; no state mutation."""
+        self._timeline_view.preview_span(
+            shot_id, start_delta=start_delta, length_delta=length_delta
+        )
 
     def remove_camera(self, shot_id: str, namespace: str) -> None:
         shot = self._state.find_shot(shot_id)
@@ -629,12 +704,31 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
                 self, f"Breaking out {label} failed:\n{exc}", _BREAK_OUT_TITLE
             ).exec_()
             return
-        # The scene on screen is the reopened previs file, so the panel re-reads it.
-        self._state = state.read_state() or PrevisState()
-        self.refresh()
+        # Break-out leaves the previs file reopened, so the panel adopts it now
+        # rather than waiting on the idle-time scene job.
+        self._adopt_scene()
+        published = self._publish_break_out_version(shot, plan.code)
         MessageDialog(
-            self, f"Broke out {plan.code} to\n{destination}", _BREAK_OUT_TITLE
+            self,
+            f"Broke out {plan.code} to\n{destination}\n\n{published}",
+            _BREAK_OUT_TITLE,
         ).exec_()
+
+    def _publish_break_out_version(self, shot: PrevisShot, code: str) -> str:
+        """Give the new Shot its first ShotGrid Version, and say how that went."""
+        sequence_code = self._sequence_code()
+        if sequence_code is None:
+            return "No sequence code, so no playblast was published."
+        # `_adopt_scene` re-read the file, so prefer the reopened scene's copy of
+        # the shot over the one captured before delivery.
+        delivered = self._state.find_shot(shot.id) or shot
+        try:
+            return playblast.deliver_break_out_version(
+                delivered, sequence_code, previs_root=get_previs_path()
+            )
+        except Exception as exc:
+            log.exception("Publishing a ShotGrid Version for %s failed.", code)
+            return f"No playblast was published for {code}:\n{exc}"
 
     def _plan_break_out(self, shot: PrevisShot, conn: ShotGrid) -> rlo.DeliveryPlan:
         """What breaking `shot` out would do."""
@@ -699,6 +793,11 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         return False
 
 
+def _assist(message: str) -> None:
+    """Say why a viewport gesture did nothing, where the artist is already looking."""
+    mc.inViewMessage(assistMessage=message, position="midCenter", fade=True)
+
+
 def _view_button(parent: QWidget, text: str, tooltip: str) -> QPushButton:
     btn = QPushButton(text, parent)
     btn.setCheckable(True)
@@ -726,7 +825,7 @@ def _restore() -> None:
     widget_ptr = MQtUtil.findControl(_panel_instance.objectName())
     if workspace_ptr and widget_ptr:
         MQtUtil.addWidgetToMayaLayout(int(widget_ptr), int(workspace_ptr))
-    _panel_instance.install_playhead_callback()
+    _panel_instance.install_scene_callbacks()
 
 
 # Generated from __name__ so an IDE module-rename stays consistent without manual edits.
@@ -756,7 +855,7 @@ def launch() -> None:
         uiScript=UI_SCRIPT,
         workspaceControlName=WORKSPACE_CONTROL_NAME,
     )
-    _panel_instance.install_playhead_callback()
+    _panel_instance.install_scene_callbacks()
 
 
 def close() -> None:

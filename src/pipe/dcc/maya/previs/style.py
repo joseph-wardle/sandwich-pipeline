@@ -50,7 +50,24 @@ ROW_HEIGHT_MAX = 96
 PX_PER_FRAME_DEFAULT = 4
 PX_PER_FRAME_MIN = 2
 PX_PER_FRAME_MAX = 16
-MIN_WIDTH_PX = 4  # a one-frame shot still has to be clickable
+
+_ROW_HEIGHT_STEP = 6  # pixels of row height per wheel notch
+
+
+def zoom_step(
+    row_height: int, px_per_frame: int, *, vertical: bool, up: bool
+) -> tuple[int, int]:
+    """One wheel notch of zoom, clamped. Shared so the two views cannot drift apart."""
+    step = 1 if up else -1
+    if vertical:
+        row_height += step * _ROW_HEIGHT_STEP
+    else:
+        px_per_frame += step
+    return (
+        max(ROW_HEIGHT_MIN, min(ROW_HEIGHT_MAX, row_height)),
+        max(PX_PER_FRAME_MIN, min(PX_PER_FRAME_MAX, px_per_frame)),
+    )
+
 
 # --- stylesheets ------------------------------------------------------------
 

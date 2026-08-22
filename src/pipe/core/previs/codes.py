@@ -33,13 +33,22 @@ def normalize_code(code: str) -> str:
     Canonicalizing on the write path stops ``A_10`` and ``A_010`` from becoming
     two manifest keys for what an artist means as one shot.
     """
+    return format_code(*_require_parsed(code))
+
+
+def shot_letter(code: str) -> str:
+    """The sequence a shot code belongs to (``A_020`` → ``A``); raise if malformed."""
+    return _require_parsed(code)[0]
+
+
+def _require_parsed(code: str) -> tuple[str, int]:
     parsed = parse_code(code)
     if parsed is None:
         raise ValueError(
             f"{code!r} is not a valid shot code "
             "(expected <LETTER>_<number>, e.g. 'A_010')"
         )
-    return format_code(*parsed)
+    return parsed
 
 
 def is_taken(code: str, existing: Iterable[str]) -> bool:
@@ -86,6 +95,7 @@ __all__ = [
     "parse_code",
     "format_code",
     "normalize_code",
+    "shot_letter",
     "is_taken",
     "suggest_next",
     "suggest_midpoint",

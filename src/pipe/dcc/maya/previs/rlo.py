@@ -119,7 +119,7 @@ def plan_delivery(shot: PrevisShot, proxy: Shot, conn: ShotGrid) -> DeliveryPlan
     previs_file = _require_saved_scene()
     code = _require_code(shot)
     _require_primary(shot)
-    sequence = _require_sequence(proxy)
+    sequence = _require_sequence(code, conn)
     sg_shot = _find_shot(conn, code)
     cut_in, cut_out = _cut_range(shot)
     held_cut = None if sg_shot is None else (sg_shot.cut_in, sg_shot.cut_out)
@@ -160,14 +160,16 @@ def _find_shot(conn: ShotGrid, code: str) -> Shot | None:
         return None
 
 
-def _require_sequence(proxy: Shot) -> Sequence:
-    if proxy.sequence is None:
+def _require_sequence(code: str, conn: ShotGrid) -> Sequence:
+    """The Sequence the code's own letter names — deliberately not the proxy's."""
+    letter = codes.shot_letter(code)
+    try:
+        return conn.get_sequence(code=letter)
+    except ShotGridNotFound:
         raise BreakOutError(
-            f"The previs sequence {proxy.code} is not linked to a sequence in "
-            "ShotGrid, so a shot broken out of it would have nowhere to live. Ask "
-            "production to fill in its Sequence field."
-        )
-    return proxy.sequence
+            f"ShotGrid has no sequence named {letter}, so {code} would have nowhere "
+            "to live. Ask production to create the sequence first."
+        ) from None
 
 
 def _require_saved_scene() -> Path:
@@ -358,10 +360,23 @@ def _trim_keys(keep_start: int, keep_end: int) -> None:
     """Drop every key outside the handled range, on every curve in the scene."""
     curves = _anim_curves()
     _warn_referenced_animation(curves)
-    if not curves:
-        return
+    _pin_range(curves, keep_start, keep_end)
     for span in ((_FAR_PAST, keep_start - _EPS), (keep_end + _EPS, _FAR_FUTURE)):
+        # Re-read per span: emptying a curve deletes it, so a name from the first
+        # pass can be dead by the second and `cutKey` raises on the whole call.
+        curves = _anim_curves()
+        if not curves:
+            return
         mc.cutKey(*curves, time=span, clear=True)
+
+
+def _pin_range(curves: list[str], keep_start: int, keep_end: int) -> None:
+    """Record each curve's value at the kept edges before anything outside is cut."""
+    for curve in curves:
+        # Referenced curves ignore this edit and the cut below alike.
+        if mc.referenceQuery(curve, isNodeReferenced=True):
+            continue
+        mc.setKeyframe(curve, insert=True, time=[keep_start, keep_end])
 
 
 def _retime(offset: int) -> None:
