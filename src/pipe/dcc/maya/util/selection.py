@@ -86,7 +86,6 @@ class IslandFaceSelectContext(MPxSelectionContext):
             _delete_cut_uv(obj)
 
     def _cancel(self) -> None:
-        self._cleanup_uv_sets()
         cmds.selectType(edge=True)
         cmds.select(*self.previous_selection, replace=True)
 
@@ -121,7 +120,7 @@ class IslandFaceSelectContext(MPxSelectionContext):
         super().toolOnSetup(event)
 
     def toolOffCleanup(self):
-        self._cancel()
+        self._cleanup_uv_sets()
         super().toolOffCleanup()
 
     def completeAction(self):
@@ -140,8 +139,8 @@ class IslandFaceSelectContext(MPxSelectionContext):
         cmds.setToolTo("selectSuperContext")
 
     def abortAction(self):
-        self._cancel()
         super().abortAction()
+        self._cancel()
         cmds.setToolTo("selectSuperContext")
 
 
@@ -171,3 +170,5 @@ def activate_island_face_select_tool():
     if not cmds.contextInfo(f"{CTX_CMD_NAME}1", exists=True):
         context = cmds.islandFaceSelectCtxCmd()  # type: ignore
         cmds.setToolTo(context)
+    else:
+        cmds.setToolTo(f"{CTX_CMD_NAME}1")
