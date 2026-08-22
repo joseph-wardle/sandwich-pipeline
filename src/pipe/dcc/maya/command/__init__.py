@@ -8,6 +8,7 @@ from types import FunctionType
 from typing import Any
 
 from maya import cmds
+
 from pipe.core.util.paths import get_function_source_code_url
 
 decorated_commands: set[CommandDescription] = set()
@@ -282,7 +283,6 @@ def register_command_from_description(
         label=command.label,
         commandLanguage="python",
         command=command_string,  # type: ignore
-        plugin="plugin",
         default=default,
         **runtime_command_optional_args,
     )
