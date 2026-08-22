@@ -58,7 +58,7 @@ def reload_pipeline(extra_modules: Sequence[ModuleType] | None = None) -> None:
     pipeline_modules = [
         module
         for name, module in sys.modules.items()
-        if (name.startswith(("core", "dcc")))
+        if (name.startswith(("pipe")))
         and ("shotgun_api3" not in name)
         or (name == "env")
     ] + extra_modules

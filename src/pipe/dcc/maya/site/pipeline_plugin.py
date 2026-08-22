@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import logging
 
+from maya import cmds
+from maya.api.OpenMaya import MFnPlugin, MObject
 from pipe.dcc.maya.command import (
     add_named_command,
     get_decorated_commands,
     register_command_from_description,
 )
-from maya import cmds
-from maya.api.OpenMaya import MObject
+from pipe.dcc.maya.util.selection import CTX_CMD_NAME, IslandFaceSelectContextCommand
 
 log = logging.getLogger("pipe.dcc.maya.pipeline_plugin")
 
@@ -23,6 +24,10 @@ maya_useNewAPI = True  # Tell Maya to use the Python API 2.0
 
 # --- Standard Maya plug-in entry points ---
 def initializePlugin(plugin: MObject) -> None:
+    plugin_fn = MFnPlugin(plugin)
+    plugin_fn.registerContextCommand(
+        CTX_CMD_NAME, IslandFaceSelectContextCommand.creator
+    )
     if not cmds.hotkeySet(HOTKEY_SET_NAME, query=True, exists=True):
         cmds.hotkeySet(HOTKEY_SET_NAME, current=True)
     else:
@@ -40,4 +45,6 @@ def initializePlugin(plugin: MObject) -> None:
 
 
 def uninitializePlugin(plugin: MObject) -> None:
+    plugin_fn = MFnPlugin(plugin)
+    plugin_fn.deregisterContextCommand(CTX_CMD_NAME)
     log.info(f"{PLUGIN_DISPLAY_NAME} un-initialized")

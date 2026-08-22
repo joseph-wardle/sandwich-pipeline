@@ -352,5 +352,39 @@ global proc shelf_SKD_Assets () {
         -commandRepeatable 1
         -flat 1
     ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "Island Select"
+        -enableBackground 0
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Island Select"
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -font "plainLabelFont"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "island_select.svg"
+        -image1 "island_select.svg"
+        -style "iconOnly"
+        -marginWidth 0
+        -marginHeight 1
+        -command "from pipe.dcc.maya.util.selection import activate_island_face_select_tool\nactivate_island_face_select_tool()"
+        -sourceType "python"
+        -commandRepeatable 1
+        -flat 1
+    ;
 
 }
