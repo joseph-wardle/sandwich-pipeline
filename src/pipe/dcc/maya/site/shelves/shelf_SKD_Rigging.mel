@@ -14,27 +14,27 @@ global proc shelf_SKD_Rigging () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Rig Build, Test, and Publish" 
+        -annotation "Rig Build, Test, and Publish"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "The Rig-Build-inator" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "The Rig-Build-inator"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -overlayLabelColor 2.624876 0.801436 0.012446 
-        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5 
-        -image "rig_builder.svg" 
-        -image1 "rig_builder.svg" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "rig_builder.svg"
+        -image1 "rig_builder.svg"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import pipe.dcc.maya.rig.builder\npipe.dcc.maya.rig.builder.ui.launch()" 
-        -sourceType "python" 
+        -command "import pipe.dcc.maya.rig.builder\npipe.dcc.maya.rig.builder.ui.launch()"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -48,27 +48,27 @@ global proc shelf_SKD_Rigging () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Reload yrig and the rig components" 
+        -annotation "Reload yrig and the rig components"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Reload y-rig" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Reload y-rig"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -overlayLabelColor 0.8 0.8 0.8 
-        -overlayLabelBackColor 0 0 0 0.5 
-        -image "y-rig_reload.svg" 
-        -image1 "y-rig_reload.svg" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "y-rig_reload.svg"
+        -image1 "y-rig_reload.svg"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "from yrig.dev import reload\nreload()\nimport yrig" 
-        -sourceType "python" 
+        -command "from yrig.dev import reload\nreload()\nimport yrig"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -82,27 +82,27 @@ global proc shelf_SKD_Rigging () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "NgSkinTools2" 
+        -annotation "NgSkinTools2"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "NgSkinTools2" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "NgSkinTools2"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -overlayLabelColor 0.8 0.8 0.8 
-        -overlayLabelBackColor 0 0 0 0.5 
-        -image "ngSkinTools2ShelfIcon.png" 
-        -image1 "ngSkinTools2ShelfIcon.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "ngSkinTools2ShelfIcon.png"
+        -image1 "ngSkinTools2ShelfIcon.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import ngSkinTools2; ngSkinTools2.open_ui()" 
-        -sourceType "python" 
+        -command "import ngSkinTools2; ngSkinTools2.open_ui()"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -116,27 +116,27 @@ global proc shelf_SKD_Rigging () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Split weights of selected (y-rig)" 
+        -annotation "Split weights of selected (y-rig)"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Split Weights" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Split Weights"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -overlayLabelColor 0.8 0.8 0.8 
-        -overlayLabelBackColor 0 0 0 0.5 
-        -image "wire.png" 
-        -image1 "wire.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "wire.png"
+        -image1 "wire.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import yrig.skin.split.operations\nselection = cmds.ls(selection=True)\nyrig.skin.split.operations.auto_split_weights(selection)" 
-        -sourceType "python" 
+        -command "import yrig.skin.split.operations\nselection = cmds.ls(selection=True)\nyrig.skin.split.operations.auto_split_weights(selection)"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
@@ -150,29 +150,63 @@ global proc shelf_SKD_Rigging () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "User Export Selected Skin Weights" 
+        -annotation "User Export Selected Skin Weights"
         -enableBackground 0
-        -backgroundColor 0 0 0 
-        -highlightColor 0.321569 0.521569 0.65098 
-        -align "center" 
-        -label "Export Selected Skin Weights" 
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Export Selected Skin Weights"
         -labelOffset 0
         -rotation 0
         -flipX 0
         -flipY 0
         -useAlpha 1
-        -font "plainLabelFont" 
-        -overlayLabelColor 0.8 0.8 0.8 
-        -overlayLabelBackColor 0 0 0 0.5 
-        -image "UVTkDuplicateSet.png" 
-        -image1 "UVTkDuplicateSet.png" 
-        -style "iconOnly" 
+        -font "plainLabelFont"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "UVTkDuplicateSet.png"
+        -image1 "UVTkDuplicateSet.png"
+        -style "iconOnly"
         -marginWidth 0
         -marginHeight 1
-        -command "import yrig.skin\n\nyrig.skin.batch_export_skin_weights(selected_only=True)" 
-        -sourceType "python" 
+        -command "import yrig.skin\n\nyrig.skin.batch_export_skin_weights(selected_only=True)"
+        -sourceType "python"
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "Island Select"
+        -enableBackground 0
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Island Select"
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -font "plainLabelFont"
+        -overlayLabelColor 0.8 0.8 0.8
+        -overlayLabelBackColor 0 0 0 0.5
+        -image "island_select.svg"
+        -image1 "island_select.svg"
+        -style "iconOnly"
+        -marginWidth 0
+        -marginHeight 1
+        -command "from pipe.dcc.maya.util.selection import activate_island_face_select_tool\nactivate_island_face_select_tool()"
+        -sourceType "python"
         -commandRepeatable 1
         -flat 1
     ;
 
-} 
+}
