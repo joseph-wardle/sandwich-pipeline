@@ -24,10 +24,11 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
+from pipe.core.playblast import PreviewClip
 from pipe.core.playblast.viewer import open_viewer
 from pipe.core.previs import codes, mutate_manifest
 from pipe.core.shotgrid import ShotGrid, ShotGridError, is_previs_shot_code
-from pipe.core.ui import MessageDialog
+from pipe.core.ui import MessageDialog, progress_scope
 from pipe.core.util.paths import get_previs_path
 
 from pipe.dcc.maya.command import undo_chunk
@@ -673,7 +674,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         """Render one shot's primary to a preview and open it in the viewer."""
         shot = self._state.find_shot(shot_id)
         if shot is not None:
-            self._launch_playblasts([shot])
+            self._launch_playblasts([shot], ask=False)
 
     def break_out_shot(self, shot_id: str) -> None:
         """Deliver one previs shot to its RLO scene, then come back to previs."""
@@ -742,9 +743,9 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         return rlo.plan_delivery(shot, conn.get_shot(code=sequence_code), conn)
 
     def playblast_all_shots(self) -> None:
-        self._launch_playblasts(self._state.shots)
+        self._launch_playblasts(self._state.shots, ask=True)
 
-    def _launch_playblasts(self, shots: list[PrevisShot]) -> None:
+    def _launch_playblasts(self, shots: list[PrevisShot], *, ask: bool) -> None:
         """Render `shots` and hand the clips to the viewer."""
         if not self._guard_previs_file():
             return
@@ -756,26 +757,99 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
                 self, "No shots in this file to playblast.", _PLAYBLAST_TITLE
             ).exec_()
             return
+        if ask:
+            shots = self._pick_shots(shots)
+            if not shots:
+                return
 
-        try:
-            batch = playblast.build_shot_playblasts(
-                shots, sequence_code, previs_root=get_previs_path()
-            )
-        except Exception as exc:
-            log.exception("Previs playblast render failed")
-            MessageDialog(self, str(exc), _PLAYBLAST_TITLE).exec_()
+        batch = self._render_shots(shots, sequence_code)
+        if batch is None:
             return
-
         if batch.failed:
             MessageDialog(
                 self, _summarize_skipped(batch.failed), _PLAYBLAST_TITLE
             ).exec_()
         if not batch.clips:
-            if not batch.failed:
+            if not (batch.failed or batch.cancelled):
                 MessageDialog(self, "Nothing was rendered.", _PLAYBLAST_TITLE).exec_()
             return
 
-        open_viewer(batch.clips, parent=get_main_qt_window())
+        cut, cut_unavailable = self._stage_cut(batch.clips, sequence_code)
+        open_viewer(
+            batch.clips,
+            parent=get_main_qt_window(),
+            cut=cut,
+            cut_unavailable=cut_unavailable,
+        )
+
+    def _pick_shots(self, shots: list[PrevisShot]) -> list[PrevisShot]:
+        """The artist's checklist pick, in cut order; empty when they cancel."""
+        rows = [
+            dialogs.PlayblastRow(
+                shot_id=shot.id,
+                label=shot.code or "no code",
+                detail=(
+                    f"{shot.source_in}–{shot.source_out}  ·  "
+                    f"{shot.primary_duration}f"
+                ),
+                blocker=playblast.render_blocker(shot),
+            )
+            for shot in shots
+        ]
+        chosen = dialogs.pick_shots_to_playblast(self, rows)
+        if chosen is None:
+            return []
+        picked = set(chosen)
+        return [shot for shot in shots if shot.id in picked]
+
+    def _render_shots(
+        self, shots: list[PrevisShot], sequence_code: str
+    ) -> playblast.ShotPlayblastBatch | None:
+        """Render the batch behind a progress dialog, or None if it broke outright."""
+        step = "Rendering shots"
+        try:
+            with progress_scope(
+                parent=self,
+                title=_PLAYBLAST_TITLE,
+                steps=[step],
+                cancellable=True,
+            ) as progress:
+                progress.begin_step(step)
+
+                def on_shot(index: int, label: str) -> bool:
+                    progress.update_substep(index, len(shots), f"Rendering {label}")
+                    return not progress.cancelled
+
+                return playblast.build_shot_playblasts(
+                    shots,
+                    sequence_code,
+                    previs_root=get_previs_path(),
+                    on_shot=on_shot,
+                )
+        except Exception as exc:
+            log.exception("Previs playblast render failed")
+            MessageDialog(self, str(exc), _PLAYBLAST_TITLE).exec_()
+            return None
+
+    def _stage_cut(
+        self, clips: list[PreviewClip], sequence_code: str
+    ) -> tuple[PreviewClip | None, str]:
+        """The whole-file cut offered beside the clips, or why there is none."""
+        if len(clips) < 2:
+            return None, ""
+        try:
+            cut = playblast.build_cut(
+                clips,
+                filename=self._current_filename(),
+                sequence_code=sequence_code,
+                previs_root=get_previs_path(),
+            )
+        except playblast.PrevisPlayblastError as exc:
+            return None, str(exc)
+        except Exception as exc:
+            log.exception("Previs cut staging failed")
+            return None, f"The cut could not be staged. {exc}"
+        return cut, ""
 
     # ---------- helpers ----------
 

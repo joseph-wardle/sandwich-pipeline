@@ -45,6 +45,7 @@ from pipe.core.playblast.clip import PreviewClip
 from pipe.core.playblast.playblaster import DEFAULT_RESOLUTION
 from pipe.core.playblast.viewer import filmstrip, icons, style
 from pipe.core.playblast.viewer.confirm_panel import ConfirmPanel, PanelStatus
+from pipe.core.playblast.viewer.cut_panel import CutSection
 from pipe.core.playblast.viewer.playlists import ReviewPlaylists
 from pipe.core.playblast.viewer.scrub import TimelineSlider
 
@@ -94,9 +95,19 @@ class ViewerWindow(QMainWindow):
     _playlists: ReviewPlaylists
     _panels: list[ConfirmPanel]
     _panel_stack: QStackedWidget
+    _cut: PreviewClip | None
+    _cut_unavailable: str
+    _cut_section: CutSection
     _confirm_remaining_button: QPushButton
 
-    def __init__(self, clips: list[PreviewClip], parent: QWidget | None) -> None:
+    def __init__(
+        self,
+        clips: list[PreviewClip],
+        parent: QWidget | None,
+        *,
+        cut: PreviewClip | None = None,
+        cut_unavailable: str = "",
+    ) -> None:
         # The parent (the DCC main window) owns the viewer's lifetime; a
         # QMainWindow always carries Qt.Window, so it stays a real window
         # rather than embedding. DeleteOnClose frees it — nobody keeps a
@@ -129,6 +140,10 @@ class ViewerWindow(QMainWindow):
         self._confirm_pool = QThreadPool(self)
         self._confirm_pool.setMaxThreadCount(1)
         self._playlists = ReviewPlaylists(self)
+        # A cut of one clip is that clip, so the section only earns its space
+        # once the window holds a batch.
+        self._cut = cut if len(clips) > 1 else None
+        self._cut_unavailable = cut_unavailable if len(clips) > 1 else ""
 
         self._build_ui()
         self._size_to_video()
@@ -204,7 +219,7 @@ class ViewerWindow(QMainWindow):
         layout.addLayout(player_column, stretch=1)
 
         self._build_confirm_panels()
-        layout.addWidget(self._panel_stack)
+        layout.addWidget(self._build_confirm_column())
 
         # Confirm is a shortcut rather than a keyPressEvent branch: a focused
         # QLineEdit ignores Return, so the window would confirm *and* the field
@@ -213,10 +228,29 @@ class ViewerWindow(QMainWindow):
         for sequence in ("Ctrl+Return", "Ctrl+Enter"):
             QShortcut(QKeySequence(sequence), self, self._confirm_current)
 
+    def _build_confirm_column(self) -> QWidget:
+        """Per-clip Confirm above, the whole batch as one cut below it."""
+        self._cut_section = CutSection(
+            self._cut,
+            self._confirm_pool,
+            self._playlists,
+            clip_count=len(self._clips),
+            unavailable=self._cut_unavailable,
+        )
+        column = QVBoxLayout()
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(style.PAD_M)
+        column.addWidget(self._panel_stack, stretch=1)
+        column.addWidget(self._cut_section)
+        widget = QWidget()
+        widget.setLayout(column)
+        widget.setFixedWidth(_CONFIRM_PANEL_WIDTH)
+        widget.setVisible(self._has_confirmables() or self._cut_section.isVisible())
+        return widget
+
     def _build_confirm_panels(self) -> None:
         self._panels = []
         self._panel_stack = QStackedWidget()
-        self._panel_stack.setFixedWidth(_CONFIRM_PANEL_WIDTH)
         for index, clip in enumerate(self._clips):
             panel = ConfirmPanel(clip, self._confirm_pool, self._playlists)
             panel.state_changed.connect(self._refresh_sidebar)
@@ -331,7 +365,7 @@ class ViewerWindow(QMainWindow):
         width, height = self._resolution
         if len(self._clips) > 1:
             width += _SIDEBAR_WIDTH
-        if self._has_confirmables():
+        if self._has_confirmables() or self._cut_section.isVisible():
             width += _CONFIRM_PANEL_WIDTH
         height += _TRANSPORT_HEIGHT
         screen = self.screen().availableGeometry()
@@ -460,6 +494,10 @@ class ViewerWindow(QMainWindow):
     def _has_confirmables(self) -> bool:
         return any(panel.is_confirmable for panel in self._panels)
 
+    def _all_panels(self) -> list[ConfirmPanel]:
+        """Every panel that can be mid-delivery"""
+        return [*self._panels, *self._cut_section.panels()]
+
     def _on_clip_delivered(self, index: int) -> None:
         if index == self._current_index:
             self._advance_to_next_unconfirmed()
@@ -554,7 +592,7 @@ class ViewerWindow(QMainWindow):
         # A running delivery is already writing files and pipeline records;
         # closing mid-flight would abandon it half-done, so it can't be
         # discarded — only waited out.
-        if any(panel.status is PanelStatus.RUNNING for panel in self._panels):
+        if any(panel.status is PanelStatus.RUNNING for panel in self._all_panels()):
             QMessageBox.information(
                 self,
                 "Playblast Viewer",

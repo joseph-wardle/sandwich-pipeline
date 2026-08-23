@@ -38,10 +38,11 @@ class ProgressDialog(QDialog):
     and a determinate/indeterminate progress bar.
 
     The dialog blocks user close attempts while active. Call ``finish`` to
-    allow dismissal.
-    """
+    allow dismissal."""
 
     _allow_close: bool
+    _cancelled: bool
+    _cancel_button: QtWidgets.QPushButton | None
     _detail_label: QLabel
     _progress_bar: QProgressBar
     _stage_label: QLabel
@@ -54,9 +55,12 @@ class ProgressDialog(QDialog):
         *,
         title: str,
         total_steps: int,
+        cancellable: bool = False,
     ) -> None:
         super().__init__(parent)
         self._allow_close = False
+        self._cancelled = False
+        self._cancel_button = None
         self._total_steps = total_steps
 
         self.setWindowTitle(title)
@@ -89,8 +93,29 @@ class ProgressDialog(QDialog):
         self._progress_bar.setRange(0, 0)
         layout.addWidget(self._progress_bar)
 
+        if cancellable:
+            self._cancel_button = QtWidgets.QPushButton("Cancel")
+            self._cancel_button.clicked.connect(self._request_cancel)
+            buttons = QtWidgets.QHBoxLayout()
+            buttons.addStretch(1)
+            buttons.addWidget(self._cancel_button)
+            layout.addLayout(buttons)
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    def _request_cancel(self) -> None:
+        """Record the request and say so; the operation stops at its next check."""
+        if self._cancelled or self._cancel_button is None:
+            return
+        self._cancelled = True
+        self._cancel_button.setEnabled(False)
+        self._cancel_button.setText("Cancelling...")
+
     def event(self, event: QtCore.QEvent) -> bool:
         if not self._allow_close and event.type() == QtCore.QEvent.Close:
+            self._request_cancel()
             event.ignore()
             return True
         return super().event(event)
@@ -98,6 +123,8 @@ class ProgressDialog(QDialog):
     def reject(self) -> None:
         if self._allow_close:
             super().reject()
+            return
+        self._request_cancel()
 
     def set_progress(
         self,
@@ -181,6 +208,10 @@ class ProgressScope:
             detail=detail,
         )
 
+    @property
+    def cancelled(self) -> bool:
+        return self._dialog.cancelled
+
     def update_substep(self, current: int, total: int, detail: str = "") -> None:
         """Show determinate sub-progress within the current step."""
         if self._current_step == 0:
@@ -196,6 +227,10 @@ class ProgressScope:
 
 class _NoOpProgressScope:
     """Stub scope for headless environments where no QApplication exists."""
+
+    @property
+    def cancelled(self) -> bool:
+        return False
 
     def begin_step(self, step_name: str, detail: str = "") -> None:
         pass
@@ -213,6 +248,7 @@ def progress_scope(
     parent: QtWidgets.QWidget | None,
     title: str,
     steps: Sequence[str],
+    cancellable: bool = False,
 ) -> Iterator[ProgressScope | _NoOpProgressScope]:
     """Show a progress dialog for the duration of a synchronous operation.
 
@@ -224,7 +260,9 @@ def progress_scope(
         yield _NoOpProgressScope()
         return
 
-    dialog = ProgressDialog(parent, title=title, total_steps=len(steps))
+    dialog = ProgressDialog(
+        parent, title=title, total_steps=len(steps), cancellable=cancellable
+    )
     scope = ProgressScope(dialog, steps)
     try:
         yield scope

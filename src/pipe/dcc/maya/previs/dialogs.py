@@ -7,12 +7,19 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from Qt.QtGui import QCursor
+from Qt.QtCore import Qt
 from Qt.QtWidgets import (
     QDialog,
+    QDialogButtonBox,
     QFormLayout,
+    QHBoxLayout,
     QInputDialog,
+    QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMenu,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -284,3 +291,87 @@ def _sets_note(plan: DeliveryPlan) -> str:
 
 def _set_list(codes: tuple[str, ...]) -> str:
     return ", ".join(codes) if codes else "no set"
+
+
+@dataclass(frozen=True)
+class PlayblastRow:
+    """One line of the playblast checklist."""
+
+    shot_id: str
+    label: str
+    detail: str
+    blocker: str | None
+
+
+class _PlayblastChecklist(QDialog, DialogButtons):
+    """Pick which shots to render. Everything renderable starts checked —
+    unlike break-out, a playblast writes nothing until the viewer confirms it."""
+
+    def __init__(self, parent: QWidget | None, rows: Sequence[PlayblastRow]) -> None:
+        super().__init__(parent)
+        self._init_buttons(True, "Playblast", "Cancel")
+        self.setWindowTitle("Playblast Shots")
+        self.setMinimumWidth(420)
+
+        self._list = QListWidget()
+        for row in rows:
+            self._list.addItem(_playblast_item(row))
+        self._list.itemChanged.connect(self._refresh_ok)
+
+        all_button = QPushButton("All")
+        all_button.clicked.connect(lambda: self._set_all(True))
+        none_button = QPushButton("None")
+        none_button.clicked.connect(lambda: self._set_all(False))
+        select = QHBoxLayout()
+        select.addWidget(all_button)
+        select.addWidget(none_button)
+        select.addStretch(1)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Shots to render, in cut order:"))
+        layout.addWidget(self._list)
+        layout.addLayout(select)
+        layout.addWidget(self.buttons)
+        self._refresh_ok()
+
+    def chosen_ids(self) -> list[str]:
+        return [
+            item.data(Qt.ItemDataRole.UserRole)
+            for item in self._items()
+            if item.checkState() == Qt.CheckState.Checked
+        ]
+
+    def _items(self) -> list[QListWidgetItem]:
+        return [self._list.item(row) for row in range(self._list.count())]
+
+    def _set_all(self, checked: bool) -> None:
+        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+        for item in self._items():
+            if item.flags() & Qt.ItemFlag.ItemIsEnabled:
+                item.setCheckState(state)
+
+    def _refresh_ok(self) -> None:
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(bool(self.chosen_ids()))
+
+
+def _playblast_item(row: PlayblastRow) -> QListWidgetItem:
+    text = f"{row.label}  ·  {row.detail}"
+    item = QListWidgetItem(text if row.blocker is None else f"{text}  —  {row.blocker}")
+    item.setData(Qt.ItemDataRole.UserRole, row.shot_id)
+    if row.blocker is None:
+        item.setCheckState(Qt.CheckState.Checked)
+        return item
+    item.setCheckState(Qt.CheckState.Unchecked)
+    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+    item.setToolTip(row.blocker)
+    return item
+
+
+def pick_shots_to_playblast(
+    parent: QWidget | None, rows: Sequence[PlayblastRow]
+) -> list[str] | None:
+    """The shot ids to render, or None on cancel."""
+    dialog = _PlayblastChecklist(parent, rows)
+    if not dialog.exec_():
+        return None
+    return dialog.chosen_ids()

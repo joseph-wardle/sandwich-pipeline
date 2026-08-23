@@ -4,6 +4,7 @@ to the sequence's playblasts folder."""
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from pipe.core.playblast import (
     ShotEntity,
     ShotGridDestination,
 )
+from pipe.core.playblast.cut import CutStagingError, stage_cut
 from pipe.core.playblast.confirm import (
     ChosenDisk,
     ChosenShotGrid,
@@ -29,13 +31,17 @@ from pipe.core.previs import codes, playblasts_dir
 
 from pipe.dcc.maya.playblast.previs.take import MTakeConfig, MTakePlayblaster
 
-from .state import PrevisShot
+from . import cameras
+from .state import FRAME_START, PrevisShot
 
 log = logging.getLogger(__name__)
 
 # Both strings are persisted: the settings key names the viewer's remembered
 # toggles, and the destination name is what gets remembered under it.
 PLAYBLAST_SETTINGS_KEY = "maya_previs_shot"
+# The cut's toggles are remembered apart from the per-shot ones: it is delivered
+# far less often, and its ShotGrid row starts off.
+CUT_SETTINGS_KEY = "maya_previs_cut"
 PLAYBLASTS_DESTINATION_NAME = "Previs Playblasts"
 
 
@@ -52,6 +58,25 @@ class ShotPlayblastBatch:
 
     clips: list[PreviewClip]
     failed: list[tuple[str, str]]
+    cancelled: bool = False
+
+
+def render_blocker(shot: PrevisShot) -> str | None:
+    """Why `shot` cannot be playblasted, or None if it can."""
+    if not shot.code.strip():
+        return "no shot code yet"
+    try:
+        codes.normalize_code(shot.code)
+    except ValueError as exc:
+        return str(exc)
+    if not shot.primary:
+        return "no primary camera"
+    # The shape, not the namespace: capture resolves a camera shape under it, so
+    # a namespace left behind by a deleted camera would pass a liveness check and
+    # still fail at render.
+    if cameras.camera_shape_for_namespace(shot.primary) is None:
+        return f"camera {shot.primary} is missing from the scene"
+    return None
 
 
 def build_shot_playblasts(
@@ -59,6 +84,7 @@ def build_shot_playblasts(
     sequence_code: str,
     *,
     previs_root: Path,
+    on_shot: Callable[[int, str], bool] | None = None,
 ) -> ShotPlayblastBatch:
     """Render every shot in `shots`, reporting per-shot failures instead of
     aborting the batch."""
@@ -66,8 +92,10 @@ def build_shot_playblasts(
     destination = _playblasts_folder(sequence_code, previs_root=previs_root)
     clips: list[PreviewClip] = []
     failed: list[tuple[str, str]] = []
-    for shot in shots:
+    for index, shot in enumerate(shots):
         label = shot.code or shot.id
+        if on_shot is not None and not on_shot(index, label):
+            return ShotPlayblastBatch(clips=clips, failed=failed, cancelled=True)
         try:
             clips.append(_render_shot_playblast(shot, playblaster, destination))
         except PrevisPlayblastError as exc:
@@ -76,6 +104,38 @@ def build_shot_playblasts(
             log.exception("Previs playblast failed for shot %s.", label)
             failed.append((label, str(exc) or exc.__class__.__name__))
     return ShotPlayblastBatch(clips=clips, failed=failed)
+
+
+def build_cut(
+    clips: list[PreviewClip],
+    *,
+    filename: str | None,
+    sequence_code: str,
+    previs_root: Path,
+) -> PreviewClip:
+    """The batch as one clip, named after the previs file that produced it."""
+    if filename is None:
+        raise PrevisPlayblastError(
+            "Save this previs file to deliver the whole cut — the cut movie is "
+            "named after the file it came from."
+        )
+    prefix = Path(filename).stem
+    try:
+        return stage_cut(
+            clips,
+            label=prefix,
+            output_prefix=prefix,
+            settings_key=CUT_SETTINGS_KEY,
+            destinations=(
+                _playblasts_folder(sequence_code, previs_root=previs_root),
+                # The sequence proxy is the one Shot a whole-file cut belongs
+                # on; the shots in it have their own Versions.
+                ShotGridDestination(entity=ShotEntity(sequence_code), default_on=False),
+            ),
+            frame_start=FRAME_START,
+        )
+    except CutStagingError as exc:
+        raise PrevisPlayblastError(str(exc)) from exc
 
 
 def deliver_break_out_version(
@@ -116,9 +176,12 @@ def _render_shot_playblast(
     linked: bool = False,
 ) -> PreviewClip:
     """Render `previs_shot`'s primary take over its authored source range."""
-    code = _require_code(previs_shot)
-    if not previs_shot.primary:
-        raise PrevisPlayblastError(f"Shot {code} has no primary camera to render from.")
+    blocker = render_blocker(previs_shot)
+    if blocker is not None:
+        raise PrevisPlayblastError(
+            f"{previs_shot.code or 'This shot'} was not rendered: {blocker}."
+        )
+    code = codes.normalize_code(previs_shot.code)
 
     # `MTakeConfig` names its range cut_in/cut_out, but a playblast samples scene
     # frames — so it gets the shot's source range.
@@ -149,24 +212,14 @@ def _destinations_for(
     return (folder, ShotGridDestination(entity=entity, default_on=linked))
 
 
-def _require_code(previs_shot: PrevisShot) -> str:
-    """The shot's canonical sticky code, or a PrevisPlayblastError an artist can fix."""
-    if not previs_shot.code.strip():
-        raise PrevisPlayblastError(
-            "This shot has no sequence code yet. Give it a code (e.g. A_010) before "
-            "playblasting it."
-        )
-    try:
-        return codes.normalize_code(previs_shot.code)
-    except ValueError as exc:
-        raise PrevisPlayblastError(str(exc)) from exc
-
-
 __all__ = [
+    "CUT_SETTINGS_KEY",
     "PLAYBLASTS_DESTINATION_NAME",
     "PLAYBLAST_SETTINGS_KEY",
     "PrevisPlayblastError",
     "ShotPlayblastBatch",
+    "build_cut",
     "build_shot_playblasts",
     "deliver_break_out_version",
+    "render_blocker",
 ]
