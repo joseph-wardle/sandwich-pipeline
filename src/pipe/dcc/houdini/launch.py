@@ -122,8 +122,7 @@ class HoudiniLauncher(Launcher):
                     os.environ.get("RMANTREE", "") + "/bin",
                 ]
             ),
-            # Force Qt5 bindings in Houdini to avoid Qt6/PySide6 conflicts
-            "QT_PREFERRED_BINDING": "PySide2",
+            "QT_PREFERRED_BINDING": None,
             # Explicitly set Tractor location
             "TRACTOR_ENGINE": "tractor-engine.cs.byu.edu:443",
         }
