@@ -534,15 +534,12 @@ class PaddedSpinBox(QtWidgets.QSpinBox):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super(PaddedSpinBox, self).__init__(parent)
 
-    # Custom format of the actual value returned from the text
+    # Custom format of the actual value returned from the text.
+    # Matched with `re`, not QRegExp: Qt.py maps QRegExp onto Qt6's
+    # QRegularExpression, which has neither exactMatch() nor cap().
     def valueFromText(self, text: str) -> int:
-        regExp = QtCore.QRegExp(("(\\d+)(\\s*[xx]\\s*\\d+)?"))
-
-        if regExp.exactMatch(text):
-            cap_value = cast(Any, regExp.cap(1))
-            return cast(int, cap_value.toInt())
-        else:
-            return 0
+        match = re.fullmatch(r"(\d+)(\s*[xX]\s*\d+)?", text)
+        return int(match.group(1)) if match else 0
 
     # Custom format of the text displayed from the value
     def textFromValue(self, val: int) -> str:
