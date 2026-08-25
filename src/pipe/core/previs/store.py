@@ -14,12 +14,16 @@ from typing import Callable
 
 from ..util.atomic_json import json_write_lock, write_json_atomic
 from ..util.paths import get_previs_path
-from .model import SequenceManifest
+from .model import SCHEMA_VERSION, SequenceManifest
 
 log = logging.getLogger(__name__)
 
 MANIFEST_FILENAME = "manifest.json"
 PLAYBLASTS_DIRNAME = "playblasts"
+
+
+class ManifestWriteRefused(Exception):
+    """The manifest on disk holds more than this version can write back."""
 
 
 def manifest_path(sequence_code: str, *, previs_root: Path | None = None) -> Path:
@@ -72,13 +76,37 @@ def mutate_manifest(
     path = manifest_path(sequence_code, previs_root=previs_root)
     with json_write_lock(path):
         manifest = load_manifest(sequence_code, previs_root=previs_root)
+        _refuse_lossy_write(manifest, path)
         mutate(manifest)
         write_json_atomic(path, manifest.to_dict())
     return manifest
 
 
+def _refuse_lossy_write(manifest: SequenceManifest, path: Path) -> None:
+    """Stop before a rewrite that would erase what the read could not parse."""
+    if manifest.schema_version > SCHEMA_VERSION:
+        raise ManifestWriteRefused(
+            f"{path.name} was written by a newer version of the pipeline "
+            f"(format {manifest.schema_version}, this build reads {SCHEMA_VERSION}). "
+            "Update your tools before editing this sequence."
+        )
+    if manifest.lost_entries:
+        log.error(
+            "Refusing to rewrite %s: %d unreadable entry/entries would be lost (%s).",
+            path,
+            len(manifest.lost_entries),
+            ", ".join(manifest.lost_entries),
+        )
+        raise ManifestWriteRefused(
+            f"{path.name} has {len(manifest.lost_entries)} damaged entry/entries. "
+            "Saving would delete them, so nothing was written. Ask a TD to repair "
+            "the manifest."
+        )
+
+
 __all__ = [
     "MANIFEST_FILENAME",
+    "ManifestWriteRefused",
     "PLAYBLASTS_DIRNAME",
     "manifest_path",
     "playblasts_dir",

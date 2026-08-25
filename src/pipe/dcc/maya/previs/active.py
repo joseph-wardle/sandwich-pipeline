@@ -51,9 +51,14 @@ def remove_camera_callback() -> None:
     _SCRIPT_JOB_ID = None
 
 
-def sync_monitor() -> None:
-    """Point the monitor at the active shot's primary camera."""
-    state = read_state()
+def sync_monitor(state: PrevisState | None = None) -> None:
+    """Point the monitor at the active shot's primary camera.
+
+    Reads the scene when no state is given, so the `timeChanged` job can call
+    this with no panel open; the panel passes the copy it already holds.
+    """
+    if state is None:
+        state = read_state()
     if state is None or not state.shots:
         return
     shot = active_shot(state, int(mc.currentTime(query=True)))

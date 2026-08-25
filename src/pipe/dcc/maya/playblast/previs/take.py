@@ -1,5 +1,5 @@
-"""`MTakePlayblaster` renders one previs shot's primary take into a HUD-burned
-preview clip for the viewer."""
+"""`MTakePlayblaster` renders one previs shot's primary take into a preview clip
+for the viewer."""
 
 from __future__ import annotations
 
@@ -18,12 +18,16 @@ from pipe.dcc.maya.util.time import scene_frame_rate
 @dataclass
 class MTakeConfig:
     """Inputs for one take playblast; `code` labels the temp frames and the
-    virtual shot handed to the `Playblaster` base."""
+    virtual shot handed to the `Playblaster` base.
+
+    The range is the shot's *source* range — a capture samples scene frames, so
+    the PNGs are numbered in scene time, not cut time.
+    """
 
     camera: str
     code: str
-    cut_in: int
-    cut_out: int
+    source_in: int
+    source_out: int
 
 
 class MTakePlayblaster(Playblaster):
@@ -39,18 +43,22 @@ class MTakePlayblaster(Playblaster):
     def playblast(self) -> list[PreviewClip]:
         with maintain_selection():
             mc.select(clear=True)
+            # The base builds the clip's frame numbering from the shot's cut
+            # range, so the source range goes in there — the one place previs'
+            # scene time is spelled as a `Shot`'s cut.
+            source_in, source_out = self._config.source_in, self._config.source_out
             virtual_shot = dummy_shot(
                 code=self._config.code,
-                cut_in=self._config.cut_in,
-                cut_out=self._config.cut_out,
-                cut_duration=max(0, self._config.cut_out - self._config.cut_in + 1),
+                cut_in=source_in,
+                cut_out=source_out,
+                cut_duration=max(0, source_out - source_in + 1),
             )
             return [super()._do_playblast(virtual_shot, tails=(0, 0))]
 
     def _write_images(self, shot: Shot, path: str) -> None:  # type: ignore[override]
         del shot  # frame range comes from `_config`, not the virtual shot
         capture_cut(
-            path, self._config.camera, self._config.cut_in, self._config.cut_out
+            path, self._config.camera, self._config.source_in, self._config.source_out
         )
 
 

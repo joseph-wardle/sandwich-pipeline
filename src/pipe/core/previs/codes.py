@@ -51,32 +51,11 @@ def _require_parsed(code: str) -> tuple[str, int]:
     return parsed
 
 
-def is_taken(code: str, existing: Iterable[str]) -> bool:
-    return code in set(existing)
-
-
 def suggest_next(letter: str, existing: Iterable[str]) -> str:
     """Suggest the next free code for ``letter``: highest used number + STEP."""
     numbers = _numbers_for_letter(letter, existing)
     following = (max(numbers) + STEP) if numbers else STEP
     return format_code(letter, following)
-
-
-def suggest_midpoint(before: str, after: str) -> str | None:
-    """Suggest a code between two existing ones, or ``None`` if there is no gap.
-
-    Returns ``None`` when the codes differ in letter or have no integer strictly
-    between them (e.g. ``A_010``/``A_011``);
-    """
-    before_parsed = parse_code(before)
-    after_parsed = parse_code(after)
-    if before_parsed is None or after_parsed is None:
-        return None
-    letter, low = before_parsed
-    after_letter, high = after_parsed
-    if letter != after_letter or high - low < 2:
-        return None
-    return format_code(letter, (low + high) // 2)
 
 
 def _numbers_for_letter(letter: str, existing: Iterable[str]) -> list[int]:
@@ -96,7 +75,5 @@ __all__ = [
     "format_code",
     "normalize_code",
     "shot_letter",
-    "is_taken",
     "suggest_next",
-    "suggest_midpoint",
 ]

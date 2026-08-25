@@ -11,7 +11,6 @@ from __future__ import annotations
 PANEL_BG = "#2A2A2A"
 PANEL_BG_DEEP = "#1E1E1E"
 PANEL_BG_HEADER = "#303030"
-PANEL_BG_SOFT = "#353535"
 PANEL_TEXT = "#DAD5CB"
 PANEL_TEXT_DIM = "#8E867A"
 PANEL_BORDER = "#444444"
@@ -71,7 +70,6 @@ def zoom_step(
 
 # --- stylesheets ------------------------------------------------------------
 
-PANEL_ROOT = f"background: {PANEL_BG}; color: {PANEL_TEXT};"
 
 TOP_BAR = f"""
 QFrame#topBar {{

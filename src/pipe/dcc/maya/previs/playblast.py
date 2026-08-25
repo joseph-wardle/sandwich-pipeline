@@ -1,5 +1,5 @@
-"""Render previs shots for the viewer: one HUD-burned clip per shot, each routed
-to the sequence's playblasts folder."""
+"""Render previs shots for the viewer: one clip per shot, each routed to the
+sequence's playblasts folder."""
 
 from __future__ import annotations
 
@@ -183,13 +183,11 @@ def _render_shot_playblast(
         )
     code = codes.normalize_code(previs_shot.code)
 
-    # `MTakeConfig` names its range cut_in/cut_out, but a playblast samples scene
-    # frames — so it gets the shot's source range.
     config = MTakeConfig(
         camera=previs_shot.primary,
         code=code,
-        cut_in=previs_shot.source_in,
-        cut_out=previs_shot.source_out,
+        source_in=previs_shot.source_in,
+        source_out=previs_shot.source_out,
     )
     clips = playblaster.configure(config).playblast()
     if not clips:

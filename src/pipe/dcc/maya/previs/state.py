@@ -69,6 +69,29 @@ class PrevisShot:
     def find_take(self, namespace: str) -> ShotTake | None:
         return next((t for t in self.takes if t.namespace == namespace), None)
 
+    def add_take(self, namespace: str, duration: int | None = None) -> ShotTake:
+        """Take on `namespace`, adding it if the shot has none yet."""
+        existing = self.find_take(namespace)
+        if existing is not None:
+            return existing
+        take = (
+            ShotTake(namespace) if duration is None else ShotTake(namespace, duration)
+        )
+        self.takes.append(take)
+        return take
+
+    def retarget_take(self, namespace: str, new_namespace: str) -> None:
+        """Point this shot's take on `namespace` at `new_namespace` instead."""
+        take = self.find_take(namespace)
+        if take is None:
+            return
+        if self.find_take(new_namespace) is not None:
+            self.takes.remove(take)
+        else:
+            take.namespace = new_namespace
+        moved = new_namespace if self.primary == namespace else self.primary
+        self.primary = _resolve_primary(self.takes, moved)
+
     @property
     def primary_duration(self) -> int:
         take = self.primary_take
@@ -124,6 +147,10 @@ class PrevisState:
 
     def find_shot(self, shot_id: str) -> PrevisShot | None:
         return next((s for s in self.shots if s.id == shot_id), None)
+
+    def shots_using(self, namespace: str) -> list[PrevisShot]:
+        """Every shot with a take on `namespace`."""
+        return [s for s in self.shots if namespace in s.namespaces]
 
     def cut_starts(self) -> dict[str, int]:
         """Cut position per shot id."""

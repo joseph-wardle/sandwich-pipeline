@@ -26,8 +26,8 @@ from Qt.QtWidgets import (
 
 from pipe.core.playblast import PreviewClip
 from pipe.core.playblast.viewer import open_viewer
-from pipe.core.previs import codes, mutate_manifest
-from pipe.core.shotgrid import ShotGrid, ShotGridError, is_previs_shot_code
+from pipe.core.previs import ManifestWriteRefused, codes, mutate_manifest, naming
+from pipe.core.shotgrid import ShotGrid, ShotGridError
 from pipe.core.ui import MessageDialog, progress_scope
 from pipe.core.util.paths import get_previs_path
 
@@ -36,6 +36,7 @@ from pipe.dcc.maya.runtime import get_main_qt_window
 
 from . import (
     active,
+    camera_sequencer,
     cameras,
     dialogs,
     file_ops,
@@ -70,6 +71,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self.setStyleSheet(f"#{PANEL_OBJECT_NAME} {{ background: {style.PANEL_BG}; }}")
 
         self._state = state.read_state() or PrevisState()
+        self._synced: tuple[str | None, tuple[str, ...]] | None = None
 
         self._build_ui()
         self.refresh()
@@ -194,6 +196,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self._update_status_text()
         self._update_monitor_label()
         self._update_branch_button()
+        active.sync_monitor(self._state)
 
     def _update_branch_button(self) -> None:
         """Branch only makes sense on an open previs file."""
@@ -224,14 +227,34 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             return
         self._state = scene_state
         self.refresh()
-        # The undone edit may have handed the current frame to a different shot.
-        active.sync_monitor()
 
     def _adopt_scene(self) -> None:
         """A different file is on screen, so this panel's shots and selection are gone."""
         active.set_selected_shot(None)
+        self._synced = None  # a different file's membership is a different fact
         self._state = state.read_state() or PrevisState()
         self.refresh()
+        self._offer_sequencer_import()
+
+    def _offer_sequencer_import(self) -> None:
+        """Offer to read a legacy file's Camera Sequencer as this file's shot list."""
+        if self._state.shots:
+            return
+        sequence = self._sequence_code()
+        result = camera_sequencer.import_from_scene(
+            naming.sequence_letter(sequence) if sequence else ""
+        )
+        if result is None:
+            return
+        imported, report = result
+        if not dialogs.confirm_sequencer_import(self, report):
+            return
+        # One chunk, so a look at the result undoes back to the legacy sequencer
+        # rather than to a file with neither.
+        with undo_chunk("previsImportSequencer"):
+            camera_sequencer.strip_sequencer()
+            self._state = imported
+            self._persist()
 
     def _persist(self) -> None:
         state.write_state(self._state)
@@ -239,32 +262,33 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self.refresh()
 
     def _sync_manifest(self) -> None:
-        """Push this file's shot codes and membership into the sequence manifest.
-
-        Runs on every _persist, so the manifest tracks each edit without scene
-        callbacks. When the scene is not a saved previs file there is nothing to
-        map membership onto, so this logs why and returns.
-        """
+        """Push this file's shot codes and membership into the sequence manifest."""
         sequence_code = self._sequence_code()
-        if sequence_code is None:
-            log.debug("Manifest sync skipped: file has no previs sequence code.")
-            return
         filename = self._current_filename()
-        if filename is None:
-            log.debug("Manifest sync skipped: scene has not been saved to disk.")
+        if sequence_code is None or filename is None:
+            log.debug("Manifest sync skipped: no previs sequence, or scene unsaved.")
             return
 
         # Codes are already canonical (declare_code / suggest_next enforce it),
         # so a file's membership snapshot joins the manifest's `shots` list on
         # the same key.
-        file_codes = [s.code for s in self._state.shots if s.code]
+        file_codes = tuple(s.code for s in self._state.shots if s.code)
+        if self._synced == (filename, file_codes):
+            return
+        # Recorded before the write: a manifest this build cannot save is not
+        # going to become savable on the next drag, and retrying would put the
+        # same dialog in front of every edit.
+        self._synced = (filename, file_codes)
 
         def _apply(manifest: SequenceManifest) -> None:
             for code in file_codes:
                 manifest.ensure_shot(code)
-            manifest.set_membership(filename, file_codes)
+            manifest.set_membership(filename, list(file_codes))
 
-        mutate_manifest(sequence_code, _apply)
+        try:
+            mutate_manifest(sequence_code, _apply)
+        except ManifestWriteRefused as exc:
+            MessageDialog(self, str(exc), "Previs Manifest").exec_()
 
     def _current_filename(self) -> str | None:
         """Basename of the open scene on disk, or None if it was never saved."""
@@ -297,19 +321,14 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         return line
 
     def _sequence_code(self) -> str | None:
-        """Sequence-proxy code from `fileInfo` (e.g. `A_previs`), or None if absent/invalid."""
-        raw = mc.fileInfo("code", query=True)
-        code = raw[0] if isinstance(raw, (list, tuple)) and raw else raw
-        if not isinstance(code, str):
-            return None
-        return code if is_previs_shot_code(code) else None
+        return file_ops.sequence_code()
 
     def pick_monitor(self) -> None:
         monitor.pick_monitor(on_bound=self._on_monitor_bound)
 
     def _on_monitor_bound(self, panel: str) -> None:
         self._update_monitor_label()
-        active.sync_monitor()  # show the active shot's camera immediately
+        active.sync_monitor(self._state)  # show the active shot's camera now
 
     def _update_monitor_label(self) -> None:
         panel = monitor.get_monitor()
@@ -333,7 +352,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         active.set_selected_shot(shot_id)
         self._view.apply_selection(shot_id)
         self._view.sync_playhead()
-        active.sync_monitor()
+        active.sync_monitor(self._state)
 
     def jump_to_shot(self, shot_id: str) -> None:
         shot = self._state.find_shot(shot_id)
@@ -365,7 +384,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         if seq is None:
             return ""
         existing = [s.code for s in self._state.shots if s.code]
-        return codes.suggest_next(seq[0], existing)
+        return codes.suggest_next(naming.sequence_letter(seq), existing)
 
     def branch_file(self) -> None:
         """Checkpoint the open file as its next version, optionally on a new stream."""
@@ -398,15 +417,19 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         if shot is None:
             return
         live = [ns for ns in shot.namespaces if cameras.is_live(ns)]
+        # A camera another shot is still cut from outlives this one.
+        doomed = [ns for ns in live if len(self._state.shots_using(ns)) == 1]
+        kept = [ns for ns in live if ns not in doomed]
         if not dialogs.confirm_delete_shot(
             self,
             label=shot.code or "this shot",
-            namespaces=live,
-            undoable=not any(cameras.is_referenced(ns) for ns in live),
+            namespaces=doomed,
+            kept=kept,
+            undoable=not any(cameras.is_referenced(ns) for ns in doomed),
         ):
             return
         with undo_chunk("previsDeleteShot"):
-            for namespace in live:
+            for namespace in doomed:
                 cameras.delete_camera_rig(namespace)
             self._state.shots = [s for s in self._state.shots if s.id != shot_id]
             self._persist()
@@ -416,7 +439,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         if shot is None:
             return
         with undo_chunk("previsAddTake"):
-            shot.takes.append(ShotTake(cameras.add_new_rig_reference()))
+            shot.add_take(cameras.add_new_rig_reference())
             self._persist()
 
     def add_take_duplicate_primary(self, shot_id: str) -> None:
@@ -428,7 +451,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             new_ns = cameras.duplicate_primary(shot)
             if new_ns is not None:
                 # A copy of the primary's keys starts out the primary's length.
-                shot.takes.append(ShotTake(new_ns, shot.primary_duration))
+                shot.add_take(new_ns, shot.primary_duration)
                 self._persist()
 
     def add_take_existing_camera(self, shot_id: str) -> None:
@@ -440,7 +463,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         if not chosen:
             return
         with undo_chunk("previsAddTake"):
-            shot.takes.append(ShotTake(chosen))
+            shot.add_take(chosen)
             self._persist()
 
     def look_through_under_cursor(self, namespace: str) -> None:
@@ -577,10 +600,10 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         chosen = dialogs.pick_scene_camera(self, candidates)
         if not chosen:
             return
+        # Every shot cut from the dead camera follows it to the new one; leaving
+        # the others pointed at a namespace that is gone only hides the problem.
         with undo_chunk("previsRelinkTake"):
-            take.namespace = chosen
-            if shot.primary == namespace:
-                shot.primary = chosen
+            self._repoint_takes(namespace, chosen)
             self._persist()
 
     def rename_camera(self, shot_id: str, namespace: str) -> None:
@@ -594,11 +617,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         with undo_chunk("previsRenameTake"):
             renamed = cameras.rename_camera(namespace, new_name)
             if renamed:
-                take = shot.find_take(namespace)
-                if take is not None:
-                    take.namespace = new_name
-                if shot.primary == namespace:
-                    shot.primary = new_name
+                self._repoint_takes(namespace, new_name)
                 self._persist()
         if not renamed:
             MessageDialog(
@@ -606,6 +625,11 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
                 f"Could not rename {namespace} to {new_name} (name in use or namespace missing).",
                 "Rename Failed",
             ).exec_()
+
+    def _repoint_takes(self, namespace: str, new_namespace: str) -> None:
+        """Move every take on `namespace` to `new_namespace`, across all shots."""
+        for shot in self._state.shots_using(namespace):
+            shot.retarget_take(namespace, new_namespace)
 
     def declare_code(self, shot_id: str) -> None:
         """Declare a shot's sticky code from free text
@@ -624,7 +648,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
                 "Set Shot Code",
             ).exec_()
             return
-        letter = seq[0]
+        letter = naming.sequence_letter(seq)
         raw = dialogs.prompt_shot_code(
             self, current=shot.code, suggestion=self._suggest_code()
         )
@@ -639,7 +663,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
                 "Set Shot Code",
             ).exec_()
             return
-        if new_code[0] != letter:
+        if codes.shot_letter(new_code) != letter:
             MessageDialog(
                 self,
                 f"Shot code {new_code} does not belong to sequence {letter}. "
@@ -789,8 +813,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
                 shot_id=shot.id,
                 label=shot.code or "no code",
                 detail=(
-                    f"{shot.source_in}–{shot.source_out}  ·  "
-                    f"{shot.primary_duration}f"
+                    f"{shot.source_in}–{shot.source_out}  ·  {shot.primary_duration}f"
                 ),
                 blocker=playblast.render_blocker(shot),
             )
@@ -930,6 +953,9 @@ def launch() -> None:
         workspaceControlName=WORKSPACE_CONTROL_NAME,
     )
     _panel_instance.install_scene_callbacks()
+    # After the panel is docked, never during construction: `_restore` builds one
+    # too, and a modal there would block Maya mid-layout-restore.
+    _panel_instance._offer_sequencer_import()
 
 
 def close() -> None:

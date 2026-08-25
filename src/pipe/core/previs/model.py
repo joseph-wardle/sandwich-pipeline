@@ -1,17 +1,23 @@
 """Pure data model for a previs sequence manifest.
 
 The manifest is an ordered list of shots keyed by code, plus a map of the workspace
-files that make up the sequence. Unknown keys are ignored and malformed entries
-dropped. The write path (SequenceManifest.ensure_shot) is strict, so bad codes can never enter
-a manifest through the tools.
+files that make up the sequence. The write path (SequenceManifest.ensure_shot) is
+strict, so bad codes can never enter a manifest through the tools.
+
+Reading is lenient — a malformed entry is dropped rather than failing the open.
+But a write rewrites the whole document from what was parsed, so anything dropped
+is gone.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import cast
 
 from .codes import normalize_code
+
+log = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 3
 
@@ -129,6 +135,9 @@ class SequenceManifest:
     shots: list[ManifestShot] = field(default_factory=list)
     files: dict[str, FileRecord] = field(default_factory=dict)
     schema_version: int = SCHEMA_VERSION
+    # What `from_dict` could not read. A rewrite would erase it, so the store
+    # checks this before persisting rather than quietly dropping the entries.
+    lost_entries: tuple[str, ...] = ()
 
     @classmethod
     def empty(cls, sequence_code: str) -> SequenceManifest:
@@ -143,13 +152,18 @@ class SequenceManifest:
         # json.load yields `object`; past the dict guard, JSON keys are strings.
         data = cast("dict[str, object]", raw)
 
+        dropped: list[str] = []
+
         shots: list[ManifestShot] = []
         seen: set[str] = set()
         shots_raw = data.get(_KEY_SHOTS)
         if isinstance(shots_raw, list):
             for entry in shots_raw:
                 shot = ManifestShot.from_dict(entry)
-                if shot is None or shot.code in seen:
+                if shot is None:
+                    dropped.append(f"shot entry {entry!r}")
+                    continue
+                if shot.code in seen:
                     continue
                 seen.add(shot.code)
                 shots.append(shot)
@@ -159,10 +173,22 @@ class SequenceManifest:
         if isinstance(files_raw, dict):
             for filename, entry in cast("dict[str, object]", files_raw).items():
                 if not isinstance(filename, str) or not filename.strip():
+                    dropped.append(f"file key {filename!r}")
                     continue
                 record = FileRecord.from_dict(filename, entry)
-                if record is not None:
-                    files[filename] = record
+                if record is None:
+                    dropped.append(f"file {filename}")
+                    continue
+                files[filename] = record
+
+        if dropped:
+            log.warning(
+                "Previs manifest for %s has %d entry/entries this version cannot "
+                "read: %s. They will not be written back.",
+                sequence_code,
+                len(dropped),
+                ", ".join(dropped),
+            )
 
         version = data.get(_KEY_SCHEMA_VERSION)
         return cls(
@@ -170,6 +196,7 @@ class SequenceManifest:
             shots=shots,
             files=files,
             schema_version=version if isinstance(version, int) else SCHEMA_VERSION,
+            lost_entries=tuple(dropped),
         )
 
     def to_dict(self) -> dict[str, object]:

@@ -11,7 +11,7 @@ from pipe.core.previs import load_manifest
 from pipe.core.shotgrid import SGEntity, Shot, is_previs_shot_code
 from pipe.core.ui import MessageDialog
 from pipe.core.util.filemanager import OpenFileDialog
-from pipe.core.util.paths import get_previs_path
+from pipe.core.util.paths import get_legacy_previs_path, get_previs_path
 from pipe.core.versioning import VersionStreamSpec
 
 from pipe.dcc.maya.shotfile import stage
@@ -91,6 +91,8 @@ class MPrevisFileManager(MShotFileManager):
         if choice is None:
             return False
         if choice.filename is None:
+            if choice.migrate:
+                return self._migrate_workspace(entity)
             return self._create_workspace(entity)
         self._open_file(sequence_dir / choice.filename)
         return True
@@ -107,6 +109,23 @@ class MPrevisFileManager(MShotFileManager):
             return False
         return True
 
+    def _migrate_workspace(self, entity: Shot) -> bool:
+        """Pick a pre-pipeline previs scene and rebuild it as a workspace file."""
+        source = dialogs.pick_legacy_previs_file(
+            self._main_window, get_legacy_previs_path()
+        )
+        if source is None:
+            return False
+        label = dialogs.prompt_new_label(self._main_window)
+        if label is None:
+            return False
+        try:
+            file_ops.migrate_legacy(self, entity, source, label)
+        except file_ops.PrevisFileError as exc:
+            MessageDialog(self._main_window, str(exc), "Cannot Migrate File").exec_()
+            return False
+        return True
+
     def _setup_scene(self) -> None:
         # Sets only. Per-shot env overrides remain the RLO's responsibility, so a
         # previs sequence has no shot-level override layer to edit into.
@@ -114,6 +133,16 @@ class MPrevisFileManager(MShotFileManager):
 
     def _setup_file(self, path: Path, entity: SGEntity) -> None:
         mc.file(newFile=True, force=True)
+        self._scaffold_and_save(path, entity)
+
+    def _setup_migrated_file(self, path: Path, entity: SGEntity, source: Path) -> None:
+        """Open the legacy scene and scaffold it as `path`."""
+        mc.file(newFile=True, force=True)
+        mc.file(str(source), open=True, force=True, prompt=False, ignoreVersion=True)
+        self._scaffold_and_save(path, entity)
+
+    def _scaffold_and_save(self, path: Path, entity: SGEntity) -> None:
+        """Give the open scene a previs sequence's stage, state, and stamp."""
         mc.file(rename=str(path))
 
         self.shot = cast(Shot, entity)
@@ -130,7 +159,10 @@ class MPrevisFileManager(MShotFileManager):
         root_layer.SetPermissionToSave(False)
 
         stage.serialize_usd_edits_into_scene()
-        state.write_state(PrevisState())
+        # Whatever the scene already holds, not a blank: opening the legacy file
+        # can fire the panel's scene callback, and an unconditional blank here
+        # would erase a shot list it had just imported.
+        state.write_state(state.read_state() or PrevisState())
         mc.fileInfo("code", code)
         mc.file(save=True, force=True)
 
