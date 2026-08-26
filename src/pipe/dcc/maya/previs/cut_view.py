@@ -137,24 +137,12 @@ class CutView(QWidget):
             return
         frame = int(mc.currentTime(query=True))
         shot = active.active_shot(state, frame)
-        cut_frame = None if shot is None else state.cut_frame(shot, frame)
-        if cut_frame is None:
+        if shot is None:
             self._playhead.hide()
             return
+        cut_frame = state.cut_frame(shot, frame)
         x = TRACK_LABEL_WIDTH + self._cut_width(cut_frame - FRAME_START)
         self._playhead.move_to(x, self._inner.height())
-
-    def _scrub_from_cut(self, cut_frame: int) -> None:
-        """Ruler click: find the shot at that cut frame, then scrub to its scene frame."""
-        state = self._last_state
-        found = None if state is None else state.shot_at_cut(cut_frame)
-        if found is None:
-            return
-        shot, source_frame = found
-        # Select first: the shot the artist just clicked is the one that should
-        # own the frame, even where several shots overlap it.
-        self._controller.select_shot(shot.id)
-        self._controller.scrub_to_frame(source_frame)
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -193,7 +181,7 @@ class CutView(QWidget):
         )
         self._grid.addWidget(spacer, _ROW_RULER, 0)
 
-        ruler = Ruler(self._inner, on_scrub=self._scrub_from_cut)
+        ruler = Ruler(self._inner, on_scrub=self._controller.scrub_to_cut_frame)
         ruler.set_range(first_frame, last_frame)
         self._grid.addWidget(ruler, _ROW_RULER, 1, 1, num_shots)
         self._ruler = ruler

@@ -161,11 +161,9 @@ class PrevisState:
             cursor += shot.primary_duration
         return starts
 
-    def cut_frame(self, shot: PrevisShot, source_frame: int) -> int | None:
-        """Where `source_frame` of `shot` lands on the cut axis. None if `shot` is
-        not in this state."""
-        start = self.cut_starts().get(shot.id)
-        return None if start is None else start + (source_frame - shot.source_in)
+    def cut_frame(self, shot: PrevisShot, source_frame: int) -> int:
+        """Where `source_frame` of `shot` lands on the cut axis."""
+        return self.cut_starts()[shot.id] + (source_frame - shot.source_in)
 
     def shot_at_cut(self, cut_frame: int) -> tuple[PrevisShot, int] | None:
         """The shot occupying `cut_frame`, and the source frame it plays there."""

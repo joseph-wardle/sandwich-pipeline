@@ -49,8 +49,10 @@ from . import (
     style,
 )
 from .cut_view import CutView
+from .playback import CutPlayback
 from .state import PrevisShot, PrevisState, ShotTake
 from .timeline_view import TimelineView
+from .transport_button import TransportButton
 
 if TYPE_CHECKING:
     from pipe.core.previs.model import SequenceManifest
@@ -74,6 +76,11 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
 
         self._state = state.read_state() or PrevisState()
         self._synced: tuple[str | None, tuple[str, ...]] | None = None
+        self._playback = CutPlayback(
+            state=lambda: self._state,
+            go_to_cut_frame=self.scrub_to_cut_frame,
+            parent=self,
+        )
 
         self._build_ui()
         self.refresh()
@@ -141,6 +148,10 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self._cut_btn.setChecked(True)
 
         row.addStretch(1)
+        self._play_btn = TransportButton(bar)
+        self._play_btn.clicked.connect(self.toggle_playback)
+        row.addWidget(self._play_btn)
+        row.addStretch(1)
 
         self._monitor_label = QLabel("", bar)
         self._monitor_label.setObjectName("info")
@@ -191,9 +202,11 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         (self._cut_btn if view is self._cut_view else self._timeline_btn).setChecked(
             True
         )
+        self._sync_transport()
         view.set_state(self._state)
 
     def refresh(self) -> None:
+        self._sync_transport()
         self._view.set_state(self._state)
         self._update_status_text()
         self._update_monitor_label()
@@ -203,6 +216,15 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
     def _update_branch_button(self) -> None:
         """Branch only makes sense on an open previs file."""
         self._branch_btn.setEnabled(self._is_previs_file())
+
+    def _sync_transport(self) -> None:
+        in_cut_view = self._view is self._cut_view
+        playable = in_cut_view and bool(self._state.shots)
+        if not playable:
+            self._playback.stop()
+        self._play_btn.setVisible(in_cut_view)
+        self._play_btn.setEnabled(playable)
+        self._play_btn.set_playing(self._playback.is_playing)
 
     def install_scene_callbacks(self) -> None:
         """Follow the scene for the panel's lifetime.
@@ -346,6 +368,20 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         """
         mc.currentTime(frame)
         self._sync_playhead()
+
+    def scrub_to_cut_frame(self, cut_frame: int) -> None:
+        """Put the scene where `cut_frame` plays, and hand that shot the overlap."""
+        found = self._state.shot_at_cut(cut_frame)
+        if found is None:
+            return  # off the end of the cut; nothing plays there
+        shot, source_frame = found
+        self.select_shot(shot.id)
+        self.scrub_to_frame(source_frame)
+
+    def toggle_playback(self) -> None:
+        """Play or pause the cut, from the transport button in the top bar."""
+        self._playback.toggle()
+        self._sync_transport()
 
     def select_shot(self, shot_id: str) -> None:
         """Make `shot_id` the shot that wins an overlap."""
