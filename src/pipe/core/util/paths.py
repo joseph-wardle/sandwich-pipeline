@@ -121,6 +121,14 @@ def get_production_path() -> Path:
     return _prp
 
 
+def get_legacy_previs_path() -> Path:
+    """Where previs worked before the pipeline: `00_pre-production/previs`.
+
+    Future capstones should remove this logic.
+    """
+    return get_production_path().parent / "00_pre-production" / "previs"
+
+
 def _sanitize_path_segment(value: str, *, fallback: str) -> str:
     normalized = str(value).strip()
     if not normalized:

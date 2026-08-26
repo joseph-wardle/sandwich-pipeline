@@ -14,12 +14,16 @@ from typing import Callable
 
 from ..util.atomic_json import json_write_lock, write_json_atomic
 from ..util.paths import get_previs_path
-from .model import SequenceManifest
+from .model import SCHEMA_VERSION, SequenceManifest
 
 log = logging.getLogger(__name__)
 
 MANIFEST_FILENAME = "manifest.json"
 PLAYBLASTS_DIRNAME = "playblasts"
+
+
+class ManifestWriteRefused(Exception):
+    """The manifest on disk holds more than this version can write back."""
 
 
 def manifest_path(sequence_code: str, *, previs_root: Path | None = None) -> Path:
@@ -29,7 +33,7 @@ def manifest_path(sequence_code: str, *, previs_root: Path | None = None) -> Pat
 
 
 def playblasts_dir(sequence_code: str, *, previs_root: Path | None = None) -> Path:
-    """Directory holding a sequence's take playblasts: ``<previs_root>/<seq>/playblasts``."""
+    """Directory holding a sequence's playblasts: ``<previs_root>/<seq>/playblasts``."""
     root = previs_root if previs_root is not None else get_previs_path()
     return root / sequence_code / PLAYBLASTS_DIRNAME
 
@@ -47,8 +51,7 @@ def load_manifest(
             raw = json.load(handle)
     except (OSError, ValueError) as exc:
         log.error(
-            "Could not read previs manifest at %s (%s); "
-            "treating sequence %s as empty.",
+            "Could not read previs manifest at %s (%s); treating sequence %s as empty.",
             path,
             exc,
             sequence_code,
@@ -73,13 +76,37 @@ def mutate_manifest(
     path = manifest_path(sequence_code, previs_root=previs_root)
     with json_write_lock(path):
         manifest = load_manifest(sequence_code, previs_root=previs_root)
+        _refuse_lossy_write(manifest, path)
         mutate(manifest)
         write_json_atomic(path, manifest.to_dict())
     return manifest
 
 
+def _refuse_lossy_write(manifest: SequenceManifest, path: Path) -> None:
+    """Stop before a rewrite that would erase what the read could not parse."""
+    if manifest.schema_version > SCHEMA_VERSION:
+        raise ManifestWriteRefused(
+            f"{path.name} was written by a newer version of the pipeline "
+            f"(format {manifest.schema_version}, this build reads {SCHEMA_VERSION}). "
+            "Update your tools before editing this sequence."
+        )
+    if manifest.lost_entries:
+        log.error(
+            "Refusing to rewrite %s: %d unreadable entry/entries would be lost (%s).",
+            path,
+            len(manifest.lost_entries),
+            ", ".join(manifest.lost_entries),
+        )
+        raise ManifestWriteRefused(
+            f"{path.name} has {len(manifest.lost_entries)} damaged entry/entries. "
+            "Saving would delete them, so nothing was written. Ask a TD to repair "
+            "the manifest."
+        )
+
+
 __all__ = [
     "MANIFEST_FILENAME",
+    "ManifestWriteRefused",
     "PLAYBLASTS_DIRNAME",
     "manifest_path",
     "playblasts_dir",

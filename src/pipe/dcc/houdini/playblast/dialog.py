@@ -12,18 +12,19 @@ from Qt import QtCore, QtWidgets
 
 from pipe.core.playblast import (
     CURRENT_FOLDER_ID,
-    CUSTOM_FOLDER_ID,
+    CURRENT_FOLDER_NAME,
     EDIT_FOLDER_ID,
+    EDIT_FOLDER_NAME,
     Destination,
     DiskDestination,
     FFmpegPreset,
     PreviewClip,
     ReviewEntity,
     ShotGridDestination,
+    custom_folder_destination,
     shot_or_scratch,
 )
 from pipe.core.playblast.naming import build_edit_output_directory
-from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.shotgrid import ShotGridError
 from pipe.core.ui import FAIL_STYLE, DialogButtons, set_tab_available
 
@@ -361,25 +362,18 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         return (
             DiskDestination(
                 id=EDIT_FOLDER_ID,
-                name="Send to Edit",
+                name=EDIT_FOLDER_NAME,
                 directory=build_edit_output_directory(EDIT_DEPARTMENT),
                 preset=FFmpegPreset.EDIT_SQ,
             ),
             DiskDestination(
                 id=CURRENT_FOLDER_ID,
-                name="Current Folder",
+                name=CURRENT_FOLDER_NAME,
                 directory=self._current_scene_directory(),
                 preset=FFmpegPreset.WEB,
                 default_on=False,
             ),
-            DiskDestination(
-                id=CUSTOM_FOLDER_ID,
-                name="Custom Folder",
-                directory=resolve_playblast_tempdir(),
-                preset=FFmpegPreset.WEB,
-                default_on=False,
-                browsable=True,
-            ),
+            custom_folder_destination(),
         )
 
     def _review_entity(self) -> ReviewEntity:

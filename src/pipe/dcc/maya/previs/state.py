@@ -1,4 +1,4 @@
-"""Previs sequencer state: dataclasses + Maya `fileInfo` persistence."""
+"""Previs sequencer state: dataclasses + persistence on a scene `network` node."""
 
 from __future__ import annotations
 
@@ -15,8 +15,14 @@ import maya.cmds as mc
 
 log = logging.getLogger(__name__)
 
-FILEINFO_KEY = "previs_sequencer_state"
-SCHEMA_VERSION = 3
+# A `network` node is DG-only, so it stays out of the outliner while its string
+# attribute rides the undo queue like any other attribute edit.
+STATE_NODE = "previsSequencerState"
+STATE_ATTR = "state"
+LEGACY_FILEINFO_KEY = "previs_sequencer_state"
+
+SCHEMA_VERSION = 4
+FRAME_START = 1001
 DEFAULT_SHOT_DURATION = 72  # frames; 3 seconds @ 24fps
 
 
@@ -29,75 +35,111 @@ def utcnow_iso() -> str:
 
 
 @dataclass
+class ShotTake:
+    """One camera's rendition of a shot."""
+
+    namespace: str
+    duration: int = DEFAULT_SHOT_DURATION
+
+
+@dataclass
 class PrevisShot:
     id: str
-    # Sticky sequence code (`A_010`). Distinct from `shotgrid_code`,
-    # the dormant link to an official SG Shot.
+    # Sticky sequence code (`A_010`) — also the ShotGrid code, when a Shot exists.
     code: str = ""
+    # Scene frame the takes' keys start on. Authored, never derived.
+    source_in: int = FRAME_START
+    takes: list[ShotTake] = field(default_factory=list)
+    # Namespace of the take that defines the shot; names an entry in `takes`
+    # whenever there is one.
     primary: str = ""
-    alternates: list[str] = field(default_factory=list)
-    durations: dict[str, int] = field(default_factory=dict)
-    shotgrid_code: str | None = None
-    rlo_animation_hash: str | None = None
-    cam_animation_hash: str | None = None
 
     @property
-    def all_cameras(self) -> list[str]:
-        return (
-            [self.primary, *self.alternates] if self.primary else list(self.alternates)
-        )
+    def namespaces(self) -> list[str]:
+        return [t.namespace for t in self.takes]
 
-    def duration_of(self, namespace: str) -> int:
-        return self.durations.get(namespace, DEFAULT_SHOT_DURATION)
+    @property
+    def primary_take(self) -> ShotTake | None:
+        return self.find_take(self.primary)
+
+    @property
+    def other_takes(self) -> list[ShotTake]:
+        return [t for t in self.takes if t.namespace != self.primary]
+
+    def find_take(self, namespace: str) -> ShotTake | None:
+        return next((t for t in self.takes if t.namespace == namespace), None)
+
+    def add_take(self, namespace: str, duration: int | None = None) -> ShotTake:
+        """Take on `namespace`, adding it if the shot has none yet."""
+        existing = self.find_take(namespace)
+        if existing is not None:
+            return existing
+        take = (
+            ShotTake(namespace) if duration is None else ShotTake(namespace, duration)
+        )
+        self.takes.append(take)
+        return take
+
+    def retarget_take(self, namespace: str, new_namespace: str) -> None:
+        """Point this shot's take on `namespace` at `new_namespace` instead."""
+        take = self.find_take(namespace)
+        if take is None:
+            return
+        if self.find_take(new_namespace) is not None:
+            self.takes.remove(take)
+        else:
+            take.namespace = new_namespace
+        moved = new_namespace if self.primary == namespace else self.primary
+        self.primary = _resolve_primary(self.takes, moved)
 
     @property
     def primary_duration(self) -> int:
-        return self.duration_of(self.primary)
+        take = self.primary_take
+        # A shot that has lost every take still occupies a column, at default width.
+        return take.duration if take else DEFAULT_SHOT_DURATION
+
+    @property
+    def source_out(self) -> int:
+        """Last frame of the shot, inclusive."""
+        return self.source_in + self.primary_duration - 1
+
+    def drop_take(self, namespace: str) -> None:
+        self.takes = [t for t in self.takes if t.namespace != namespace]
+        self.primary = _resolve_primary(self.takes, self.primary)
 
 
 @dataclass
 class PrevisState:
-    schema_version: int = SCHEMA_VERSION
     created_at: str = field(default_factory=utcnow_iso)
-    last_published_at: str | None = None
     notes: str = ""
     shots: list[PrevisShot] = field(default_factory=list)
 
     @classmethod
-    def empty(cls) -> PrevisState:
-        return cls()
-
-    @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> PrevisState:
-        shots_raw = raw.get("shots") or []
-        shots = [PrevisShot(**_load_shot_fields(s)) for s in shots_raw]
+        shots = [_load_shot(s) for s in raw.get("shots") or []]
+        if _stored_version(raw) < SCHEMA_VERSION:
+            _pack_source_in(shots)
         metadata = raw.get("metadata") or {}
         return cls(
-            schema_version=int(raw.get("schema_version") or SCHEMA_VERSION),
             created_at=str(metadata.get("created_at") or utcnow_iso()),
-            last_published_at=metadata.get("last_published_at"),
             notes=str(metadata.get("notes") or ""),
             shots=shots,
         )
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": self.schema_version,
-            "metadata": {
-                "created_at": self.created_at,
-                "last_published_at": self.last_published_at,
-                "notes": self.notes,
-            },
+            "schema_version": SCHEMA_VERSION,
+            "metadata": {"created_at": self.created_at, "notes": self.notes},
             "shots": [
                 {
                     "id": s.id,
                     "code": s.code,
+                    "source_in": s.source_in,
                     "primary": s.primary,
-                    "alternates": list(s.alternates),
-                    "durations": dict(s.durations),
-                    "shotgrid_code": s.shotgrid_code,
-                    "rlo_animation_hash": s.rlo_animation_hash,
-                    "cam_animation_hash": s.cam_animation_hash,
+                    "takes": [
+                        {"namespace": t.namespace, "duration": t.duration}
+                        for t in s.takes
+                    ],
                 }
                 for s in self.shots
             ],
@@ -106,82 +148,200 @@ class PrevisState:
     def find_shot(self, shot_id: str) -> PrevisShot | None:
         return next((s for s in self.shots if s.id == shot_id), None)
 
+    def shots_using(self, namespace: str) -> list[PrevisShot]:
+        """Every shot with a take on `namespace`."""
+        return [s for s in self.shots if namespace in s.namespaces]
 
-def _load_shot_fields(s: dict[str, Any]) -> dict[str, Any]:
-    """Build PrevisShot kwargs from raw JSON, migrating legacy v1 field names."""
-    primary = str(s.get("primary") or "")
-    durations_raw = s.get("durations")
-    if isinstance(durations_raw, dict):
-        durations = {str(k): int(v) for k, v in durations_raw.items()}
-    else:
-        # v1 stored a single `duration_frames` (= the primary's duration).
-        legacy = int(s.get("duration_frames") or DEFAULT_SHOT_DURATION)
-        durations = {primary: legacy} if primary else {}
-    return dict(
+    def cut_starts(self) -> dict[str, int]:
+        """Cut position per shot id."""
+        starts: dict[str, int] = {}
+        cursor = FRAME_START
+        for shot in self.shots:
+            starts[shot.id] = cursor
+            cursor += shot.primary_duration
+        return starts
+
+    def cut_frame(self, shot: PrevisShot, source_frame: int) -> int:
+        """Where `source_frame` of `shot` lands on the cut axis."""
+        return self.cut_starts()[shot.id] + (source_frame - shot.source_in)
+
+    def shot_at_cut(self, cut_frame: int) -> tuple[PrevisShot, int] | None:
+        """The shot occupying `cut_frame`, and the source frame it plays there."""
+        starts = self.cut_starts()
+        for shot in self.shots:
+            start = starts[shot.id]
+            if start <= cut_frame < start + shot.primary_duration:
+                return shot, shot.source_in + (cut_frame - start)
+        return None
+
+    def next_source_in(self) -> int:
+        """First frame free of every existing shot — shots may overlap, so list
+        order says nothing about which one ends latest."""
+        return max((s.source_out + 1 for s in self.shots), default=FRAME_START)
+
+
+def _resolve_primary(takes: list[ShotTake], primary: str) -> str:
+    """The primary names one of `takes`; anything else falls back to the first."""
+    if any(t.namespace == primary for t in takes):
+        return primary
+    return takes[0].namespace if takes else ""
+
+
+# ---------- reading legacy and current payloads ----------
+
+
+def _as_int(value: Any, fallback: int) -> int:
+    # `bool` is an `int` subclass; a stray `true` is not a frame count.
+    if isinstance(value, bool) or not isinstance(value, int):
+        return fallback
+    return value
+
+
+def _duration(value: Any) -> int:
+    return max(1, _as_int(value, DEFAULT_SHOT_DURATION))
+
+
+def _stored_version(raw: dict[str, Any]) -> int:
+    # A missing version is the oldest shape; guessing high would skip the
+    # migration and stack every shot on `FRAME_START`.
+    return _as_int(raw.get("schema_version"), 1)
+
+
+def _pack_source_in(shots: list[PrevisShot]) -> None:
+    """Give pre-v4 shots the source range their stacked durations used to imply."""
+    cursor = FRAME_START
+    for shot in shots:
+        shot.source_in = cursor
+        cursor = shot.source_out + 1
+
+
+def _load_shot(s: dict[str, Any]) -> PrevisShot:
+    takes = _load_takes(s)
+    return PrevisShot(
         id=str(s.get("id") or next_shot_id()),
         code=str(s.get("code") or ""),
-        primary=primary,
-        alternates=list(s.get("alternates") or []),
-        durations=durations,
-        shotgrid_code=s.get("shotgrid_code"),
-        rlo_animation_hash=s.get("rlo_animation_hash"),
-        # v1 named the cam-bake hash `published_animation_hash`.
-        cam_animation_hash=s.get("cam_animation_hash")
-        or s.get("published_animation_hash"),
+        source_in=_as_int(s.get("source_in"), FRAME_START),
+        takes=takes,
+        primary=_resolve_primary(takes, str(s.get("primary") or "")),
     )
 
 
+def _load_takes(s: dict[str, Any]) -> list[ShotTake]:
+    raw = s.get("takes")
+    if isinstance(raw, list):
+        pairs = [
+            (str(t["namespace"]), _duration(t.get("duration")))
+            for t in raw
+            if isinstance(t, dict) and t.get("namespace")
+        ]
+    else:
+        # v2/v3 split the cameras across `primary` + `alternates` and kept their
+        # lengths in a parallel `durations` map; v1 stored the primary's alone.
+        primary = str(s.get("primary") or "")
+        durations = s.get("durations")
+        if not isinstance(durations, dict):
+            durations = {primary: _duration(s.get("duration_frames"))}
+        namespaces = ([primary] if primary else []) + [
+            str(ns) for ns in (s.get("alternates") or [])
+        ]
+        pairs = [(ns, _duration(durations.get(ns))) for ns in namespaces if ns]
+
+    unique: dict[str, ShotTake] = {}
+    for namespace, duration in pairs:
+        unique.setdefault(namespace, ShotTake(namespace, duration))
+    return list(unique.values())
+
+
+# ---------- persistence ----------
+
+
 def read_state() -> PrevisState | None:
-    info = mc.fileInfo(FILEINFO_KEY, query=True)
-    if not info:
-        return None
-    raw = info[0] if isinstance(info, (list, tuple)) else info
-    if not isinstance(raw, str):
-        return None
-    json_text = _decode_payload(raw)
-    if json_text is None:
-        log.warning("Previs sequencer state in fileInfo is malformed; ignoring.")
+    """The scene's state, or None when there is none.
+
+    The node wins outright: once it exists, a malformed payload there reads as
+    nothing rather than resurrecting the legacy `fileInfo` copy.
+    """
+    raw = _read_node_payload() or _read_fileinfo_payload()
+    if raw is None:
         return None
     try:
-        return PrevisState.from_dict(json.loads(json_text))
+        # A payload that will not decode fails the same way as one that will not parse.
+        return PrevisState.from_dict(json.loads(_decode_payload(raw) or ""))
     except (json.JSONDecodeError, KeyError, ValueError):
-        log.warning("Previs sequencer state in fileInfo is malformed; ignoring.")
+        log.warning("Previs sequencer state is malformed; ignoring.")
         return None
 
 
 def write_state(state: PrevisState) -> None:
-    # Base64-wrap so the stored string contains only `[A-Za-z0-9+/=]`. Maya's
-    # `fileInfo` round-trips raw JSON with backslash-escaped quotes (`\"`),
-    # which then fails to parse. Base64 has none of the characters Maya
-    # touches, so the value comes back exactly as written.
+    # Base64-wrap so the stored string holds only `[A-Za-z0-9+/=]`: raw JSON came
+    # back from Maya with its quotes backslash-escaped, and then failed to parse.
     payload = base64.b64encode(json.dumps(state.to_dict()).encode("utf-8")).decode(
         "ascii"
     )
-    mc.fileInfo(FILEINFO_KEY, payload)
+    mc.setAttr(_state_plug(), payload, type="string")
+    _drop_legacy_fileinfo()
+
+
+def delete_state() -> None:
+    """Strip the scene of its sequencer state, so it stops being a previs file."""
+    node = _find_state_node()
+    if node is not None:
+        mc.delete(node)
+    _drop_legacy_fileinfo()
+
+
+def _find_state_node() -> str | None:
+    nodes = mc.ls(STATE_NODE, type="network") or []
+    return str(nodes[0]) if nodes else None
+
+
+def _state_plug() -> str:
+    node = _find_state_node()
+    if node is None:
+        # `skipSelect` so writing state never disturbs what the artist has selected.
+        node = str(mc.createNode("network", name=STATE_NODE, skipSelect=True))
+    plug = f"{node}.{STATE_ATTR}"
+    if not mc.objExists(plug):
+        mc.addAttr(node, longName=STATE_ATTR, dataType="string")
+    return plug
+
+
+def _read_node_payload() -> str | None:
+    node = _find_state_node()
+    if node is None:
+        return None
+    plug = f"{node}.{STATE_ATTR}"
+    if not mc.objExists(plug):
+        return None
+    value = mc.getAttr(plug)
+    return value if isinstance(value, str) and value else None
+
+
+def _read_fileinfo_payload() -> str | None:
+    info = mc.fileInfo(LEGACY_FILEINFO_KEY, query=True)
+    if not info:
+        return None
+    raw = info[0] if isinstance(info, (list, tuple)) else info
+    return raw if isinstance(raw, str) else None
+
+
+def _drop_legacy_fileinfo() -> None:
+    # Left behind it would outlive the node, so deleting the node would fall back
+    # to a stale sequence instead of reading as empty.
+    if mc.fileInfo(LEGACY_FILEINFO_KEY, query=True):
+        mc.fileInfo(remove=LEGACY_FILEINFO_KEY)
 
 
 def _decode_payload(raw: str) -> str | None:
-    """Return the JSON text from a stored `fileInfo` value.
-
-    Handles three shapes seen in the wild:
-    * **Base64** — the canonical form written by `write_state` post-fix.
-    * **MEL-escaped JSON** — legacy form where Maya stored `\\"` instead of
-      `"`. Recovered by unescaping the quotes.
-    * **Bare JSON** — earliest legacy form (no escapes). Returned unchanged.
-    """
-    # Base64 first: cheap to attempt and unambiguous when it succeeds.
     try:
-        decoded_bytes = base64.b64decode(raw.encode("ascii"), validate=True)
-        decoded = decoded_bytes.decode("utf-8")
+        decoded = base64.b64decode(raw.encode("ascii"), validate=True).decode("utf-8")
         if decoded.lstrip().startswith("{"):
             return decoded
     except (binascii.Error, UnicodeDecodeError, ValueError):
         pass
-
+    # Legacy `fileInfo` payloads held raw JSON, which Maya sometimes handed back
+    # with every `"` escaped to `\"`.
     stripped = raw.lstrip()
     if stripped.startswith('{\\"'):
-        # MEL-escaped: every `"` was stored as `\"`. Reverse it.
         return raw.replace('\\"', '"')
-    if stripped.startswith("{"):
-        return raw
-    return None
+    return raw if stripped.startswith("{") else None

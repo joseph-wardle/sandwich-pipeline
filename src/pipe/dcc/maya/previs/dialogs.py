@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import re
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from Qt.QtGui import QCursor
@@ -14,41 +14,23 @@ from Qt.QtWidgets import (
     QInputDialog,
     QLineEdit,
     QMenu,
-    QMessageBox,
     QVBoxLayout,
     QWidget,
 )
 
 from pipe.core.previs import naming
-from pipe.core.ui import DialogButtons, FilteredListDialog
-from pipe.core.shotgrid import ShotGrid
+from pipe.core.ui import (
+    DialogButtons,
+    FilteredListDialog,
+    MessageDialog,
+    MessageDialogCustomButtons,
+)
 
 if TYPE_CHECKING:
     from pipe.core.previs.model import FileRecord
 
-
-def shotgrid_codes_for_sequence(conn: ShotGrid, sequence_letter: str) -> list[str]:
-    """Real shot codes (e.g. `A_010`) for the given sequence letter, sorted."""
-    pattern = re.compile(rf"^{re.escape(sequence_letter)}_\d+$")
-    return sorted(s.code for s in conn.find_shots() if s.code and pattern.match(s.code))
-
-
-def pick_shotgrid_code(
-    parent: QWidget,
-    codes: Sequence[str],
-    sequence_letter: str,
-) -> str | None:
-    """Prompt the user to pick one of `codes`; None on cancel."""
-    dialog = FilteredListDialog(
-        parent,
-        list(codes),
-        title="Assign ShotGrid Code",
-        list_label=f"Select the shot to pair with this previs shot (sequence {sequence_letter}):",
-        accept_button_name="Assign",
-    )
-    if not dialog.exec_():
-        return None
-    return dialog.get_selected_item()
+    from .camera_sequencer import ImportReport
+    from .rlo import DeliveryPlan
 
 
 def pick_scene_camera(parent: QWidget, candidates: Sequence[str]) -> str | None:
@@ -67,20 +49,31 @@ def pick_scene_camera(parent: QWidget, candidates: Sequence[str]) -> str | None:
     return dialog.get_selected_item()
 
 
-# The picker lists real workspace files plus this synthetic row; selecting it
-# means "start a new file" rather than "open an existing one".
+# The picker lists real workspace files plus these synthetic rows; selecting one
+# means "start a file" rather than "open an existing one".
 _NEW_FILE_ROW = "＋  New file…"
+_MIGRATE_ROW = "↧  Migrate a legacy previs file…"
+
+# Legacy sub-trees that hold no previs cut of their own. Between them they hold
+# more Maya files than the sequence folders do, so leaving them in roughly
+# doubles the list for nothing.
+_LEGACY_SKIP_DIRS = frozenset(
+    {"Assets", "Rigs", "Animation Library", "Dailies", "Test Shots"}
+)
+_LEGACY_SUFFIXES = (".mb", ".ma")
 
 
 @dataclass(frozen=True)
 class WorkspaceChoice:
     """The artist's pick from pick_workspace_file.
 
-    filename is the file to open, or None to start a new one (the "New file…"
-    row). A cancelled dialog returns None instead of a choice.
+    filename is the file to open. With no filename the artist wants a new file —
+    an empty one, or, when migrate is set, one built from a legacy previs file.
+    A cancelled dialog returns None instead of a choice.
     """
 
     filename: str | None
+    migrate: bool = False
 
 
 def _format_workspace_row(record: FileRecord) -> str:
@@ -102,7 +95,7 @@ def pick_workspace_file(
     filename_by_row = {row: r.filename for row, r in zip(rows, records)}
     dialog = FilteredListDialog(
         parent,
-        [*rows, _NEW_FILE_ROW],
+        [*rows, _NEW_FILE_ROW, _MIGRATE_ROW],
         title="Open Previs File",
         list_label=f"Select a file in sequence {sequence_code}, or start a new one:",
         accept_button_name="Open",
@@ -114,7 +107,45 @@ def pick_workspace_file(
         return None
     if selected == _NEW_FILE_ROW:
         return WorkspaceChoice(filename=None)
+    if selected == _MIGRATE_ROW:
+        return WorkspaceChoice(filename=None, migrate=True)
     return WorkspaceChoice(filename=filename_by_row[selected])
+
+
+def pick_legacy_previs_file(parent: QWidget | None, root: Path) -> Path | None:
+    """Pick a scene file from the pre-pipeline previs tree; None on cancel.X scdxa zZ"""
+    rows = sorted(str(p.relative_to(root)) for p in _legacy_scene_files(root))
+    if not rows:
+        MessageDialog(
+            parent,
+            f"No previs scenes found under {root}.",
+            "Nothing to Migrate",
+        ).exec_()
+        return None
+    dialog = FilteredListDialog(
+        parent,
+        rows,
+        title="Migrate Legacy Previs File",
+        list_label=(
+            "Select the previs file to migrate. It is copied, never moved.\n"
+            "A file with no Camera Sequencer migrates as an empty previs file."
+        ),
+        accept_button_name="Migrate",
+    )
+    if not dialog.exec_():
+        return None
+    selected = dialog.get_selected_item()
+    return None if selected is None else root / selected
+
+
+def _legacy_scene_files(root: Path) -> list[Path]:
+    return [
+        path
+        for path in root.rglob("*")
+        if path.suffix.lower() in _LEGACY_SUFFIXES
+        and path.is_file()
+        and not _LEGACY_SKIP_DIRS.intersection(path.relative_to(root).parts)
+    ]
 
 
 def prompt_new_label(parent: QWidget | None) -> str | None:
@@ -225,17 +256,121 @@ def show_add_alternate_menu(
     menu.exec_(QCursor.pos())
 
 
-def show_orphan_warning(parent: QWidget, orphans: Iterable[tuple[str, str]]) -> None:
-    """Non-blocking warning listing every (shot_id, namespace) gone missing."""
-    items = list(orphans)
-    if not items:
-        return
-    lines = [f"  • {ns}  (shot {shot_id})" for shot_id, ns in items]
-    QMessageBox.warning(
+def confirm_delete_shot(
+    parent: QWidget,
+    *,
+    label: str,
+    namespaces: Sequence[str],
+    kept: Sequence[str] = (),
+    undoable: bool,
+) -> bool:
+    """Confirm deleting a shot, naming the cameras that go with it and the ones
+    that stay because another shot is still cut from them."""
+    lines = [f"Delete {label}?", ""]
+    if namespaces:
+        lines.append("Its cameras are removed from the scene too:")
+        lines.extend(f"  • {ns}" for ns in namespaces)
+    elif not kept:
+        lines.append("None of its cameras are still in the scene.")
+    if kept:
+        lines += ["", "These stay — other shots are cut from them:"]
+        lines.extend(f"  • {ns}" for ns in kept)
+    if not undoable:
+        lines += [
+            "",
+            "Maya clears the undo queue when a referenced rig is removed, so this "
+            "cannot be undone.",
+        ]
+    dialog = MessageDialogCustomButtons(
         parent,
-        "Missing cameras",
-        "These tracked cameras are missing from the scene:\n\n"
-        + "\n".join(lines)
-        + "\n\nThey were probably renamed or removed externally. "
-        "Re-add them through the panel to fix tracking.",
+        "\n".join(lines),
+        "Delete Shot",
+        has_cancel_button=True,
+        ok_name="Delete",
+        cancel_name="Cancel",
     )
+    return bool(dialog.exec_())
+
+
+def confirm_sequencer_import(parent: QWidget, report: ImportReport) -> bool:
+    """Offer to read a legacy file's Camera Sequencer, naming what the read costs."""
+    lines = [
+        "This file has shots in Maya's Camera Sequencer but no previs shot list.",
+        "",
+        "Reading them in gives you the cut as it played:",
+        "",
+    ]
+    lines += [f"  • {line}" for line in report.summary_lines()]
+    lines += [
+        "",
+        "Maya's Camera Sequencer is emptied — the shot list replaces it. The "
+        "original file on disk is not touched.",
+        "Skip leaves the file alone; you are asked again next time it opens.",
+    ]
+    dialog = MessageDialogCustomButtons(
+        parent,
+        "\n".join(lines),
+        "Import Camera Sequencer",
+        has_cancel_button=True,
+        ok_name="Import",
+        cancel_name="Skip",
+    )
+    return bool(dialog.exec_())
+
+
+def confirm_break_out(parent: QWidget, plan: DeliveryPlan) -> bool:
+    """The single confirm break-out shows, whatever the delivery turns out to do."""
+    dialog = MessageDialogCustomButtons(
+        parent,
+        _break_out_message(plan),
+        "Break Out Shot",
+        has_cancel_button=True,
+        ok_name="Break out",
+        cancel_name="Cancel",
+    )
+    return bool(dialog.exec_())
+
+
+def _break_out_message(plan: DeliveryPlan) -> str:
+    """Name every consequence of `plan`, so one confirm covers all of them."""
+    lines = [
+        f"Break out {plan.code} — {plan.frames} frames, {plan.cut_in}–{plan.cut_out}.",
+        "",
+    ]
+    if plan.sg_shot is None:
+        lines.append(
+            f"  • Create shot {plan.code} in ShotGrid, in sequence "
+            f"{plan.sequence.code}, with its standard task list."
+        )
+    elif plan.recuts:
+        lines.append(
+            f"  • Re-cut {plan.code} in ShotGrid to {plan.cut_in}–{plan.cut_out}."
+        )
+    if plan.replaces_rlo:
+        lines.append(
+            f"  • Replace {plan.destination.name}, keeping the one already "
+            "there as a version."
+        )
+    else:
+        lines.append(f"  • Write {plan.destination.name}.")
+    lines.append(
+        "  • Save this previs file, and reopen it when the break-out finishes."
+    )
+    return "\n".join([*lines, "", _sets_note(plan)])
+
+
+def _sets_note(plan: DeliveryPlan) -> str:
+    """What the delivered RLO will be dressed with, when previs shows otherwise."""
+    if plan.previs_sets == plan.rlo_sets:
+        return (
+            "Set dressing you moved in previs stays in previs — the RLO "
+            "composes its sets from ShotGrid."
+        )
+    return (
+        f"Heads up: previs is laid out against {_set_list(plan.previs_sets)}, but "
+        f"{plan.code}'s RLO will compose {_set_list(plan.rlo_sets)} from ShotGrid."
+    )
+
+
+def _set_list(codes: tuple[str, ...]) -> str:
+    return ", ".join(codes) if codes else "no set"

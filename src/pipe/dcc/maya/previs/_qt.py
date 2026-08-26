@@ -15,6 +15,7 @@ LEFT_BUTTON = QtCore.Qt.LeftButton  # type: ignore[attr-defined]
 
 POINTING_HAND = QtCore.Qt.PointingHandCursor  # type: ignore[attr-defined]
 SIZE_HOR = QtCore.Qt.SizeHorCursor  # type: ignore[attr-defined]
+SIZE_ALL = QtCore.Qt.SizeAllCursor  # type: ignore[attr-defined]
 
 SCROLL_AS_NEEDED = QtCore.Qt.ScrollBarAsNeeded  # type: ignore[attr-defined]
 

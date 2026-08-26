@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 from typing import cast
@@ -93,54 +92,9 @@ def focal_length(namespace: str) -> float | None:
         return None
 
 
-def camera_animation_range(namespace: str) -> tuple[float, float] | None:
-    """Earliest and latest keyframe time across every rig control, or None when unkeyed.
-
-    Used at publish time to bake the camera's actual animation into USD —
-    the sequencer panel no longer reads this for layout (durations are stored
-    explicitly on `PrevisShot.durations`).
-    """
-    all_times: list[float] = []
-    for control in RIG_CONTROLS:
-        plug = f"{namespace}:{control}"
-        if not mc.objExists(plug):
-            continue
-        raw = mc.keyframe(plug, query=True, timeChange=True) or []
-        if raw:
-            all_times.extend(cast(list[float], raw))
-    if not all_times:
-        return None
-    return (float(min(all_times)), float(max(all_times)))
-
-
-def compute_animation_hash(camera_namespace: str) -> str:
-    """SHA1 over every (control, attr, time, value) tuple under `camera_namespace`.
-
-    Stored on each shot at publish; the panel re-hashes the live primary and
-    compares to flag "current" vs "modified".
-    """
-    parts: list[str] = []
-    for control in RIG_CONTROLS:
-        plug = f"{camera_namespace}:{control}"
-        if not mc.objExists(plug):
-            continue
-        for attr in mc.listAttr(plug, keyable=True) or []:
-            target = f"{plug}.{attr}"
-            count = mc.keyframe(target, query=True, keyframeCount=True) or 0
-            if count <= 0:
-                continue
-            # `mc.keyframe` stubs union list/scalar; count>0 guarantees a list.
-            times = cast(list[float], mc.keyframe(target, query=True, timeChange=True))
-            values = cast(
-                list[float], mc.keyframe(target, query=True, valueChange=True)
-            )
-            parts.append(f"{control}.{attr}|{list(zip(times, values))}")
-    return hashlib.sha1("\n".join(parts).encode()).hexdigest()
-
-
 def find_scene_cameras_outside_state(state: PrevisState) -> list[str]:
     """Camera-bearing namespaces in the scene that aren't already tracked by `state`."""
-    in_state: set[str] = {ns for shot in state.shots for ns in shot.all_cameras}
+    in_state: set[str] = {ns for shot in state.shots for ns in shot.namespaces}
     candidates: set[str] = set()
     for cam_shape in mc.ls(type="camera", long=True) or []:
         leaf = cam_shape.rsplit("|", 1)[-1]
@@ -157,11 +111,36 @@ def is_live(namespace: str) -> bool:
     return bool(namespace) and bool(mc.namespace(exists=f":{namespace}"))
 
 
+def _reference_node(namespace: str) -> str | None:
+    """The reference node that brought `namespace` in, or None if it was made in-scene."""
+    for node in mc.ls(f"{namespace}:*", long=True) or []:
+        if mc.referenceQuery(node, isNodeReferenced=True):
+            return cast(str, mc.referenceQuery(node, referenceNode=True))
+    return None
+
+
+def is_referenced(namespace: str) -> bool:
+    return _reference_node(namespace) is not None
+
+
+def delete_camera_rig(namespace: str) -> None:
+    """Remove `namespace` and everything under it from the scene."""
+    reference_node = _reference_node(namespace)
+    if reference_node is not None:
+        mc.file(removeReference=True, referenceNode=reference_node)
+    else:
+        nodes = mc.ls(f"{namespace}:*", long=True) or []
+        if nodes:
+            mc.delete(*nodes)
+    if mc.namespace(exists=f":{namespace}"):
+        mc.namespace(removeNamespace=f":{namespace}", deleteNamespaceContent=True)
+
+
 def find_orphan_cameras(state: PrevisState) -> list[tuple[str, str]]:
     """`(shot_id, namespace)` for every camera in `state` whose namespace is gone from the scene."""
     orphans: list[tuple[str, str]] = []
     for shot in state.shots:
-        for ns in shot.all_cameras:
+        for ns in shot.namespaces:
             if not is_live(ns):
                 orphans.append((shot.id, ns))
     return orphans
@@ -174,12 +153,3 @@ def rename_camera(old_ns: str, new_ns: str) -> bool:
         return False
     mc.namespace(rename=(old_ns, new_ns))
     return True
-
-
-def remove_camera_from_shot(shot: PrevisShot, namespace: str) -> None:
-    """Drop `namespace` from the shot's schema. The scene node itself is left untouched."""
-    if shot.primary == namespace:
-        shot.primary = ""
-    if namespace in shot.alternates:
-        shot.alternates.remove(namespace)
-    shot.durations.pop(namespace, None)

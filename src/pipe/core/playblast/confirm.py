@@ -13,7 +13,6 @@ from pipe.core.playblast.clip import (
     DestinationId,
     DiskDestination,
     PreviewClip,
-    PrevisTakeDestination,
     ShotGridDestination,
 )
 from pipe.core.playblast.encoding import build_image_input_chain, encode_movie
@@ -25,14 +24,6 @@ from pipe.core.playblast.review.versions import (
     find_playblast_version_codes,
     upload_playblast_version,
 )
-from pipe.core.previs import (
-    load_manifest,
-    mutate_manifest,
-    naming,
-    playblasts_dir,
-    utcnow_iso,
-)
-from pipe.core.previs.model import Take
 from pipe.core.util.users import resolve_artist_display_name
 
 log = logging.getLogger(__name__)
@@ -53,12 +44,7 @@ class ChosenShotGrid:
     description: str | None = None
 
 
-@attrs.frozen
-class ChosenTake:
-    destination: PrevisTakeDestination
-
-
-ChosenDestination = ChosenDisk | ChosenShotGrid | ChosenTake
+ChosenDestination = ChosenDisk | ChosenShotGrid
 
 
 @attrs.frozen
@@ -100,14 +86,6 @@ def confirm_clip(
 
     outcomes: list[DestinationOutcome] = []
 
-    take = next((choice for choice in chosen if isinstance(choice, ChosenTake)), None)
-    if take is not None:
-        take_outcome, take_basename = _deliver_take(clip, take.destination)
-        outcomes.append(take_outcome)
-        # A take that failed before it could allocate a version yields no
-        # basename; the folders then version themselves as usual below.
-        basename = basename or take_basename
-
     if basename is None:
         basename = next_versioned_basename(
             clip.output_prefix,
@@ -143,50 +121,6 @@ def _shotgrid_version_codes(
         # Losing the delivery to a failed read is worse than a repeated code.
         log.exception("Could not read existing ShotGrid Version codes for %s", prefix)
         return ()
-
-
-def _deliver_take(
-    clip: PreviewClip, destination: PrevisTakeDestination
-) -> tuple[DestinationOutcome, str | None]:
-    """Returns the outcome and the version basename the take allocated."""
-    stamp = destination.stamp
-    try:
-        version = load_manifest(
-            stamp.sequence_code, previs_root=stamp.previs_root
-        ).next_take_version(stamp.shot_code)
-    except Exception as exc:
-        log.exception("Could not allocate a take version for %s", stamp.shot_code)
-        return _failed(destination, exc), None
-
-    basename = naming.take_filename(stamp.shot_code, version).removesuffix(
-        naming.TAKE_SUFFIX
-    )
-    directory = playblasts_dir(stamp.sequence_code, previs_root=stamp.previs_root)
-    try:
-        final_path = _encode_and_copy(clip, directory, destination.preset, basename)
-        _stamp_take(destination, version)
-    except Exception as exc:
-        log.exception(
-            "Send to Edit failed for take v%s of %s", version, stamp.shot_code
-        )
-        return _failed(destination, exc), basename
-    return _delivered(destination, final_path), basename
-
-
-def _stamp_take(destination: PrevisTakeDestination, version: int) -> None:
-    stamp = destination.stamp
-    take = Take(
-        version=version,
-        source_filename=stamp.source_filename,
-        camera=stamp.camera,
-        created_at=utcnow_iso(),
-        duration_frames=stamp.duration_frames,
-    )
-    mutate_manifest(
-        stamp.sequence_code,
-        lambda manifest: manifest.add_take(stamp.shot_code, take),
-        previs_root=stamp.previs_root,
-    )
 
 
 def _deliver_to_folder(
@@ -275,7 +209,6 @@ __all__ = [
     "ChosenDestination",
     "ChosenDisk",
     "ChosenShotGrid",
-    "ChosenTake",
     "ConfirmResult",
     "DestinationOutcome",
     "confirm_clip",

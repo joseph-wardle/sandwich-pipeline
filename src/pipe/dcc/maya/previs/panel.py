@@ -12,39 +12,47 @@ from maya.app.general.mayaMixin import MayaQWidgetDockableMixin  # type: ignore
 from maya.OpenMayaUI import MQtUtil
 from Qt.QtCompat import wrapInstance
 from Qt.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QPushButton,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from pipe.core.playblast import PreviewClip
 from pipe.core.playblast.viewer import open_viewer
-from pipe.core.previs import codes, mutate_manifest
-from pipe.core.shotgrid import ShotGrid, is_previs_shot_code
-from pipe.core.ui import MessageDialog, MessageDialogCustomButtons
-from pipe.core.util.paths import get_previs_path, get_production_path
+from pipe.core.previs import ManifestWriteRefused, codes, mutate_manifest, naming
+from pipe.core.shotgrid import ShotGrid, ShotGridError
+from pipe.core.ui import MessageDialog, progress_scope
+from pipe.core.util.paths import get_previs_path
 
+from pipe.dcc.maya.command import undo_chunk
+from pipe.dcc.maya.playblast.viewport import ViewportQuality, query_viewport_quality
 from pipe.dcc.maya.runtime import get_main_qt_window
 
 from . import (
-    breakout,
+    active,
+    camera_sequencer,
     cameras,
     dialogs,
-    export,
     file_ops,
     monitor,
-    playback,
-    publish,
+    playblast,
+    playblast_dialog,
+    rlo,
     state,
-    status,
     style,
 )
-from .state import PrevisShot, PrevisState
-from .timeline import PrevisTimeline
+from .cut_view import CutView
+from .playback import CutPlayback
+from .state import PrevisShot, PrevisState, ShotTake
+from .timeline_view import TimelineView
+from .transport_button import TransportButton
 
 if TYPE_CHECKING:
     from pipe.core.previs.model import SequenceManifest
@@ -53,6 +61,8 @@ log = logging.getLogger(__name__)
 
 PANEL_OBJECT_NAME = "previsPanel"
 WORKSPACE_CONTROL_NAME = PANEL_OBJECT_NAME + "WorkspaceControl"
+_PLAYBLAST_TITLE = "Previs Playblast"
+_BREAK_OUT_TITLE = "Break Out Shot"
 
 _panel_instance: PrevisPanel | None = None
 
@@ -64,8 +74,13 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self.setWindowTitle("Previs Sequencer")
         self.setStyleSheet(f"#{PANEL_OBJECT_NAME} {{ background: {style.PANEL_BG}; }}")
 
-        self._state = state.read_state() or PrevisState.empty()
-        self._sg_conn: ShotGrid | None = None
+        self._state = state.read_state() or PrevisState()
+        self._synced: tuple[str | None, tuple[str, ...]] | None = None
+        self._playback = CutPlayback(
+            state=lambda: self._state,
+            go_to_cut_frame=self.scrub_to_cut_frame,
+            parent=self,
+        )
 
         self._build_ui()
         self.refresh()
@@ -77,8 +92,15 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         root.addWidget(self._build_top_bar())
-        self._timeline = PrevisTimeline(self, parent=self)
-        root.addWidget(self._timeline, 1)
+        self._cut_view = CutView(self, parent=self)
+        self._timeline_view = TimelineView(self, parent=self)
+        self._views = QStackedWidget(self)
+        self._views.addWidget(self._cut_view)
+        self._views.addWidget(self._timeline_view)
+        root.addWidget(self._views, 1)
+        # Not persisted: the cut is what the panel is for, so every session opens
+        # on it regardless of where the last one ended.
+        self._view: CutView | TimelineView = self._cut_view
 
     def _build_top_bar(self) -> QFrame:
         bar = QFrame(self)
@@ -104,6 +126,31 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self._info.setObjectName("info")
         row.addWidget(self._info)
 
+        self._cut_btn = _view_button(
+            bar, "cut", "Shots in edit order — horizontal position is cut position"
+        )
+        self._cut_btn.clicked.connect(lambda: self._show_view(self._cut_view))
+        row.addWidget(self._cut_btn)
+
+        self._timeline_btn = _view_button(
+            bar,
+            "timeline",
+            "Shots where their animation lives. Horizontal position is scene time",
+        )
+        self._timeline_btn.clicked.connect(lambda: self._show_view(self._timeline_view))
+        row.addWidget(self._timeline_btn)
+
+        # Exclusive group, so "which button is lit" cannot drift from each other
+        # and clicking the lit one cannot leave the pair unlit.
+        self._view_group = QButtonGroup(bar)
+        self._view_group.addButton(self._cut_btn)
+        self._view_group.addButton(self._timeline_btn)
+        self._cut_btn.setChecked(True)
+
+        row.addStretch(1)
+        self._play_btn = TransportButton(bar)
+        self._play_btn.clicked.connect(self.toggle_playback)
+        row.addWidget(self._play_btn)
         row.addStretch(1)
 
         self._monitor_label = QLabel("", bar)
@@ -135,44 +182,103 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self._branch_btn.clicked.connect(self.branch_file)
         row.addWidget(self._branch_btn)
 
-        breakout_btn = QPushButton("break out all", bar)
-        breakout_btn.setStyleSheet(style.TOOLBAR_BUTTON)
-        breakout_btn.clicked.connect(self.break_out_all)
-        row.addWidget(breakout_btn)
-
-        publish_btn = QPushButton("publish all cams", bar)
-        publish_btn.setStyleSheet(style.TOOLBAR_BUTTON)
-        publish_btn.clicked.connect(self.publish_all_shot_cameras)
-        row.addWidget(publish_btn)
-
-        export_btn = QPushButton("export takes", bar)
-        export_btn.setStyleSheet(style.TOOLBAR_BUTTON)
-        export_btn.setToolTip("Render every shot's primary to a new immutable take")
-        export_btn.clicked.connect(self.export_all_takes)
-        row.addWidget(export_btn)
+        playblast_btn = QPushButton("playblast all", bar)
+        playblast_btn.setStyleSheet(style.TOOLBAR_BUTTON)
+        playblast_btn.setToolTip(
+            "Choose shots and capture quality, then render and review the clips"
+        )
+        playblast_btn.clicked.connect(self.playblast_all_shots)
+        row.addWidget(playblast_btn)
         return bar
 
+    def _show_view(self, view: CutView | TimelineView) -> None:
+        """Swap which axis is on screen."""
+        if view is self._view:
+            return
+        self._view = view
+        self._views.setCurrentWidget(view)
+        # Redundant after a click (the button checked itself), but keeps the
+        # lit button honest if this is ever called from anywhere else.
+        (self._cut_btn if view is self._cut_view else self._timeline_btn).setChecked(
+            True
+        )
+        self._sync_transport()
+        view.set_state(self._state)
+
     def refresh(self) -> None:
-        self._timeline.set_state(self._state)
+        self._sync_transport()
+        self._view.set_state(self._state)
         self._update_status_text()
         self._update_monitor_label()
         self._update_branch_button()
-        self._warn_orphans()
+        active.sync_monitor(self._state)
 
     def _update_branch_button(self) -> None:
         """Branch only makes sense on an open previs file."""
         self._branch_btn.setEnabled(self._is_previs_file())
 
-    def install_playhead_callback(self) -> None:
-        """Resync the playhead on every scene time change, for the panel's lifetime.
+    def _sync_transport(self) -> None:
+        in_cut_view = self._view is self._cut_view
+        playable = in_cut_view and bool(self._state.shots)
+        if not playable:
+            self._playback.stop()
+        self._play_btn.setVisible(in_cut_view)
+        self._play_btn.setEnabled(playable)
+        self._play_btn.set_playing(self._playback.is_playing)
 
-        Parented to the workspaceControl so Maya kills the job when the panel closes —
-        deliberately separate from playback.py's file-scoped monitor job.
+    def install_scene_callbacks(self) -> None:
+        """Follow the scene for the panel's lifetime.
+
+        The scene node is the state; `self._state` is only a copy of it, so every
+        event that can move the node behind the panel's back has to be here.
         """
-        mc.scriptJob(
-            event=("timeChanged", self._timeline.sync_playhead),
-            parent=WORKSPACE_CONTROL_NAME,
+        for event, handler in (
+            ("timeChanged", self._sync_playhead),
+            ("Undo", self._reload_state),
+            ("Redo", self._reload_state),
+            ("SceneOpened", self._adopt_scene),
+            ("NewSceneOpened", self._adopt_scene),
+        ):
+            mc.scriptJob(event=(event, handler), parent=WORKSPACE_CONTROL_NAME)
+
+    def _sync_playhead(self) -> None:
+        self._view.sync_playhead()
+
+    def _reload_state(self) -> None:
+        """Adopt whatever the scene now says, discarding the panel's copy."""
+        scene_state = state.read_state() or PrevisState()
+        if scene_state.to_dict() == self._state.to_dict():
+            return
+        self._state = scene_state
+        self.refresh()
+
+    def _adopt_scene(self) -> None:
+        """A different file is on screen, so this panel's shots and selection are gone."""
+        active.set_selected_shot(None)
+        self._synced = None  # a different file's membership is a different fact
+        self._state = state.read_state() or PrevisState()
+        self.refresh()
+        self._offer_sequencer_import()
+
+    def _offer_sequencer_import(self) -> None:
+        """Offer to read a legacy file's Camera Sequencer as this file's shot list."""
+        if self._state.shots:
+            return
+        sequence = self._sequence_code()
+        result = camera_sequencer.import_from_scene(
+            naming.sequence_letter(sequence) if sequence else ""
         )
+        if result is None:
+            return
+        imported, report = result
+        if not dialogs.confirm_sequencer_import(self, report):
+            return
+        # One chunk, so a look at the result undoes back to the legacy sequencer
+        # rather than to a file with neither.
+        with undo_chunk("previsImportSequencer"):
+            camera_sequencer.strip_sequencer()
+            self._state = imported
+            self._persist()
 
     def _persist(self) -> None:
         state.write_state(self._state)
@@ -180,32 +286,33 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         self.refresh()
 
     def _sync_manifest(self) -> None:
-        """Push this file's shot codes and membership into the sequence manifest.
-
-        Runs on every _persist, so the manifest tracks each edit without scene
-        callbacks. When the scene is not a saved previs file there is nothing to
-        map membership onto, so this logs why and returns.
-        """
+        """Push this file's shot codes and membership into the sequence manifest."""
         sequence_code = self._sequence_code()
-        if sequence_code is None:
-            log.debug("Manifest sync skipped: file has no previs sequence code.")
-            return
         filename = self._current_filename()
-        if filename is None:
-            log.debug("Manifest sync skipped: scene has not been saved to disk.")
+        if sequence_code is None or filename is None:
+            log.debug("Manifest sync skipped: no previs sequence, or scene unsaved.")
             return
 
         # Codes are already canonical (declare_code / suggest_next enforce it),
         # so a file's membership snapshot joins the manifest's `shots` list on
         # the same key.
-        file_codes = [s.code for s in self._state.shots if s.code]
+        file_codes = tuple(s.code for s in self._state.shots if s.code)
+        if self._synced == (filename, file_codes):
+            return
+        # Recorded before the write: a manifest this build cannot save is not
+        # going to become savable on the next drag, and retrying would put the
+        # same dialog in front of every edit.
+        self._synced = (filename, file_codes)
 
         def _apply(manifest: SequenceManifest) -> None:
             for code in file_codes:
                 manifest.ensure_shot(code)
-            manifest.set_membership(filename, file_codes)
+            manifest.set_membership(filename, list(file_codes))
 
-        mutate_manifest(sequence_code, _apply)
+        try:
+            mutate_manifest(sequence_code, _apply)
+        except ManifestWriteRefused as exc:
+            MessageDialog(self, str(exc), "Previs Manifest").exec_()
 
     def _current_filename(self) -> str | None:
         """Basename of the open scene on disk, or None if it was never saved."""
@@ -228,34 +335,28 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             return f"{seq}  ·  no shots"
         total_frames = sum(s.primary_duration for s in shots)
         plural = "s" if len(shots) != 1 else ""
-        return (
+        line = (
             f"{seq}  ·  {len(shots)} shot{plural}"
             f"  ·  {total_frames}f  ·  {total_frames / 24.0:.1f}s @ 24fps"
         )
+        missing = len(cameras.find_orphan_cameras(self._state))
+        if missing:
+            return f"{line}  ·  {missing} camera{'s' if missing != 1 else ''} missing"
+        return line
 
     def _sequence_code(self) -> str | None:
-        """Sequence-proxy code from `fileInfo` (e.g. `A_previs`), or None if absent/invalid."""
-        raw = mc.fileInfo("code", query=True)
-        code = raw[0] if isinstance(raw, (list, tuple)) and raw else raw
-        if not isinstance(code, str):
-            return None
-        return code if is_previs_shot_code(code) else None
+        return file_ops.sequence_code()
 
     def pick_monitor(self) -> None:
         monitor.pick_monitor(on_bound=self._on_monitor_bound)
 
     def _on_monitor_bound(self, panel: str) -> None:
         self._update_monitor_label()
-        playback.sync_monitor()  # show the current shot's camera immediately
+        active.sync_monitor(self._state)  # show the active shot's camera now
 
     def _update_monitor_label(self) -> None:
         panel = monitor.get_monitor()
         self._monitor_label.setText(f"monitor: {panel}" if panel else "")
-
-    def _warn_orphans(self) -> None:
-        orphans = cameras.find_orphan_cameras(self._state)
-        if orphans:
-            dialogs.show_orphan_warning(self, orphans)
 
     # ---------- controller methods (called by child widgets) ----------
 
@@ -266,26 +367,54 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         instead, since that job is coalesced and lags an interactive scrub.
         """
         mc.currentTime(frame)
-        self._timeline.sync_playhead()
+        self._sync_playhead()
+
+    def scrub_to_cut_frame(self, cut_frame: int) -> None:
+        """Put the scene where `cut_frame` plays, and hand that shot the overlap."""
+        found = self._state.shot_at_cut(cut_frame)
+        if found is None:
+            return  # off the end of the cut; nothing plays there
+        shot, source_frame = found
+        self.select_shot(shot.id)
+        self.scrub_to_frame(source_frame)
+
+    def toggle_playback(self) -> None:
+        """Play or pause the cut, from the transport button in the top bar."""
+        self._playback.toggle()
+        self._sync_transport()
+
+    def select_shot(self, shot_id: str) -> None:
+        """Make `shot_id` the shot that wins an overlap."""
+        if active.selected_shot_id() == shot_id:
+            return
+        active.set_selected_shot(shot_id)
+        self._view.apply_selection(shot_id)
+        self._view.sync_playhead()
+        active.sync_monitor(self._state)
 
     def jump_to_shot(self, shot_id: str) -> None:
-        ranges = playback.compute_shot_ranges(self._state)
-        shot_range = ranges.get(shot_id)
-        if shot_range is not None:
-            self.scrub_to_frame(shot_range[0])
+        shot = self._state.find_shot(shot_id)
+        if shot is None:
+            return
+        self.select_shot(shot_id)
+        self.scrub_to_frame(shot.source_in)
 
     def add_shot(self) -> None:
         if not self._guard_previs_file():
             return
-        ns = cameras.add_new_rig_reference()
-        new_shot = PrevisShot(
-            id=state.next_shot_id(),
-            code=self._suggest_code(),
-            primary=ns,
-            durations={ns: state.DEFAULT_SHOT_DURATION},
-        )
-        self._state.shots.append(new_shot)
-        self._persist()
+        # The rig reference joins the undo chunk
+        with undo_chunk("previsAddShot"):
+            ns = cameras.add_new_rig_reference()
+            self._state.shots.append(
+                PrevisShot(
+                    id=state.next_shot_id(),
+                    code=self._suggest_code(),
+                    source_in=self._state.next_source_in(),
+                    takes=[ShotTake(ns)],
+                    primary=ns,
+                )
+            )
+            self._persist()
 
     def _suggest_code(self) -> str:
         """Next free sticky code for this sequence, or "" if the letter can't resolve."""
@@ -293,7 +422,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         if seq is None:
             return ""
         existing = [s.code for s in self._state.shots if s.code]
-        return codes.suggest_next(seq[0], existing)
+        return codes.suggest_next(naming.sequence_letter(seq), existing)
 
     def branch_file(self) -> None:
         """Checkpoint the open file as its next version, optionally on a new stream."""
@@ -321,31 +450,49 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         ).exec_()
 
     def remove_shot(self, shot_id: str) -> None:
-        self._state.shots = [s for s in self._state.shots if s.id != shot_id]
-        self._persist()
-
-    def add_alternate_new_rig(self, shot_id: str) -> None:
+        """Delete a shot and the cameras it owns, once the artist confirms both."""
         shot = self._state.find_shot(shot_id)
         if shot is None:
             return
-        ns = cameras.add_new_rig_reference()
-        shot.alternates.append(ns)
-        shot.durations[ns] = state.DEFAULT_SHOT_DURATION
-        self._persist()
+        live = [ns for ns in shot.namespaces if cameras.is_live(ns)]
+        # A camera another shot is still cut from outlives this one.
+        doomed = [ns for ns in live if len(self._state.shots_using(ns)) == 1]
+        kept = [ns for ns in live if ns not in doomed]
+        if not dialogs.confirm_delete_shot(
+            self,
+            label=shot.code or "this shot",
+            namespaces=doomed,
+            kept=kept,
+            undoable=not any(cameras.is_referenced(ns) for ns in doomed),
+        ):
+            return
+        with undo_chunk("previsDeleteShot"):
+            for namespace in doomed:
+                cameras.delete_camera_rig(namespace)
+            self._state.shots = [s for s in self._state.shots if s.id != shot_id]
+            self._persist()
 
-    def add_alternate_duplicate_primary(self, shot_id: str) -> None:
+    def add_take_new_rig(self, shot_id: str) -> None:
         shot = self._state.find_shot(shot_id)
         if shot is None:
             return
-        new_ns = cameras.duplicate_primary(shot)
-        if new_ns is None:
-            return
-        shot.alternates.append(new_ns)
-        # Inherit the primary's duration — the duplicate IS the primary, at this moment.
-        shot.durations[new_ns] = shot.primary_duration
-        self._persist()
+        with undo_chunk("previsAddTake"):
+            shot.add_take(cameras.add_new_rig_reference())
+            self._persist()
 
-    def add_alternate_existing_camera(self, shot_id: str) -> None:
+    def add_take_duplicate_primary(self, shot_id: str) -> None:
+        shot = self._state.find_shot(shot_id)
+        if shot is None:
+            return
+        # The rig reference and its copied keys belong to the same edit as the take.
+        with undo_chunk("previsDuplicateTake"):
+            new_ns = cameras.duplicate_primary(shot)
+            if new_ns is not None:
+                # A copy of the primary's keys starts out the primary's length.
+                shot.add_take(new_ns, shot.primary_duration)
+                self._persist()
+
+    def add_take_existing_camera(self, shot_id: str) -> None:
         shot = self._state.find_shot(shot_id)
         if shot is None:
             return
@@ -353,9 +500,9 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         chosen = dialogs.pick_scene_camera(self, candidates)
         if not chosen:
             return
-        shot.alternates.append(chosen)
-        shot.durations[chosen] = state.DEFAULT_SHOT_DURATION
-        self._persist()
+        with undo_chunk("previsAddTake"):
+            shot.add_take(chosen)
+            self._persist()
 
     def look_through_under_cursor(self, namespace: str) -> None:
         """Aim the work viewport under the cursor at `namespace`'s camera.
@@ -369,27 +516,44 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         if panel == monitor.get_monitor():
             # The monitor re-aims at the active shot on every time change, so an aim
             # here would just revert
-            mc.inViewMessage(
-                assistMessage="The monitor follows the active shot; drop on a work viewport.",
-                position="midCenter",
-                fade=True,
+            _assist("The monitor follows the active shot; drop on a work viewport.")
+            return
+        self._aim_viewport(panel, namespace)
+
+    def look_through(self, namespace: str) -> None:
+        """Aim a work viewport at `namespace`'s camera."""
+        visible = mc.getPanel(visiblePanels=True) or []
+        panels = [
+            p
+            for p in (mc.getPanel(type="modelPanel") or [])
+            if p in visible and p != monitor.get_monitor()
+        ]
+        if not panels:
+            _assist(
+                "The monitor follows the active shot; open another viewport to "
+                "look through this camera."
+                if monitor.get_monitor()
+                else "No model viewport open to look through."
             )
             return
+        self._aim_viewport(panels[0], namespace)
+
+    def _aim_viewport(self, panel: str, namespace: str) -> None:
         camera_shape = cameras.camera_shape_for_namespace(namespace)
-        if camera_shape:
-            mc.lookThru(panel, camera_shape)
+        if not camera_shape:
+            _assist(f"{namespace} has no camera in the scene — right-click to re-link.")
+            return
+        mc.lookThru(panel, camera_shape)
 
     def promote_to_primary(self, shot_id: str, namespace: str) -> None:
         shot = self._state.find_shot(shot_id)
         if shot is None or shot.primary == namespace:
             return
-        if namespace not in shot.alternates:
+        if shot.find_take(namespace) is None:
             return
-        shot.alternates.remove(namespace)
-        if shot.primary:
-            shot.alternates.insert(0, shot.primary)
-        shot.primary = namespace
-        self._persist()
+        with undo_chunk("previsPromoteTake"):
+            shot.primary = namespace
+            self._persist()
 
     def resize_camera(
         self, shot_id: str, namespace: str, new_length_frames: int
@@ -397,44 +561,113 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         shot = self._state.find_shot(shot_id)
         if shot is None or new_length_frames <= 0:
             return
-        if shot.duration_of(namespace) == new_length_frames:
+        take = shot.find_take(namespace)
+        if take is None or take.duration == new_length_frames:
             return
-        shot.durations[namespace] = new_length_frames
-        self._persist()
+        with undo_chunk("previsResizeShot"):
+            take.duration = new_length_frames
+            self._persist()
+
+    def set_source_in(self, shot_id: str, frame: int) -> None:
+        """Move where this shot's material sits in scene time."""
+        shot = self._state.find_shot(shot_id)
+        if shot is None or shot.source_in == int(frame):
+            return
+        with undo_chunk("previsSetSourceIn"):
+            shot.source_in = int(frame)
+            self._persist()
+
+    def set_source_in_to_current(self, shot_id: str) -> None:
+        """Menu path to the exact frame a four-pixels-per-frame drag can't land on."""
+        self.set_source_in(shot_id, int(mc.currentTime(query=True)))
+
+    def trim_head(self, shot_id: str, delta_frames: int) -> None:
+        """Move the shot's head by `delta_frames`, holding `source_out` still."""
+        shot = self._state.find_shot(shot_id)
+        if shot is None or delta_frames == 0:
+            return
+        take = shot.primary_take
+        # Both unreachable from the UI — a takeless shot draws as an inert
+        # placeholder, and the handle clamps the drag to leave one frame.
+        if take is None or take.duration - delta_frames <= 0:
+            return
+        with undo_chunk("previsTrimHead"):
+            shot.source_in += delta_frames
+            take.duration -= delta_frames
+            self._persist()
 
     def preview_resize_camera(
         self, shot_id: str, namespace: str, new_length_frames: int
     ) -> None:
-        """Live column-width preview during a resize drag; no state mutation."""
-        self._timeline.preview_column_width(shot_id, namespace, new_length_frames)
+        """Live width preview during a resize drag; no state mutation."""
+        self._view.preview_resize(shot_id, namespace, new_length_frames)
+
+    def preview_span(
+        self, shot_id: str, *, start_delta: int, length_delta: int
+    ) -> None:
+        """Live block geometry during a source-axis drag; no state mutation."""
+        self._timeline_view.preview_span(
+            shot_id, start_delta=start_delta, length_delta=length_delta
+        )
 
     def remove_camera(self, shot_id: str, namespace: str) -> None:
         shot = self._state.find_shot(shot_id)
         if shot is None:
             return
-        cameras.remove_camera_from_shot(shot, namespace)
-        self._persist()
+        with undo_chunk("previsRemoveTake"):
+            shot.drop_take(namespace)
+            self._persist()
+
+    def relink_camera(self, shot_id: str, namespace: str) -> None:
+        """Repoint a take at a camera that is actually in the scene, keeping its length."""
+        shot = self._state.find_shot(shot_id)
+        if shot is None:
+            return
+        take = shot.find_take(namespace)
+        if take is None:
+            return
+        candidates = cameras.find_scene_cameras_outside_state(self._state)
+        if not candidates:
+            MessageDialog(
+                self,
+                f"There is no untracked camera in the scene to re-link {namespace} to. "
+                "Add the camera back, or delete the take.",
+                "Re-link Camera",
+            ).exec_()
+            return
+        chosen = dialogs.pick_scene_camera(self, candidates)
+        if not chosen:
+            return
+        # Every shot cut from the dead camera follows it to the new one; leaving
+        # the others pointed at a namespace that is gone only hides the problem.
+        with undo_chunk("previsRelinkTake"):
+            self._repoint_takes(namespace, chosen)
+            self._persist()
 
     def rename_camera(self, shot_id: str, namespace: str) -> None:
+        shot = self._state.find_shot(shot_id)
+        if shot is None:
+            return
         new_name = dialogs.prompt_rename(self, namespace)
         if not new_name:
             return
-        if not cameras.rename_camera(namespace, new_name):
+        # Renaming the namespace and repointing the takes at it is one edit
+        with undo_chunk("previsRenameTake"):
+            renamed = cameras.rename_camera(namespace, new_name)
+            if renamed:
+                self._repoint_takes(namespace, new_name)
+                self._persist()
+        if not renamed:
             MessageDialog(
                 self,
                 f"Could not rename {namespace} to {new_name} (name in use or namespace missing).",
                 "Rename Failed",
             ).exec_()
-            return
-        shot = self._state.find_shot(shot_id)
-        if shot is None:
-            return
-        if shot.primary == namespace:
-            shot.primary = new_name
-        shot.alternates = [new_name if a == namespace else a for a in shot.alternates]
-        if namespace in shot.durations:
-            shot.durations[new_name] = shot.durations.pop(namespace)
-        self._persist()
+
+    def _repoint_takes(self, namespace: str, new_namespace: str) -> None:
+        """Move every take on `namespace` to `new_namespace`, across all shots."""
+        for shot in self._state.shots_using(namespace):
+            shot.retarget_take(namespace, new_namespace)
 
     def declare_code(self, shot_id: str) -> None:
         """Declare a shot's sticky code from free text
@@ -453,7 +686,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
                 "Set Shot Code",
             ).exec_()
             return
-        letter = seq[0]
+        letter = naming.sequence_letter(seq)
         raw = dialogs.prompt_shot_code(
             self, current=shot.code, suggestion=self._suggest_code()
         )
@@ -468,7 +701,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
                 "Set Shot Code",
             ).exec_()
             return
-        if new_code[0] != letter:
+        if codes.shot_letter(new_code) != letter:
             MessageDialog(
                 self,
                 f"Shot code {new_code} does not belong to sequence {letter}. "
@@ -483,8 +716,9 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
                 "Set Shot Code",
             ).exec_()
             return
-        shot.code = new_code
-        self._persist()
+        with undo_chunk("previsSetShotCode"):
+            shot.code = new_code
+            self._persist()
 
     def move_shot(self, shot_id: str, delta: int) -> None:
         shots = self._state.shots
@@ -494,106 +728,87 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         new_index = max(0, min(len(shots) - 1, index + delta))
         if new_index == index:
             return
-        shots[index], shots[new_index] = shots[new_index], shots[index]
-        self._persist()
+        with undo_chunk("previsMoveShot"):
+            shots[index], shots[new_index] = shots[new_index], shots[index]
+            self._persist()
 
-    def break_out_shot(self, shot_id: str) -> None:
-        shot = self._state.find_shot(shot_id)
-        if shot is None:
-            return
-        if not shot.shotgrid_code:
-            MessageDialog(
-                self,
-                "Assign a ShotGrid code to this shot before breaking out.",
-                "Break Out to RLO",
-            ).exec_()
-            return
-        if not self._confirm_break_out([shot]):
-            return
-        try:
-            conn = self._conn()
-            shot_range = playback.compute_shot_ranges(self._state)[shot.id]
-            sg_shot = conn.get_shot(code=shot.shotgrid_code)
-            breakout.break_out_shot(shot, sg_shot, shot_range, conn)
-        except Exception as exc:
-            log.exception("break_out_shot failed")
-            MessageDialog(self, str(exc), "Break Out Failed").exec_()
-            return
-        self._persist()
-
-    def break_out_all(self) -> None:
-        paired = [s for s in self._state.shots if s.shotgrid_code]
-        if not paired:
-            MessageDialog(
-                self,
-                "No shots have a ShotGrid code yet. Assign codes before breaking out.",
-                "Break Out to RLO",
-            ).exec_()
-            return
-        if not self._confirm_break_out(paired):
-            return
-        try:
-            paths = breakout.break_out_sequence(self._state, self._conn())
-        except Exception as exc:
-            log.exception("break_out_all failed")
-            MessageDialog(self, str(exc), "Break Out Failed").exec_()
-            return
-        MessageDialog(
-            self, f"Broke out {len(paths)} shot(s).", "Break Out to RLO"
-        ).exec_()
-        self._persist()
-
-    def publish_shot_camera(self, shot_id: str) -> None:
-        shot = self._state.find_shot(shot_id)
-        if shot is None:
-            return
-        if not shot.shotgrid_code:
-            MessageDialog(
-                self,
-                "Assign a ShotGrid code to this shot before publishing its camera.",
-                "Publish Shot Camera",
-            ).exec_()
-            return
-        try:
-            sg_shot = self._conn().get_shot(code=shot.shotgrid_code)
-            publish.publish_shot_camera(shot, sg_shot)
-        except Exception as exc:
-            log.exception("publish_shot_camera failed")
-            MessageDialog(self, str(exc), "Publish Failed").exec_()
-            return
-        self._persist()
-
-    def publish_all_shot_cameras(self) -> None:
-        paired = [s for s in self._state.shots if s.shotgrid_code]
-        if not paired:
-            MessageDialog(
-                self,
-                "No shots have a ShotGrid code yet. Assign codes before publishing.",
-                "Publish Shot Cameras",
-            ).exec_()
-            return
-        try:
-            paths = publish.publish_all_shot_cameras(self._state, self._conn())
-        except Exception as exc:
-            log.exception("publish_all_shot_cameras failed")
-            MessageDialog(self, str(exc), "Publish Failed").exec_()
-            return
-        MessageDialog(
-            self, f"Published {len(paths)} shot camera(s).", "Publish Shot Cameras"
-        ).exec_()
-        self._persist()
-
-    def export_take(self, shot_id: str) -> None:
-        """Render one shot's primary to a take preview and open it in the viewer."""
+    def playblast_shot(self, shot_id: str) -> None:
+        """Render one shot's primary to a preview and open it in the viewer."""
         shot = self._state.find_shot(shot_id)
         if shot is not None:
-            self._launch_take_previews([shot])
+            self._launch_playblasts([shot], ask=False)
 
-    def export_all_takes(self) -> None:
-        self._launch_take_previews(self._state.shots)
+    def break_out_shot(self, shot_id: str) -> None:
+        """Deliver one previs shot to its RLO scene, then come back to previs."""
+        shot = self._state.find_shot(shot_id)
+        if shot is None or not self._guard_previs_file():
+            return
+        label = shot.code or shot.id
+        try:
+            conn = ShotGrid.connect(DB_Config)
+            plan = self._plan_break_out(shot, conn)
+            if not dialogs.confirm_break_out(self, plan):
+                return
+            destination = rlo.deliver(plan, shot, self._state, conn)
+        except rlo.BreakOutError as exc:
+            MessageDialog(self, str(exc), _BREAK_OUT_TITLE).exec_()
+            return
+        except ShotGridError as exc:
+            log.exception("Could not read ShotGrid to break out %s.", label)
+            MessageDialog(
+                self,
+                f"Could not reach ShotGrid, so nothing was broken out:\n{exc}",
+                _BREAK_OUT_TITLE,
+            ).exec_()
+            return
+        except Exception as exc:
+            log.exception("Break-out of %s failed.", label)
+            MessageDialog(
+                self, f"Breaking out {label} failed:\n{exc}", _BREAK_OUT_TITLE
+            ).exec_()
+            return
+        # Break-out leaves the previs file reopened, so the panel adopts it now
+        # rather than waiting on the idle-time scene job.
+        self._adopt_scene()
+        published = self._publish_break_out_version(shot, plan.code)
+        MessageDialog(
+            self,
+            f"Broke out {plan.code} to\n{destination}\n\n{published}",
+            _BREAK_OUT_TITLE,
+        ).exec_()
 
-    def _launch_take_previews(self, shots: list[PrevisShot]) -> None:
-        """Render take previews for `shots` and hand them to the viewer."""
+    def _publish_break_out_version(self, shot: PrevisShot, code: str) -> str:
+        """Give the new Shot its first ShotGrid Version, and say how that went."""
+        sequence_code = self._sequence_code()
+        if sequence_code is None:
+            return "No sequence code, so no playblast was published."
+        # `_adopt_scene` re-read the file, so prefer the reopened scene's copy of
+        # the shot over the one captured before delivery.
+        delivered = self._state.find_shot(shot.id) or shot
+        try:
+            return playblast.deliver_break_out_version(
+                delivered, sequence_code, previs_root=get_previs_path()
+            )
+        except Exception as exc:
+            log.exception("Publishing a ShotGrid Version for %s failed.", code)
+            return f"No playblast was published for {code}:\n{exc}"
+
+    def _plan_break_out(self, shot: PrevisShot, conn: ShotGrid) -> rlo.DeliveryPlan:
+        """What breaking `shot` out would do."""
+        sequence_code = self._sequence_code()
+        if sequence_code is None:
+            raise rlo.BreakOutError(
+                "This file is not stamped with a previs sequence code, so break-out "
+                "cannot tell which sequence the shot belongs to. Reopen it through "
+                "Open Previs in the shelf."
+            )
+        return rlo.plan_delivery(shot, conn.get_shot(code=sequence_code), conn)
+
+    def playblast_all_shots(self) -> None:
+        self._launch_playblasts(self._state.shots, ask=True)
+
+    def _launch_playblasts(self, shots: list[PrevisShot], *, ask: bool) -> None:
+        """Render `shots` and hand the clips to the viewer."""
         if not self._guard_previs_file():
             return
         sequence_code = self._sequence_code()
@@ -601,64 +816,110 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             return  # guarded above; re-checked so the type stays narrowed
         if not shots:
             MessageDialog(
-                self, "No shots in this file to export.", "Export Takes"
+                self, "No shots in this file to playblast.", _PLAYBLAST_TITLE
             ).exec_()
             return
+        if ask:
+            request = self._ask_playblast(shots)
+            if request is None:
+                return
+            picked = set(request.shot_ids)
+            shots = [shot for shot in shots if shot.id in picked]
+            quality = request.quality
+        else:
+            quality = query_viewport_quality()
 
-        try:
-            batch = export.build_take_previews(
-                self._state, shots, sequence_code, previs_root=get_previs_path()
-            )
-        except Exception as exc:
-            log.exception("Take preview render failed")
-            MessageDialog(self, str(exc), "Export Failed").exec_()
+        batch = self._render_shots(shots, sequence_code, quality)
+        if batch is None:
             return
-
         if batch.failed:
             MessageDialog(
-                self, _summarize_skipped(batch.failed), "Export Takes"
+                self, _summarize_skipped(batch.failed), _PLAYBLAST_TITLE
             ).exec_()
         if not batch.clips:
-            if not batch.failed:
-                MessageDialog(self, "Nothing was rendered.", "Export Takes").exec_()
+            if not (batch.failed or batch.cancelled):
+                MessageDialog(self, "Nothing was rendered.", _PLAYBLAST_TITLE).exec_()
             return
 
-        open_viewer(batch.clips, parent=get_main_qt_window())
+        cut, cut_unavailable = self._stage_cut(batch.clips, sequence_code)
+        open_viewer(
+            batch.clips,
+            parent=get_main_qt_window(),
+            cut=cut,
+            cut_unavailable=cut_unavailable,
+        )
 
-    def _confirm_break_out(self, shots: list[PrevisShot]) -> bool:
-        """Confirm a destructive re-bake, flagging any RLO files it would overwrite."""
-        prod_root = get_production_path()
-        overwrites = [
-            s.shotgrid_code
-            for s in shots
-            if s.shotgrid_code and status.rlo_path(s.shotgrid_code, prod_root).exists()
-        ]
-        plural = "s" if len(shots) != 1 else ""
-        body = (
-            f"Break out {len(shots)} shot{plural} to RLO? "
-            "This re-bakes the scene from scratch."
-        )
-        if overwrites:
-            body += "\n\nOverwrites existing RLO files:\n" + "\n".join(
-                f"  • {code}" for code in overwrites
+    def _ask_playblast(
+        self, shots: list[PrevisShot]
+    ) -> playblast_dialog.PlayblastRequest | None:
+        """The artist's shot picks and capture settings; None when they cancel."""
+        rows = [
+            playblast_dialog.PlayblastRow(
+                shot_id=shot.id,
+                label=shot.code or "no code",
+                detail=(
+                    f"{shot.source_in}–{shot.source_out}  ·  {shot.primary_duration}f"
+                ),
+                blocker=playblast.render_blocker(shot),
             )
-        return bool(
-            MessageDialogCustomButtons(
-                self,
-                body,
-                "Break Out to RLO",
-                has_cancel_button=True,
-                ok_name="Break Out",
-                cancel_name="Cancel",
-            ).exec_()
-        )
+            for shot in shots
+        ]
+        return playblast_dialog.ask_playblast(self, rows)
+
+    def _render_shots(
+        self,
+        shots: list[PrevisShot],
+        sequence_code: str,
+        quality: ViewportQuality,
+    ) -> playblast.ShotPlayblastBatch | None:
+        """Render the batch behind a progress dialog, or None if it broke outright."""
+        step = "Rendering shots"
+        try:
+            with progress_scope(
+                parent=self,
+                title=_PLAYBLAST_TITLE,
+                steps=[step],
+                cancellable=True,
+            ) as progress:
+                progress.begin_step(step)
+
+                def on_shot(index: int, label: str) -> bool:
+                    progress.update_substep(index, len(shots), f"Rendering {label}")
+                    return not progress.cancelled
+
+                return playblast.build_shot_playblasts(
+                    shots,
+                    sequence_code,
+                    previs_root=get_previs_path(),
+                    quality=quality,
+                    on_shot=on_shot,
+                )
+        except Exception as exc:
+            log.exception("Previs playblast render failed")
+            MessageDialog(self, str(exc), _PLAYBLAST_TITLE).exec_()
+            return None
+
+    def _stage_cut(
+        self, clips: list[PreviewClip], sequence_code: str
+    ) -> tuple[PreviewClip | None, str]:
+        """The whole-file cut offered beside the clips, or why there is none."""
+        if len(clips) < 2:
+            return None, ""
+        try:
+            cut = playblast.build_cut(
+                clips,
+                filename=self._current_filename(),
+                sequence_code=sequence_code,
+                previs_root=get_previs_path(),
+            )
+        except playblast.PrevisPlayblastError as exc:
+            return None, str(exc)
+        except Exception as exc:
+            log.exception("Previs cut staging failed")
+            return None, f"The cut could not be staged. {exc}"
+        return cut, ""
 
     # ---------- helpers ----------
-
-    def _conn(self) -> ShotGrid:
-        if self._sg_conn is None:
-            self._sg_conn = ShotGrid.connect(DB_Config)
-        return self._sg_conn
 
     def _is_previs_file(self) -> bool:
         return self._sequence_code() is not None
@@ -674,8 +935,21 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         return False
 
 
+def _assist(message: str) -> None:
+    """Say why a viewport gesture did nothing, where the artist is already looking."""
+    mc.inViewMessage(assistMessage=message, position="midCenter", fade=True)
+
+
+def _view_button(parent: QWidget, text: str, tooltip: str) -> QPushButton:
+    btn = QPushButton(text, parent)
+    btn.setCheckable(True)
+    btn.setStyleSheet(style.TOOLBAR_BUTTON)
+    btn.setToolTip(tooltip)
+    return btn
+
+
 def _summarize_skipped(failed: list[tuple[str, str]]) -> str:
-    """Multi-line list of shots that rendered no take preview, with reasons."""
+    """Multi-line list of shots that rendered nothing, with reasons."""
     plural = "s" if len(failed) != 1 else ""
     lines = [f"Skipped {len(failed)} shot{plural}:"]
     lines += [f"  • {label} — {reason}" for label, reason in failed]
@@ -693,7 +967,7 @@ def _restore() -> None:
     widget_ptr = MQtUtil.findControl(_panel_instance.objectName())
     if workspace_ptr and widget_ptr:
         MQtUtil.addWidgetToMayaLayout(int(widget_ptr), int(workspace_ptr))
-    _panel_instance.install_playhead_callback()
+    _panel_instance.install_scene_callbacks()
 
 
 # Generated from __name__ so an IDE module-rename stays consistent without manual edits.
@@ -723,7 +997,10 @@ def launch() -> None:
         uiScript=UI_SCRIPT,
         workspaceControlName=WORKSPACE_CONTROL_NAME,
     )
-    _panel_instance.install_playhead_callback()
+    _panel_instance.install_scene_callbacks()
+    # After the panel is docked, never during construction: `_restore` builds one
+    # too, and a modal there would block Maya mid-layout-restore.
+    _panel_instance._offer_sequencer_import()
 
 
 def close() -> None:

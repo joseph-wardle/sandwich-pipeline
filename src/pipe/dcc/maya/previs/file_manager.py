@@ -2,29 +2,23 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import cast
 
 import maya.cmds as mc
-from pxr import Sdf
 
 from pipe.core.previs import load_manifest
 from pipe.core.shotgrid import SGEntity, Shot, is_previs_shot_code
 from pipe.core.ui import MessageDialog
 from pipe.core.util.filemanager import OpenFileDialog
-from pipe.core.util.paths import get_previs_path
+from pipe.core.util.paths import get_legacy_previs_path, get_previs_path
 from pipe.core.versioning import VersionStreamSpec
 
+from pipe.dcc.maya.shotfile import stage
 from pipe.dcc.maya.shotfile.shotfile_manager import MShotFileManager
 
-from . import dialogs, file_ops, playback, state
+from . import active, dialogs, file_ops, state
 from .state import PrevisState
-
-log = logging.getLogger(__name__)
-
-_ROOT_LAYER_FILENAME = "maya_root.usd"
-_ROOT_LAYER_REF = "./" + _ROOT_LAYER_FILENAME
 
 
 class MPrevisFileManager(MShotFileManager):
@@ -97,6 +91,8 @@ class MPrevisFileManager(MShotFileManager):
         if choice is None:
             return False
         if choice.filename is None:
+            if choice.migrate:
+                return self._migrate_workspace(entity)
             return self._create_workspace(entity)
         self._open_file(sequence_dir / choice.filename)
         return True
@@ -113,68 +109,62 @@ class MPrevisFileManager(MShotFileManager):
             return False
         return True
 
-    def _setup_scene(self) -> None:
-        # Sequence-level environment refs only. Per-shot env overrides remain
-        # the RLO's responsibility, so there's no shot-level edit-target layer here.
-        envs = list(self.shot.sets or [])
-        if not envs and self.shot.set:
-            envs = [self.shot.set]
+    def _migrate_workspace(self, entity: Shot) -> bool:
+        """Pick a pre-pipeline previs scene and rebuild it as a workspace file."""
+        source = dialogs.pick_legacy_previs_file(
+            self._main_window, get_legacy_previs_path()
+        )
+        if source is None:
+            return False
+        label = dialogs.prompt_new_label(self._main_window)
+        if label is None:
+            return False
+        try:
+            file_ops.migrate_legacy(self, entity, source, label)
+        except file_ops.PrevisFileError as exc:
+            MessageDialog(self._main_window, str(exc), "Cannot Migrate File").exec_()
+            return False
+        return True
 
-        stage = self.get_stage()
-        root_layer = stage.GetRootLayer()
-        for env in envs:
-            if env is None:
-                continue
-            env_layer = Sdf.Layer.FindOrOpenRelativeToLayer(
-                root_layer, env.environment_path
-            )
-            if env_layer is None:
-                log.warning("Could not open env layer: %s", env.environment_path)
-                continue
-            if env_layer.identifier not in root_layer.subLayerPaths:  # type: ignore[operator]
-                root_layer.subLayerPaths.append(env_layer.identifier)
-            env_layer.SetPermissionToSave(False)
+    def _setup_scene(self) -> None:
+        # Sets only. Per-shot env overrides remain the RLO's responsibility, so a
+        # previs sequence has no shot-level override layer to edit into.
+        stage.add_sets(self.shot)
 
     def _setup_file(self, path: Path, entity: SGEntity) -> None:
         mc.file(newFile=True, force=True)
+        self._scaffold_and_save(path, entity)
+
+    def _setup_migrated_file(self, path: Path, entity: SGEntity, source: Path) -> None:
+        """Open the legacy scene and scaffold it as `path`."""
+        mc.file(newFile=True, force=True)
+        mc.file(str(source), open=True, force=True, prompt=False, ignoreVersion=True)
+        self._scaffold_and_save(path, entity)
+
+    def _scaffold_and_save(self, path: Path, entity: SGEntity) -> None:
+        """Give the open scene a previs sequence's stage, state, and stamp."""
         mc.file(rename=str(path))
 
         self.shot = cast(Shot, entity)
         code = self.shot.code or ""
-        previs_dir = get_previs_path() / code
 
-        transform = mc.createNode("transform", name="stage_transform")
-        mc.createNode("mayaUsdProxyShape", name="stage", parent=transform)
-        stage_shape = self.get_stage_shape()
-        mc.connectAttr("time1.outTime", f"{stage_shape}.time")
+        # The sequence's maya_root.usd is shared by every file in it, so creating a
+        # file is also when its sets are reconciled against ShotGrid.
+        root_layer, _ = stage.create_stage_proxy(
+            get_previs_path() / code / stage.ROOT_LAYER,
+            file_path_ref="./" + stage.ROOT_LAYER,
+        )
+        self._setup_scene()
+        root_layer.Save()
+        root_layer.SetPermissionToSave(False)
 
-        self._attach_root_layer(previs_dir, stage_shape)
-
-        mc.optionVar(intValue=("mayaUsd_SerializedUsdEditsLocationPrompt", 0))
-        mc.optionVar(intValue=("mayaUsd_SerializedUsdEditsLocation", 2))
-
-        state.write_state(PrevisState.empty())
+        stage.serialize_usd_edits_into_scene()
+        # Whatever the scene already holds, not a blank: opening the legacy file
+        # can fire the panel's scene callback, and an unconditional blank here
+        # would erase a shot list it had just imported.
+        state.write_state(state.read_state() or PrevisState())
         mc.fileInfo("code", code)
         mc.file(save=True, force=True)
-
-    def _attach_root_layer(self, previs_dir: Path, stage_shape: str) -> None:
-        """Point the stage at the sequence's shared read-only maya_root.usd."""
-        root_layer_path = previs_dir / _ROOT_LAYER_FILENAME
-        is_new_root = not root_layer_path.exists()
-
-        root_layer = Sdf.Layer.FindOrOpen(str(root_layer_path)) or Sdf.Layer.CreateNew(
-            str(root_layer_path)
-        )
-        if is_new_root:
-            # Land the empty root on disk so the proxy can compose it below.
-            root_layer.Save()
-
-        mc.setAttr(f"{stage_shape}.filePath", _ROOT_LAYER_REF, type="string")
-
-        if is_new_root:
-            self._setup_scene()
-            root_layer.Save()
-        root_layer.SetPermissionToSave(False)
 
     @classmethod
     def run_on_open(cls) -> None:
@@ -182,7 +172,7 @@ class MPrevisFileManager(MShotFileManager):
         mc.setAttr("defaultResolution.height", 1080)  # type: ignore
         mc.setAttr("defaultResolution.pixelAspect", 1.0)  # type: ignore
         mc.setAttr("defaultResolution.deviceAspectRatio", 1920 / 1080)  # type: ignore
-        playback.install_camera_callback()
+        active.install_camera_callback()
 
     def _resolve_current_stream(
         self, scene_path: Path

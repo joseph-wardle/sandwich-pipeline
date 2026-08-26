@@ -33,17 +33,22 @@ def normalize_code(code: str) -> str:
     Canonicalizing on the write path stops ``A_10`` and ``A_010`` from becoming
     two manifest keys for what an artist means as one shot.
     """
+    return format_code(*_require_parsed(code))
+
+
+def shot_letter(code: str) -> str:
+    """The sequence a shot code belongs to (``A_020`` → ``A``); raise if malformed."""
+    return _require_parsed(code)[0]
+
+
+def _require_parsed(code: str) -> tuple[str, int]:
     parsed = parse_code(code)
     if parsed is None:
         raise ValueError(
             f"{code!r} is not a valid shot code "
             "(expected <LETTER>_<number>, e.g. 'A_010')"
         )
-    return format_code(*parsed)
-
-
-def is_taken(code: str, existing: Iterable[str]) -> bool:
-    return code in set(existing)
+    return parsed
 
 
 def suggest_next(letter: str, existing: Iterable[str]) -> str:
@@ -51,23 +56,6 @@ def suggest_next(letter: str, existing: Iterable[str]) -> str:
     numbers = _numbers_for_letter(letter, existing)
     following = (max(numbers) + STEP) if numbers else STEP
     return format_code(letter, following)
-
-
-def suggest_midpoint(before: str, after: str) -> str | None:
-    """Suggest a code between two existing ones, or ``None`` if there is no gap.
-
-    Returns ``None`` when the codes differ in letter or have no integer strictly
-    between them (e.g. ``A_010``/``A_011``);
-    """
-    before_parsed = parse_code(before)
-    after_parsed = parse_code(after)
-    if before_parsed is None or after_parsed is None:
-        return None
-    letter, low = before_parsed
-    after_letter, high = after_parsed
-    if letter != after_letter or high - low < 2:
-        return None
-    return format_code(letter, (low + high) // 2)
 
 
 def _numbers_for_letter(letter: str, existing: Iterable[str]) -> list[int]:
@@ -86,7 +74,6 @@ __all__ = [
     "parse_code",
     "format_code",
     "normalize_code",
-    "is_taken",
+    "shot_letter",
     "suggest_next",
-    "suggest_midpoint",
 ]

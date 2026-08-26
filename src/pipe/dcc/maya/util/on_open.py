@@ -41,3 +41,11 @@ def install_on_open_node(manager: _OnOpenManager) -> None:
 
     if not had_node:  # nothing fired on load, so install hooks now
         manager.run_on_open()
+
+
+def remove_on_open_node() -> None:
+    """Drop the scene's open hook, so the next manager to open the file installs
+    its own."""
+    for name in (ON_OPEN_NODE_NAME, *_LEGACY_NODE_NAMES):
+        if mc.objExists(name):
+            mc.delete(name)

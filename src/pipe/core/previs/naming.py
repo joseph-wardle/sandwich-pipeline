@@ -1,8 +1,4 @@
-"""File naming for a previs sequence.
-
-`<letter>_<label>_v###.mb` for a workspace filename.
-`<code>_v###.mov` for a playblast.
-"""
+"""File naming for a previs sequence: `<letter>_<label>_v###.mb` for a workspace file."""
 
 from __future__ import annotations
 
@@ -10,10 +6,7 @@ import re
 
 from pipe.core.shotgrid.paths import is_previs_shot_code
 
-from .codes import normalize_code
-
 WORKSPACE_SUFFIX = ".mb"
-TAKE_SUFFIX = ".mov"
 VERSION_PAD = 3
 _VERSION_PREFIX = "v"
 
@@ -58,19 +51,11 @@ def workspace_filename(sequence_code: str, label: str, version: int) -> str:
     return f"{letter}_{label}_{version_token(version)}{WORKSPACE_SUFFIX}"
 
 
-def take_filename(code: str, version: int) -> str:
-    """Build a take's playblast filename `<code>_v###.mov` (e.g. `A_010_v003.mov`)."""
-    canonical = normalize_code(code)
-    return f"{canonical}_{version_token(version)}{TAKE_SUFFIX}"
-
-
 __all__ = [
     "WORKSPACE_SUFFIX",
-    "TAKE_SUFFIX",
     "VERSION_PAD",
     "sequence_letter",
     "normalize_label",
     "version_token",
     "workspace_filename",
-    "take_filename",
 ]

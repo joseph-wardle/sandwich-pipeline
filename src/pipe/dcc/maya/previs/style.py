@@ -11,35 +11,30 @@ from __future__ import annotations
 PANEL_BG = "#2A2A2A"
 PANEL_BG_DEEP = "#1E1E1E"
 PANEL_BG_HEADER = "#303030"
-PANEL_BG_SOFT = "#353535"
 PANEL_TEXT = "#DAD5CB"
 PANEL_TEXT_DIM = "#8E867A"
 PANEL_BORDER = "#444444"
 PANEL_BORDER_SOFT = "#383838"
 
+ACCENT = "#2D5566"
+ACCENT_EDGE = "#4A9DB8"
+ACCENT_TEXT = "#E8F4F8"
+
 # --- shot blocks ------------------------------------------------------------
 
-SHOT_ACTIVE = "#2D5566"
-SHOT_ACTIVE_EDGE = "#4A9DB8"
-SHOT_ACTIVE_TEXT = "#E8F4F8"
 SHOT_ALT = "#3A3A3A"
 SHOT_ALT_EDGE = "#555555"
 SHOT_ALT_TEXT = "#C8C0B0"
 SHOT_EMPTY_EDGE = "#4A4A4A"
+MISSING_EDGE = "#8A5A5A"  # the take's namespace is gone from the scene
+MISSING_TEXT = "#C9A0A0"
 TRUNC_EDGE = "#C97D52"
 TRUNC_TEXT = "#F4D4BE"
 
 # --- break-out dot (RLO) ----------------------------------------------------
 
-RLO_NO_CODE = "#6E665A"  # unpaired — drawn as a dashed outline
-RLO_READY = "#6E8BA8"  # paired, never broken out
-RLO_DRIFTED = "#E5B340"  # RLO exists, primary moved since
-RLO_IN_SYNC = "#88AA70"  # live primary matches last break-out
-
-# --- cam-publish pip --------------------------------------------------------
-
-CAM_ABSENT_STALE = "#585348"  # cam.usd missing or stale — dim
-CAM_IN_SYNC = "#6F8C5A"  # cam.usd matches last publish — muted green
+RLO_PENDING = "#6E8BA8"  # no RLO scene yet — drawn as a dashed outline
+RLO_BROKEN_OUT = "#88AA70"  # an RLO scene exists on disk
 
 # --- playhead ---------------------------------------------------------------
 
@@ -48,9 +43,33 @@ PLAYHEAD = "#E5484D"  # head + current-frame line spanning every track
 TIER_NARROW = 40  # below: only the colored sliver; tooltip carries the info
 TIER_COMPACT = 110  # below: drop name + start/end labels, keep the length pill
 
+ROW_HEIGHT_DEFAULT = 44
+ROW_HEIGHT_MIN = 32
+ROW_HEIGHT_MAX = 96
+PX_PER_FRAME_DEFAULT = 4
+PX_PER_FRAME_MIN = 2
+PX_PER_FRAME_MAX = 16
+
+_ROW_HEIGHT_STEP = 6  # pixels of row height per wheel notch
+
+
+def zoom_step(
+    row_height: int, px_per_frame: int, *, vertical: bool, up: bool
+) -> tuple[int, int]:
+    """One wheel notch of zoom, clamped. Shared so the two views cannot drift apart."""
+    step = 1 if up else -1
+    if vertical:
+        row_height += step * _ROW_HEIGHT_STEP
+    else:
+        px_per_frame += step
+    return (
+        max(ROW_HEIGHT_MIN, min(ROW_HEIGHT_MAX, row_height)),
+        max(PX_PER_FRAME_MIN, min(PX_PER_FRAME_MAX, px_per_frame)),
+    )
+
+
 # --- stylesheets ------------------------------------------------------------
 
-PANEL_ROOT = f"background: {PANEL_BG}; color: {PANEL_TEXT};"
 
 TOP_BAR = f"""
 QFrame#topBar {{
@@ -79,7 +98,12 @@ QPushButton {{
     font-size: 11px;
     letter-spacing: 1px;
 }}
-QPushButton:hover {{ border-color: {SHOT_ACTIVE_EDGE}; color: {SHOT_ACTIVE_TEXT}; }}
+QPushButton:hover {{ border-color: {ACCENT_EDGE}; color: {ACCENT_TEXT}; }}
+QPushButton:checked {{
+    background: {ACCENT};
+    border-color: {ACCENT_EDGE};
+    color: {ACCENT_TEXT};
+}}
 QPushButton:disabled {{ color: {PANEL_TEXT_DIM}; border-color: {PANEL_BORDER_SOFT}; }}
 """
 
@@ -97,10 +121,26 @@ QCheckBox::indicator {{
     border-radius: 2px;
     background: {PANEL_BG};
 }}
-QCheckBox::indicator:hover {{ border-color: {SHOT_ACTIVE_EDGE}; }}
+QCheckBox::indicator:hover {{ border-color: {ACCENT_EDGE}; }}
 QCheckBox::indicator:checked {{
-    background: {SHOT_ACTIVE_EDGE};
-    border-color: {SHOT_ACTIVE_EDGE};
+    background: {ACCENT_EDGE};
+    border-color: {ACCENT_EDGE};
+}}
+"""
+
+SHOT_HEADER = f"""
+ShotHeader {{
+    background: {PANEL_BG_HEADER};
+    border-right: 1px solid {PANEL_BORDER_SOFT};
+    border-top: 2px solid transparent;
+}}
+"""
+
+SHOT_HEADER_SELECTED = f"""
+ShotHeader {{
+    background: {ACCENT};
+    border-right: 1px solid {PANEL_BORDER_SOFT};
+    border-top: 2px solid {ACCENT_EDGE};
 }}
 """
 
@@ -163,15 +203,15 @@ QFrame#camBlock QLabel#lengthBadge {
 
 CAM_BLOCK_PRIMARY = f"""
 QFrame#camBlock {{
-    background-color: {SHOT_ACTIVE};
-    border-top: 1px solid {SHOT_ACTIVE_EDGE};
-    border-right: 1px solid {SHOT_ACTIVE_EDGE};
-    border-bottom: 1px solid {SHOT_ACTIVE_EDGE};
-    border-left: 3px solid {SHOT_ACTIVE_EDGE};
+    background-color: {ACCENT};
+    border-top: 1px solid {ACCENT_EDGE};
+    border-right: 1px solid {ACCENT_EDGE};
+    border-bottom: 1px solid {ACCENT_EDGE};
+    border-left: 3px solid {ACCENT_EDGE};
     border-radius: 2px;
 }}
 QFrame#camBlock QLabel#name {{
-    color: {SHOT_ACTIVE_TEXT};
+    color: {ACCENT_TEXT};
     font-size: 12px;
     font-weight: 500;
     background: transparent;
@@ -183,12 +223,27 @@ QFrame#camBlock QLabel#name {{
 # while an alternate is being dragged onto it.
 CAM_BLOCK_PRIMARY_DROP = f"""
 QFrame#camBlock {{
-    background-color: {SHOT_ACTIVE};
-    border: 2px dashed {SHOT_ACTIVE_TEXT};
+    background-color: {ACCENT};
+    border: 2px dashed {ACCENT_TEXT};
     border-radius: 2px;
 }}
 QFrame#camBlock QLabel#name {{
-    color: {SHOT_ACTIVE_TEXT};
+    color: {ACCENT_TEXT};
+    font-size: 12px;
+    font-weight: 500;
+    background: transparent;
+}}
+{_FRAME_LABELS_PRIMARY}
+"""
+
+CAM_BLOCK_PRIMARY_SELECTED = f"""
+QFrame#camBlock {{
+    background-color: {ACCENT};
+    border: 2px solid {ACCENT_TEXT};
+    border-radius: 2px;
+}}
+QFrame#camBlock QLabel#name {{
+    color: {ACCENT_TEXT};
     font-size: 12px;
     font-weight: 500;
     background: transparent;
@@ -255,6 +310,45 @@ QFrame#camBlock QLabel#lengthBadge {{
 }}
 """
 
+# A take whose namespace has left the scene. Hollow and dashed, matching the
+# panel's other "not there yet" outline (the pending break-out dot), so absence
+# reads the same way everywhere.
+CAM_BLOCK_MISSING = f"""
+QFrame#camBlock {{
+    background-color: transparent;
+    border: 1px dashed {MISSING_EDGE};
+    border-radius: 2px;
+}}
+QFrame#camBlock QLabel#name {{
+    color: {MISSING_TEXT};
+    font-size: 12px;
+    background: transparent;
+}}
+{_FRAME_LABELS_ALT}
+"""
+
+CUT_BADGE = f"""
+QLabel {{
+    background: rgba(0,0,0,0.35);
+    color: {ACCENT_TEXT};
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    padding: 0px 5px;
+    border-radius: 2px;
+}}
+"""
+
+EMPTY_SHOT_BLOCK = f"""
+QLabel {{
+    border: 1px dashed {MISSING_EDGE};
+    border-radius: 2px;
+    color: {MISSING_TEXT};
+    font-size: 11px;
+    font-style: italic;
+}}
+"""
+
 ADD_ALT_CELL = f"""
 QPushButton#addAlt {{
     background: transparent;
@@ -267,8 +361,8 @@ QPushButton#addAlt {{
     text-align: center;
 }}
 QPushButton#addAlt:hover {{
-    border-color: {SHOT_ACTIVE_EDGE};
-    color: {SHOT_ACTIVE_EDGE};
+    border-color: {ACCENT_EDGE};
+    color: {ACCENT_EDGE};
 }}
 QPushButton#addAlt:disabled {{
     color: {PANEL_BORDER_SOFT};
@@ -288,20 +382,20 @@ QFrame#resizeHandle {
 RESIZE_HANDLE_HOVER = f"""
 QFrame#resizeHandle {{
     background: rgba(74,157,184,0.55);
-    border-left: 1px solid {SHOT_ACTIVE_EDGE};
+    border-left: 1px solid {ACCENT_EDGE};
 }}
 """
 
 RESIZE_HANDLE_ACTIVE = f"""
 QFrame#resizeHandle {{
-    background: {SHOT_ACTIVE_EDGE};
-    border-left: 1px solid {SHOT_ACTIVE_TEXT};
+    background: {ACCENT_EDGE};
+    border-left: 1px solid {ACCENT_TEXT};
 }}
 """
 
 TOP_BAR_DOT = f"""
 QFrame#topBarDot {{
-    background: {SHOT_ACTIVE_EDGE};
+    background: {ACCENT_EDGE};
     border-radius: 4px;
 }}
 """

@@ -27,14 +27,12 @@ from pipe.core.playblast.clip import (
     DestinationId,
     DiskDestination,
     PreviewClip,
-    PrevisTakeDestination,
     ShotGridDestination,
 )
 from pipe.core.playblast.confirm import (
     ChosenDestination,
     ChosenDisk,
     ChosenShotGrid,
-    ChosenTake,
     ConfirmResult,
     confirm_clip,
     failure_summary,
@@ -101,19 +99,25 @@ class _Row(QWidget):
     destination_id: DestinationId
     default_on: bool
     _state: RowState
+    _unavailable: str
     _checkbox: QCheckBox
     _status: QLabel
     _detail: QLabel
     _header: QHBoxLayout
     _column: QVBoxLayout
     _options: QFrame | None
+    _collapse_options: bool
 
     def __init__(self, destination: Destination) -> None:
         super().__init__()
+        unavailable = destination.unavailable
         self.destination_id = destination.id
-        self.default_on = destination.default_on
+        # A row nobody can deliver to never starts checked, whatever it declared.
+        self.default_on = destination.default_on and not unavailable
         self._state = RowState.IDLE
+        self._unavailable = unavailable
         self._options = None
+        self._collapse_options = True
         self._checkbox = QCheckBox(destination.name)
         # Nothing here but the text fields takes focus: a control left focused
         # by the last click would swallow the window's Space and arrow keys.
@@ -136,15 +140,22 @@ class _Row(QWidget):
         self._header = QHBoxLayout()
         self._header.addWidget(self._checkbox)
         self._header.addStretch(1)
+        if unavailable:
+            self._checkbox.setEnabled(False)
+            note = QLabel(unavailable)
+            # Disabled rather than coloured: the viewer takes its look from the
+            # host DCC, and a row that is merely not ready yet is not a failure.
+            note.setEnabled(False)
+            self._header.addWidget(note)
         self._header.addWidget(self._status)
         self._column = QVBoxLayout(self)
         self._column.setContentsMargins(0, 0, 0, 0)
         self._column.addLayout(self._header)
         self._column.addWidget(self._detail)
 
-    def add_options(self, layout: QLayout) -> None:
-        """Attach this row's sub-options as an indented, framed well below the
-        checkbox. The well only shows while the row is checked."""
+    def add_options(self, layout: QLayout, *, collapse: bool = True) -> None:
+        """Attach this row's sub-options as an indented, framed well below the checkbox."""
+        self._collapse_options = collapse
         self._options = QFrame()
         self._options.setFrameShape(QFrame.Shape.StyledPanel)
         self._options.setLayout(layout)
@@ -152,10 +163,10 @@ class _Row(QWidget):
         indent.setContentsMargins(style.PAD_L, 0, 0, 0)
         indent.addWidget(self._options)
         self._column.addLayout(indent)
-        self._options.setVisible(self.is_checked)
+        self._options.setVisible(self.is_checked or not collapse)
 
     def _on_toggled(self) -> None:
-        if self._options is not None:
+        if self._options is not None and self._collapse_options:
             self._options.setVisible(self.is_checked)
         # Unchecking abandons the attempt, so its ✗ goes with it — otherwise the
         # row keeps reporting a failure nobody is retrying.
@@ -175,10 +186,16 @@ class _Row(QWidget):
         return self._state
 
     @property
+    def is_available(self) -> bool:
+        return not self._unavailable
+
+    @property
     def is_checked(self) -> bool:
         return self._checkbox.isChecked()
 
     def set_checked(self, checked: bool) -> None:
+        if self._unavailable:
+            return
         self._checkbox.setChecked(checked)
 
     def _set_status(self, glyph: str, css: str) -> None:
@@ -205,7 +222,7 @@ class _Row(QWidget):
         self._state = RowState.IDLE
         self._set_status("", "")
         self._set_detail("", "")
-        self._checkbox.setEnabled(True)
+        self._checkbox.setEnabled(not self._unavailable)
 
     def set_delivered(self, detail: str, path: Path | None) -> None:
         self._state = RowState.DELIVERED
@@ -220,12 +237,11 @@ class _Row(QWidget):
         self._state = RowState.FAILED
         self._set_status("✗", FAIL_STYLE)
         self._set_detail(detail, FAIL_STYLE)
-        self._checkbox.setEnabled(True)
+        self._checkbox.setEnabled(not self._unavailable)
 
 
 class _FolderRow(_Row):
-    """A disk-folder destination. Browsable rows let the artist pick the
-    directory; the picked folder is remembered globally across tools."""
+    """A disk-folder destination, showing the folder it writes into."""
 
     _destination: DiskDestination
     _directory: Path
@@ -237,20 +253,21 @@ class _FolderRow(_Row):
         self._directory = destination.directory
         if destination.browsable:
             self._directory = load_last_custom_folder() or destination.directory
-            self._build_options()
-        else:
-            self._checkbox.setToolTip(str(destination.directory))
+        if not destination.unavailable:
+            self._build_options(browsable=destination.browsable)
 
-    def _build_options(self) -> None:
+    def _build_options(self, *, browsable: bool) -> None:
         self._path_label = QLabel()
+        self._path_label.setTextFormat(Qt.TextFormat.PlainText)
         self._show_directory()
-        browse = QPushButton("Browse…")
-        browse.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        browse.clicked.connect(self._on_browse)
         row = QHBoxLayout()
         row.addWidget(self._path_label, stretch=1)
-        row.addWidget(browse)
-        self.add_options(row)
+        if browsable:
+            browse = QPushButton("Browse…")
+            browse.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            browse.clicked.connect(self._on_browse)
+            row.addWidget(browse)
+        self.add_options(row, collapse=False)
 
     @property
     def directory(self) -> Path:
@@ -260,7 +277,7 @@ class _FolderRow(_Row):
         return ChosenDisk(destination=self._destination, directory=self._directory)
 
     def _show_directory(self) -> None:
-        self._path_label.setText(self._directory.name or str(self._directory))
+        self._path_label.setText(_elided_path(self._directory))
         self._path_label.setToolTip(str(self._directory))
 
     def _on_browse(self) -> None:
@@ -272,6 +289,16 @@ class _FolderRow(_Row):
         self._directory = Path(picked)
         self._show_directory()
         save_last_custom_folder(self._directory)
+
+
+_PATH_TAIL_PARTS = 4
+
+
+def _elided_path(directory: Path) -> str:
+    parts = directory.parts
+    if len(parts) <= _PATH_TAIL_PARTS:
+        return str(directory)
+    return "…/" + "/".join(parts[-_PATH_TAIL_PARTS:])
 
 
 class _ShotGridRow(_Row):
@@ -446,32 +473,11 @@ class _ShotGridRow(_Row):
         return "No review playlists found."
 
 
-class _SendToEditRow(_Row):
-    """The Send to Edit peer row (previs only): delivers an immutable take and
-    stamps the sequence manifest."""
-
-    _destination: PrevisTakeDestination
-
-    def __init__(self, destination: PrevisTakeDestination) -> None:
-        super().__init__(destination)
-        self._destination = destination
-        stamp = destination.stamp
-        self._checkbox.setToolTip(
-            f"Deliver an immutable take for {stamp.shot_code} "
-            f"(sequence {stamp.sequence_code}) and stamp the previs manifest."
-        )
-
-    def chosen(self) -> ChosenTake:
-        return ChosenTake(destination=self._destination)
-
-
 def _build_row(destination: Destination, playlists: ReviewPlaylists) -> _Row:
     if isinstance(destination, DiskDestination):
         return _FolderRow(destination)
     if isinstance(destination, ShotGridDestination):
         return _ShotGridRow(destination, playlists)
-    if isinstance(destination, PrevisTakeDestination):
-        return _SendToEditRow(destination)
     assert_never(destination)
 
 
@@ -587,7 +593,9 @@ class ConfirmPanel(QWidget):
         self._remember_toggles()
         chosen = tuple(row.chosen() for row in runnable)
         folders = tuple(
-            row.directory for row in self._rows if isinstance(row, _FolderRow)
+            row.directory
+            for row in self._rows
+            if isinstance(row, _FolderRow) and row.is_available
         )
         for row in runnable:
             row.set_running()
