@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from pipe.core.playblast.clip import (
     CURRENT_FOLDER_ID,
+    CURRENT_FOLDER_NAME,
     CUSTOM_FOLDER_ID,
+    CUSTOM_FOLDER_NAME,
     EDIT_FOLDER_ID,
+    EDIT_FOLDER_NAME,
+    PREVIS_FOLDER_ID,
     RENDER_FOLDER_ID,
     AssetEntity,
     Destination,
@@ -14,6 +18,7 @@ from pipe.core.playblast.clip import (
     ScratchEntity,
     ShotEntity,
     ShotGridDestination,
+    custom_folder_destination,
     shot_or_scratch,
 )
 from pipe.core.playblast.confirm import (
@@ -29,9 +34,13 @@ from pipe.core.playblast.presets import FFmpegPreset
 
 __all__ = [
     "CURRENT_FOLDER_ID",
+    "CURRENT_FOLDER_NAME",
     "CUSTOM_FOLDER_ID",
+    "CUSTOM_FOLDER_NAME",
     "DEFAULT_RESOLUTION",
     "EDIT_FOLDER_ID",
+    "EDIT_FOLDER_NAME",
+    "PREVIS_FOLDER_ID",
     "RENDER_FOLDER_ID",
     "AssetEntity",
     "ChosenDestination",
@@ -50,5 +59,6 @@ __all__ = [
     "ShotEntity",
     "ShotGridDestination",
     "confirm_clip",
+    "custom_folder_destination",
     "shot_or_scratch",
 ]

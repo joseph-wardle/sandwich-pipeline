@@ -18,11 +18,16 @@ FONT_PATH = (
 # Cross-DCC labels. Department-specific labels (Pass, Camera, Asset, ...) live
 # with the department code, not here.
 ARTIST = "Artist"
+# `TITLE` is a version record's own title; `FILE` is the scene file on disk. Previs
+# says FILE because its files *are* its versions — there is no title to carry.
 TITLE = "Title"
+FILE = "File"
 SHOT = "Shot"
 
 _DATE_FORMAT = "%Y-%m-%d"
-_UNSAVED_VERSION_SUFFIX = "*"
+# What a reviewer reads as "this frame is ahead of the last save", wherever the
+# HUD says it — on the version here, on the previs filename that stands in for one.
+UNSAVED_SUFFIX = "*"
 _FRAME_COUNTER_TEMPLATE = "Frame %{{eif:n+{start}:d}}"
 
 # Sizes as fractions of frame height so 720p and 1080p exports look the same.
@@ -77,7 +82,7 @@ def line_shot(code: str, version: str | None = None, *, unsaved: bool = False) -
     if version:
         line += f" {version}"
         if unsaved:
-            line += _UNSAVED_VERSION_SUFFIX
+            line += UNSAVED_SUFFIX
     return line
 
 
@@ -176,10 +181,12 @@ def _iter_filter_kwargs(content: HudContent, style: _Style) -> Iterator[dict[str
 
 __all__ = [
     "ARTIST",
+    "FILE",
     "FONT_PATH",
     "HudContent",
     "SHOT",
     "TITLE",
+    "UNSAVED_SUFFIX",
     "TimedText",
     "apply_hud",
     "labeled_line",

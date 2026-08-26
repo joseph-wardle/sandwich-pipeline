@@ -41,6 +41,7 @@ from pipe.dcc.maya.playblast.shot.config import (
     dummy_shot,
 )
 from pipe.dcc.maya.playblast.shot.playblaster import MPlayblaster
+from pipe.dcc.maya.playblast.viewport import ViewportQuality, query_viewport_quality
 from pipe.dcc.maya.runtime import get_main_qt_window
 
 if TYPE_CHECKING:
@@ -222,30 +223,30 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         options_group = QGroupBox("Viewport Options")
         options_layout = QHBoxLayout(options_group)
 
-        active_panel = self._resolve_active_model_panel()
+        current = query_viewport_quality()
         self._use_lighting = self._build_option_checkbox(
             "Use Lighting",
-            self._query_lighting(active_panel),
+            current.lighting,
             "Use viewport lighting for playblast capture.",
         )
         self._use_shadows = self._build_option_checkbox(
             "Use Shadows",
-            self._query_shadows(active_panel),
+            current.shadows,
             "Render viewport shadows in playblast.",
         )
         self._use_ssao = self._build_option_checkbox(
             "Use Ambient Occlusion",
-            self._query_ssao(),
+            current.ssao,
             "Shade viewport contact areas with screen-space ambient occlusion.",
         )
         self._use_hardware_fog = self._build_option_checkbox(
             "Use Hardware Fog",
-            self._query_hardware_fog(active_panel),
+            current.hardware_fog,
             "Include hardware fog from viewport settings.",
         )
         self._use_dof = self._build_option_checkbox(
             "Use DoF",
-            self._query_dof(active_panel),
+            current.dof,
             "Include camera depth of field in playblast.",
         )
         for checkbox in (
@@ -438,84 +439,19 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     def _on_source_settings_changed(self, *_args: object) -> None:
         self._update_ui_state()
 
-    # ------------------------------------------------------------------
-    # Viewport option queries
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _resolve_active_model_panel() -> str:
-        panel = str(mc.sequenceManager(query=True, modelPanel=True) or "")
-        if panel and mc.modelPanel(panel, exists=True):
-            return panel
-
-        model_panels = mc.getPanel(type="modelPanel") or []
-        if model_panels:
-            return str(model_panels[0])
-        return ""
-
-    @staticmethod
-    def _query_lighting(panel: str) -> bool:
-        if not panel:
-            return False
-        try:
-            return mc.modelEditor(panel, query=True, displayLights=True) == "all"
-        except Exception:
-            return False
-
-    @staticmethod
-    def _query_shadows(panel: str) -> bool:
-        if not panel:
-            return False
-        try:
-            return bool(mc.modelEditor(panel, query=True, shadows=True))
-        except Exception:
-            return False
-
-    @staticmethod
-    def _query_ssao() -> bool:
-        try:
-            return bool(mc.getAttr("hardwareRenderingGlobals.ssaoEnable"))
-        except Exception:
-            return False
-
-    @staticmethod
-    def _query_hardware_fog(panel: str) -> bool:
-        if not panel:
-            return False
-        try:
-            return bool(mc.modelEditor(panel, query=True, fogging=True))
-        except Exception:
-            return False
-
-    @staticmethod
-    def _query_dof(panel: str) -> bool:
-        if not panel:
-            return False
-        try:
-            camera = str(mc.modelEditor(panel, query=True, camera=True))
-            return bool(mc.camera(camera, query=True, depthOfField=True))
-        except Exception:
-            return False
-
     @property
-    def use_dof(self) -> bool:
-        return self._use_dof.isChecked()
-
-    @property
-    def use_hardware_fog(self) -> bool:
-        return self._use_hardware_fog.isChecked()
-
-    @property
-    def use_lighting(self) -> bool:
-        return self._use_lighting.isChecked()
-
-    @property
-    def use_shadows(self) -> bool:
-        return self._use_shadows.isChecked()
-
-    @property
-    def use_ssao(self) -> bool:
-        return self._use_ssao.isChecked()
+    def quality(self) -> ViewportQuality:
+        """What the artist asked the capture to include."""
+        return ViewportQuality(
+            # Not offered here: this dialog has always captured anti-aliased,
+            # and the Previs Sequencer is the surface where it is a choice.
+            anti_alias=True,
+            dof=self._use_dof.isChecked(),
+            hardware_fog=self._use_hardware_fog.isChecked(),
+            lighting=self._use_lighting.isChecked(),
+            shadows=self._use_shadows.isChecked(),
+            ssao=self._use_ssao.isChecked(),
+        )
 
     # ------------------------------------------------------------------
     # Config generation

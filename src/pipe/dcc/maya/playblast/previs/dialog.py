@@ -14,12 +14,12 @@ from Qt.QtWidgets import (
 
 from pipe.core.playblast import (
     CURRENT_FOLDER_ID,
-    CUSTOM_FOLDER_ID,
+    CURRENT_FOLDER_NAME,
     DiskDestination,
     FFmpegPreset,
     ShotGridDestination,
+    custom_folder_destination,
 )
-from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.shot import maya_rlo_stream, shot_owner_for
 from pipe.core.shotgrid import Shot
 from pipe.core.versioning import current_version_label
@@ -28,6 +28,7 @@ from pipe.dcc.maya.playblast.shot.config import (
     MShotPlayblastConfig,
 )
 from pipe.dcc.maya.playblast.shot.dialog import MPlayblastDialog
+from pipe.dcc.maya.playblast.viewport import resolve_active_model_panel
 from pipe.dcc.maya.previs import state as previs_state
 
 if TYPE_CHECKING:
@@ -96,7 +97,7 @@ class PrevisPlayblastDialog(MPlayblastDialog):
 
     @staticmethod
     def _active_camera_name() -> str:
-        panel = MPlayblastDialog._resolve_active_model_panel()
+        panel = resolve_active_model_panel()
         if not panel:
             return ""
         try:
@@ -173,19 +174,12 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         return (
             DiskDestination(
                 id=CURRENT_FOLDER_ID,
-                name="Current Folder",
+                name=CURRENT_FOLDER_NAME,
                 directory=scene_dir,
                 preset=FFmpegPreset.WEB,
                 default_on=False,
             ),
-            DiskDestination(
-                id=CUSTOM_FOLDER_ID,
-                name="Custom Folder",
-                directory=resolve_playblast_tempdir(),
-                preset=FFmpegPreset.WEB,
-                default_on=False,
-                browsable=True,
-            ),
+            custom_folder_destination(),
         )
 
     def _clip_shotgrid(self) -> ShotGridDestination:
@@ -205,14 +199,7 @@ class PrevisPlayblastDialog(MPlayblastDialog):
             shot_config = self._build_rlo_shot_config()
         else:
             shot_config = self._build_custom_playblast_config()
-        return MPlayblastConfig(
-            dof=self.use_dof,
-            hardware_fog=self.use_hardware_fog,
-            lighting=self.use_lighting,
-            shadows=self.use_shadows,
-            shots=[shot_config],
-            ssao=self.use_ssao,
-        )
+        return MPlayblastConfig(quality=self.quality, shots=[shot_config])
 
     def _build_rlo_shot_config(self) -> MShotPlayblastConfig:
         if self._shot is None:

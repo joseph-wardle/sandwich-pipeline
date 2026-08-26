@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pipe.core.shotgrid import Shot
+from pipe.dcc.maya.playblast.viewport import ViewportQuality
 
 
 def dummy_shot(code: str, cut_in: int, cut_out: int, cut_duration: int) -> Shot:
@@ -38,14 +39,10 @@ class MShotPlayblastConfig:
 
 @dataclass
 class MPlayblastConfig:
-    """Viewport flags + the shot configs to playblast."""
+    """What the capture should look like + the shot configs to playblast."""
 
-    dof: bool
-    hardware_fog: bool
-    lighting: bool
-    shadows: bool
+    quality: ViewportQuality
     shots: list[MShotPlayblastConfig]
-    ssao: bool
 
 
 __all__ = [

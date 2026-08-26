@@ -32,6 +32,7 @@ from pipe.core.ui import MessageDialog, progress_scope
 from pipe.core.util.paths import get_previs_path
 
 from pipe.dcc.maya.command import undo_chunk
+from pipe.dcc.maya.playblast.viewport import ViewportQuality, query_viewport_quality
 from pipe.dcc.maya.runtime import get_main_qt_window
 
 from . import (
@@ -42,6 +43,7 @@ from . import (
     file_ops,
     monitor,
     playblast,
+    playblast_dialog,
     rlo,
     state,
     style,
@@ -172,7 +174,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         playblast_btn = QPushButton("playblast all", bar)
         playblast_btn.setStyleSheet(style.TOOLBAR_BUTTON)
         playblast_btn.setToolTip(
-            "Render every shot's primary take and review the clips"
+            "Choose shots and capture quality, then render and review the clips"
         )
         playblast_btn.clicked.connect(self.playblast_all_shots)
         row.addWidget(playblast_btn)
@@ -782,11 +784,16 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             ).exec_()
             return
         if ask:
-            shots = self._pick_shots(shots)
-            if not shots:
+            request = self._ask_playblast(shots)
+            if request is None:
                 return
+            picked = set(request.shot_ids)
+            shots = [shot for shot in shots if shot.id in picked]
+            quality = request.quality
+        else:
+            quality = query_viewport_quality()
 
-        batch = self._render_shots(shots, sequence_code)
+        batch = self._render_shots(shots, sequence_code, quality)
         if batch is None:
             return
         if batch.failed:
@@ -806,10 +813,12 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             cut_unavailable=cut_unavailable,
         )
 
-    def _pick_shots(self, shots: list[PrevisShot]) -> list[PrevisShot]:
-        """The artist's checklist pick, in cut order; empty when they cancel."""
+    def _ask_playblast(
+        self, shots: list[PrevisShot]
+    ) -> playblast_dialog.PlayblastRequest | None:
+        """The artist's shot picks and capture settings; None when they cancel."""
         rows = [
-            dialogs.PlayblastRow(
+            playblast_dialog.PlayblastRow(
                 shot_id=shot.id,
                 label=shot.code or "no code",
                 detail=(
@@ -819,14 +828,13 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             )
             for shot in shots
         ]
-        chosen = dialogs.pick_shots_to_playblast(self, rows)
-        if chosen is None:
-            return []
-        picked = set(chosen)
-        return [shot for shot in shots if shot.id in picked]
+        return playblast_dialog.ask_playblast(self, rows)
 
     def _render_shots(
-        self, shots: list[PrevisShot], sequence_code: str
+        self,
+        shots: list[PrevisShot],
+        sequence_code: str,
+        quality: ViewportQuality,
     ) -> playblast.ShotPlayblastBatch | None:
         """Render the batch behind a progress dialog, or None if it broke outright."""
         step = "Rendering shots"
@@ -847,6 +855,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
                     shots,
                     sequence_code,
                     previs_root=get_previs_path(),
+                    quality=quality,
                     on_shot=on_shot,
                 )
         except Exception as exc:

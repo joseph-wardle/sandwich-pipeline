@@ -20,7 +20,6 @@ from Qt.QtWidgets import (
 )
 
 from pipe.core.playblast import (
-    CUSTOM_FOLDER_ID,
     RENDER_FOLDER_ID,
     AssetEntity,
     Destination,
@@ -30,8 +29,8 @@ from pipe.core.playblast import (
     ReviewEntity,
     ScratchEntity,
     ShotGridDestination,
+    custom_folder_destination,
 )
-from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.playblast.viewer import open_viewer
 from pipe.core.shotgrid import normalize_display_name
 from pipe.core.ui import FAIL_STYLE, ButtonPair, MessageDialog
@@ -321,18 +320,7 @@ class AssetTurnaroundDialog(ButtonPair, QtWidgets.QMainWindow):
                     preset=FFmpegPreset.WEB,
                 )
             )
-        rows.append(
-            DiskDestination(
-                id=CUSTOM_FOLDER_ID,
-                name="Custom Folder",
-                directory=resolve_playblast_tempdir(),
-                preset=FFmpegPreset.WEB,
-                # An unsaved scene has no Render Folder row; give the artist
-                # one checked destination instead of an all-off panel.
-                default_on=scene_path is None,
-                browsable=True,
-            )
-        )
+        rows.append(custom_folder_destination(default_on=scene_path is None))
         return tuple(rows)
 
     def _review_entity(self) -> ReviewEntity:

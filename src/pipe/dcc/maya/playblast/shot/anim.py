@@ -15,13 +15,14 @@ from Qt.QtWidgets import (
 
 from pipe.core.playblast import (
     CURRENT_FOLDER_ID,
-    CUSTOM_FOLDER_ID,
+    CURRENT_FOLDER_NAME,
     EDIT_FOLDER_ID,
+    EDIT_FOLDER_NAME,
     DiskDestination,
     FFmpegPreset,
+    custom_folder_destination,
 )
 from pipe.core.playblast.naming import build_edit_output_directory
-from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 from pipe.core.shot import maya_anim_stream, shot_owner_for
 from pipe.core.versioning import current_version_label
 from pipe.dcc.maya.playblast.shot.config import (
@@ -101,25 +102,18 @@ class AnimPlayblastDialog(MPlayblastDialog):
         return (
             DiskDestination(
                 id=EDIT_FOLDER_ID,
-                name="Send to Edit",
+                name=EDIT_FOLDER_NAME,
                 directory=build_edit_output_directory("anim"),
                 preset=FFmpegPreset.EDIT_SQ,
                 default_on=False,
             ),
             DiskDestination(
                 id=CURRENT_FOLDER_ID,
-                name="Current Folder",
+                name=CURRENT_FOLDER_NAME,
                 directory=scene_dir,
                 preset=FFmpegPreset.WEB,
             ),
-            DiskDestination(
-                id=CUSTOM_FOLDER_ID,
-                name="Custom Folder",
-                directory=resolve_playblast_tempdir(),
-                preset=FFmpegPreset.WEB,
-                default_on=False,
-                browsable=True,
-            ),
+            custom_folder_destination(),
         )
 
     def _build_shot_playblast_config(self) -> MShotPlayblastConfig:
@@ -144,14 +138,7 @@ class AnimPlayblastDialog(MPlayblastDialog):
         pass_label = str(self._shot_pass.currentText()).strip() or None
         shot_config = replace(shot_config, pass_label=pass_label)
 
-        return MPlayblastConfig(
-            dof=self.use_dof,
-            hardware_fog=self.use_hardware_fog,
-            lighting=self.use_lighting,
-            shadows=self.use_shadows,
-            shots=[shot_config],
-            ssao=self.use_ssao,
-        )
+        return MPlayblastConfig(quality=self.quality, shots=[shot_config])
 
 
 def _resolve_anim_version(shot) -> tuple[str | None, str | None]:

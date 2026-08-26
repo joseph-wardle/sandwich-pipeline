@@ -8,6 +8,7 @@ from typing import Any, ClassVar, NewType
 import attrs
 
 from pipe.core.playblast.presets import FFmpegPreset
+from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 
 
 def padded_frame_number(frame: int, width: int = 4) -> str:
@@ -17,9 +18,13 @@ def padded_frame_number(frame: int, width: int = 4) -> str:
 DestinationId = NewType("DestinationId", str)
 
 EDIT_FOLDER_ID = DestinationId("edit")
+EDIT_FOLDER_NAME = "Send to Edit"
 CURRENT_FOLDER_ID = DestinationId("current_folder")
+CURRENT_FOLDER_NAME = "Current Folder"
 CUSTOM_FOLDER_ID = DestinationId("custom_folder")
+CUSTOM_FOLDER_NAME = "Custom Folder"
 RENDER_FOLDER_ID = DestinationId("render_folder")
+PREVIS_FOLDER_ID = DestinationId("previs_folder")
 
 
 @attrs.frozen
@@ -67,12 +72,15 @@ def shot_or_scratch(shot_code: str, scratch_label: str) -> ReviewEntity:
 
 @attrs.frozen
 class DiskDestination:
+    """`unavailable`, when set, is why this row cannot be delivered to yet."""
+
     id: DestinationId
     name: str
     directory: Path
     preset: FFmpegPreset
     default_on: bool = True
     browsable: bool = False
+    unavailable: str = ""
 
 
 @attrs.frozen
@@ -81,6 +89,8 @@ class ShotGridDestination:
 
     id: ClassVar[DestinationId] = DestinationId("shotgrid")
     name: ClassVar[str] = "ShotGrid"
+    # Always deliverable, so every `Destination` answers the same question.
+    unavailable: ClassVar[str] = ""
     # ShotGrid transcodes whatever it receives, so the upload reuses the WEB
     # encode a checked WEB folder row already needs.
     preset: ClassVar[FFmpegPreset] = FFmpegPreset.WEB
@@ -94,6 +104,17 @@ class ShotGridDestination:
 
 
 Destination = DiskDestination | ShotGridDestination
+
+
+def custom_folder_destination(*, default_on: bool = False) -> DiskDestination:
+    return DiskDestination(
+        id=CUSTOM_FOLDER_ID,
+        name=CUSTOM_FOLDER_NAME,
+        directory=resolve_playblast_tempdir(),
+        preset=FFmpegPreset.WEB,
+        default_on=default_on,
+        browsable=True,
+    )
 
 
 def _validate_destinations(
@@ -135,8 +156,12 @@ class PreviewClip:
 
 __all__ = [
     "CURRENT_FOLDER_ID",
+    "CURRENT_FOLDER_NAME",
     "CUSTOM_FOLDER_ID",
+    "CUSTOM_FOLDER_NAME",
     "EDIT_FOLDER_ID",
+    "EDIT_FOLDER_NAME",
+    "PREVIS_FOLDER_ID",
     "RENDER_FOLDER_ID",
     "AssetEntity",
     "Destination",
@@ -147,6 +172,7 @@ __all__ = [
     "ScratchEntity",
     "ShotEntity",
     "ShotGridDestination",
+    "custom_folder_destination",
     "is_unlinked",
     "padded_frame_number",
 ]
