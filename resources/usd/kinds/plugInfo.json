@@ -5,9 +5,17 @@
            "Name": "dungeonKinds", 
          "Info":{
              "Kinds":{
-                "character":{
+                "rig":{
                    "baseKind":"component",
+                   "description":"A component that is meant to inherit animation data."
+                },
+                "character":{
+                   "baseKind":"rig",
                    "description":"A (usually animated) character"
+                },
+                "prop":{
+                   "baseKind":"rig",
+                   "description":"A (usually animated) object"
                 },
                 "fx":{
                    "baseKind":"component",
