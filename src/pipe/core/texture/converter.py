@@ -142,7 +142,7 @@ class TexConverter:
         def tex_cmd(img: str, is_color: bool) -> list[str]:
             # fmt: off
             return [
-                str(Executables.oiiotool),
+                str(Executables.rman_oiiotool),
                 img,
                 *(
                     [
@@ -166,7 +166,7 @@ class TexConverter:
             # height map produced by the `norm2height` pre-pass.
             # fmt: off
             return [
-                str(Executables.oiiotool),
+                str(Executables.rman_oiiotool),
                 img,
                 "--planarconfig", "separate",
                 "-obump:bumpformat=height",
