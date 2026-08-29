@@ -42,6 +42,9 @@ RIG_DIRNAME = "rig"
 RIG_VERSIONS_DIRNAME = ".versions"
 DEFAULT_GEOMETRY_VARIANT = "main"
 
+# The geometry variant an asset has when nobody chose one.
+DEFAULT_GEOMETRY_VARIANT = "main"
+
 # Publish filenames
 PUBLISH_SOURCE_MODEL_FILENAME = "model.usd"
 PUBLISH_ASSET_USD_FILENAME = "asset.usd"
@@ -203,6 +206,20 @@ def paths_for_asset(asset: Asset, production_root: Path | None = None) -> AssetP
     return AssetPaths(asset_root(asset, production_root=production_root))
 
 
+def production_relative_identifier(
+    path: Path, production_root: Path | None = None
+) -> str:
+    """Return `path` as a USD layer identifier resolved through the search path."""
+    prod_root = production_root or get_production_path()
+    try:
+        return str(path.relative_to(prod_root))
+    except ValueError:
+        log.warning(
+            "Layer %s is outside the production root; using its full path", path
+        )
+        return str(path)
+
+
 __all__ = [
     "AssetPaths",
     "DEFAULT_GEOMETRY_VARIANT",
@@ -230,4 +247,5 @@ __all__ = [
     "asset_root",
     "asset_root_from_path",
     "paths_for_asset",
+    "production_relative_identifier",
 ]
