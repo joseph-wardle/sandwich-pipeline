@@ -3,10 +3,16 @@ from __future__ import annotations
 import logging
 from abc import ABCMeta, abstractmethod
 from pathlib import Path
+from typing import cast
 
 from Qt import QtWidgets
 
-from pipe.core.ui import FilteredListDialog, MessageDialog, MessageDialogCustomButtons
+from pipe.core.ui import (
+    FilteredListDialog,
+    ItemSource,
+    MessageDialog,
+    MessageDialogCustomButtons,
+)
 from pipe.core.shotgrid import (
     Asset,
     Environment,
@@ -14,6 +20,8 @@ from pipe.core.shotgrid import (
     Sequence,
     Shot,
     ShotGrid,
+    group_assets_by_subdirectory,
+    group_shots_by_sequence,
 )
 from pipe.core.util.paths import get_production_path
 
@@ -61,7 +69,7 @@ class OpenFileDialog(FilteredListDialog):
     def __init__(
         self,
         parent: QtWidgets.QWidget | None,
-        items: list[str],
+        items: ItemSource,
         entity_type: type[SGEntity],
         versioning: bool,
         version_msg: str,
@@ -148,6 +156,16 @@ class FileManager(metaclass=ABCMeta):
         """Restrict the open-file dialog's entity list. Default: no filter."""
         return entities
 
+    def _group_entities(self, entities: list[SGEntity]) -> ItemSource:
+        """Rows for the open-file dialog, bucketed into collapsible groups."""
+        if self._entity_type is Shot:
+            return group_shots_by_sequence(cast("list[Shot]", entities))
+        if self._entity_type in (Asset, Environment):
+            return group_assets_by_subdirectory(
+                cast("list[Asset | Environment]", entities)
+            )
+        return sorted(e.code for e in entities if e.code)
+
     def _prompt_create_if_not_exist(self, path: Path) -> bool:
         """Returns True if safe to proceed, False otherwise"""
         if not path.exists():
@@ -171,10 +189,9 @@ class FileManager(metaclass=ABCMeta):
             entities = self._filter_entities(
                 _find_entities_for_type(self._conn, self._entity_type, roots_only=True)
             )
-            entity_names = sorted(e.code or "" for e in entities if e.code)
             open_file_dialog = OpenFileDialog(
                 self._main_window,
-                entity_names,
+                self._group_entities(entities),
                 self._entity_type,
                 versioning=self._versioning,
                 version_msg=self._version_msg,

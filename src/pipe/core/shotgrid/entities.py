@@ -124,6 +124,10 @@ class SGEntity:
     def __hash__(self) -> int:
         return hash((type(self).__name__, self.id))
 
+    def as_fetched(self, name: str) -> Any:
+        """Read a field exactly as ShotGrid returned it, skipping lazy hydration."""
+        return object.__getattribute__(self, name)
+
     def __getattribute__(self, name: str) -> Any:
         value = object.__getattribute__(self, name)
         if value is not None:

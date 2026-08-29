@@ -19,13 +19,20 @@ from pipe.core.ui import (
     RESTORE_CANCEL,
     RESTORE_SAVE_FIRST,
     FilteredListDialog,
+    ItemSource,
     MessageDialog,
     prompt_restore_conflict,
 )
 from pipe.core.ui.save_version_dialog import SaveVersionDialog
 from pipe.core.ui.version_browser import VersionBrowserWidget
 from pipe.dcc.maya.runtime import get_main_qt_window
-from pipe.core.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
+from pipe.core.shotgrid import (
+    Asset,
+    SGEntity,
+    ShotGrid,
+    ShotGridError,
+    group_assets_by_subdirectory,
+)
 from pipe.core.util import FileManager
 from pipe.core.versioning import (
     VersionRecord,
@@ -195,7 +202,10 @@ class AssetOpenDialog(FilteredListDialog):
     _info_label: QtWidgets.QLabel
 
     def __init__(
-        self, parent: QtWidgets.QWidget | None, items: list[str], conn: ShotGrid
+        self,
+        parent: QtWidgets.QWidget | None,
+        items: ItemSource,
+        conn: ShotGrid,
     ) -> None:
         super().__init__(
             parent,
@@ -220,7 +230,9 @@ class AssetOpenDialog(FilteredListDialog):
         self._layout.insertWidget(1, info_widget)
         if hasattr(self, "_filter_field"):
             self._filter_field.setToolTip("Type to filter the asset list.")
-        self._list_widget.setToolTip("Select the asset model you want to open.")
+        self._list_widget.setToolTip(
+            "Pick an asset. Assets are grouped by their ShotGrid subdirectory."
+        )
         _set_dialog_button_tooltips(
             self,
             ok_text="Open the selected asset model file.",
@@ -337,10 +349,8 @@ class MAssetFileManager(FileManager):
             log.debug("Unable to infer asset metadata from scene path: %s", scene_path)
 
     def _prompt_asset_selection(self) -> Asset | None:
-        asset_names = sorted(
-            a.display_name for a in self._conn.find_assets(roots_only=True)
-        )
-        dialog = AssetOpenDialog(self._main_window, asset_names, self._conn)
+        assets = group_assets_by_subdirectory(self._conn.find_assets(roots_only=True))
+        dialog = AssetOpenDialog(self._main_window, assets, self._conn)
         if not dialog.exec_():
             return None
 

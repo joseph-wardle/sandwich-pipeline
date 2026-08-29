@@ -27,6 +27,11 @@ from pipe.core.shotgrid.errors import (
     ShotGridNotFound,
     ShotGridWriteError,
 )
+from pipe.core.shotgrid.grouping import (
+    OTHER_GROUP,
+    group_assets_by_subdirectory,
+    group_shots_by_sequence,
+)
 from pipe.core.shotgrid.paths import (
     build_asset_path,
     build_environment_path,
@@ -52,6 +57,10 @@ __all__ = [
     "Task",
     "User",
     "Version",
+    # Grouping
+    "OTHER_GROUP",
+    "group_assets_by_subdirectory",
+    "group_shots_by_sequence",
     # Errors
     "ShotGridAmbiguous",
     "ShotGridError",

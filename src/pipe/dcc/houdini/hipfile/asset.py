@@ -14,7 +14,7 @@ from pipe.core.asset import (
 )
 from pipe.core.asset.paths import BACKUP_DIRNAME
 from pipe.core.ui import FilteredListDialog, MessageDialog
-from pipe.core.shotgrid import Asset, SGEntity
+from pipe.core.shotgrid import Asset, SGEntity, group_assets_by_subdirectory
 from pipe.core.versioning import VersionStreamSpec
 
 from ..publish import nodelayouts
@@ -52,12 +52,10 @@ class HAssetFileManager(HFileManager):
             log.exception("Failed to ensure SKD Component Builder for %s", asset_name)
 
     def _prompt_asset_selection(self) -> Asset | None:
-        asset_codes = sorted(
-            a.display_name for a in self._conn.find_assets(roots_only=True)
-        )
+        assets = group_assets_by_subdirectory(self._conn.find_assets(roots_only=True))
         dialog = FilteredListDialog(
             self._main_window,
-            asset_codes,
+            assets,
             "Select Asset",
             "Select the asset to browse versions.",
             accept_button_name="Select",
