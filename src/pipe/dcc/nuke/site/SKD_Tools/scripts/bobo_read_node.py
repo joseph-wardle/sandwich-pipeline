@@ -191,13 +191,15 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
     if not sequences:
         return []
 
-    # remove any existing nodes created by this tool (by prefix)
-    for n in nuke.allNodes("Read"):
-        try:
-            if n.name().startswith(node_name_prefix):
-                nuke.delete(n)
-        except Exception:
-            pass
+    # This was originally implemented and works, but I found it personally annoying.
+
+    # removes any existing nodes created by this tool (by prefix)
+    # for n in nuke.allNodes("Read"):
+    #     try:
+    #         if n.name().startswith(node_name_prefix):
+    #             nuke.delete(n)
+    #     except Exception:
+    #         pass
 
     created = []
     global_first = min(s["first"] for s in sequences)
