@@ -24,7 +24,7 @@ from pipe.core.util.paths import get_production_path, resolve_mapped_path
 from substance_painter.project import NormalMapFormat, ProjectWorkflow, TangentSpace
 
 from pipe.core.asset import AssetPaths, paths_for_asset
-from pipe.core.ui import DialogFilteredList, FilteredListDialog
+from pipe.core.ui import DialogFilteredList, FilteredListDialog, ItemSource
 from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.dcc.substance_painter.util.docs import docs_link_html
 
@@ -116,7 +116,10 @@ class SubstanceAssetDialog(FilteredListDialog):
     _info_label: QtWidgets.QLabel
 
     def __init__(
-        self, parent: QtWidgets.QWidget | None, items: list[str], conn: ShotGrid
+        self,
+        parent: QtWidgets.QWidget | None,
+        items: ItemSource,
+        conn: ShotGrid,
     ) -> None:
         super().__init__(
             parent,
@@ -170,7 +173,10 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
     _geo_variant_dropdown: QtWidgets.QComboBox
 
     def __init__(
-        self, parent: QtWidgets.QWidget | None, items: list[str], conn: ShotGrid
+        self,
+        parent: QtWidgets.QWidget | None,
+        items: ItemSource,
+        conn: ShotGrid,
     ) -> None:
         super().__init__(parent)
         self._conn = conn
@@ -276,6 +282,9 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
     def _set_action_and_accept(self, action: str) -> None:
         self._action = action
         self.accept()
+
+    def _accept_selection(self) -> None:
+        self._set_action_and_accept(self.ACTION_OPEN_EXISTING)
 
     def _on_variant_changed(self, _text: str) -> None:
         self._update_project_info()

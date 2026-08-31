@@ -227,7 +227,7 @@ class PublishAssetOptionsDialog(
 
         self._init_variant_controls()
         self._init_version_title_controls()
-        self._version_title_field.textChanged.connect(self._update_accept_state)
+        self._version_title_field.textChanged.connect(self._refresh_accept)
 
         insert_at = max(self._layout.count() - 1, 0)
         self._layout.insertStretch(insert_at, 1)
@@ -249,18 +249,15 @@ class PublishAssetOptionsDialog(
         cancel_btn = self.buttons.button(QDialogButtonBox.Cancel)
         if cancel_btn:
             cancel_btn.setToolTip("Cancel publishing and close this window.")
-        self._update_accept_state()
+        self._refresh_accept()
 
     def get_selected_item(self) -> str | None:
         return self._selected_asset_name
 
-    def _on_item_selected(self) -> None:
-        return
-
-    def _update_accept_state(self) -> None:
-        ok_btn = self.buttons.button(QDialogButtonBox.Ok)
-        if ok_btn:
-            ok_btn.setEnabled(bool(self.get_version_title()))
+    def _can_accept(self) -> bool:
+        # The asset comes from the scene, not the (hidden) list, so a title is
+        # the only thing left to require.
+        return bool(self.get_version_title())
 
 
 class PublishAssetPickerDialog(
@@ -285,7 +282,7 @@ class PublishAssetPickerDialog(
         self._list_widget.setToolTip("Select the asset to publish.")
         self._init_variant_controls()
         self._init_version_title_controls()
-        self._version_title_field.textChanged.connect(self._update_accept_state)
+        self._version_title_field.textChanged.connect(self._refresh_accept)
         self._populate_geo_var(None)
         insert_at = max(self._layout.count() - 1, 0)
         self._layout.insertStretch(insert_at, 1)
@@ -296,29 +293,22 @@ class PublishAssetPickerDialog(
         cancel_btn = self.buttons.button(QDialogButtonBox.Cancel)
         if cancel_btn:
             cancel_btn.setToolTip("Cancel publishing and close this window.")
-        self._update_accept_state()
+        self._refresh_accept()
 
     def _on_item_selected(self) -> None:
         selected = self.get_selected_item()
         if not (self._conn and selected):
-            self._update_accept_state()
             return
         try:
             asset = self._conn.get_asset(display_name=selected)
         except ShotGridError:
             log.warning("Could not resolve asset %r in publish picker.", selected)
             self._populate_geo_var(None)
-            self._update_accept_state()
             return
         self._populate_geo_var(asset)
-        self._update_accept_state()
 
-    def _update_accept_state(self) -> None:
-        ok_btn = self.buttons.button(QDialogButtonBox.Ok)
-        if ok_btn:
-            ok_btn.setEnabled(
-                bool(self.get_version_title()) and bool(self.get_selected_item())
-            )
+    def _can_accept(self) -> bool:
+        return bool(self.get_version_title()) and bool(self.get_selected_item())
 
 
 class AssetPublisher(Publisher):

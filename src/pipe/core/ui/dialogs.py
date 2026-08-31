@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING, Any, cast
+import typing
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 from random import randint
 
 from Qt import QtCore, QtGui, QtWidgets
 from pipe.core.util.paths import get_repo_root
 
-if TYPE_CHECKING:
-    import typing
-
 """Adapted/updated from 2024 (Accomplice) / 2022 (Cenote) pipelines"""
 
 log = logging.getLogger(__name__)
+
+ItemSource = Sequence[str] | Mapping[str, Sequence[str]]
 
 
 def set_tab_available(
@@ -68,13 +69,71 @@ class DialogButtons(ButtonPair):
             self.buttons.rejected.connect(self.reject)
 
 
-class _FilterFieldEventFilter(QtCore.QObject):
-    """Handles navigation key events on the filter field for DialogFilteredList."""
+_COLUMN = 0
+_VALUE_ROLE = QtCore.Qt.UserRole
+_FILTER_ROLE = QtCore.Qt.UserRole + 1
+
+_MATCH_EVERYTHING = re.compile("")
+
+
+def _is_group(item: QtWidgets.QTreeWidgetItem) -> bool:
+    return item.data(_COLUMN, _VALUE_ROLE) is None
+
+
+def _leaf_item(text: str) -> QtWidgets.QTreeWidgetItem:
+    item = QtWidgets.QTreeWidgetItem([text])
+    item.setData(_COLUMN, _VALUE_ROLE, text)
+    item.setData(_COLUMN, _FILTER_ROLE, text)
+    return item
+
+
+def _group_item(label: str, items: Sequence[str]) -> QtWidgets.QTreeWidgetItem:
+    group = QtWidgets.QTreeWidgetItem([f"{label}  ({len(items)})"])
+    group.setData(_COLUMN, _FILTER_ROLE, label)
+    font = group.font(_COLUMN)
+    font.setBold(True)
+    group.setFont(_COLUMN, font)
+    for text in items:
+        group.addChild(_leaf_item(text))
+    return group
+
+
+def _first_visible_row(
+    tree: QtWidgets.QTreeWidget,
+) -> QtWidgets.QTreeWidgetItem | None:
+    for index in range(tree.topLevelItemCount()):
+        top = tree.topLevelItem(index)
+        if not top.isHidden():
+            return top
+    return None
+
+
+def _apply_filter(
+    row: QtWidgets.QTreeWidgetItem, pattern: typing.Pattern[str]
+) -> QtWidgets.QTreeWidgetItem | None:
+    """Hide the rows that do not match; return the first leaf that survives."""
+    matched = bool(pattern.match(str(row.data(_COLUMN, _FILTER_ROLE)).lower()))
+
+    if not _is_group(row):
+        row.setHidden(not matched)
+        return row if matched else None
+
+    first: QtWidgets.QTreeWidgetItem | None = None
+    for index in range(row.childCount()):
+        hit = _apply_filter(row.child(index), _MATCH_EVERYTHING if matched else pattern)
+        if first is None:
+            first = hit
+    row.setHidden(first is None)
+    return first
+
+
+class _ListNavigationEventFilter(QtCore.QObject):
+    """Keyboard glue between the filter field and the item tree."""
 
     def __init__(
         self,
         parent: QtCore.QObject,
-        list_widget: QtWidgets.QListWidget,
+        list_widget: QtWidgets.QTreeWidget,
         accept: typing.Callable[..., None],
         get_selected_item: typing.Callable[[], str | None],
     ) -> None:
@@ -87,12 +146,25 @@ class _FilterFieldEventFilter(QtCore.QObject):
         if event.type() == QtCore.QEvent.KeyPress:
             key_event = cast(QtGui.QKeyEvent, event)
 
-            if key_event.key() == QtCore.Qt.Key_Down:
+            if (
+                key_event.key() == QtCore.Qt.Key_Down
+                and watched is not self._list_widget
+            ):
                 self._list_widget.setFocus()
-                QtWidgets.QApplication.sendEvent(self._list_widget, event)
+                first = _first_visible_row(self._list_widget)
+                # Qt parks an unselected current item on the first row, so
+                # forwarding the keypress there would skip straight past it.
+                if not self._list_widget.selectedItems() and first is not None:
+                    self._list_widget.setCurrentItem(first)
+                else:
+                    QtWidgets.QApplication.sendEvent(self._list_widget, event)
                 return True
 
             if key_event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+                current = self._list_widget.currentItem()
+                if current is not None and _is_group(current):
+                    current.setExpanded(not current.isExpanded())
+                    return True
                 if self._get_selected_item() is not None:
                     self._accept()
                     return True
@@ -101,70 +173,124 @@ class _FilterFieldEventFilter(QtCore.QObject):
 
 
 class DialogFilteredList:
-    accept: typing.Callable[..., None]
+    """A filter field over a list of rows, optionally bucketed into groups."""
+
+    # `QDialog.accept`, on the dialog this mixin is mixed into.
+    accept: typing.Callable[[], None]
 
     filtered_list: QtWidgets.QVBoxLayout
     _filter_field: QtWidgets.QLineEdit
     _list_label: QtWidgets.QLabel
-    _list_widget: QtWidgets.QListWidget
+    _list_widget: QtWidgets.QTreeWidget
+    # Groups the artist had opened before they started typing, restored when
+    # they clear the filter. `None` while no filter is active.
+    _expanded_before_filter: set[int] | None
 
     def _init_filtered_list(
         self,
-        items: typing.Sequence[str],
+        items: ItemSource,
         list_label: str | None = None,
         include_filter_field: bool | None = True,
     ) -> None:
         self.filtered_list = QtWidgets.QVBoxLayout()
+        self._expanded_before_filter = None
 
         if list_label is not None:
             assert isinstance(list_label, str)
             self._list_label = QtWidgets.QLabel(list_label)
             self.filtered_list.addWidget(self._list_label)
 
-        self._list_widget = QtWidgets.QListWidget()
-        self._list_widget.addItems(items)
-        self._list_widget.itemDoubleClicked.connect(self.accept)
-
+        # Built before the tree so it leads the tab order and takes focus when
+        # the dialog opens: an artist can start typing without clicking first.
         if include_filter_field:
             self._filter_field = QtWidgets.QLineEdit()
             self._filter_field.setPlaceholderText("Type here to filter...")
+            self.filtered_list.addWidget(self._filter_field)
+
+        self._list_widget = QtWidgets.QTreeWidget()
+        self._list_widget.setHeaderHidden(True)
+        self._list_widget.setUniformRowHeights(True)
+        self._list_widget.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self._populate_items(items)
+        self._list_widget.itemDoubleClicked.connect(self._on_item_activated)
+        self.filtered_list.addWidget(self._list_widget)
+
+        if include_filter_field:
             self._filter_field.textChanged.connect(self._filter_items)
-            self._filter_event_filter = _FilterFieldEventFilter(
+            self._filter_event_filter = _ListNavigationEventFilter(
                 self._filter_field,
                 self._list_widget,
-                self.accept,
+                self._accept_selection,
                 self.get_selected_item,
             )
             self._filter_field.installEventFilter(self._filter_event_filter)
-            self.filtered_list.addWidget(self._filter_field)
+            self._list_widget.installEventFilter(self._filter_event_filter)
 
-        self.filtered_list.addWidget(self._list_widget)
+    def _populate_items(self, items: ItemSource) -> None:
+        """Fill the tree. Groups start collapsed; a flat sequence has none."""
+        self._list_widget.clear()
+        if isinstance(items, Mapping):
+            groups = cast("Mapping[str, Sequence[str]]", items)
+            for label, group_items in groups.items():
+                # A header with nothing under it is not a group; rendering it
+                # would also make it vanish the moment the artist starts typing.
+                if group_items:
+                    self._list_widget.addTopLevelItem(_group_item(label, group_items))
+            return
+        for text in items:
+            self._list_widget.addTopLevelItem(_leaf_item(text))
+
+    def _accept_selection(self) -> None:
+        """Accept the picked row."""
+        self.accept()
+
+    def _on_item_activated(self, item: QtWidgets.QTreeWidgetItem) -> None:
+        if _is_group(item):
+            item.setExpanded(not item.isExpanded())
+            return
+        self._accept_selection()
 
     def _filter_items(self) -> None:
         filter_text = self._filter_field.text().lower()
-        reg = re.compile(".*".join(["", *filter_text.split(), ""]))
+        pattern = re.compile(".*".join(["", *filter_text.split(), ""]))
+        filtering = bool(filter_text.strip())
+        tree = self._list_widget
 
-        first_visible_row: int | None = None
+        if filtering and self._expanded_before_filter is None:
+            self._expanded_before_filter = {
+                index
+                for index in range(tree.topLevelItemCount())
+                if tree.topLevelItem(index).isExpanded()
+            }
+        restore = self._expanded_before_filter or set()
 
-        for row in range(self._list_widget.count()):
-            item = self._list_widget.item(row)
-            item_text = item.text().lower()
-            if reg.match(item_text):
-                item.setHidden(False)
-                if first_visible_row is None:
-                    first_visible_row = row
-            else:
-                item.setHidden(True)
+        first_match: QtWidgets.QTreeWidgetItem | None = None
+        for index in range(tree.topLevelItemCount()):
+            top = tree.topLevelItem(index)
+            match = _apply_filter(top, pattern)
+            # A match inside a collapsed group is invisible, so open the group
+            # while the artist types and hand their own layout back after.
+            top.setExpanded(match is not None if filtering else index in restore)
+            if first_match is None:
+                first_match = match
 
-        # select the first visible item
-        if first_visible_row is not None:
-            self._list_widget.setCurrentRow(first_visible_row)
+        if not filtering:
+            self._expanded_before_filter = None
+
+        # Selecting a row the artist cannot see would arm the accept button
+        # against an invisible pick, so only follow a match that is on screen.
+        parent = first_match.parent() if first_match is not None else None
+        if first_match is not None and (parent is None or parent.isExpanded()):
+            tree.setCurrentItem(first_match)
+        else:
+            tree.clearSelection()
 
     def get_selected_item(self) -> str | None:
+        """The selected row's value, or `None` when a group header is selected."""
         selected_items = self._list_widget.selectedItems()
-        if selected_items:
-            return selected_items[0].text()
-        return None
+        if not selected_items:
+            return None
+        return cast("str | None", selected_items[0].data(_COLUMN, _VALUE_ROLE))
 
 
 FLASHBANG_DIR = get_repo_root() / "resources/flashbang"
@@ -244,13 +370,13 @@ class MessageDialogCustomButtons(QtWidgets.QDialog, DialogButtons):
 class FilteredListDialog(QtWidgets.QDialog, DialogButtons, DialogFilteredList):
     filter_field: QtWidgets.QLineEdit
     list_label: QtWidgets.QLabel
-    list_widget: QtWidgets.QListWidget
+    list_widget: QtWidgets.QTreeWidget
     _layout: QtWidgets.QBoxLayout
 
     def __init__(
         self,
         parent: QtWidgets.QWidget | None,
-        items: typing.Sequence[str],
+        items: ItemSource,
         title: str = "Filtered List",
         list_label: str | None = None,
         include_filter_field: bool | None = True,
@@ -272,7 +398,27 @@ class FilteredListDialog(QtWidgets.QDialog, DialogButtons, DialogFilteredList):
         self._layout.addLayout(self.filtered_list)
         self._layout.addWidget(self.buttons)
 
+        self._list_widget.itemSelectionChanged.connect(self._refresh_accept)
         self._list_widget.itemSelectionChanged.connect(self._on_item_selected)
+        # Nothing is picked yet. `_refresh_accept` is deliberately not called
+        # here: a subclass's `_can_accept` may read widgets its own `__init__`
+        # has not built yet, so subclasses refresh once they are ready.
+        self._set_accept_enabled(False)
+
+        if include_filter_field:
+            self._filter_field.setFocus()
+
+    def _can_accept(self) -> bool:
+        """Whether the accept button should be live."""
+        return self.get_selected_item() is not None
+
+    def _refresh_accept(self) -> None:
+        self._set_accept_enabled(self._can_accept())
+
+    def _set_accept_enabled(self, enabled: bool) -> None:
+        button = self.buttons.button(QtWidgets.QDialogButtonBox.Ok)
+        if button is not None:
+            button.setEnabled(enabled)
 
     def _on_item_selected(self):
         """Called when the selection changes in the list widget. Override based on need"""

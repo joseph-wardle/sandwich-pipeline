@@ -37,12 +37,6 @@ class PublishPrevisAssetDialog(FilteredListDialog):
 
         self._conn = conn
 
-    def get_selected_item(self) -> str | None:
-        selected_items = self._list_widget.selectedItems()
-        if selected_items:
-            return selected_items[0].text()
-        return None
-
 
 class PrevisAssetPublisher(Publisher):
     _PUBLISH_KIND = "previs_asset"

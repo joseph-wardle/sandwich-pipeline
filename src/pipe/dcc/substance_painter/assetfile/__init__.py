@@ -23,7 +23,7 @@ from Qt import QtWidgets
 from pipe.core.util.paths import resolve_mapped_path
 
 from pipe.core.asset import asset_owner_for, paths_for_asset, substance_project_stream
-from pipe.core.shotgrid import Asset, ShotGrid
+from pipe.core.shotgrid import Asset, ShotGrid, group_assets_by_subdirectory
 from pipe.core.ui import (
     RESTORE_CANCEL,
     RESTORE_SAVE_FIRST,
@@ -451,10 +451,12 @@ def launch_open_asset_textures() -> None:
         return
 
     conn = ShotGrid.connect(DB_Config)
-    asset_names = sorted(a.name for a in conn.find_assets())
+    # Keyed on `name`, not `display_name`: the dialog resolves its pick with
+    # `get_asset(name=...)`.
+    assets = group_assets_by_subdirectory(conn.find_assets(), key=lambda a: a.name)
     parent = get_main_qt_window()
 
-    select_dialog = SubstanceAssetSelectDialog(parent, asset_names, conn)
+    select_dialog = SubstanceAssetSelectDialog(parent, assets, conn)
     if not select_dialog.exec_():
         return
 

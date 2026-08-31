@@ -35,12 +35,6 @@ class SelectFromGroup(FilteredListDialog):
             return wrapInstance(int(ptr), QtWidgets.QWidget)
         return None
 
-    def get_selected_item(self):
-        selected_items = self._list_widget.selectedItems()
-        if selected_items:
-            return selected_items[0].text()
-        return None
-
 
 class LayoutMaker:
     """Different methods for making layouts in maya
