@@ -7,8 +7,6 @@ from maya.OpenMayaUI import MQtUtil
 from Qt import QtCore
 from Qt.QtWidgets import QWidget
 
-from pipe.dcc.maya.runtime import get_main_qt_window
-
 from .. import build, publish
 from ..build import RigDefinition, has_local_override_directory
 from ..database import DBWorker
@@ -40,6 +38,17 @@ def _restore() -> None:
     widget_ptr = MQtUtil.findControl(_window_instance.objectName())
     if workspace_ptr and widget_ptr:
         MQtUtil.addWidgetToMayaLayout(int(widget_ptr), int(workspace_ptr))
+        log.debug(
+            "Restored rig builder UI: workspace_control=%s widget=%s",
+            WORKSPACE_CONTROL_NAME,
+            _window_instance.objectName(),
+        )
+    else:
+        log.warning(
+            "Failed to restore rig builder: workspace_control=%s widget=%s",
+            WORKSPACE_CONTROL_NAME,
+            _window_instance.objectName(),
+        )
 
 
 # This uiScript is called by Maya to recreate the widget when restoring layout.
@@ -61,7 +70,7 @@ def launch() -> None:
 
     delete_workspace_control(WORKSPACE_CONTROL_NAME)
 
-    _window_instance = RigBuilderWindow(parent=get_main_qt_window())
+    _window_instance = RigBuilderWindow(parent=get_maya_main_window())
     _window_instance.show(
         dockable=True,
         uiScript=UI_SCRIPT,
