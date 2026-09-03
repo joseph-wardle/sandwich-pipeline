@@ -37,3 +37,7 @@
 [submodule "pipeline/lib/ae_SVG"]
 	path = src/pipe/dcc/houdini/third_party/ae_SVG
 	url = https://github.com/Aeoll/ae_SVG.git
+[submodule "src/pipe/dcc/maya/third_party/nxt_editor_git"]
+	path = src/pipe/dcc/maya/third_party/nxt_editor_git
+	url = https://github.com/michaelharmonart/nxt_editor.git
+	branch = qresources

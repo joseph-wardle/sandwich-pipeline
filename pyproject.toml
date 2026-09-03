@@ -71,6 +71,7 @@ exclude = [
     'y-rig',
     "studiolibrary",
     "timeline_marker",
+    "src/pipe/dcc/maya/site/plugins/nxt_maya.py",
     "src/pipe/dcc/maya/third_party/**"
 ]
 
@@ -119,6 +120,7 @@ exclude = [
     "src/**/timeline_marker/**",
     "src/**/houdini/site/scripts/**",
     "src/pipe/dcc/maya/third_party/**",
+    "src/pipe/dcc/maya/site/plugins/nxt_maya.py",
     "src/pipe/dcc/houdini/site/**/scripts/"
 ]
 
