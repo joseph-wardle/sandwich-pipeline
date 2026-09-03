@@ -4,6 +4,7 @@ import re
 import glob
 import math
 from functools import reduce
+from pathlib import Path
 
 
 def _find_images_dir(base):
@@ -137,6 +138,16 @@ def _nearest_hold_expr(first, last, step):
     return f"clamp({first}+{step}*floor((frame-{first})/{step}+0.5), {first}, {last})"
 
 
+def _redirect_to_cache(path):
+    """Prefer /cache for renders, falling back to the original mount."""
+    parts = Path(path).parts
+    if len(parts) > 1 and parts[1] in ("groups", "job"):
+        cached = str(Path("/cache", *parts[2:]))
+        if os.path.isdir(cached):
+            return cached
+    return path
+
+
 def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
     """
     Create one Read node per discovered sequence inside the newest date/version folder.
@@ -156,8 +167,8 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
 
     shot_dir = os.path.dirname(os.path.dirname(script_path))
     # ex: /groups/sandwich/05_production/shot/A_010
-    render_dir = os.path.join(shot_dir, render_subdir)
-    # ex: /groups/sandwich/05_production/shot/A_010/render
+    render_dir = _redirect_to_cache(os.path.join(shot_dir, render_subdir))
+    # ex: /cache/sandwich/05_production/shot/A_010/render
 
     sequences = get_latest_exr_sequences(render_dir)
     if not sequences:
