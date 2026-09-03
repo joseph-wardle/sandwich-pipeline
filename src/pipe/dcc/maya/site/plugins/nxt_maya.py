@@ -1,0 +1,1 @@
+../../third_party/nxt_editor_git/nxt_editor/integration/maya/plug-ins/nxt_maya.py
