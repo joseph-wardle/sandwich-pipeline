@@ -270,22 +270,3 @@ def auto_read_latest_exr():
         nuke.zoom(1, [viewer["xpos"].value(), viewer["ypos"].value()])
     except Exception as e:
         nuke.tprint(f"[Auto Read] Viewer zoom error: {e}")
-
-
-def main():
-    """
-    Register the menu command and run it immediately.
-    """
-    nuke.menu("Nuke").addCommand(
-        "Custom/Auto Read Latest EXR", auto_read_latest_exr, "ctrl+shift+r"
-    )
-    # immediately invoke to surface any errors at load time
-    auto_read_latest_exr()
-
-
-# auto-register on module load
-try:
-    main()
-    nuke.tprint("[Auto Read] Module loaded and command registered.")
-except Exception as e:
-    nuke.tprint(f"[Auto Read] Failed to initialize: {e}")
