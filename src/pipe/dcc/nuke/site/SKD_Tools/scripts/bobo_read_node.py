@@ -4,7 +4,6 @@ import re
 import glob
 import math
 from functools import reduce
-from datetime import datetime
 
 
 def _find_images_dir(base):
@@ -59,12 +58,7 @@ def _scan_exr_sequence(images_dir):
 
 def get_latest_exr_sequences(render_root):
     """
-    Discover EXR sequences in the newest MM-DD-YY_V_### directory.
-
-    - If subfolders exist under the newest date/version dir:
-        scan each subfolder; in each, prefer images_dn/ over images/
-    - If no subfolders:
-        look directly under the newest date/version dir for images_dn/ or images/
+    Discover EXR sequences in each render layer's most recent version.
 
     Returns a list of dicts:
       [{
@@ -79,72 +73,46 @@ def get_latest_exr_sequences(render_root):
         nuke.message(f"[Auto Read] Render folder does not exist:\n  {render_root}")
         return []
 
-    folder_pattern = re.compile(r"^(\d{2}-\d{2}-\d{2})_V_(\d{3})$")
-    candidates = []
-    for name in os.listdir(render_root):
-        path = os.path.join(render_root, name)
-        m = folder_pattern.match(name)
-        if m and os.path.isdir(path):
-            date_obj = datetime.strptime(m.group(1), "%m-%d-%y").date()
-            version = int(m.group(2))
-            candidates.append((date_obj, version, path))
-    if not candidates:
-        nuke.message("[Auto Read] No valid render subfolders found.")
-        return []
-
-    _, _, newest = sorted(candidates, key=lambda x: (x[0], x[1]))[-1]
-
-    subfolders = [
-        d for d in os.listdir(newest) if os.path.isdir(os.path.join(newest, d))
-    ]
-
+    version_pattern = re.compile(r"^V_(\d+)$", re.IGNORECASE)
     sequences = []
 
-    if subfolders:
-        for sub in sorted(subfolders):
-            base = os.path.join(newest, sub)
-            images_dir = _find_images_dir(base)
-            if not images_dir:
-                continue
-            seq = _scan_exr_sequence(images_dir)
-            if not seq:
-                continue
-            pattern, first, last, _pad, step = seq
-            sequences.append(
-                {
-                    "label": sub,
-                    "pattern": pattern,
-                    "first": first,
-                    "last": last,
-                    "step": step,
-                }
-            )
-        if not sequences:
-            nuke.message(
-                f"[Auto Read] No .exr sequences found under any subfolder in:\n  {newest}"
-            )
-            return []
-    else:
-        images_dir = _find_images_dir(newest)
+    for layer in sorted(os.listdir(render_root)):
+        layer_dir = os.path.join(render_root, layer)
+        # Skips hidden folders and stray files
+        if layer.startswith(".") or not os.path.isdir(layer_dir):
+            continue
+
+        versions = []
+        # Appends a tuple of the version number and the path to versions.
+        for n in os.listdir(layer_dir):
+            m = version_pattern.match(n)
+            version_dir = os.path.join(layer_dir, n)
+            if m and os.path.isdir(version_dir):
+                versions.append((int(m.group(1)), version_dir))
+        if not versions:
+            continue
+
+        images_dir = _find_images_dir(max(versions, key=lambda v: v[0])[1])
         if not images_dir:
-            nuke.message(
-                f"[Auto Read] Neither images_dn nor images found in:\n  {newest}"
-            )
-            return []
+            continue
+
         seq = _scan_exr_sequence(images_dir)
         if not seq:
-            nuke.message(f"[Auto Read] No .exr files found in:\n  {images_dir}")
-            return []
+            continue
+
         pattern, first, last, _pad, step = seq
         sequences.append(
             {
-                "label": "root",
+                "label": layer,
                 "pattern": pattern,
                 "first": first,
                 "last": last,
                 "step": step,
             }
         )
+    if not sequences:
+        nuke.message(f"[Auto Read] No sequences found in {render_root}")
+        return []
 
     return sequences
 
@@ -180,12 +148,16 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
     - If ALL sequences share the same cadence of 2 or 4, project FPS is divided by that cadence.
     """
     script_path = nuke.root()["name"].value()
+    # ex: /groups/sandwich/05_production/shot/A_010/comp/A_010.nk
+
     if not script_path or script_path == "Root":
         nuke.message("Open your shot before using Auto Read.")
         return []
 
     shot_dir = os.path.dirname(os.path.dirname(script_path))
+    # ex: /groups/sandwich/05_production/shot/A_010
     render_dir = os.path.join(shot_dir, render_subdir)
+    # ex: /groups/sandwich/05_production/shot/A_010/render
 
     sequences = get_latest_exr_sequences(render_dir)
     if not sequences:
@@ -207,9 +179,7 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
 
     for s in sequences:
         label = _sanitize_for_nuke(s["label"])
-        node_name = (
-            f"{node_name_prefix}_{label}" if label != "root" else node_name_prefix
-        )
+        node_name = f"{node_name_prefix}_{label}"
         read = nuke.nodes.Read(name=node_name, file=s["pattern"], on_error="black")
         # native sequence range
         read["origfirst"].setValue(s["first"])
