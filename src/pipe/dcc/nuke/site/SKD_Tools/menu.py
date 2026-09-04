@@ -128,7 +128,9 @@ m.addCommand("Lens", "nuke.createNode('Lens')", icon="MicrowaveIcon.png")
 print(f"nuke.nodePaste({_TOOLSETS / 'shotTemplate.nk'})")
 m.addCommand("SKD Write Node", "make_bobo_write_node()", icon="MicrowaveIcon.png")
 m.addCommand("SKD Open Shot", "choose_shot()", icon="MicrowaveIcon.png")
-m.addCommand("SKD Read Node", "make_bobo_read_node()", icon="MicrowaveIcon.png")
+m.addCommand(
+    "SKD Read Node", "make_bobo_read_node()", "ctrl+shift+r", icon="MicrowaveIcon.png"
+)
 
 m.addCommand("SKD FX Read", "make_bobo_fx_read_node()", icon="MicrowaveIcon.png")
 m.addCommand("SKD CFX Read", "make_bobo_cfx_read_node()", icon="MicrowaveIcon.png")
