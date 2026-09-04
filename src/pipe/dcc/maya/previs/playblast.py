@@ -70,10 +70,6 @@ def render_blocker(shot: PrevisShot) -> str | None:
     """Why `shot` cannot be playblasted, or None if it can."""
     if not shot.code.strip():
         return "no shot code yet"
-    try:
-        codes.normalize_code(shot.code)
-    except ValueError as exc:
-        return str(exc)
     if not shot.primary:
         return "no primary camera"
     # The shape, not the namespace: capture resolves a camera shape under it, so
