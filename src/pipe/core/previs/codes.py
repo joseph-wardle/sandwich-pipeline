@@ -28,27 +28,19 @@ def format_code(letter: str, number: int) -> str:
 
 
 def normalize_code(code: str) -> str:
-    """Return the code in canonical padded form; raise ``ValueError`` if malformed.
+    """Return the code in canonical padded form, or unchanged if it is not a code.
 
-    Canonicalizing on the write path stops ``A_10`` and ``A_010`` from becoming
-    two manifest keys for what an artist means as one shot.
+    Helps ensure ``A_10`` and ``A_010`` both refer to the same shot
     """
-    return format_code(*_require_parsed(code))
+    token = code.strip()
+    parsed = parse_code(token)
+    return format_code(*parsed) if parsed is not None else token
 
 
 def shot_letter(code: str) -> str:
-    """The sequence a shot code belongs to (``A_020`` → ``A``); raise if malformed."""
-    return _require_parsed(code)[0]
-
-
-def _require_parsed(code: str) -> tuple[str, int]:
+    """The sequence a shot code belongs to (``A_020`` → ``A``), or "" if it names none."""
     parsed = parse_code(code)
-    if parsed is None:
-        raise ValueError(
-            f"{code!r} is not a valid shot code "
-            "(expected <LETTER>_<number>, e.g. 'A_010')"
-        )
-    return parsed
+    return parsed[0] if parsed is not None else ""
 
 
 def suggest_next(letter: str, existing: Iterable[str]) -> str:

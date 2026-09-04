@@ -9,7 +9,7 @@ from typing import cast
 
 import maya.cmds as mc
 
-from pipe.core.previs import codes
+from pipe.core.previs import codes, naming
 from pipe.core.shot import maya_rlo_stream, shot_owner_for
 from pipe.core.shotgrid import (
     Environment,
@@ -119,7 +119,7 @@ def plan_delivery(shot: PrevisShot, proxy: Shot, conn: ShotGrid) -> DeliveryPlan
     previs_file = _require_saved_scene()
     code = _require_code(shot)
     _require_primary(shot)
-    sequence = _require_sequence(code, conn)
+    sequence = _require_sequence(code, proxy, conn)
     sg_shot = _find_shot(conn, code)
     cut_in, cut_out = _cut_range(shot)
     held_cut = None if sg_shot is None else (sg_shot.cut_in, sg_shot.cut_out)
@@ -160,9 +160,10 @@ def _find_shot(conn: ShotGrid, code: str) -> Shot | None:
         return None
 
 
-def _require_sequence(code: str, conn: ShotGrid) -> Sequence:
-    """The Sequence the code's own letter names — deliberately not the proxy's."""
-    letter = codes.shot_letter(code)
+def _require_sequence(code: str, proxy: Shot, conn: ShotGrid) -> Sequence:
+    """The Sequence the code's own letter names, falling back to the previs file's
+    for an off-convention code that names no letter of its own."""
+    letter = codes.shot_letter(code) or naming.sequence_letter(proxy.code or "")
     try:
         return conn.get_sequence(code=letter)
     except ShotGridNotFound:
@@ -299,10 +300,7 @@ def _require_code(shot: PrevisShot) -> str:
             "This shot has no sequence code yet. Give it a code (e.g. A_010) "
             "before breaking it out."
         )
-    try:
-        return codes.normalize_code(shot.code)
-    except ValueError as exc:
-        raise BreakOutError(str(exc)) from exc
+    return codes.normalize_code(shot.code)
 
 
 def _require_primary(shot: PrevisShot) -> None:

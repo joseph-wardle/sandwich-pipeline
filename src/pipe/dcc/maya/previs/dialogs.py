@@ -242,6 +242,25 @@ def prompt_shot_code(parent: QWidget, *, current: str, suggestion: str) -> str |
     return text
 
 
+def confirm_odd_shot_code(parent: QWidget, code: str) -> bool:
+    """Confirm a shot code that breaks the `<LETTER>_<number>` convention."""
+    dialog = MessageDialogCustomButtons(
+        parent,
+        "\n".join(
+            [
+                f"'{code}' is not a standard shot code. Those look like A_010.",
+                "",
+                "Are you sure you want to use this unusual code?.",
+            ]
+        ),
+        "Set Shot Code",
+        has_cancel_button=True,
+        ok_name="Use it",
+        cancel_name="Cancel",
+    )
+    return bool(dialog.exec_())
+
+
 def show_add_alternate_menu(
     anchor: QWidget,
     *,

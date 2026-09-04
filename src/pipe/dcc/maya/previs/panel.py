@@ -27,7 +27,7 @@ from Qt.QtWidgets import (
 from pipe.core.playblast import PreviewClip
 from pipe.core.playblast.viewer import open_viewer
 from pipe.core.previs import ManifestWriteRefused, codes, mutate_manifest, naming
-from pipe.core.shotgrid import ShotGrid, ShotGridError
+from pipe.core.shotgrid import ShotGrid, ShotGridError, validate_shot_code_token
 from pipe.core.ui import MessageDialog, progress_scope
 from pipe.core.util.paths import get_previs_path
 
@@ -293,9 +293,6 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             log.debug("Manifest sync skipped: no previs sequence, or scene unsaved.")
             return
 
-        # Codes are already canonical (declare_code / suggest_next enforce it),
-        # so a file's membership snapshot joins the manifest's `shots` list on
-        # the same key.
         file_codes = tuple(s.code for s in self._state.shots if s.code)
         if self._synced == (filename, file_codes):
             return
@@ -670,11 +667,7 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
             shot.retarget_take(namespace, new_namespace)
 
     def declare_code(self, shot_id: str) -> None:
-        """Declare a shot's sticky code from free text
-
-        The artist owns the code; we only canonicalize it and reject the three ways
-        it can be wrong: malformed, wrong sequence letter, or already used in this file.
-        """
+        """Declare a shot's sticky code from free text"""
         shot = self._state.find_shot(shot_id)
         if shot is None:
             return
@@ -692,16 +685,19 @@ class PrevisPanel(MayaQWidgetDockableMixin, QWidget):  # type: ignore[misc]
         )
         if raw is None:
             return
+        new_code = codes.normalize_code(raw)
         try:
-            new_code = codes.normalize_code(raw)
-        except ValueError:
-            MessageDialog(
-                self,
-                f"'{raw}' is not a valid shot code. Use <LETTER>_<number>, e.g. A_010.",
-                "Set Shot Code",
-            ).exec_()
+            # The code becomes a folder name, so this much holds however far the
+            # naming convention bends.
+            validate_shot_code_token(new_code)
+        except ValueError as exc:
+            MessageDialog(self, f"{exc}.", "Set Shot Code").exec_()
             return
-        if codes.shot_letter(new_code) != letter:
+        code_letter = codes.shot_letter(new_code)
+        if not code_letter:
+            if not dialogs.confirm_odd_shot_code(self, new_code):
+                return
+        elif code_letter != letter:
             MessageDialog(
                 self,
                 f"Shot code {new_code} does not belong to sequence {letter}. "
