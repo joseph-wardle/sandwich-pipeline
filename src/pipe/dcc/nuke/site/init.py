@@ -2,8 +2,6 @@ import os
 
 import nuke
 
-"""Register non-plugin third party gizmos."""
-
 _THIRD_PARTY = os.environ["DCC_NUKE_THIRD_PARTY"]
 
 nuke.pluginAddPath(
