@@ -2,9 +2,8 @@ import os
 
 import nuke
 
-# `third_party` lives outside NUKE_PATH (which is this `site` folder), so its
-# contents have to be added explicitly. launch.py exports DCC_NUKE_THIRD_PARTY
-# for exactly this; gizmos in there also read it via [getenv] in file knobs.
+"""Register non-plugin third party gizmos."""
+
 _THIRD_PARTY = os.environ["DCC_NUKE_THIRD_PARTY"]
 
 nuke.pluginAddPath(
