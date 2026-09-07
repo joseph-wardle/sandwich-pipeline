@@ -9,7 +9,7 @@ nuke.pluginAddPath(
         _THIRD_PARTY, "NukeSurvivalToolkit_publicRelease", "NukeSurvivalToolkit"
     )
 )
-# Registers the loose vendored gizmos; see that folder's init.py / menu.py.
+
 nuke.pluginAddPath(os.path.join(_THIRD_PARTY, "scripts"))
 nuke.pluginAddPath("./SKD_Tools")
 
