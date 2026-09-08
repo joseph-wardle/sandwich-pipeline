@@ -21,6 +21,7 @@ dependencies = [
     "gitpython>=3.1.45,<4",
     "nxt-core>=0.18.1",
     "shotgun-api3>=3.8.4,<4",
+    "msgspec>=0.21.1",
 ]
 
 [project.scripts]
