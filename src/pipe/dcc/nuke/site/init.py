@@ -1,6 +1,16 @@
+import os
+
 import nuke
 
-nuke.pluginAddPath("./NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit")
+_THIRD_PARTY = os.environ["DCC_NUKE_THIRD_PARTY"]
+
+nuke.pluginAddPath(
+    os.path.join(
+        _THIRD_PARTY, "NukeSurvivalToolkit_publicRelease", "NukeSurvivalToolkit"
+    )
+)
+
+nuke.pluginAddPath(os.path.join(_THIRD_PARTY, "scripts"))
 nuke.pluginAddPath("./SKD_Tools")
 
 # aspect ratio
