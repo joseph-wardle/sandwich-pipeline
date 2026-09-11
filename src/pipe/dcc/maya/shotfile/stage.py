@@ -26,7 +26,12 @@ _SET_SCALE = (100.0, 100.0, 100.0)
 
 
 def get_stage_shape() -> str:
-    shapes = mc.ls(type="mayaUsdProxyShape", long=True) or []
+    """The stage this pipeline built for the open scene."""
+    shapes = [
+        shape
+        for shape in mc.ls(type="mayaUsdProxyShape", long=True) or []
+        if not mc.referenceQuery(shape, isNodeReferenced=True)
+    ]
     if not shapes:
         raise RuntimeError("No USD stage found in scene")
     if len(shapes) > 1:
@@ -55,8 +60,9 @@ def create_stage_proxy(
 ) -> tuple[Sdf.Layer, bool]:
     """Create the scene's `mayaUsdProxyShape` over `root_layer_path`."""
     transform = mc.createNode("transform", name="stage_transform")
-    mc.createNode("mayaUsdProxyShape", name="stage", parent=transform)
-    stage_shape = get_stage_shape()
+    # The shape this call returns, never one looked up afterwards: the scene may
+    # hold other proxies, and wiring a stranger's would leave ours unconnected.
+    stage_shape = mc.createNode("mayaUsdProxyShape", name="stage", parent=transform)
     mc.connectAttr("time1.outTime", f"{stage_shape}.time")
 
     created = not root_layer_path.exists()
