@@ -409,6 +409,9 @@ def _strip_previs_scaffold() -> None:
     delete_state()
     remove_on_open_node()
     for shape in mc.ls(type="mayaUsdProxyShape", long=True) or []:
+        if mc.referenceQuery(shape, isNodeReferenced=True):
+            log.info("Leaving the referenced USD stage %s in the RLO scene.", shape)
+            continue
         parents = mc.listRelatives(shape, parent=True, fullPath=True) or []
         mc.delete(shape)
         for parent in parents:
