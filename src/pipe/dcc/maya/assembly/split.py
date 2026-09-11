@@ -6,7 +6,6 @@ import logging
 import os
 from pathlib import Path
 
-import mayaUsd.ufe
 from maya import cmds as mc
 from pxr import Gf, Usd, UsdGeom
 
@@ -27,20 +26,15 @@ from pipe.dcc.maya.assembly.scan import (
     world_matrix,
     world_point_bounds,
 )
+from pipe.dcc.maya.assembly.stage import ensure_assembly_stage, stage_shape
 from pipe.dcc.maya.util.selection import maintain_selection
 from pipe.dcc.maya.util.usd_export import export_selection
 
 log = logging.getLogger(__name__)
 
-STAGE_TRANSFORM_NAME = "assembly_stage"
-STAGE_SHAPE_NAME = "assemblyStage"
-_STAGE_SHAPE_TYPE = "mayaUsdProxyShape"
-
 _ROOT_PRIM_TYPE = "xform"
 
 _SHADING_MODE = "useRegistry"
-
-_STAGE_METERS_PER_UNIT = 0.01
 
 _PLACEMENT_TOLERANCE = 1e-3
 
@@ -53,7 +47,7 @@ def split_piece(
     """Move `piece` out of the Maya scene and into `target`, in place."""
     _refuse_existing_model(target)
     _refuse_foreign_scene_units()
-    _stage_shape()  # Refuse an ambiguous scene before anything is written.
+    stage_shape()  # Refuse an ambiguous scene before anything is written.
     scale = _bakeable_scale(piece)
     bounds_before = _piece_bounds(piece)
 
@@ -76,18 +70,6 @@ def split_piece(
         world_bounds_before=bounds_before,
         world_bounds_after=bounds_after,
     )
-
-
-def ensure_assembly_stage() -> Usd.Stage:
-    """Return the assembly's working stage, creating an empty one on first split."""
-    shape = _stage_shape() or _create_stage_shape()
-    stage = mayaUsd.ufe.getStage(shape)
-    if stage is None:
-        raise SplitError(
-            "The assembly's USD stage could not be opened. Save and reopen the "
-            f"scene, then split again (proxy shape: {shape})."
-        )
-    return stage
 
 
 def _refuse_existing_model(target: PieceTarget) -> None:
@@ -265,37 +247,8 @@ def _prim_world_bounds(prim: Usd.Prim) -> Gf.Range3d:
 
 
 def _stage_world_matrix() -> Gf.Matrix4d:
-    shape = _stage_shape()
+    shape = stage_shape()
     if shape is None:
         return Gf.Matrix4d(1.0)
     transform = mc.listRelatives(shape, parent=True, fullPath=True)[0]
     return world_matrix(transform)
-
-
-def _stage_shape() -> str | None:
-    shapes = mc.ls(type=_STAGE_SHAPE_TYPE, long=True) or []
-    if len(shapes) > 1:
-        raise SplitError(
-            f"This scene has {len(shapes)} USD stages and a split needs exactly "
-            "one. Delete the stages that do not belong to the assembly."
-        )
-    return shapes[0] if shapes else None
-
-
-def _create_stage_shape() -> str:
-    """Create the assembly's stage: one empty proxy shape, in the show's units."""
-    transform = mc.createNode("transform", name=STAGE_TRANSFORM_NAME)
-    shape = mc.createNode(_STAGE_SHAPE_TYPE, name=STAGE_SHAPE_NAME, parent=transform)
-    mc.connectAttr("time1.outTime", f"{shape}.time")
-
-    resolved = _stage_shape()
-    if resolved is None:
-        raise SplitError(
-            "Could not create the assembly's USD stage. Check that the "
-            "mayaUsdPlugin is loaded, then split again."
-        )
-
-    stage = mayaUsd.ufe.getStage(resolved)
-    UsdGeom.SetStageMetersPerUnit(stage, _STAGE_METERS_PER_UNIT)
-    UsdGeom.SetStageUpAxis(stage, SOURCE_LAYER_UP_AXIS)
-    return resolved

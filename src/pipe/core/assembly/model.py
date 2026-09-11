@@ -10,8 +10,16 @@ from pxr import Gf
 from pipe.core.asset.paths import DEFAULT_GEOMETRY_VARIANT, AssetPaths
 
 
-class SplitError(Exception):
-    """A piece cannot be split. The message is written for an artist to act on."""
+class AssemblyError(Exception):
+    """Something an artist must fix. The message is written for them to act on."""
+
+
+class SplitError(AssemblyError):
+    """A piece cannot be split."""
+
+
+class EditError(AssemblyError):
+    """A piece cannot be opened for editing, or its edits cannot be saved back."""
 
 
 @dataclass(frozen=True)
