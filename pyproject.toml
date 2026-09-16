@@ -18,10 +18,15 @@ dependencies = [
     "qt-py>=1.4.1,<2",
     "filelock>=3.17.0,<4",
     "six>=1.17.0,<2",
-    "gitpython>=3.1.45,<4",
-    "nxt-core>=0.18.1",
+    
+    
     "shotgun-api3>=3.8.4,<4",
+    # yrig deps
+    "nxt-core>=0.18.1",
     "msgspec>=0.21.1",
+    "jedi>=0.20.0",
+    # aperture deps
+    "gitpython>=3.1.45,<4",
 ]
 
 [project.scripts]

@@ -87,6 +87,18 @@ wheels = [
 ]
 
 [[package]]
+name = "jedi"
+version = "0.20.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "parso" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/46/b7/a3635f6a2d7cf5b5dd98064fc1d5fbbafcb25477bcea204a3a92145d158b/jedi-0.20.0.tar.gz", hash = "sha256:c3f4ccbd276696f4b19c54618d4fb18f9fc24b0aef02acf704b23f487daa1011", size = 3119416, upload-time = "2026-05-01T23:38:47.814Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9a/93/242e2eab5fe682ffcb8b0084bde703a41d51e17ee0f3a31ff0d9d813620a/jedi-0.20.0-py2.py3-none-any.whl", hash = "sha256:7bdd9c2634f56713299976f4cbd59cb3fa92165cc5e05ea811fb253480728b67", size = 4884812, upload-time = "2026-05-01T23:38:43.919Z" },
+]
+
+[[package]]
 name = "maya-stubs"
 version = "0.4.2"
 source = { registry = "https://pypi.org/simple" }
@@ -184,6 +196,15 @@ name = "nxt-core"
 version = "0.18.1"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/32/b8/d15fda032fbb33e88e0c8cf9e5504540fcad814b3afa034b7912d3e9f3cd/nxt-core-0.18.1.tar.gz", hash = "sha256:210c6f55b6593a91c5412d13196c0e7b5bbcaf6d7e16f42bd8c8766c93908498", size = 129446, upload-time = "2024-11-25T21:59:38.493Z" }
+
+[[package]]
+name = "parso"
+version = "0.8.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/4b/90c937815137d43ce71ba043cd3566221e9df6b9c805f24b5d138c9d40a7/parso-0.8.7.tar.gz", hash = "sha256:eaaac4c9fdd5e9e8852dc778d2d7405897ec510f2a298071453e5e3a07914bb1", size = 401824, upload-time = "2026-05-01T23:13:02.138Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/99/5d/8268b644392ee874ee82a635cd0df1773de230bde356c38de28e298392cc/parso-0.8.7-py2.py3-none-any.whl", hash = "sha256:a8926eb2a1b915486941fdbd31e86a4baf88fe8c210f25f2f35ecec5b574ca1c", size = 107025, upload-time = "2026-05-01T23:12:58.867Z" },
+]
 
 [[package]]
 name = "psycopg"
@@ -301,6 +322,7 @@ dependencies = [
     { name = "ffmpeg-python" },
     { name = "filelock" },
     { name = "gitpython" },
+    { name = "jedi" },
     { name = "msgspec" },
     { name = "nxt-core" },
     { name = "qt-py" },
@@ -333,6 +355,7 @@ requires-dist = [
     { name = "ffmpeg-python", specifier = ">=0.2.0,<0.3" },
     { name = "filelock", specifier = ">=3.17.0,<4" },
     { name = "gitpython", specifier = ">=3.1.45,<4" },
+    { name = "jedi", specifier = ">=0.20.0" },
     { name = "msgspec", specifier = ">=0.21.1" },
     { name = "nxt-core", specifier = ">=0.18.1" },
     { name = "qt-py", specifier = ">=1.4.1,<2" },
