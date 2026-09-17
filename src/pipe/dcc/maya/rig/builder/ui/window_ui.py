@@ -74,6 +74,9 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
         self.build_horizontal_layout.setContentsMargins(0, 0, 0, 0)
         self.top_layout.addLayout(self.build_horizontal_layout)
 
+        self.open_editor_button = QPushButton()
+        self.open_editor_button.setText("Open Editor")
+        self.build_horizontal_layout.addWidget(self.open_editor_button, 1)
         self.build_rig_button = QPushButton()
         self.build_rig_button.setText("Build Rig")
         self.build_horizontal_layout.addWidget(self.build_rig_button, 2)

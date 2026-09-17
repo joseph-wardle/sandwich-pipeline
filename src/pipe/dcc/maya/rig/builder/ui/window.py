@@ -136,6 +136,8 @@ class RigBuilderWindow(RigBuilderWindowUI):
             lambda _: self._refresh_override_indicators()
         )
 
+        self.open_editor_button.clicked.connect(self._open_editor)
+
         self.build_rig_button.clicked.connect(self.rig_build_log_box.clear_log)
         self.build_rig_button.clicked.connect(self._build_rig)
 
@@ -274,6 +276,11 @@ class RigBuilderWindow(RigBuilderWindowUI):
             return RigDefinition(selected_rig, rig_type)
         else:
             return None
+
+    def _open_editor(self) -> None:
+        override_directory = self._active_override_dir()
+        rig_to_open = self._get_rig_to_build()
+        build.open_editor(rig_to_open, override_directory)
 
     def _build_rig(self):
         override_directory = self._active_override_dir()

@@ -40,6 +40,21 @@ def resolve_root_paths(
         return (get_rig_build_path(),)
 
 
+def get_rig_path_from_rig_definition(rig: RigDefinition) -> Path:
+    return Path(rig.type) / Path(rig.name)
+
+
+def open_editor(
+    rig: RigDefinition | None = None,
+    override_directory: Path | None = None,
+):
+    from yrig.build import open_rig_in_editor
+
+    root_paths = resolve_root_paths(override_directory)
+    rig_path = get_rig_path_from_rig_definition(rig) if rig is not None else None
+    open_rig_in_editor(root_paths, rig_path)
+
+
 @contextmanager
 def redirect_external_logger(
     external_logger: logging.Logger, target_logger: logging.Logger
@@ -95,7 +110,7 @@ class RigBuilder:
             cmds.file(newFile=True, force=True)
             build_result = build_rig(
                 root_paths=resolve_root_paths(override_directory),
-                rig_path=Path(rig.type) / Path(rig.name),
+                rig_path=get_rig_path_from_rig_definition(rig),
                 dev_build=dev_build,
                 build_scope=build_scope,
                 progress_callback=progress_manager.update_progress_with_step,
