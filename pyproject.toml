@@ -18,8 +18,6 @@ dependencies = [
     "qt-py>=1.4.1,<2",
     "filelock>=3.17.0,<4",
     "six>=1.17.0,<2",
-    
-    
     "shotgun-api3>=3.8.4,<4",
     # yrig deps
     "nxt-core>=0.18.1",
