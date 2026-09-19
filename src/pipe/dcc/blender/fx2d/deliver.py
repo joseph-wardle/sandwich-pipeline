@@ -54,18 +54,15 @@ def _uncut(scene: Scene) -> list[str]:
     ]
 
 
-class PIPELINE_OT_fx2d_deliver(Operator):
+class SKD_OT_fx2d_deliver(Operator):
     """Render every effect layer to a new version for comp."""
 
-    bl_idname = "pipeline.fx2d_deliver"
-    bl_label = "Deliver"
+    bl_idname = "skd.fx2d_deliver"
+    bl_label = "Deliver Effect Layers"
 
     @classmethod
     def poll(cls, context: Context) -> bool:
-        if util.shot_root() is None:
-            cls.poll_message_set(util.NOT_FX2D_FILE)
-            return False
-        return True
+        return util.poll_fx2d_file(cls)
 
     def invoke(self, context: Context, event: Event) -> set[OperatorReturnItems]:
         assert context.scene is not None

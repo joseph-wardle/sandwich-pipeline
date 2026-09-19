@@ -5,57 +5,78 @@ from bpy.types import Context, Menu, Operator, Panel, PropertyGroup
 from bpy.utils import register_class, unregister_class
 
 from pipe.dcc.blender.assetfile import (
-    PIPELINE_OT_open_asset,
-    PIPELINE_OT_search_and_open_asset,
+    SKD_OT_open_asset,
+    SKD_OT_search_and_open_asset,
     PipelineAssetProps,
 )
 from pipe.dcc.blender.fx2d import (
-    PIPELINE_OT_fx2d_deliver,
-    PIPELINE_OT_fx2d_import_holdout,
-    PIPELINE_OT_fx2d_open_shot,
-    PIPELINE_OT_fx2d_set_backdrop,
+    SKD_OT_fx2d_deliver,
+    SKD_OT_fx2d_import_holdout,
+    SKD_OT_fx2d_open_shot,
+    SKD_OT_fx2d_refresh,
+    SKD_OT_fx2d_set_backdrop,
 )
-from pipe.dcc.blender.publish import PIPELINE_OT_publish_asset
+from pipe.dcc.blender.publish import SKD_OT_publish_asset
 
 bl_info = {"name": "Sandwich Pipeline", "blender": (5, 0, 1), "category": "Pipeline"}
 
 log = logging.getLogger("pipe.dcc.blender.addon")
 
-# Shown in the Pipeline menu and the N-panel, in this order.
-MENU_OPERATORS: tuple[type[Operator], ...] = (
-    PIPELINE_OT_search_and_open_asset,
-    PIPELINE_OT_publish_asset,
-    PIPELINE_OT_fx2d_open_shot,
-    PIPELINE_OT_fx2d_set_backdrop,
-    PIPELINE_OT_fx2d_import_holdout,
-    PIPELINE_OT_fx2d_deliver,
+ASSET_OPERATORS: tuple[type[Operator], ...] = (
+    SKD_OT_search_and_open_asset,
+    SKD_OT_publish_asset,
 )
+SHOT_OPERATORS: tuple[type[Operator], ...] = (
+    SKD_OT_fx2d_open_shot,
+    SKD_OT_fx2d_set_backdrop,
+    SKD_OT_fx2d_import_holdout,
+    SKD_OT_fx2d_refresh,
+    SKD_OT_fx2d_deliver,
+)
+ASSET_LABEL = "Asset"
+SHOT_LABEL = "Shot (fx2d)"
 
 
-class PIPELINE_PT_tools(Panel):
-    bl_label = "Pipeline Tools"
-    bl_idname = "PIPELINE_PT_tools"
+class _Tools(Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Pipeline"
+    bl_category = "SKD"
+    operators: tuple[type[Operator], ...]
 
     def draw(self, context: Context) -> None:
         layout = self.layout
         if layout is None:
             return
-        for operator in MENU_OPERATORS:
+        for operator in self.operators:
             layout.operator(operator.bl_idname)
 
 
-class PIPELINE_MT_menu(Menu):
-    bl_label = "Pipeline"
-    bl_idname = "PIPELINE_MT_menu"
+class SKD_PT_asset(_Tools):
+    bl_label = ASSET_LABEL
+    bl_idname = "SKD_PT_asset"
+    operators = ASSET_OPERATORS
+
+
+class SKD_PT_shot(_Tools):
+    bl_label = SHOT_LABEL
+    bl_idname = "SKD_PT_shot"
+    operators = SHOT_OPERATORS
+
+
+class SKD_MT_menu(Menu):
+    bl_label = "SKD"
+    bl_idname = "SKD_MT_menu"
 
     def draw(self, context: Context) -> None:
         layout = self.layout
         if layout is None:
             return
-        for operator in MENU_OPERATORS:
+        layout.label(text=ASSET_LABEL)
+        for operator in ASSET_OPERATORS:
+            layout.operator(operator.bl_idname)
+        layout.separator()
+        layout.label(text=SHOT_LABEL)
+        for operator in SHOT_OPERATORS:
             layout.operator(operator.bl_idname)
 
 
@@ -63,10 +84,12 @@ class PIPELINE_MT_menu(Menu):
 # here. PipelineAssetProps comes first because the Scene property below points at it.
 CLASSES: tuple[type[Operator | Menu | Panel | PropertyGroup], ...] = (
     PipelineAssetProps,
-    PIPELINE_OT_open_asset,
-    *MENU_OPERATORS,
-    PIPELINE_MT_menu,
-    PIPELINE_PT_tools,
+    SKD_OT_open_asset,
+    *ASSET_OPERATORS,
+    *SHOT_OPERATORS,
+    SKD_MT_menu,
+    SKD_PT_asset,
+    SKD_PT_shot,
 )
 
 
@@ -74,7 +97,7 @@ def draw_pipeline(self: Menu, context: Context) -> None:
     layout = self.layout
     if layout is None:
         return
-    layout.menu(PIPELINE_MT_menu.bl_idname)
+    layout.menu(SKD_MT_menu.bl_idname)
 
 
 def register() -> None:

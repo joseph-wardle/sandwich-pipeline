@@ -154,10 +154,10 @@ def _layer_items(self: Operator, context: Context) -> list[tuple[str, str, str]]
     return _LAYER_ITEMS
 
 
-class PIPELINE_OT_fx2d_set_backdrop(Operator):
+class SKD_OT_fx2d_set_backdrop(Operator):
     """Show the latest render of one of the shot's layers behind the camera view."""
 
-    bl_idname = "pipeline.fx2d_set_backdrop"
+    bl_idname = "skd.fx2d_set_backdrop"
     bl_label = "Set Backdrop"
     bl_property = "layer"
 

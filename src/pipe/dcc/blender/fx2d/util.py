@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
 
 import bpy
-from bpy.types import Collection, Scene, ViewLayer
+from bpy.types import Collection, Operator, Scene, ViewLayer
+from pxr import Sdf, Tf
 
 DEPARTMENT = "fx2d"
 FILE_NAME = "fx2d.blend"
@@ -14,12 +16,15 @@ FILE_NAME = "fx2d.blend"
 # Pipeline-owned collections. Everything else at the top level is an effect layer.
 CONTEXT = "context"
 HOLDOUT = "holdout"
+CHARACTERS = "characters"
+SET = "set"
+HOLDOUT_SOURCES = (CHARACTERS, SET)
 DEFAULT_LAYER = "main"
 LAYER_PREFIX = "fx2d_"
 
 VERSION = re.compile(r"^V_(\d+)$")
 
-NOT_FX2D_FILE = "This is not an fx2d file. Open one with Pipeline > Open Shot (fx2d)."
+NOT_FX2D_FILE = "This is not an fx2d file. Open one with SKD > Open Shot."
 
 
 def shot_root() -> Path | None:
@@ -28,6 +33,47 @@ def shot_root() -> Path | None:
     if path.name != FILE_NAME or path.parent.name != DEPARTMENT:
         return None
     return path.parents[1]
+
+
+def poll_fx2d_file(operator: type[Operator]) -> bool:
+    """An operator's `poll`: greys it out, with the reason, outside an fx2d file."""
+    if shot_root() is None:
+        operator.poll_message_set(NOT_FX2D_FILE)
+        return False
+    return True
+
+
+def camera_usd(shot_root: Path) -> Path:
+    return shot_root / "cam" / "cam.usd"
+
+
+def anim_usd(shot_root: Path) -> Path:
+    return shot_root / "anim" / "usd" / "main.usd"
+
+
+def cfx_usd(shot_root: Path) -> Path:
+    return shot_root / "cfx" / "usd" / "main.usd"
+
+
+def holdout_usd(shot_root: Path, source: str) -> Path:
+    """The layers the artist chose for a holdout source; missing when it is off."""
+    return shot_root / DEPARTMENT / HOLDOUT / f"{source}.usda"
+
+
+def unreadable(layers: Iterable[Path]) -> list[str]:
+    """The layers that are missing or that USD cannot open."""
+    bad: list[str] = []
+    for layer in layers:
+        try:
+            # Read from disk, not from the cache USD shares with Blender, which may
+            # hold the layer as it was before the publish began.
+            opened = Sdf.Layer.OpenAsAnonymous(str(layer))
+        except Tf.ErrorException:
+            opened = None
+        # A missing file gives no layer; one that cannot be parsed raises.
+        if not opened:
+            bad.append(str(layer))
+    return bad
 
 
 def cache_root(shot_root: Path) -> Path:

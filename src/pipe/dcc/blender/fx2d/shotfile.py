@@ -10,7 +10,7 @@ from pxr import Usd
 
 from env_sg import DB_Config
 from pipe.core.shot import shot_root_path
-from pipe.core.shotgrid import ShotGrid
+from pipe.core.shotgrid import ShotGrid, is_previs_shot_code
 from pipe.dcc.blender.fx2d import backdrop
 from pipe.dcc.blender.fx2d import util
 
@@ -26,7 +26,12 @@ _SHOT_ITEMS: list[tuple[str, str, str]] = []
 
 def _shot_items(self: Operator, context: Context | None) -> list[tuple[str, str, str]]:
     conn = ShotGrid.connect(DB_Config)
-    codes = sorted(shot.code for shot in conn.find_shots() if shot.code)
+    codes = sorted(
+        shot.code
+        for shot in conn.find_shots()
+        # A previs sequence is a Shot in ShotGrid but has no camera or renders.
+        if shot.code and not is_previs_shot_code(shot.code)
+    )
     _SHOT_ITEMS[:] = [(code, code, "") for code in codes]
     return _SHOT_ITEMS
 
@@ -48,7 +53,7 @@ def _create(camera_usd: Path, path: Path) -> None:
     with bpy.context.temp_override(window=window):
         bpy.ops.wm.usd_import(filepath=str(camera_usd))
     scene.camera = next(
-        obj for obj in context_collection.all_objects if obj.type == "CAMERA"
+        obj for obj in context_collection.objects if obj.type == "CAMERA"
     )
     # A new scene sits on frame 1, outside the shot, where a backdrop has no frame.
     scene.frame_current = scene.frame_start
@@ -70,11 +75,11 @@ def _create(camera_usd: Path, path: Path) -> None:
     bpy.ops.wm.save_as_mainfile(filepath=str(path), relative_remap=False)
 
 
-class PIPELINE_OT_fx2d_open_shot(Operator):
+class SKD_OT_fx2d_open_shot(Operator):
     """Open a shot's fx2d file, creating it from the shot camera the first time."""
 
-    bl_idname = "pipeline.fx2d_open_shot"
-    bl_label = "Open Shot (fx2d)"
+    bl_idname = "skd.fx2d_open_shot"
+    bl_label = "Open Shot"
     bl_property = "shot_code"
 
     shot_code: bpy.props.EnumProperty(name="Shot", items=_shot_items)  # type: ignore
@@ -100,7 +105,7 @@ class PIPELINE_OT_fx2d_open_shot(Operator):
             bpy.ops.wm.open_mainfile(filepath=str(path))
             return {"FINISHED"}
 
-        camera_usd = shot_root / "cam" / "cam.usd"
+        camera_usd = util.camera_usd(shot_root)
         if not camera_usd.exists():
             self.report(
                 {"ERROR"},

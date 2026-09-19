@@ -16,8 +16,8 @@ def get_asset_names():
     return sorted(a.display_name for a in conn.find_assets(roots_only=True))
 
 
-class PIPELINE_OT_open_asset(bpy.types.Operator):
-    bl_idname = "pipeline.open_asset"
+class SKD_OT_open_asset(bpy.types.Operator):
+    bl_idname = "skd.open_asset"
     bl_label = "Open/Create Asset File"
     asset: Asset
     asset_name: bpy.props.StringProperty()  # type: ignore
@@ -64,13 +64,13 @@ def get_asset_items(self, context):
 
 def on_asset_selected(self, context):
     """This triggers as soon as the user hits Enter or clicks an item."""
-    bpy.ops.pipeline.open_asset("INVOKE_DEFAULT", asset_name=self.asset_id)  # type: ignore
+    bpy.ops.skd.open_asset("INVOKE_DEFAULT", asset_name=self.asset_id)  # type: ignore
 
 
-class PIPELINE_OT_search_and_open_asset(bpy.types.Operator):
+class SKD_OT_search_and_open_asset(bpy.types.Operator):
     """Open a search menu to find and open an asset file."""
 
-    bl_idname = "pipeline.search_assets"
+    bl_idname = "skd.search_assets"
     bl_label = "Open Asset"
     bl_property = "asset_id"
 
@@ -79,7 +79,7 @@ class PIPELINE_OT_search_and_open_asset(bpy.types.Operator):
     )
 
     def execute(self, context):
-        bpy.ops.pipeline.open_asset("INVOKE_DEFAULT", asset_name=self.asset_id)  # type: ignore
+        bpy.ops.skd.open_asset("INVOKE_DEFAULT", asset_name=self.asset_id)  # type: ignore
         return {"FINISHED"}
 
     def invoke(self, context, event):

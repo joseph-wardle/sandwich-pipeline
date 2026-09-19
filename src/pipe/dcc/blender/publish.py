@@ -15,18 +15,18 @@ if TYPE_CHECKING:
 GEO_VARIANT = "main"
 
 
-class PIPELINE_OT_publish_asset(Operator):
+class SKD_OT_publish_asset(Operator):
     """Publish the selected meshes as the asset's main geometry variant."""
 
-    bl_idname = "pipeline.publish_asset"
-    bl_label = "Publish Selected"
+    bl_idname = "skd.publish_asset"
+    bl_label = "Publish Model"
 
     @classmethod
     def poll(cls, context: Context) -> bool:
         if not context.scene.pipeline_asset.name:  # type: ignore
             cls.poll_message_set(
                 "This file is not a pipeline asset file. Open the asset with "
-                "Pipeline > Open Asset, then bring your model into that file."
+                "SKD > Open Asset, then bring your model into that file."
             )
             return False
         if not any(obj.type == "MESH" for obj in context.selected_objects):
