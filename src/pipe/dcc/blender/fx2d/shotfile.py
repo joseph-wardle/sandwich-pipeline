@@ -4,12 +4,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import bpy
-from bpy.types import Context, Event, Operator
+from bpy.types import Camera, Context, Event, Operator
 from pxr import Usd
 
 from env_sg import DB_Config
 from pipe.core.shot import shot_root_path
 from pipe.core.shotgrid import ShotGrid
+from pipe.dcc.blender.fx2d import backdrop
 from pipe.dcc.blender.fx2d import scene as fx2d_scene
 
 if TYPE_CHECKING:
@@ -27,7 +28,8 @@ def _shot_items(self: Operator, context: Context | None) -> list[tuple[str, str,
     return _SHOT_ITEMS
 
 
-def _create(camera_usd: Path, path: Path) -> None:
+def _create(camera_usd: Path, path: Path) -> list[Path]:
+    """Build and save a new fx2d file; returns the frames used as its backdrop."""
     bpy.ops.wm.read_homefile(use_empty=True)
     scene = bpy.context.scene
     view_layer = bpy.context.view_layer
@@ -47,6 +49,8 @@ def _create(camera_usd: Path, path: Path) -> None:
     scene.camera = next(
         obj for obj in context_collection.all_objects if obj.type == "CAMERA"
     )
+    # A new scene sits on frame 1, outside the shot, where a backdrop has no frame.
+    scene.frame_current = scene.frame_start
     scene.render.fps = round(Usd.Stage.Open(str(camera_usd)).GetTimeCodesPerSecond())
     fx2d_scene.apply_render_settings(scene, view_layer)
 
@@ -54,8 +58,20 @@ def _create(camera_usd: Path, path: Path) -> None:
     # Anything drawn outside a layer collection would render into every layer.
     fx2d_scene.make_active(view_layer, layer)
 
+    frames = backdrop.default_frames(path.parents[1])
+    if frames:
+        assert isinstance(scene.camera.data, Camera)
+        backdrop.set_backdrop(scene.camera.data, path.parents[1], frames)
+    # The backdrop only shows when looking through the shot camera.
+    for area in window.screen.areas:
+        if area.type == "VIEW_3D":
+            area.spaces.active.region_3d.view_perspective = "CAMERA"  # type: ignore
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    bpy.ops.wm.save_as_mainfile(filepath=str(path))
+    # Save As rewrites file paths relative to the .blend by default, which turns
+    # the /cache backdrop into a long ../ chain that breaks if either side moves.
+    bpy.ops.wm.save_as_mainfile(filepath=str(path), relative_remap=False)
+    return frames
 
 
 class PIPELINE_OT_fx2d_open_shot(Operator):
@@ -96,5 +112,15 @@ class PIPELINE_OT_fx2d_open_shot(Operator):
                 f"published camera at {camera_usd}. Ask layout to publish the camera.",
             )
             return {"CANCELLED"}
-        _create(camera_usd, path)
+        frames = _create(camera_usd, path)
+        self.report(
+            {"INFO"},
+            f"Created the fx2d file for {self.shot_code}. "
+            + (
+                f"Backdrop is {backdrop.label(frames)}; change it with Set Backdrop."
+                if frames
+                else "The shot has no beauty render yet, so no backdrop was set; "
+                "pick another layer with Set Backdrop."
+            ),
+        )
         return {"FINISHED"}

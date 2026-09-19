@@ -96,6 +96,8 @@ replace-imports-with-any = [
     # Substance API surface is partially dynamic in plugin runtime.
     "substance_painter",
     "substance_painter.**",
+    # Ships inside Blender; the pipeline venv has no copy.
+    "OpenImageIO",
 ]
 
 [tool.ty.environment]

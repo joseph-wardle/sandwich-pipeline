@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -20,17 +19,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-_VERSION = re.compile(r"^V_(\d+)$")
-
-
-def render_root(shot_root: Path) -> Path:
-    """Renders live on /cache under the path the shot has on /groups.
-
-    Nuke's auto-read applies the same rule, and once a shot has a /cache render
-    folder it stops looking anywhere else.
-    """
-    return Path("/cache", *shot_root.parts[2:]) / "render"
-
 
 def _layers(scene: Scene) -> list[Collection]:
     """Top-level collections to deliver: not pipeline-owned, not hidden, not empty."""
@@ -47,7 +35,7 @@ def _next_version(layer_dir: Path) -> int:
     numbers = [
         int(match[1])
         for path in layer_dir.glob("V_*")
-        if (match := _VERSION.match(path.name))
+        if (match := fx2d_scene.VERSION.match(path.name))
     ]
     return max(numbers, default=0) + 1
 
@@ -96,7 +84,7 @@ class PIPELINE_OT_fx2d_deliver(Operator):
             return {"CANCELLED"}
 
         versions = {
-            layer.name: f"V_{_next_version(render_root(shot_root) / layer.name):02d}"
+            layer.name: f"V_{_next_version(fx2d_scene.render_root(shot_root) / layer.name):02d}"
             for layer in layers
         }
         delivering = ", ".join(
@@ -135,7 +123,7 @@ class PIPELINE_OT_fx2d_deliver(Operator):
             for layer in layers:
                 for collection in top_level:
                     collection.hide_render = collection != layer
-                layer_dir = render_root(shot_root) / layer.name
+                layer_dir = fx2d_scene.render_root(shot_root) / layer.name
                 version = versions[layer.name]
                 # Nuke reads the highest V_NN as soon as it exists, so frames are
                 # rendered into a hidden folder and renamed once all are written.
@@ -179,6 +167,6 @@ class PIPELINE_OT_fx2d_deliver(Operator):
         self.report(
             {"INFO"},
             f"Delivered {delivering} ({frame_count} frames) to "
-            f"{render_root(shot_root)}",
+            f"{fx2d_scene.render_root(shot_root)}",
         )
         return {"FINISHED"}

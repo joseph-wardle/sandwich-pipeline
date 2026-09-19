@@ -13,6 +13,7 @@ from pipe.dcc.blender.fx2d import (
     PIPELINE_OT_fx2d_deliver,
     PIPELINE_OT_fx2d_import_holdout,
     PIPELINE_OT_fx2d_open_shot,
+    PIPELINE_OT_fx2d_set_backdrop,
 )
 from pipe.dcc.blender.publish import PIPELINE_OT_publish_asset
 
@@ -25,6 +26,7 @@ MENU_OPERATORS: tuple[type[Operator], ...] = (
     PIPELINE_OT_search_and_open_asset,
     PIPELINE_OT_publish_asset,
     PIPELINE_OT_fx2d_open_shot,
+    PIPELINE_OT_fx2d_set_backdrop,
     PIPELINE_OT_fx2d_import_holdout,
     PIPELINE_OT_fx2d_deliver,
 )

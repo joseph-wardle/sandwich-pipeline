@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import bpy
@@ -14,6 +15,8 @@ FILE_NAME = "fx2d.blend"
 CONTEXT = "context"
 HOLDOUT = "holdout"
 DEFAULT_LAYER = "fx2d"
+
+VERSION = re.compile(r"^V_(\d+)$")
 
 NOT_FX2D_FILE = "This is not an fx2d file. Open one with Pipeline > Open Shot (fx2d)."
 
@@ -28,6 +31,21 @@ def shot_root() -> Path | None:
     if path.name != FILE_NAME or path.parent.name != DEPARTMENT:
         return None
     return path.parents[1]
+
+
+def cache_root(shot_root: Path) -> Path:
+    """The shot's folder on /cache, which mirrors its path on /groups."""
+    return Path("/cache", *shot_root.parts[2:])
+
+
+def render_root(shot_root: Path) -> Path:
+    """Where Nuke's auto-read looks; once this exists it stops looking anywhere else."""
+    return cache_root(shot_root) / "render"
+
+
+def backdrop_root(shot_root: Path) -> Path:
+    """Beside `render/`, not inside it, so comp never mistakes a proxy for a layer."""
+    return cache_root(shot_root) / DEPARTMENT / "backdrop"
 
 
 def child_collection(parent: Collection, name: str) -> Collection:
