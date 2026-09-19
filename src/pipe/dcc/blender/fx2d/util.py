@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 import bpy
-from bpy.types import Collection, LayerCollection, Scene, ViewLayer
+from bpy.types import Collection, Scene, ViewLayer
 
 DEPARTMENT = "fx2d"
 FILE_NAME = "fx2d.blend"
@@ -14,7 +14,8 @@ FILE_NAME = "fx2d.blend"
 # Pipeline-owned collections. Everything else at the top level is an effect layer.
 CONTEXT = "context"
 HOLDOUT = "holdout"
-DEFAULT_LAYER = "fx2d"
+DEFAULT_LAYER = "main"
+LAYER_PREFIX = "fx2d_"
 
 VERSION = re.compile(r"^V_(\d+)$")
 
@@ -22,11 +23,7 @@ NOT_FX2D_FILE = "This is not an fx2d file. Open one with Pipeline > Open Shot (f
 
 
 def shot_root() -> Path | None:
-    """The open file's shot folder, or None when the file is not `<shot>/fx2d/fx2d.blend`.
-
-    The path is the only record of which shot a file belongs to, so a copy saved
-    elsewhere stops being an fx2d file instead of delivering to the wrong shot.
-    """
+    """The open file's shot folder, or None when the file is not `<shot>/fx2d/fx2d.blend`."""
     path = Path(bpy.data.filepath)
     if path.name != FILE_NAME or path.parent.name != DEPARTMENT:
         return None
@@ -43,6 +40,10 @@ def render_root(shot_root: Path) -> Path:
     return cache_root(shot_root) / "render"
 
 
+def layer_dir(shot_root: Path, collection: Collection) -> Path:
+    return render_root(shot_root) / f"{LAYER_PREFIX}{collection.name}"
+
+
 def backdrop_root(shot_root: Path) -> Path:
     """Beside `render/`, not inside it, so comp never mistakes a proxy for a layer."""
     return cache_root(shot_root) / DEPARTMENT / "backdrop"
@@ -55,23 +56,6 @@ def child_collection(parent: Collection, name: str) -> Collection:
     collection = bpy.data.collections.new(name)
     parent.children.link(collection)
     return collection
-
-
-def _layer_collection(root: LayerCollection, name: str) -> LayerCollection | None:
-    if root.name == name:
-        return root
-    for child in root.children:
-        found = _layer_collection(child, name)
-        if found is not None:
-            return found
-    return None
-
-
-def make_active(view_layer: ViewLayer, collection: Collection) -> None:
-    """New and imported objects land in the active collection."""
-    layer_collection = _layer_collection(view_layer.layer_collection, collection.name)
-    if layer_collection is not None:
-        view_layer.active_layer_collection = layer_collection
 
 
 def apply_render_settings(scene: Scene, view_layer: ViewLayer) -> None:

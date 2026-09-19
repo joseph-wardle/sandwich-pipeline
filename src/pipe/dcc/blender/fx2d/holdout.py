@@ -3,9 +3,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import bpy
-from bpy.types import Context, Operator
+from bpy.types import (
+    ID,
+    Context,
+    MeshSequenceCacheModifier,
+    Operator,
+    TransformCacheConstraint,
+)
 
-from pipe.dcc.blender.fx2d import scene as fx2d_scene
+from pipe.dcc.blender.fx2d import util
 
 if TYPE_CHECKING:
     from bpy.stub_internal.rna_enums import OperatorReturnItems
@@ -23,16 +29,15 @@ class PIPELINE_OT_fx2d_import_holdout(Operator):
 
     @classmethod
     def poll(cls, context: Context) -> bool:
-        if fx2d_scene.shot_root() is None:
-            cls.poll_message_set(fx2d_scene.NOT_FX2D_FILE)
+        if util.shot_root() is None:
+            cls.poll_message_set(util.NOT_FX2D_FILE)
             return False
         return True
 
     def execute(self, context: Context) -> set[OperatorReturnItems]:
-        shot_root = fx2d_scene.shot_root()
+        shot_root = util.shot_root()
         scene, view_layer = context.scene, context.view_layer
-        if shot_root is None or scene is None or view_layer is None:
-            return {"CANCELLED"}
+        assert shot_root is not None and scene is not None and view_layer is not None
 
         anim_usd = shot_root / "anim" / "usd" / "main.usd"
         if not anim_usd.exists():
@@ -43,21 +48,33 @@ class PIPELINE_OT_fx2d_import_holdout(Operator):
             )
             return {"CANCELLED"}
 
-        context_collection = fx2d_scene.child_collection(
-            scene.collection, fx2d_scene.CONTEXT
-        )
-        holdout = fx2d_scene.child_collection(context_collection, fx2d_scene.HOLDOUT)
+        context_collection = util.child_collection(scene.collection, util.CONTEXT)
+        holdout = util.child_collection(context_collection, util.HOLDOUT)
         # Imported object names are not stable ("body_geo.001" appears on a first
         # import), so a re-import replaces everything instead of matching by name.
-        bpy.data.batch_remove(list(holdout.all_objects))
+        objects = list(holdout.all_objects)
+        # Removing an object leaves its mesh and cache file behind. Only what the
+        # import made is removed: a purge would also take the artist's unused data.
+        imported: set[ID] = {obj.data for obj in objects if obj.data is not None}
+        for obj in objects:
+            imported.update(
+                user.cache_file
+                for user in (*obj.modifiers, *obj.constraints)
+                if isinstance(
+                    user, (MeshSequenceCacheModifier, TransformCacheConstraint)
+                )
+                and user.cache_file is not None
+            )
+        bpy.data.batch_remove(objects)
+        bpy.data.batch_remove([block for block in imported if block.users == 0])
         for child in list(holdout.children_recursive):
             bpy.data.collections.remove(child)
-        bpy.ops.outliner.orphans_purge(
-            do_local_ids=True, do_linked_ids=True, do_recursive=True
-        )
 
         active = view_layer.active_layer_collection
-        fx2d_scene.make_active(view_layer, holdout)
+        # Imported objects land in the active collection.
+        view_layer.active_layer_collection = view_layer.layer_collection.children[
+            util.CONTEXT
+        ].children[util.HOLDOUT]
         bpy.ops.wm.usd_import(
             filepath=str(anim_usd),
             # Groom guide curves would render as solid grey geometry.

@@ -12,7 +12,7 @@ from env_sg import DB_Config
 from pipe.core.shot import blender_fx2d_stream, shot_owner_for
 from pipe.core.shotgrid import ShotGrid
 from pipe.core.versioning import save_version
-from pipe.dcc.blender.fx2d import scene as fx2d_scene
+from pipe.dcc.blender.fx2d import util
 
 if TYPE_CHECKING:
     from bpy.stub_internal.rna_enums import OperatorReturnItems
@@ -25,19 +25,33 @@ def _layers(scene: Scene) -> list[Collection]:
     return [
         collection
         for collection in scene.collection.children
-        if collection.name != fx2d_scene.CONTEXT
+        if collection.name != util.CONTEXT
         and not collection.hide_render
         and collection.all_objects
     ]
 
 
-def _next_version(layer_dir: Path) -> int:
+def _next_version(layer_dir: Path) -> str:
     numbers = [
         int(match[1])
         for path in layer_dir.glob("V_*")
-        if (match := fx2d_scene.VERSION.match(path.name))
+        if (match := util.VERSION.match(path.name))
     ]
-    return max(numbers, default=0) + 1
+    return f"V_{max(numbers, default=0) + 1:02d}"
+
+
+def _uncut(scene: Scene) -> list[str]:
+    """Grease Pencil objects the holdout cannot cut: In Front draws over everything."""
+    context_collection = scene.collection.children.get(util.CONTEXT)
+    holdout = context_collection and context_collection.children.get(util.HOLDOUT)
+    if not holdout or not any(obj.type == "MESH" for obj in holdout.all_objects):
+        return []
+    return [
+        obj.name
+        for layer in _layers(scene)
+        for obj in layer.all_objects
+        if obj.type == "GREASEPENCIL" and obj.show_in_front
+    ]
 
 
 class PIPELINE_OT_fx2d_deliver(Operator):
@@ -48,23 +62,29 @@ class PIPELINE_OT_fx2d_deliver(Operator):
 
     @classmethod
     def poll(cls, context: Context) -> bool:
-        if fx2d_scene.shot_root() is None:
-            cls.poll_message_set(fx2d_scene.NOT_FX2D_FILE)
+        if util.shot_root() is None:
+            cls.poll_message_set(util.NOT_FX2D_FILE)
             return False
         return True
 
     def invoke(self, context: Context, event: Event) -> set[OperatorReturnItems]:
-        return context.window_manager.invoke_confirm(  # type: ignore
-            self,
-            event,
-            message="Render and deliver every effect layer? Blender is busy until it finishes.",
+        assert context.scene is not None
+        message = (
+            "Render and deliver every effect layer? Blender is busy until it finishes."
         )
+        # Asked before rendering: afterwards the uncut layer is already comp's newest.
+        uncut = _uncut(context.scene)
+        if uncut:
+            message += (
+                "\nThe holdout will not cut these Grease Pencil objects because they "
+                f"have In Front on: {', '.join(uncut)}."
+            )
+        return context.window_manager.invoke_confirm(self, event, message=message)  # type: ignore
 
     def execute(self, context: Context) -> set[OperatorReturnItems]:
-        shot_root = fx2d_scene.shot_root()
+        shot_root = util.shot_root()
         scene, view_layer = context.scene, context.view_layer
-        if shot_root is None or scene is None or view_layer is None:
-            return {"CANCELLED"}
+        assert shot_root is not None and scene is not None and view_layer is not None
 
         if scene.collection.objects:
             names = ", ".join(obj.name for obj in scene.collection.objects)
@@ -83,16 +103,14 @@ class PIPELINE_OT_fx2d_deliver(Operator):
             )
             return {"CANCELLED"}
 
-        versions = {
-            layer.name: f"V_{_next_version(fx2d_scene.render_root(shot_root) / layer.name):02d}"
-            for layer in layers
-        }
+        layer_dirs = {layer: util.layer_dir(shot_root, layer) for layer in layers}
+        versions = {layer: _next_version(layer_dirs[layer]) for layer in layers}
         delivering = ", ".join(
-            f"{name} {version}" for name, version in versions.items()
+            f"{layer_dirs[layer].name} {versions[layer]}" for layer in layers
         )
 
         # Settings first, then save, so the saved file records what was rendered.
-        fx2d_scene.apply_render_settings(scene, view_layer)
+        util.apply_render_settings(scene, view_layer)
         bpy.ops.wm.save_mainfile()
 
         # Versioned before rendering, so every delivered layer can be traced back
@@ -111,11 +129,13 @@ class PIPELINE_OT_fx2d_deliver(Operator):
             )
             return {"CANCELLED"}
 
-        frame_count = scene.frame_end - scene.frame_start + 1
+        frame_count = len(
+            range(scene.frame_start, scene.frame_end + 1, scene.frame_step)
+        )
         top_level = [
             collection
             for collection in scene.collection.children
-            if collection.name != fx2d_scene.CONTEXT
+            if collection.name != util.CONTEXT
         ]
         hidden_before = {collection: collection.hide_render for collection in top_level}
         output_before = scene.render.filepath
@@ -123,8 +143,7 @@ class PIPELINE_OT_fx2d_deliver(Operator):
             for layer in layers:
                 for collection in top_level:
                     collection.hide_render = collection != layer
-                layer_dir = fx2d_scene.render_root(shot_root) / layer.name
-                version = versions[layer.name]
+                layer_dir, version = layer_dirs[layer], versions[layer]
                 # Nuke reads the highest V_NN as soon as it exists, so frames are
                 # rendered into a hidden folder and renamed once all are written.
                 hidden = layer_dir / f".{version}"
@@ -141,7 +160,7 @@ class PIPELINE_OT_fx2d_deliver(Operator):
                 if written != frame_count:
                     self.report(
                         {"ERROR"},
-                        f"Could not deliver {layer.name}: only {written} of "
+                        f"Could not deliver {layer_dir.name}: only {written} of "
                         f"{frame_count} frames were rendered. Nothing was delivered "
                         "for this layer; run Deliver again.",
                     )
@@ -152,21 +171,9 @@ class PIPELINE_OT_fx2d_deliver(Operator):
                 collection.hide_render = was_hidden
             scene.render.filepath = output_before
 
-        in_front = [
-            obj.name
-            for layer in layers
-            for obj in layer.all_objects
-            if obj.type == "GREASEPENCIL" and obj.show_in_front
-        ]
-        if in_front:
-            self.report(
-                {"WARNING"},
-                "These Grease Pencil objects have In Front on, so holdout geometry "
-                f"does not cut them: {', '.join(in_front)}.",
-            )
         self.report(
             {"INFO"},
             f"Delivered {delivering} ({frame_count} frames) to "
-            f"{fx2d_scene.render_root(shot_root)}",
+            f"{util.render_root(shot_root)}",
         )
         return {"FINISHED"}

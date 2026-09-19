@@ -10,7 +10,7 @@ import bpy
 import OpenImageIO as oiio
 from bpy.types import Camera, Context, Event, Operator
 
-from pipe.dcc.blender.fx2d import scene as fx2d_scene
+from pipe.dcc.blender.fx2d import util
 
 if TYPE_CHECKING:
     from bpy.stub_internal.rna_enums import OperatorReturnItems
@@ -30,7 +30,7 @@ def latest_frames(layer_dir: Path) -> list[Path]:
     one is often still empty.
     """
     versions = sorted(
-        (path for path in layer_dir.glob("V_*") if fx2d_scene.VERSION.match(path.name)),
+        (path for path in layer_dir.glob("V_*") if util.VERSION.match(path.name)),
         key=lambda path: int(path.name[2:]),
         reverse=True,
     )
@@ -42,23 +42,17 @@ def latest_frames(layer_dir: Path) -> list[Path]:
     return []
 
 
-def _render_layers(shot_root: Path, scene: bpy.types.Scene) -> dict[str, list[Path]]:
-    """Render layers with frames, leaving out the effect layers this file delivers."""
-    own = {collection.name for collection in scene.collection.children}
-    root = fx2d_scene.render_root(shot_root)
+def _render_layers(shot_root: Path) -> dict[str, list[Path]]:
+    """Render layers with frames, leaving out the effect layers fx2d delivers."""
+    root = util.render_root(shot_root)
     if not root.is_dir():
         return {}
     layers = {
         path.name: latest_frames(path)
         for path in sorted(root.iterdir())
-        if path.is_dir() and path.name not in own
+        if path.is_dir() and not path.name.startswith(util.LAYER_PREFIX)
     }
     return {name: frames for name, frames in layers.items() if frames}
-
-
-def default_frames(shot_root: Path) -> list[Path]:
-    """The beauty render, which is what a new file shows until the artist picks."""
-    return latest_frames(fx2d_scene.render_root(shot_root) / "beauty")
 
 
 def label(frames: list[Path]) -> str:
@@ -93,11 +87,9 @@ def _write_proxy(source: Path, target: Path) -> None:
 def proxy_frames(shot_root: Path, frames: list[Path]) -> list[Path]:
     """RGBA-only copies of render frames, built on /cache the first time they are needed.
 
-    A render frame carries every AOV: about 200 MB on disk and 370 MB decoded, so
-    Blender plays it at a few frames a second and cannot keep a shot in memory.
-    The colour channels alone are under 1 MB and load in a few milliseconds.
+    A render frame carries every AOV, which is too heavy for Blender to play back.
     """
-    directory = fx2d_scene.backdrop_root(shot_root).joinpath(*frames[0].parts[-4:-1])
+    directory = util.backdrop_root(shot_root).joinpath(*frames[0].parts[-4:-1])
     directory.mkdir(parents=True, exist_ok=True)
     proxies = [directory / frame.name for frame in frames]
     stale = [
@@ -154,12 +146,8 @@ _LAYER_ITEMS: list[tuple[str, str, str]] = []
 
 
 def _layer_items(self: Operator, context: Context) -> list[tuple[str, str, str]]:
-    shot_root = fx2d_scene.shot_root()
-    layers = (
-        _render_layers(shot_root, context.scene)
-        if shot_root is not None and context.scene is not None
-        else {}
-    )
+    shot_root = util.shot_root()
+    layers = _render_layers(shot_root) if shot_root is not None else {}
     _LAYER_ITEMS[:] = [
         (name, label(frames), str(frames[0].parent)) for name, frames in layers.items()
     ]
@@ -177,9 +165,9 @@ class PIPELINE_OT_fx2d_set_backdrop(Operator):
 
     @classmethod
     def poll(cls, context: Context) -> bool:
-        shot_root = fx2d_scene.shot_root()
+        shot_root = util.shot_root()
         if shot_root is None or context.scene is None:
-            cls.poll_message_set(fx2d_scene.NOT_FX2D_FILE)
+            cls.poll_message_set(util.NOT_FX2D_FILE)
             return False
         if context.scene.camera is None:
             cls.poll_message_set("This scene has no camera to show a backdrop behind.")
@@ -187,27 +175,25 @@ class PIPELINE_OT_fx2d_set_backdrop(Operator):
         return True
 
     def invoke(self, context: Context, event: Event) -> set[OperatorReturnItems]:
-        shot_root = fx2d_scene.shot_root()
-        if shot_root is None or context.scene is None:
-            return {"CANCELLED"}
+        shot_root = util.shot_root()
+        assert shot_root is not None
         # Checked here, not in poll: poll runs on every panel redraw and this reads
         # the render folders over the network.
-        if not _render_layers(shot_root, context.scene):
+        if not _render_layers(shot_root):
             self.report(
                 {"ERROR"},
                 "Could not set a backdrop because this shot has no rendered frames "
-                f"under {fx2d_scene.render_root(shot_root)} yet.",
+                f"under {util.render_root(shot_root)} yet.",
             )
             return {"CANCELLED"}
         context.window_manager.invoke_search_popup(self)  # type: ignore
         return {"RUNNING_MODAL"}
 
     def execute(self, context: Context) -> set[OperatorReturnItems]:
-        shot_root = fx2d_scene.shot_root()
+        shot_root = util.shot_root()
         scene = context.scene
-        if shot_root is None or scene is None or scene.camera is None:
-            return {"CANCELLED"}
-        frames = latest_frames(fx2d_scene.render_root(shot_root) / self.layer)
+        assert shot_root is not None and scene is not None and scene.camera is not None
+        frames = latest_frames(util.render_root(shot_root) / self.layer)
         camera = scene.camera.data
         assert isinstance(camera, Camera)
         try:
@@ -217,7 +203,7 @@ class PIPELINE_OT_fx2d_set_backdrop(Operator):
             self.report(
                 {"ERROR"},
                 f"Could not set the backdrop because its preview frames could not be "
-                f"written under {fx2d_scene.backdrop_root(shot_root)}: {error}",
+                f"written under {util.backdrop_root(shot_root)}: {error}",
             )
             return {"CANCELLED"}
         message = (
