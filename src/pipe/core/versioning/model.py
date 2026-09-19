@@ -13,7 +13,7 @@ standard library.
 
 DCC identifiers
 ---------------
-``DCC_MAYA``, ``DCC_HOUDINI``, and ``DCC_SUBSTANCE`` are the canonical string
+``DCC_MAYA``, ``DCC_HOUDINI``, ``DCC_SUBSTANCE``, and ``DCC_BLENDER`` are the canonical string
 values used in ``VersionStreamSpec.dcc``.  They live here so every domain adapter
 can import a single authoritative definition instead of each spelling its own
 string literal.
@@ -30,6 +30,7 @@ from typing import Any, Optional
 DCC_MAYA = "maya"
 DCC_HOUDINI = "houdini"
 DCC_SUBSTANCE = "substance_painter"
+DCC_BLENDER = "blender"
 
 _STREAM_DIRNAME_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -141,6 +142,7 @@ class VersionStreamSpec:
 
 __all__ = [
     "BackupResult",
+    "DCC_BLENDER",
     "DCC_HOUDINI",
     "DCC_MAYA",
     "DCC_SUBSTANCE",

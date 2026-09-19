@@ -2,6 +2,7 @@
 
 from .model import (
     BackupResult,
+    DCC_BLENDER,
     DCC_HOUDINI,
     DCC_MAYA,
     DCC_SUBSTANCE,
@@ -39,6 +40,7 @@ from .store import (
 
 __all__ = [
     "BackupResult",
+    "DCC_BLENDER",
     "DCC_HOUDINI",
     "DCC_MAYA",
     "DCC_SUBSTANCE",

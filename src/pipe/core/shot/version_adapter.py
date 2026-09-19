@@ -13,6 +13,7 @@ from pipe.core.util.paths import get_production_path
 
 from pipe.core.shotgrid import Shot
 from pipe.core.versioning import (
+    DCC_BLENDER,
     DCC_HOUDINI,
     DCC_MAYA,
     VERSION_MANIFEST_FILENAME,
@@ -147,7 +148,25 @@ def houdini_department_stream(
     )
 
 
+def blender_fx2d_stream(
+    shot: Shot,
+    *,
+    owner: VersionOwner | None = None,
+) -> VersionStreamSpec:
+    return shot_stream(
+        shot,
+        DCC_BLENDER,
+        stream_name="fx2d",
+        subpath="fx2d",
+        stem="fx2d",
+        ext="blend",
+        owner=owner,
+        label="FX2D Scene",
+    )
+
+
 __all__ = [
+    "blender_fx2d_stream",
     "houdini_department_stream",
     "maya_anim_stream",
     "maya_rlo_stream",
