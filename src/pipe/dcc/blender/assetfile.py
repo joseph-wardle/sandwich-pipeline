@@ -1,13 +1,11 @@
 import bpy
 from bpy.types import Context
-from env_sg import DB_Config
 
+from env_sg import DB_Config
 from pipe.core.asset import paths_for_asset
-from pipe.dcc.blender.util.register import blender_class, blender_operator
 from pipe.core.shotgrid import Asset, ShotGrid
 
 
-@blender_class
 class PipelineAssetProps(bpy.types.PropertyGroup):
     name: bpy.props.StringProperty()  # type: ignore
     display_name: bpy.props.StringProperty()  # type: ignore
@@ -18,14 +16,21 @@ def get_asset_names():
     return sorted(a.display_name for a in conn.find_assets(roots_only=True))
 
 
-@blender_operator()
-class PIPELINE_OT_open_asset(bpy.types.Operator):
-    bl_idname = "pipeline.open_asset"
+class SKD_OT_open_asset(bpy.types.Operator):
+    bl_idname = "skd.open_asset"
     bl_label = "Open/Create Asset File"
     asset: Asset
     asset_name: bpy.props.StringProperty()  # type: ignore
 
     def invoke(self, context: Context, event):
+        if bpy.data.is_dirty:
+            self.report(
+                {"ERROR"},
+                "Could not open the asset because this file has unsaved changes. "
+                "Save it or start a new file, then try again.",
+            )
+            return {"CANCELLED"}
+
         conn = ShotGrid.connect(DB_Config)
         self.asset = conn.get_asset(display_name=self.asset_name)
         paths = paths_for_asset(self.asset)
@@ -59,14 +64,13 @@ def get_asset_items(self, context):
 
 def on_asset_selected(self, context):
     """This triggers as soon as the user hits Enter or clicks an item."""
-    bpy.ops.pipeline.open_asset("INVOKE_DEFAULT", asset_name=self.asset_id)  # type: ignore
+    bpy.ops.skd.open_asset("INVOKE_DEFAULT", asset_name=self.asset_id)  # type: ignore
 
 
-@blender_operator(add_to_menu=True)
-class PIPELINE_OT_search_and_open_asset(bpy.types.Operator):
+class SKD_OT_search_and_open_asset(bpy.types.Operator):
     """Open a search menu to find and open an asset file."""
 
-    bl_idname = "pipeline.search_assets"
+    bl_idname = "skd.search_assets"
     bl_label = "Open Asset"
     bl_property = "asset_id"
 
@@ -75,7 +79,7 @@ class PIPELINE_OT_search_and_open_asset(bpy.types.Operator):
     )
 
     def execute(self, context):
-        bpy.ops.pipeline.open_asset("INVOKE_DEFAULT", asset_name=self.asset_id)  # type: ignore
+        bpy.ops.skd.open_asset("INVOKE_DEFAULT", asset_name=self.asset_id)  # type: ignore
         return {"FINISHED"}
 
     def invoke(self, context, event):

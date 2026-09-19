@@ -10,6 +10,7 @@ import maya.cmds as mc
 import mayaUsd  # type: ignore[import-not-found]
 from pxr import Sdf, Tf, Usd, UsdGeom
 
+from pipe.core.shot import linked_environments
 from pipe.core.shotgrid import Environment, Shot, build_shot_path
 from pipe.core.util.paths import get_production_path
 
@@ -152,19 +153,6 @@ def _target_override_layer(stage: Usd.Stage, root_layer: Sdf.Layer, shot: Shot) 
     override_layer.Save()
     add_sublayer(root_layer, override_layer)
     stage.SetEditTarget(Usd.EditTarget(override_layer))
-
-
-def linked_environments(shot: Shot) -> list[Environment]:
-    """The shot's sets, falling back to the one linked on its sequence.
-
-    These arrive partial from ShotGrid; reading `environment_path` lazy-fetches.
-    """
-    envs = [env for env in (shot.sets or []) if env is not None]
-    if envs:
-        return envs
-    sequence = shot.sequence
-    sole_env = shot.set or (sequence.set if sequence else None)
-    return [sole_env] if sole_env else []
 
 
 __all__ = [
