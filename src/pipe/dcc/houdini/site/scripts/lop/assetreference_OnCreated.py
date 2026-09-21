@@ -20,10 +20,11 @@ def update_filepath(
     ppth = get_production_path()
 
     if not path.is_relative_to(ppth):
-        if ppth.anchor == "G:\\":
-            path = Path("G:/") / path.relative_to("/groups")
-        else:
-            path = Path("/groups") / path.relative_to("G:/")
+        # The same file as the other OS, or the old `/groups` symlink, spells it.
+        for root in ("/job", "/groups", "G:/"):
+            if path.is_relative_to(root):
+                path = ppth.parents[1] / path.relative_to(root)
+                break
 
     parm_tuple.set(("$JOB/" + str(path.relative_to(ppth)).replace("\\", "/"),))
 
