@@ -10,6 +10,8 @@ import bpy
 from bpy.types import Collection, Operator, Scene, ViewLayer
 from pxr import Sdf, Tf
 
+from pipe.core.cache import RENDER_DIRNAME, link_to_cache
+
 DEPARTMENT = "fx2d"
 FILE_NAME = "fx2d.blend"
 
@@ -22,7 +24,9 @@ HOLDOUT_SOURCES = (CHARACTERS, SET)
 DEFAULT_LAYER = "main"
 LAYER_PREFIX = "fx2d_"
 
-VERSION = re.compile(r"^V_(\d+)$")
+# The spelling Tractor Configure gives the version folders it renders into, so a
+# layer folder reads the same whether the farm or fx2d filled it.
+VERSION = re.compile(r"^v(\d+)$")
 
 NOT_FX2D_FILE = "This is not an fx2d file. Open one with SKD > Open Shot."
 
@@ -76,14 +80,9 @@ def unreadable(layers: Iterable[Path]) -> list[str]:
     return bad
 
 
-def cache_root(shot_root: Path) -> Path:
-    """The shot's folder on /cache, which mirrors its path on /groups."""
-    return Path("/cache", *shot_root.parts[2:])
-
-
 def render_root(shot_root: Path) -> Path:
-    """Where Nuke's auto-read looks; once this exists it stops looking anywhere else."""
-    return cache_root(shot_root) / "render"
+    """Where Nuke's auto-read looks."""
+    return shot_root / RENDER_DIRNAME
 
 
 def layer_dir(shot_root: Path, collection: Collection) -> Path:
@@ -92,7 +91,13 @@ def layer_dir(shot_root: Path, collection: Collection) -> Path:
 
 def backdrop_root(shot_root: Path) -> Path:
     """Beside `render/`, not inside it, so comp never mistakes a proxy for a layer."""
-    return cache_root(shot_root) / DEPARTMENT / "backdrop"
+    return shot_root / DEPARTMENT / "backdrop"
+
+
+def link_cache_dirs(shot_root: Path) -> None:
+    """Creates symlinks on disk: the folders fx2d fills with regeneratable frames."""
+    link_to_cache(render_root(shot_root))
+    link_to_cache(backdrop_root(shot_root))
 
 
 def child_collection(parent: Collection, name: str) -> Collection:

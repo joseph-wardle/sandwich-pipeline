@@ -30,8 +30,8 @@ def latest_frames(layer_dir: Path) -> list[Path]:
     one is often still empty.
     """
     versions = sorted(
-        (path for path in layer_dir.glob("V_*") if util.VERSION.match(path.name)),
-        key=lambda path: int(path.name[2:]),
+        (path for path in layer_dir.glob("v*") if util.VERSION.match(path.name)),
+        key=lambda path: int(path.name[1:]),
         reverse=True,
     )
     for version in versions:
@@ -56,7 +56,7 @@ def _render_layers(shot_root: Path) -> dict[str, list[Path]]:
 
 
 def label(frames: list[Path]) -> str:
-    """`env V_06` for frames under `env/V_06/images_dn/`."""
+    """`env v006` for frames under `env/v006/images_dn/`."""
     return f"{frames[0].parents[2].name} {frames[0].parents[1].name}"
 
 
@@ -85,7 +85,7 @@ def _write_proxy(source: Path, target: Path) -> None:
 
 
 def proxy_frames(shot_root: Path, frames: list[Path]) -> list[Path]:
-    """RGBA-only copies of render frames, built on /cache the first time they are needed.
+    """RGBA-only copies of render frames, built the first time they are needed.
 
     A render frame carries every AOV, which is too heavy for Blender to play back.
     """

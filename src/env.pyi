@@ -8,6 +8,7 @@ from pathlib import Path
 _system = ...
 _is_windows = ...
 production_path: Path
+cache_path: Path
 
 @dataclass
 class Executables:

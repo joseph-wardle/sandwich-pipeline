@@ -71,7 +71,7 @@ def _create(camera_usd: Path, path: Path) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     # Save As rewrites file paths relative to the .blend by default, which turns
-    # the /cache backdrop into a long ../ chain that breaks if either side moves.
+    # production paths into `../` chains that break if the file moves.
     bpy.ops.wm.save_as_mainfile(filepath=str(path), relative_remap=False)
 
 
@@ -102,6 +102,7 @@ class SKD_OT_fx2d_open_shot(Operator):
         shot_root = shot_root_path(conn.get_shot(code=self.shot_code))
         path = shot_root / util.DEPARTMENT / util.FILE_NAME
         if path.exists():
+            util.link_cache_dirs(shot_root)
             bpy.ops.wm.open_mainfile(filepath=str(path))
             return {"FINISHED"}
 
@@ -114,6 +115,7 @@ class SKD_OT_fx2d_open_shot(Operator):
             )
             return {"CANCELLED"}
         _create(camera_usd, path)
+        util.link_cache_dirs(shot_root)
         created = f"Created the fx2d file for {self.shot_code}."
 
         # Beauty is what a new file shows until the artist picks another layer.
@@ -127,8 +129,8 @@ class SKD_OT_fx2d_open_shot(Operator):
             return {"FINISHED"}
         camera = bpy.context.scene.camera.data  # type: ignore
         assert isinstance(camera, Camera)
-        # The file is saved before this, so a /cache that cannot be written costs
-        # the artist a backdrop and not the file.
+        # The file is saved before this, so a backdrop folder that cannot be written
+        # costs the artist a backdrop and not the file.
         try:
             backdrop.set_backdrop(camera, shot_root, frames)
         except OSError as error:

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from types import FunctionType
 
+from env import cache_path as _cap
 from env import production_path as _prp
 
 _DOCUMENTATION_ENV_VAR = "PIPELINE_DOCUMENTATION_URL"
@@ -50,6 +51,11 @@ def get_anim_path() -> Path:
 
 def get_asset_path() -> Path:
     return get_production_path() / "asset"
+
+
+def get_cache_path() -> Path:
+    """The show's root on the cache mount. Only `pipe.core.cache` should need it."""
+    return _cap
 
 
 def get_groups_path() -> Path:

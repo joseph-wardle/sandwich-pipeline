@@ -6,6 +6,7 @@ from pathlib import Path
 import hou
 from env_sg import DB_Config
 
+from pipe.core.cache import RENDER_DIRNAME, SIM_DIRNAME, link_to_cache
 from pipe.dcc.houdini import runtime as houdini_runtime
 from pipe.dcc.houdini.hipfile.paths import current_hip_path
 from pipe.core.ui import (
@@ -67,6 +68,14 @@ class HFileManager(FileManager):
         Used in dialog messages, e.g. ``"asset"``, ``"set"``, ``"shot"``.
         """
         return "file"
+
+    def _link_cache_dirs(self, entity: SGEntity, entity_path: Path) -> None:
+        super()._link_cache_dirs(entity, entity_path)
+        link_to_cache(entity_path / SIM_DIRNAME)
+        # Tractor Configure renders a lighting hip into the shot's `render/`, which
+        # the base class links, and every other hip into `$HIP/render`.
+        if entity_path.name != "lighting":
+            link_to_cache(entity_path / RENDER_DIRNAME)
 
     # ------------------------------------------------------------------
     # Shared HIP helpers
