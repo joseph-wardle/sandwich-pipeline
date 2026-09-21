@@ -11,7 +11,8 @@ import platform
 from dataclasses import dataclass
 from pathlib import Path
 
-production_path: Path  # absolute path to this repository (ie /groups/project/dungeon-pipeline)
+production_path: Path  # absolute path to the production folder (ie /job/project/05_production)
+cache_path: Path       # the show's folder on the cache mount (ie /cache/project)
 
 @dataclass
 class Executables:

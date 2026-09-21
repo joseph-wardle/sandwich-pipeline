@@ -7,6 +7,7 @@ from typing import cast
 
 from Qt import QtWidgets
 
+from pipe.core.cache import RENDER_DIRNAME, link_to_cache
 from pipe.core.ui import (
     FilteredListDialog,
     ItemSource,
@@ -152,6 +153,11 @@ class FileManager(metaclass=ABCMeta):
         """Working-files directory for `entity`. Override for non-standard layouts."""
         return get_production_path() / entity.path / self._get_subpath()
 
+    def _link_cache_dirs(self, entity: SGEntity, entity_path: Path) -> None:
+        """Creates symlinks on disk: this entity's folders of regeneratable files."""
+        if self._entity_type in (Shot, Asset) and entity.path:
+            link_to_cache(get_production_path() / entity.path / RENDER_DIRNAME)
+
     def _filter_entities(self, entities: list[SGEntity]) -> list[SGEntity]:
         """Restrict the open-file dialog's entity list. Default: no filter."""
         return entities
@@ -225,6 +231,7 @@ class FileManager(metaclass=ABCMeta):
         entity_path = self._compute_entity_path(entity)
         if not self._prompt_create_if_not_exist(entity_path):
             return
+        self._link_cache_dirs(entity, entity_path)
 
         filename, ext = self._generate_filename_ext(entity)
         file_path = entity_path / f"{filename}.{ext}"

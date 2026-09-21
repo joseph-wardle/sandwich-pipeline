@@ -34,10 +34,10 @@ def _layers(scene: Scene) -> list[Collection]:
 def _next_version(layer_dir: Path) -> str:
     numbers = [
         int(match[1])
-        for path in layer_dir.glob("V_*")
+        for path in layer_dir.glob("v*")
         if (match := util.VERSION.match(path.name))
     ]
-    return f"V_{max(numbers, default=0) + 1:02d}"
+    return f"v{max(numbers, default=0) + 1:03d}"
 
 
 def _uncut(scene: Scene) -> list[str]:
@@ -141,7 +141,7 @@ class SKD_OT_fx2d_deliver(Operator):
                 for collection in top_level:
                     collection.hide_render = collection != layer
                 layer_dir, version = layer_dirs[layer], versions[layer]
-                # Nuke reads the highest V_NN as soon as it exists, so frames are
+                # Nuke reads the highest v### as soon as it exists, so frames are
                 # rendered into a hidden folder and renamed once all are written.
                 hidden = layer_dir / f".{version}"
                 if hidden.exists():
