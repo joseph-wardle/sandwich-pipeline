@@ -86,6 +86,7 @@ allowed-unresolved-imports = [
     "substance_painter_plugins.**",
     "yrig.**",
     "tractor.**",
+    "husd.**",
 ]
 replace-imports-with-any = [
     # shotgun_api3 is untyped; treat as Any to avoid churn.
