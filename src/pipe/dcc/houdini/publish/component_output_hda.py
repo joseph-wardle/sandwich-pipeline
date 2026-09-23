@@ -11,6 +11,8 @@ from typing import Any, Mapping
 
 import hou
 
+from pipe.dcc.houdini.gallery import production_db_path
+
 from . import hooks as publish_hooks
 from .main import PublishOptions, publish_component
 
@@ -40,10 +42,6 @@ def on_created(node: hou.Node) -> None:
         "rootprim": f"/{asset_name}",
         "localize": 0,
         "lopoutput": _DEFAULT_LOPOUTPUT,
-        "thumbnailmode": 2,
-        "renderer": "RenderMan RIS",
-        "thumbnailscenesource": 1,
-        "thumbnailinputcamera": "/lookdev/cam",
     }
 
     # Prefer setting promoted wrapper parms so internal channel references stay intact.
@@ -116,8 +114,7 @@ def preflight(node: hou.Node) -> dict[str, Any]:
                 {
                     "code": "ExportTriggerMissing",
                     "message": (
-                        "No export trigger found "
-                        "(saveToDisk/execute/render/renderbutton)."
+                        "No export trigger found (execute/render/renderbutton)."
                     ),
                 }
             )
@@ -130,24 +127,16 @@ def preflight(node: hou.Node) -> dict[str, Any]:
             warnings.append({"code": "HookNotResolvable", "message": f"{spec}: {exc}"})
 
     if _eval_bool(node, "enable_gallery_sync", True):
-        db_path = _eval_string(node, "gallery_db_override")
-        if not db_path:
-            db_path = (hou.getenv("HOUDINI_ASSETGALLERY_DATA_SOURCE") or "").strip()
-        if not db_path:
-            db_path = (hou.getenv("HOUDINI_ASSETGALLERY_DB_FILE") or "").strip()
-
-        if not db_path:
+        db_path = _eval_path(node, "gallery_db_override") or production_db_path()
+        if db_path.is_file():
+            checks.append(f"gallery_db: {db_path}")
+        else:
             warnings.append(
                 {
                     "code": "GalleryDBMissing",
-                    "message": (
-                        "No gallery DB configured "
-                        "(override or HOUDINI_ASSETGALLERY_DATA_SOURCE)."
-                    ),
+                    "message": f"Asset Gallery DB not found: {db_path}",
                 }
             )
-        else:
-            checks.append(f"gallery_db: {db_path}")
 
     result = {
         "status": "failed" if errors else "success",
@@ -195,14 +184,10 @@ def _collect_publish_options(node: hou.Node) -> PublishOptions:
         publish_note=publish_note,
         tool_version=_empty_to_none(_eval_string(node, "tool_version")),
         export_component=_eval_bool(node, "export_component", True),
-        collect_thumbnail=_eval_bool(node, "collect_thumbnail", True),
-        generate_thumbnail_if_missing=_eval_bool(
-            node, "generate_thumbnail_if_missing", True
-        ),
+        render_thumbnail=_eval_bool(node, "collect_thumbnail", True),
         update_gallery=_eval_bool(node, "enable_gallery_sync", True),
         gallery_db_path=_eval_path(node, "gallery_db_override"),
         gallery_label=_empty_to_none(_eval_string(node, "gallery_label_override")),
-        prune_existing_items=_eval_bool(node, "prune_existing_items", True),
         fail_on_gallery_error=_eval_bool(node, "fail_on_gallery_error", False),
         hooks=tuple(_collect_hook_specs(node)),
         fail_on_hook_error=_eval_bool(node, "fail_on_hook_error", False),
