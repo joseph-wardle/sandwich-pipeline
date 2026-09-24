@@ -1,0 +1,30 @@
+#usda 1.0
+(
+    "ColorChecker Classic reference card asset"
+    defaultPrim = "ColorChecker"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def Xform "ColorChecker" (
+    assetInfo = {
+        asset identifier = @./color_checker.usd@
+        string name = "color_checker"
+    }
+    customData = {
+        dictionary provenance = {
+            string conversion = "Lab D50 -> XYZ D50 -> Bradford chromatic adaptation D50->D60 -> ACEScg AP1"
+            string note = "primvars:referenceColor (ACEScg) is the rendering source of truth; the background face color is an authored design choice, not a measured patch."
+            string referenceRevision = "After November 2014"
+            string referenceSource = "X-Rite published CIELAB values; matches colour-science \"ColorChecker24 - After November 2014\" to 1e-4"
+            string referenceType = "ColorChecker Classic"
+            string renderingColorSpace = "ACEScg / AP1 / D60"
+            string sourceMeasurementSpace = "CIELAB D50 / 2deg"
+        }
+    }
+    kind = "component"
+    prepend payload = @./payload.usd@
+)
+{
+}
+

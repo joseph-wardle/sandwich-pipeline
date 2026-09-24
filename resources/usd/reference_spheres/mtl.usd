@@ -1,0 +1,60 @@
+#usda 1.0
+(
+    "Chrome and grey reference spheres asset"
+    defaultPrim = "ReferenceSpheres"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+over "ReferenceSpheres"
+{
+    def Scope "mtl"
+    {
+        def Material "chrome"
+        {
+            token outputs:surface.connect = </ReferenceSpheres/mtl/chrome/surface.outputs:surface>
+
+            def Shader "surface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (1, 1, 1)
+                float inputs:metallic = 1
+                float inputs:roughness = 0
+                token outputs:surface
+            }
+        }
+
+        def Material "grey"
+        {
+            token outputs:surface.connect = </ReferenceSpheres/mtl/grey/surface.outputs:surface>
+
+            def Shader "surface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.18, 0.18, 0.18)
+                float inputs:roughness = 1
+                color3f inputs:specularColor = (0, 0, 0)
+                int inputs:useSpecularWorkflow = 1
+                token outputs:surface
+            }
+        }
+    }
+
+    over "geo"
+    {
+        over "chrome" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            rel material:binding = </ReferenceSpheres/mtl/chrome>
+        }
+
+        over "grey" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            rel material:binding = </ReferenceSpheres/mtl/grey>
+        }
+    }
+}
+

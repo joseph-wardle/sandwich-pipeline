@@ -1,0 +1,201 @@
+#usda 1.0
+(
+    "ColorChecker Classic reference card asset"
+    defaultPrim = "ColorChecker"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def Xform "ColorChecker"
+{
+    def Scope "geo"
+    {
+        def Mesh "card"
+        {
+            uniform bool doubleSided = 1
+            float3[] extent = [(-0.146, -0.1015, -0.001), (0.146, 0.1015, 0)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
+            uniform token orientation = "rightHanded"
+            point3f[] points = [(-0.139, 0.053, 0), (-0.101, 0.053, 0), (-0.101, 0.091, 0), (-0.139, 0.091, 0), (-0.091, 0.053, 0), (-0.053, 0.053, 0), (-0.053, 0.091, 0), (-0.091, 0.091, 0), (-0.043, 0.053, 0), (-0.005, 0.053, 0), (-0.005, 0.091, 0), (-0.043, 0.091, 0), (0.005, 0.053, 0), (0.043, 0.053, 0), (0.043, 0.091, 0), (0.005, 0.091, 0), (0.053, 0.053, 0), (0.091, 0.053, 0), (0.091, 0.091, 0), (0.053, 0.091, 0), (0.101, 0.053, 0), (0.139, 0.053, 0), (0.139, 0.091, 0), (0.101, 0.091, 0), (-0.139, 0.005, 0), (-0.101, 0.005, 0), (-0.101, 0.043, 0), (-0.139, 0.043, 0), (-0.091, 0.005, 0), (-0.053, 0.005, 0), (-0.053, 0.043, 0), (-0.091, 0.043, 0), (-0.043, 0.005, 0), (-0.005, 0.005, 0), (-0.005, 0.043, 0), (-0.043, 0.043, 0), (0.005, 0.005, 0), (0.043, 0.005, 0), (0.043, 0.043, 0), (0.005, 0.043, 0), (0.053, 0.005, 0), (0.091, 0.005, 0), (0.091, 0.043, 0), (0.053, 0.043, 0), (0.101, 0.005, 0), (0.139, 0.005, 0), (0.139, 0.043, 0), (0.101, 0.043, 0), (-0.139, -0.043, 0), (-0.101, -0.043, 0), (-0.101, -0.005, 0), (-0.139, -0.005, 0), (-0.091, -0.043, 0), (-0.053, -0.043, 0), (-0.053, -0.005, 0), (-0.091, -0.005, 0), (-0.043, -0.043, 0), (-0.005, -0.043, 0), (-0.005, -0.005, 0), (-0.043, -0.005, 0), (0.005, -0.043, 0), (0.043, -0.043, 0), (0.043, -0.005, 0), (0.005, -0.005, 0), (0.053, -0.043, 0), (0.091, -0.043, 0), (0.091, -0.005, 0), (0.053, -0.005, 0), (0.101, -0.043, 0), (0.139, -0.043, 0), (0.139, -0.005, 0), (0.101, -0.005, 0), (-0.139, -0.091, 0), (-0.101, -0.091, 0), (-0.101, -0.053, 0), (-0.139, -0.053, 0), (-0.091, -0.091, 0), (-0.053, -0.091, 0), (-0.053, -0.053, 0), (-0.091, -0.053, 0), (-0.043, -0.091, 0), (-0.005, -0.091, 0), (-0.005, -0.053, 0), (-0.043, -0.053, 0), (0.005, -0.091, 0), (0.043, -0.091, 0), (0.043, -0.053, 0), (0.005, -0.053, 0), (0.053, -0.091, 0), (0.091, -0.091, 0), (0.091, -0.053, 0), (0.053, -0.053, 0), (0.101, -0.091, 0), (0.139, -0.091, 0), (0.139, -0.053, 0), (0.101, -0.053, 0), (-0.146, -0.1015, -0.001), (0.146, -0.1015, -0.001), (0.146, 0.1015, -0.001), (-0.146, 0.1015, -0.001)]
+            uniform token subdivisionScheme = "none"
+            uniform token subsetFamily:colorPatch:familyType = "partition"
+
+            def GeomSubset "A1_dark_skin"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [0]
+            }
+
+            def GeomSubset "B1_light_skin"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [1]
+            }
+
+            def GeomSubset "C1_blue_sky"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [2]
+            }
+
+            def GeomSubset "D1_foliage"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [3]
+            }
+
+            def GeomSubset "E1_blue_flower"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [4]
+            }
+
+            def GeomSubset "F1_bluish_green"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [5]
+            }
+
+            def GeomSubset "A2_orange"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [6]
+            }
+
+            def GeomSubset "B2_purplish_blue"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [7]
+            }
+
+            def GeomSubset "C2_moderate_red"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [8]
+            }
+
+            def GeomSubset "D2_purple"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [9]
+            }
+
+            def GeomSubset "E2_yellow_green"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [10]
+            }
+
+            def GeomSubset "F2_orange_yellow"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [11]
+            }
+
+            def GeomSubset "A3_blue"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [12]
+            }
+
+            def GeomSubset "B3_green"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [13]
+            }
+
+            def GeomSubset "C3_red"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [14]
+            }
+
+            def GeomSubset "D3_yellow"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [15]
+            }
+
+            def GeomSubset "E3_magenta"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [16]
+            }
+
+            def GeomSubset "F3_cyan"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [17]
+            }
+
+            def GeomSubset "A4_white_95"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [18]
+            }
+
+            def GeomSubset "B4_neutral_8"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [19]
+            }
+
+            def GeomSubset "C4_neutral_65"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [20]
+            }
+
+            def GeomSubset "D4_neutral_5"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [21]
+            }
+
+            def GeomSubset "E4_neutral_35"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [22]
+            }
+
+            def GeomSubset "F4_black_2"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [23]
+            }
+
+            def GeomSubset "background"
+            {
+                uniform token elementType = "face"
+                uniform token familyName = "colorPatch"
+                int[] indices = [24]
+            }
+        }
+    }
+}
+

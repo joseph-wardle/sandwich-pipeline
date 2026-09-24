@@ -1,0 +1,55 @@
+#usda 1.0
+(
+    "ColorChecker Classic reference card asset"
+    defaultPrim = "ColorChecker"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+over "ColorChecker"
+{
+    def Scope "mtl"
+    {
+        def Material "reference"
+        {
+            token outputs:surface.connect = </ColorChecker/mtl/reference/surface.outputs:surface>
+
+            def Shader "referenceColor"
+            {
+                uniform token info:id = "UsdPrimvarReader_float3"
+                float3 inputs:fallback = (0.18, 0.18, 0.18)
+                string inputs:varname = "referenceColor"
+                float3 outputs:result
+            }
+
+            def Shader "surface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor.connect = </ColorChecker/mtl/reference/referenceColor.outputs:result>
+                float inputs:roughness = 1
+                color3f inputs:specularColor = (0, 0, 0)
+                int inputs:useSpecularWorkflow = 1
+                token outputs:surface
+            }
+        }
+    }
+
+    over "geo"
+    {
+        over "card" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            rel material:binding = </ColorChecker/mtl/reference>
+            color3f[] primvars:referenceColor = [(0.135753, 0.08509, 0.058181), (0.44743, 0.296321, 0.225351), (0.143612, 0.184846, 0.308939), (0.118433, 0.146241, 0.062912), (0.231771, 0.216326, 0.398866), (0.262461, 0.478613, 0.415562), (0.52741, 0.237926, 0.063482), (0.088734, 0.102056, 0.349548), (0.376091, 0.114258, 0.119976), (0.087739, 0.048, 0.126997), (0.374934, 0.479681, 0.098398), (0.595269, 0.382307, 0.072875), (0.042442, 0.048852, 0.252767), (0.130319, 0.271676, 0.086421), (0.287856, 0.065184, 0.048443), (0.711349, 0.585427, 0.08432), (0.3604, 0.11182, 0.270915), (0.070271, 0.216116, 0.352767), (0.879304, 0.883887, 0.840683), (0.587133, 0.591479, 0.585279), (0.361259, 0.366365, 0.365282), (0.190354, 0.190783, 0.189921), (0.087071, 0.088546, 0.089601), (0.03145, 0.031495, 0.03221), (0.01, 0.01, 0.01)] (
+                colorSpace = "lin_ap1_scene"
+                customData = {
+                    string colorSpace = "ACEScg"
+                    string description = "Per-face scene-linear ACEScg reflectance; faces 0-23 are the measured ColorChecker Classic patches in chart order, face 24 is the backing."
+                }
+                interpolation = "uniform"
+            )
+        }
+    }
+}
+
