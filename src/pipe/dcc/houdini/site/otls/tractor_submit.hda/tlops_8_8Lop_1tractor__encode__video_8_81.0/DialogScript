@@ -6,7 +6,7 @@
     label	"Tractor Encode Video"
 
     help {
-	""
+	"Encodes a rendered frame sequence to a movie through an OCIO display and view, so the movie matches what the artist saw in the viewer."
     }
 
     inputlabel	1	"Input Stage"
@@ -32,24 +32,26 @@
         parmtag { "script_callback_language" "python" }
     }
     parm {
-        name    "colorspace_in"
-        label   "Source Color Space"
+        name    "display"
+        label   "Display"
         type    string
-        default { "scene_linear" }
+        default { [ "hou.Color.ocio_defaultDisplay()" python ] }
+        help    "Defaults to this session's OCIO display."
         menureplace {
-            "scene_linear"  "Scene Linear (OCIO Role)"
-            "ACEScg"        "ACEScg"
+            [ "[d for d in hou.Color.ocio_activeDisplays() for d in (d, d)]" ]
+            language python
         }
         parmtag { "script_callback_language" "python" }
     }
     parm {
-        name    "colorspace_out"
-        label   "Display Color Space"
+        name    "view"
+        label   "View"
         type    string
-        default { "sRGB - Texture" }
+        default { [ "hou.Color.ocio_views(hou.pwd().evalParm(\"display\"))[0]" python ] }
+        help    "Defaults to the first view of the display."
         menureplace {
-            "sRGB - Texture"                "sRGB - Texture"
-            "Gamma 2.4 Rec.709 - Texture"   "Rec.709 Gamma 2.4"
+            [ "[v for v in hou.Color.ocio_views(kwargs[\"node\"].evalParm(\"display\")) for v in (v, v)]" ]
+            language python
         }
         parmtag { "script_callback_language" "python" }
     }
