@@ -3,9 +3,12 @@
 A published material variant looks like::
 
     publish/tex/<geo>/<mat>/<layer>/            RenderMan `.tex`
-    publish/tex/<geo>/<mat>/<layer>/_preview/   UsdPreviewSurface `.jpeg`
-    publish/tex/<geo>/<mat>/<layer>/_src/       Substance exports, used as fallback
+    publish/tex/<geo>/<mat>/<layer>/_preview/   the same maps as 1k `.jpeg` per UDIM
+    publish/tex/<geo>/<mat>/<layer>/_src/       Substance exports, render fallback
     publish/tex/<geo>/<mat>/<layer>/mat.json    the publish's own manifest
+
+Both surfaces consume the same four maps and the same `st` coordinates; only
+the file format differs.
 """
 
 from __future__ import annotations
@@ -15,33 +18,23 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from pipe.core.asset.paths import (
+    PUBLISH_TEXTURES_PREVIEW_DIRNAME,
+    PUBLISH_TEXTURES_SOURCE_DIRNAME,
+)
 from pipe.core.struct.material import MaterialInfo
 
 from .variants import to_hip_expression
 
 log = logging.getLogger(__name__)
 
-PREVIEW_DIR = "_preview"
-SOURCE_DIR = "_src"
 MANIFEST_NAME = "mat.json"
 
+MAPS: tuple[str, ...] = ("BaseColor", "Metallic", "SpecularRoughness", "Normal")
 
-@dataclass(frozen=True)
-class Role:
-    """Which maps a shader consumes and which file formats it prefers."""
-
-    maps: tuple[str, ...]
-    extensions: tuple[str, ...]
-
-
-RENDER = Role(
-    maps=("BaseColor", "Metallic", "SpecularRoughness", "Normal"),
-    extensions=("tex", "exr", "png", "jpg", "jpeg"),
-)
-PREVIEW = Role(
-    maps=("DiffuseColor", "ORM", "Emissive", "NormalDX"),
-    extensions=("jpeg", "jpg", "png", "exr", "tex"),
-)
+# File formats each surface prefers, best first.
+_RENDER_EXTENSIONS = ("tex", "exr", "png")
+_PREVIEW_EXTENSIONS = ("jpeg", "jpg")
 
 
 @dataclass(frozen=True)
@@ -61,14 +54,10 @@ class MaterialSpec:
     preview_maps: dict[str, str]
 
 
-_ALL_MAPS: tuple[str, ...] = (*RENDER.maps, *PREVIEW.maps)
-_MAP_NAMES = {name.lower(): name for name in _ALL_MAPS}
-# Longest first, so "NormalDX" wins the alternation over "Normal".
-_MAP_ALTERNATION = "|".join(sorted(_ALL_MAPS, key=lambda name: (-len(name), name)))
+_MAP_ALTERNATION = "|".join(MAPS)
 _TEX_FILE_RE = re.compile(
     rf"^(?P<tex_set>.+?)_(?P<map>{_MAP_ALTERNATION})(?:_[^.]+)?"
-    rf"(?:\.(?P<udim>\d{{4}}))?\.(?P<ext>[A-Za-z0-9]+)$",
-    flags=re.IGNORECASE,
+    rf"(?:\.(?P<udim>\d{{4}}))?\.(?P<ext>[A-Za-z0-9]+)$"
 )
 _UDIM_RE = re.compile(r"\.(?P<udim>\d{4})(?=\.[^.]+$)")
 
@@ -80,7 +69,7 @@ class _TextureFile:
     path: Path
     extension: str
     udim: str | None
-    # 0 for a file published for this role, 1 for the `_src` fallback.
+    # 0 for a file published for its role, 1 for the `_src` render fallback.
     priority: int
 
 
@@ -106,7 +95,11 @@ def published_materials(tex_root: Path, *, hip_root: Path) -> tuple[MaterialSpec
         layer_specs = tuple(
             LayerSpec(name=layer.name, render_maps=render_maps)
             for layer in layers
-            if (render_maps := _chosen_paths(layer.render, tex_set, RENDER, hip_root))
+            if (
+                render_maps := _chosen_paths(
+                    layer.render, tex_set, _RENDER_EXTENSIONS, hip_root
+                )
+            )
         )
         if not layer_specs:
             log.warning(
@@ -114,7 +107,7 @@ def published_materials(tex_root: Path, *, hip_root: Path) -> tuple[MaterialSpec
                 "filenames must name one of %s.",
                 tex_set,
                 tex_root,
-                list(RENDER.maps),
+                list(MAPS),
             )
             continue
 
@@ -122,7 +115,7 @@ def published_materials(tex_root: Path, *, hip_root: Path) -> tuple[MaterialSpec
         for layer in layers:
             # One preview surface per material, so later layers deliberately win.
             preview_maps.update(
-                _chosen_paths(layer.preview, tex_set, PREVIEW, hip_root)
+                _chosen_paths(layer.preview, tex_set, _PREVIEW_EXTENSIONS, hip_root)
             )
 
         materials.append(MaterialSpec(tex_set, layer_specs, preview_maps))
@@ -130,12 +123,16 @@ def published_materials(tex_root: Path, *, hip_root: Path) -> tuple[MaterialSpec
 
 
 def _read_layer(layer_dir: Path) -> _Layer:
-    source = _texture_files(layer_dir / SOURCE_DIR, priority=1)
+    # No `_src` fallback for previews: a missing jpeg should leave the input
+    # unwired rather than hand the viewport a full-resolution 16-bit png.
     return _Layer(
         name=layer_dir.name,
         declared_tex_sets=_declared_tex_sets(layer_dir / MANIFEST_NAME),
-        render=_texture_files(layer_dir, priority=0) + source,
-        preview=_texture_files(layer_dir / PREVIEW_DIR, priority=0) + source,
+        render=_texture_files(layer_dir, priority=0)
+        + _texture_files(layer_dir / PUBLISH_TEXTURES_SOURCE_DIRNAME, priority=1),
+        preview=_texture_files(
+            layer_dir / PUBLISH_TEXTURES_PREVIEW_DIRNAME, priority=0
+        ),
     )
 
 
@@ -171,12 +168,11 @@ def _parse_texture_file(path: Path, priority: int) -> _TextureFile | None:
     if match is None:
         return None
     tex_set = match.group("tex_set").strip()
-    map_name = _MAP_NAMES.get(match.group("map").lower())
-    if not tex_set or map_name is None:
+    if not tex_set:
         return None
     return _TextureFile(
         tex_set=tex_set,
-        map_name=map_name,
+        map_name=match.group("map"),
         path=path,
         extension=path.suffix.lstrip(".").lower(),
         udim=match.group("udim"),
@@ -185,28 +181,29 @@ def _parse_texture_file(path: Path, priority: int) -> _TextureFile | None:
 
 
 def _chosen_paths(
-    files: tuple[_TextureFile, ...], tex_set: str, role: Role, hip_root: Path
+    files: tuple[_TextureFile, ...],
+    tex_set: str,
+    extensions: tuple[str, ...],
+    hip_root: Path,
 ) -> dict[str, str]:
     """Best file per map for one texture set, as `$HIP` expressions."""
     best: dict[str, _TextureFile] = {}
     for texture in files:
-        if texture.tex_set != tex_set or texture.map_name not in role.maps:
+        if texture.tex_set != tex_set:
             continue
         current = best.get(texture.map_name)
-        if current is None or _rank(texture, role) < _rank(current, role):
+        if current is None or _rank(texture, extensions) < _rank(current, extensions):
             best[texture.map_name] = texture
     return {
-        name: _texture_expression(best[name], hip_root)
-        for name in role.maps
-        if name in best
+        name: _texture_expression(best[name], hip_root) for name in MAPS if name in best
     }
 
 
-def _rank(texture: _TextureFile, role: Role) -> tuple[int, int, str]:
+def _rank(texture: _TextureFile, extensions: tuple[str, ...]) -> tuple[int, int, str]:
     try:
-        extension = role.extensions.index(texture.extension)
+        extension = extensions.index(texture.extension)
     except ValueError:
-        extension = len(role.extensions)
+        extension = len(extensions)
     return texture.priority, extension, texture.path.name.casefold()
 
 
@@ -233,10 +230,8 @@ def _subdirectories(root: Path) -> list[Path]:
 
 
 __all__ = [
-    "PREVIEW",
-    "RENDER",
+    "MAPS",
     "LayerSpec",
     "MaterialSpec",
-    "Role",
     "published_materials",
 ]

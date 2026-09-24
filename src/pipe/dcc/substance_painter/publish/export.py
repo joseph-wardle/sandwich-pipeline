@@ -46,6 +46,10 @@ from pipe.core.texture import TexConversionError, TexConverter
 
 log = logging.getLogger(__name__)
 
+# Painter writes the 1k UsdPreviewSurface maps as jpeg; every render map is png
+# or exr, so the extension alone separates the two.
+_PREVIEW_SUFFIX = ".jpeg"
+
 
 class TextureExportError(Exception):
     error_code = "TEXTURE_EXPORT_FAILED"
@@ -336,10 +340,19 @@ class Exporter:
             f"{self._texture_export_asset_name()} to {self._out_path}"
         )
 
+        try:
+            render_sources = self._move_previews(all_exported_textures)
+        except OSError as exc:
+            log.exception("Failed to move preview textures.")
+            self._set_error_message(
+                f"Textures exported, but moving the preview jpegs into "
+                f"{self._preview_path} failed.\nDetails: {exc}"
+            )
+            return False
+
         tex_converter = TexConverter(
             self._tex_path,
-            self._preview_path,
-            list(all_exported_textures.values()),
+            render_sources,
             asset_name=self._texture_export_asset_name(),
             geo_variant=geo_var,
             material_variant=mat_var,
@@ -362,6 +375,22 @@ class Exporter:
             return False
 
         return True
+
+    def _move_previews(
+        self, exported_textures: dict[tuple[str, str], list[str]]
+    ) -> list[list[str]]:
+        """Move the exported preview jpegs from `_src` into `_preview`."""
+        render_sources: list[list[str]] = []
+        for textures in exported_textures.values():
+            kept: list[str] = []
+            for texture in textures:
+                path = Path(texture)
+                if path.suffix.lower() == _PREVIEW_SUFFIX:
+                    path.replace(self._preview_path / path.name)
+                else:
+                    kept.append(texture)
+            render_sources.append(kept)
+        return render_sources
 
     def _export_substance_textures(
         self,

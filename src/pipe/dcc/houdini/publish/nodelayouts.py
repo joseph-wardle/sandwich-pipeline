@@ -468,7 +468,7 @@ def create_skd_component_geometry(
 
     # Configure Component Geometry node
     _set_parm_if_exists(cgeo, "dogeommodelapi", True)
-    _set_parm_if_exists(cgeo, "attribs", "P uv preview_uv")
+    _set_parm_if_exists(cgeo, "attribs", "P uv")
     _set_parm_if_exists(cgeo, "indexattribs", "texset")
     _set_parm_if_exists(cgeo, "prefixpartitionsubsets", False)
     _set_parm_if_exists(cgeo, "geovariantname", geo_variant or cgeo.name())
