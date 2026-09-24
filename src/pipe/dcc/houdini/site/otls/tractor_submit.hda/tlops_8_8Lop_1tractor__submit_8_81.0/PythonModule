@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+import hou
+import os
+
+import tractor.api.author as author
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Iterable
+
+_shared_module = hou.nodeType(
+    hou.lopNodeTypeCategory(), "tlops::shared_python"
+).hdaModule()
+ParmData = _shared_module.ParmData
+
+
+class SubmitParms(metaclass=ParmData):
+    title: str
+    priority: int
+    engine_url: str
+    engine_port: int
+    env_vars: str
+    license_server: str
+
+
+def ensure_valid_inputs(inputs: Iterable[hou.LopNode]) -> bool:
+    for input in inputs:
+        # if input is not a tractor_configure node, cancel
+        if not input.type().name().startswith("tlops::tractor_"):
+            hou.ui.displayMessage(
+                "Please ensure that all inputs to the Tractor Submit node are Tractor Configure nodes. "
+                f'Error on input node "{input.name()}"',
+                title="Error sending to Tractor",
+                severity=hou.severityType.Error,
+            )
+            return False
+    return True
+
+
+def configure_tractor_connection(parms: SubmitParms) -> None:
+    author.setEngineClientParam(hostname=parms.engine_url, port=parms.engine_port)
+
+
+def generate_setenv(parms: SubmitParms) -> str:
+    return " ".join(
+        ["setenv"]
+        + [f"{var}={os.getenv(var)}" for var in parms.env_vars.split(" ") if var]
+        + [f"HOUDINI_LICENSE_SERVER={parms.license_server}"]
+    )
+
+
+def sendToTractor(node: hou.LopNode) -> None:
+    if not ensure_valid_inputs(node.inputs()):
+        return
+
+    parms = SubmitParms(node)
+    configure_tractor_connection(parms)
+    job = author.Job()
+    job.title = parms.title
+    job.envkey = [generate_setenv(parms)]
+    job.priority = parms.priority
+
+    for input in node.inputs():
+        task: author.Task = input.hdaModule().generate_tractor_task(input, input)
+        job.addChild(task)
+
+    # configure blades and such
+    job.spool(block=True)
+
+    author.closeEngineClient()
+    hou.ui.displayMessage(
+        f"Visit {parms.engine_url} to check progress.", title="Job sent to Tractor"
+    )

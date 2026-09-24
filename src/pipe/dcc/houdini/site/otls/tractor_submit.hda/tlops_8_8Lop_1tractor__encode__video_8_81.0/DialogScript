@@ -1,0 +1,88 @@
+# Dialog script for tlops::tractor_encode_video::1.0 automatically generated
+
+{
+    name	tlops::tractor_encode_video::1.0
+    script	load_asset::1.0
+    label	"Tractor Encode Video"
+
+    help {
+	""
+    }
+
+    inputlabel	1	"Input Stage"
+    inputlabel	2	"Input 2"
+    inputlabel	3	"Input 3"
+    inputlabel	4	"Input 4"
+
+    parm {
+        name    "output_file"
+        label   "Output File"
+        type    file
+        default { "" }
+        parmtag { "filechooser_mode" "write" }
+        parmtag { "filechooser_pattern" "*.mp4 *.mov" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "framerate"
+        label   "Frame Rate"
+        type    integer
+        default { "24" }
+        range   { 1! 60 }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "colorspace_in"
+        label   "Source Color Space"
+        type    string
+        default { "scene_linear" }
+        menureplace {
+            "scene_linear"  "Scene Linear (OCIO Role)"
+            "ACEScg"        "ACEScg"
+        }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "colorspace_out"
+        label   "Display Color Space"
+        type    string
+        default { "sRGB - Texture" }
+        menureplace {
+            "sRGB - Texture"                "sRGB - Texture"
+            "Gamma 2.4 Rec.709 - Texture"   "Rec.709 Gamma 2.4"
+        }
+        parmtag { "script_callback_language" "python" }
+    }
+    groupcollapsible {
+        name    "folder0"
+        label   "Advanced"
+
+        parm {
+            name    "codec"
+            label   "Codec"
+            type    string
+            default { "h264" }
+            menu {
+                "h264"      "H.264 (MP4)"
+                "prores"    "ProRes (MOV)"
+            }
+            parmtag { "script_callback_language" "python" }
+        }
+        parm {
+            name    "quality"
+            label   "Quality"
+            type    integer
+            default { "18" }
+            range   { 0! 51 }
+            parmtag { "script_callback_language" "python" }
+        }
+        parm {
+            name    "service"
+            label   "Service Key"
+            type    string
+            default { "EL9" }
+            parmtag { "script_callback_language" "python" }
+        }
+    }
+
+}

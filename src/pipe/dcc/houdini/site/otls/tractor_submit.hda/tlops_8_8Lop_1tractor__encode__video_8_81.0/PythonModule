@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+import hou
+import re
+
+import tractor.api.author as author
+
+from pathlib import Path
+
+
+_shared_module = hou.nodeType(
+    hou.lopNodeTypeCategory(), "tlops::shared_python"
+).hdaModule()
+ParmData = _shared_module.ParmData
+
+
+class EncodeParms(metaclass=ParmData):
+    output_file: str
+    framerate: int
+    colorspace_in: str
+    colorspace_out: str
+    codec: str
+    quality: int
+    service: str
+
+
+IMAGES_DIR = "images"
+DENOISE_DIR = "images_dn"
+ENCODE_DIR = "video_tmp"
+
+_OCIO_CONFIG = "/groups/sandwich/.pipeline/pipeline/lib/ocio/sandwich-v01/config.ocio"
+
+
+def _input_image_dir(node: hou.LopNode) -> str:
+    """Determine the correct image subdirectory based on the input node type."""
+    input_node = node.input(0)
+    input_type = input_node.type().name()
+    if "tractor_denoise" in input_type:
+        return DENOISE_DIR
+    return IMAGES_DIR
+
+
+def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> author.Task:
+    """
+    node: current node this function is called in
+    submit_input: the node at the bottom of this stream feeding into the Tractor Submit node
+    """
+    node_name = node.name()
+    parms = EncodeParms(node)
+
+    input_node = node.input(0)
+    upstream_task = input_node.hdaModule().generate_tractor_task(input_node, submit_input)
+
+    task = author.Task(title=node_name)
+    task.addChild(upstream_task)
+
+    encode_task = author.Task(title=f"Encode Video ({node_name})")
+    encode_task.addChild(author.Instance(title=upstream_task.title))
+
+    jd = job_directory(node)
+    image_subdir = _input_image_dir(node)
+    image_dir = jd / image_subdir
+    tmp_dir = jd / ENCODE_DIR
+
+    output_file = parms.output_file
+    if not output_file:
+        ext = ".mov" if parms.codec == "prores" else ".mp4"
+        output_file = str(jd / f"video{ext}")
+
+    # Parse frame numbers from the upstream task tree to determine range.
+    # For configure input, frames are direct subtasks: "Frame 1001, node"
+    # For denoise input, frames are nested under the render subtask.
+    fnum_re = re.compile(r"^Frame (\d+)")
+    frame_numbers = _collect_frame_numbers(upstream_task, fnum_re)
+
+    if not frame_numbers:
+        raise hou.NodeError(
+            "No frame tasks found in upstream node. "
+            "Ensure a Tractor Configure or Denoise node is connected."
+        )
+
+    frame_start = min(frame_numbers)
+
+    # Step 1: Color convert EXR frames to PNG via hoiiotool
+    convert_cmd = (
+        f"export OCIO='{_OCIO_CONFIG}'; "
+        f"mkdir -p '{tmp_dir}' && "
+        f"for f in '{image_dir}'/*.exr; do "
+        f"  fbase=$(basename \"$f\" .exr); "
+        f"  hoiiotool \"$f\" "
+        f"    --colorconvert '{parms.colorspace_in}' '{parms.colorspace_out}' "
+        f"    -o '{tmp_dir}/'\"$fbase\".png; "
+        f"done"
+    )
+    encode_task.newCommand(
+        argv=["/bin/bash", "-exc", convert_cmd],
+        service=parms.service,
+    )
+
+    # Step 2: Assemble video with ffmpeg
+    codec_flags = _get_codec_flags(parms.codec, parms.quality)
+    ffmpeg_cmd = (
+        f"ffmpeg -y "
+        f"-framerate {parms.framerate} "
+        f"-start_number {frame_start} "
+        f"-i '{tmp_dir}/%04d.png' "
+        f"{codec_flags} "
+        f"'{output_file}'"
+    )
+    encode_task.newCommand(
+        argv=["/bin/bash", "-exc", ffmpeg_cmd],
+        service=parms.service,
+    )
+
+    # Step 3: Clean up temp PNGs
+    encode_task.newCommand(
+        argv=["rm", "-rf", str(tmp_dir)],
+        service=parms.service,
+    )
+
+    task.addChild(encode_task)
+    return task
+
+
+def _collect_frame_numbers(task: author.Task, pattern: re.Pattern) -> list[int]:
+    """Recursively search task tree for frame numbers in task titles."""
+    results = []
+    if not task.subtasks:
+        return results
+    for subtask in task.subtasks:
+        m = pattern.match(subtask.title)
+        if m:
+            fnum = int(m.group(1))
+            if fnum not in results:
+                results.append(fnum)
+        else:
+            results.extend(_collect_frame_numbers(subtask, pattern))
+    return results
+
+
+def _get_codec_flags(codec: str, quality: int) -> str:
+    if codec == "prores":
+        return f"-c:v prores_ks -profile:v 3 -qscale:v {quality} -pix_fmt yuv422p10le"
+    # Default: h264
+    return f"-c:v libx264 -crf {quality} -pix_fmt yuv420p"
+
+
+def job_directory(node: hou.LopNode) -> Path:
+    input_node = node.input(0)
+    return input_node.hdaModule().job_directory(input_node)
