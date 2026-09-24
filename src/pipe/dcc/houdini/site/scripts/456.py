@@ -8,5 +8,9 @@ if any(get_production_path() / p in hip_path.parents for p in ["asset", "charact
     if not hou.contextOption("ASSET"):
         hou.setContextOption("ASSET", hip_path.name)
 
+session_db = hou.getenv("HOUDINI_ASSETGALLERY_DB_FILE")
+if session_db:
+    hou.hscript(f"setenv ASSETGALLERY_DATA_SOURCE='{session_db}'")
+
 # mark any node referencing above vars as dirty
 hou.hscript("varchange")
