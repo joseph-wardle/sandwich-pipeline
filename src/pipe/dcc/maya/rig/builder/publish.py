@@ -7,9 +7,9 @@ from env_sg import DB_Config
 from maya import cmds
 
 from pipe.core.asset import paths_for_asset
-from pipe.dcc.maya.util.selection import maintain_selection
 from pipe.core.shotgrid import ShotGrid
 from pipe.core.versioning import next_version, versioned_filename
+from pipe.dcc.maya.util.selection import maintain_selection
 
 from .build import RigBuilder, RigDefinition
 from .progress import ProgressStep, TestProgressManager
@@ -109,7 +109,19 @@ class RigPublisher:
         )
 
         cmds.select("rig")
-        cmds.file(str(rig_version_filepath), exportSelected=True, type="mayaBinary")
+        cmds.file(
+            str(rig_version_filepath),
+            exportSelected=True,
+            type="mayaBinary",
+            options="v=0;",
+            constructionHistory=True,
+            expressions=True,
+            constraints=True,
+            shader=True,
+            channels=True,
+            preserveReferences=True,
+            exportUnloadedReferences=False,
+        )
         log.info(
             f"PUBLISH: {rig.name} was successfully built and published to {rig_version_filepath}"
         )
