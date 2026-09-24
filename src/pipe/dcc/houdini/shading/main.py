@@ -43,8 +43,6 @@ _MIXER_SLOTS = 4
 
 _MATERIAL_Y_STEP = 3.5
 _LAYER_Y_STEP = 8.0
-_PREVIEW_UV_PRIMVAR = "preview_uv"
-
 # RenderMan colour-config aliases. Published `.tex` colour maps are already
 # ACEScg, so they are tagged "rendering" rather than converted on read.
 _COLOR_SPACE = "rendering"
@@ -57,12 +55,13 @@ _NODE_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_]+")
 class _PreviewInput:
     """How one published preview map drives UsdPreviewSurface.
 
-    `connections` pairs a UsdPreviewSurface input with a usduvtexture output.
+    A usduvtexture output feeds one UsdPreviewSurface input.
     `source_colorspace` is a USD Preview Material spec token, not an OCIO name.
     """
 
     map_name: str
-    connections: tuple[tuple[str, str], ...]
+    surface_input: str
+    texture_output: str
     source_colorspace: str
     row_offset: float
     scale: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
@@ -70,18 +69,14 @@ class _PreviewInput:
 
 
 _PREVIEW_INPUTS = (
-    _PreviewInput("DiffuseColor", (("diffuseColor", "rgb"),), "sRGB", 2.0),
-    _PreviewInput(
-        "ORM",
-        (("occlusion", "r"), ("roughness", "g"), ("metallic", "b")),
-        "raw",
-        0.0,
-    ),
-    _PreviewInput("Emissive", (("emissiveColor", "rgb"),), "sRGB", -2.0),
+    _PreviewInput("BaseColor", "diffuseColor", "rgb", "sRGB", 2.0),
+    _PreviewInput("Metallic", "metallic", "r", "raw", 0.0),
+    _PreviewInput("SpecularRoughness", "roughness", "r", "raw", -2.0),
     # Normal maps store 0..1; UsdPreviewSurface wants -1..1 tangent space.
     _PreviewInput(
-        "NormalDX",
-        (("normal", "rgb"),),
+        "Normal",
+        "normal",
+        "rgb",
         "raw",
         -4.0,
         scale=(2.0, 2.0, 2.0, 1.0),
@@ -90,11 +85,11 @@ _PREVIEW_INPUTS = (
 )
 
 
-if {preview.map_name for preview in _PREVIEW_INPUTS} != set(textures.PREVIEW.maps):
+if {preview.map_name for preview in _PREVIEW_INPUTS} != set(textures.MAPS):
     # Drift here is silent: a discovered map with no entry is simply never wired.
     raise ImportError(
-        "_PREVIEW_INPUTS and textures.PREVIEW.maps disagree, so a published "
-        "preview map would be discovered and then dropped"
+        "_PREVIEW_INPUTS and textures.MAPS disagree, so a published preview "
+        "map would be discovered and then dropped"
     )
 
 
@@ -342,15 +337,7 @@ class MaterialGraphBuilder:
         surface = self._create(
             builder, "usdpreviewsurface", f"{suffix}_UsdPreviewSurface", (11.0, row_y)
         )
-        uv_reader = self._create(
-            builder, "usdprimvarreader", f"{suffix}_PreviewUv", (3.0, row_y)
-        )
-        # "float2" is the signature token that makes the output a UV pair; a token
-        # Houdini does not recognise silently leaves the output a single float.
-        _parm(uv_reader, "signature").set("float2")
-        _parm(uv_reader, "varname").set(_PREVIEW_UV_PRIMVAR)
-
-        nodes = [surface, uv_reader]
+        nodes = [surface]
         for preview in _PREVIEW_INPUTS:
             path = material.preview_maps.get(preview.map_name)
             if path is None:
@@ -365,9 +352,9 @@ class MaterialGraphBuilder:
             _parm(texture, "sourceColorSpace").set(preview.source_colorspace)
             _parm_tuple(texture, "scale").set(preview.scale)
             _parm_tuple(texture, "bias").set(preview.bias)
-            texture.setNamedInput("st", uv_reader, "result")
-            for surface_input, texture_output in preview.connections:
-                surface.setNamedInput(surface_input, texture, texture_output)
+            surface.setNamedInput(
+                preview.surface_input, texture, preview.texture_output
+            )
             nodes.append(texture)
         return surface, nodes
 

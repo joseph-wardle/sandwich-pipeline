@@ -5,7 +5,7 @@ import os
 import re
 import subprocess
 import time
-from math import ceil, floor, log2, sqrt
+from math import log2
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -45,19 +45,14 @@ def _process_qt_events() -> None:
         pass
 
 
-def _nearest_pow2(n: int) -> int:
-    return 1 << (n - 1).bit_length()
-
-
 class TexConversionError(ChildProcessError):
-    """Raised when one of the tex / preview-image conversion subprocesses fails."""
+    """Raised when one of the tex conversion subprocesses fails."""
 
     error_code = "TEXTURE_CONVERSION_FAILED"
 
 
 class TexConverter:
     tex_path: Path
-    preview_path: Path
     imgs_by_tex_set: list[list[str]]
     asset_name: str | None
     geo_variant: str | None
@@ -68,7 +63,6 @@ class TexConverter:
     def __init__(
         self,
         tex_path: Path,
-        preview_path: Path,
         imgs_by_tex_set: typing.Iterable[list[str]],
         *,
         asset_name: str | None = None,
@@ -79,7 +73,6 @@ class TexConverter:
         progress_callback: PublishProgressCallback | None = None,
     ) -> None:
         self.tex_path = tex_path
-        self.preview_path = preview_path
         self.imgs_by_tex_set = [list(imgs) for imgs in imgs_by_tex_set]
         self.asset_name = asset_name
         self.geo_variant = geo_variant
@@ -91,11 +84,10 @@ class TexConverter:
     def _source_count(self) -> int:
         return sum(len(imgs) for imgs in self.imgs_by_tex_set)
 
-    def convert_all(self) -> tuple[list[Path], list[Path]]:
+    def convert_all(self) -> list[Path]:
         payload: dict[str, object] = {
             "source_count": self._source_count(),
             "converted_tex_count": 0,
-            "converted_preview_count": 0,
             "batch_size": self.batch_size,
         }
         if self.geo_variant:
@@ -105,13 +97,7 @@ class TexConverter:
         if self.renderman_variant:
             payload["renderman_variant"] = str(self.renderman_variant)
 
-        # Tracked across both conversion steps; finally folds whatever
-        # was reached into the event so a partial failure ("tex convert
-        # succeeded, preview surface failed") shows up in the dashboard
-        # rather than reporting zero.
         converted_tex: list[Path] = []
-        converted_preview: list[Path] = []
-
         with telemetry.record(
             telemetry.EVENT_TEXTURE_CONVERT_TEX,
             payload=payload,
@@ -119,14 +105,10 @@ class TexConverter:
         ) as telemetry_event:
             try:
                 converted_tex = self.convert_tex()
-                converted_preview = self.convert_previewsurface()
             finally:
-                telemetry_event.update(
-                    converted_tex_count=len(converted_tex),
-                    converted_preview_count=len(converted_preview),
-                )
+                telemetry_event.update(converted_tex_count=len(converted_tex))
 
-        return converted_tex, converted_preview
+        return converted_tex
 
     def convert_tex(self) -> list[Path]:
         """Convert all .png textures in the most recent export to .tex"""
@@ -205,8 +187,6 @@ class TexConverter:
         for imgs in self.imgs_by_tex_set:
             log.debug(imgs)
             for img in imgs:
-                if img.endswith(".jpeg"):
-                    continue
                 log.debug(f"        {img}")
                 if "pre-b2r" in img:
                     pre_cmdlines.append(norm2height(img))
@@ -249,87 +229,6 @@ class TexConverter:
 
         if len(finished_imgs) != len(cmdlines):
             raise TexConversionError("Not all png textures were converted")
-
-        return finished_imgs
-
-    def convert_previewsurface(self) -> list[Path]:
-        """Compile all .jpeg textures in the most recent export to UDIM-less tiles"""
-        MAX_OUTPUT_SIZE = 4096
-        DOWNSCALE_RATIO = 2
-        assert self.preview_path is not None
-
-        @self._debug_out
-        def jpeg_cmd(root: Path, imgs: typing.Sequence[str]) -> list[str]:
-            img_name = re.search(r"^(.*_)(.+)$", root.name)
-            assert img_name is not None
-            name_base, _color_space = img_name.group(1, 2)
-
-            count = len(imgs)
-            grid_height = int(floor(sqrt(count)))
-            grid_base = int(grid_height + ceil(count / grid_height - grid_height))
-
-            native_x, native_y = self._img_dims(imgs[0])
-            total_pixels = native_x * native_y * count
-            mosaic_side = _nearest_pow2(int(sqrt(total_pixels) / DOWNSCALE_RATIO))
-            mosaic_side = min(mosaic_side, MAX_OUTPUT_SIZE)
-            target_tile_size = mosaic_side / max(grid_base, grid_height)
-            cell_size = _nearest_pow2(int(target_tile_size))
-
-            # fmt: off
-            return [
-                str(Executables.oiiotool),
-                *imgs,
-                f"--mosaic:fit{cell_size}x{cell_size}", f"{grid_base}x{grid_height}",
-                "--resize", f"{mosaic_side}x{mosaic_side}",
-                "-o", f"{str(self.preview_path / name_base)}sRGB.jpeg",
-            ]
-            # fmt: on
-
-        # construct list of grouped images
-        img_list: dict[str, list[str]] = {}
-        for imgs in self.imgs_by_tex_set:
-            for img in imgs:
-                if img.endswith(".jpeg"):
-                    key_search = re.search(r"^(.*)\.\d{4}\.jpeg$", img)
-                    if not key_search:  # no UDIMs
-                        key_search = re.search(r"^(.*)\.jpeg$", img)
-                        assert key_search is not None
-
-                    key = key_search.group(1)
-                    if key not in img_list:
-                        img_list[key] = []
-                    img_list[key].append(img)
-
-        cmdlines = [
-            jpeg_cmd(Path(root), sorted(imgs)) for root, imgs in img_list.items()
-        ]
-
-        total_preview = len(cmdlines)
-        if total_preview <= 0:
-            self._report_progress(
-                PublishStage.CONVERTING_PREVIEW,
-                "No preview textures were required for this publish.",
-                current=1,
-                total=1,
-            )
-            return []
-
-        self._report_progress(
-            PublishStage.CONVERTING_PREVIEW,
-            f"Building preview textures ({total_preview} output file(s)).",
-            current=0,
-            total=total_preview,
-        )
-
-        finished_imgs = self._wait_and_check_cmds(
-            cmdlines,
-            batch_size=self.batch_size,
-            stage=PublishStage.CONVERTING_PREVIEW,
-            message="Building preview textures.",
-        )
-
-        if len(finished_imgs) != len(cmdlines):
-            raise TexConversionError("Not all jpeg textures were converted")
 
         return finished_imgs
 

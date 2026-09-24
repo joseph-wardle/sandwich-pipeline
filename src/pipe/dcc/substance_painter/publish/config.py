@@ -18,6 +18,7 @@ from pipe.dcc.substance_painter.util.texture_set import texture_set_name
 
 _COLOR_EXPORT_COLORSPACE = "sRGB - Texture"
 _DATA_EXPORT_COLORSPACE = "Raw"
+_PREVIEW_SIZE_LOG2 = 10
 
 
 def channel_export_name(channel: sp.textureset.Channel) -> str:
@@ -91,15 +92,9 @@ def generate_export_config(
                                 f"$textureSet_{channel_export_name(ch)}"
                                 "(_$colorSpace)(.$udim)"
                             ),
-                            "channels": [
-                                {
-                                    "destChannel": color,
-                                    "srcChannel": color,
-                                    "srcMapType": "documentMap",
-                                    "srcMapName": ch.type().name.lower(),
-                                }
-                                for color in colors
-                            ],
+                            "channels": _document_channels(
+                                ch.type().name.lower(), colors
+                            ),
                             "parameters": {
                                 "colorSpace": _DATA_EXPORT_COLORSPACE,
                                 "bitDepth": bit_depth.lower(),
@@ -113,7 +108,7 @@ def generate_export_config(
                             target.stack.get_channel(ch.type()).format().name,
                         )
                     ],
-                    *_preview_surface_maps(),
+                    *_preview_maps(target.settings),
                 ],
             }
             for target in targets
@@ -138,262 +133,152 @@ def generate_export_config(
 
 
 def _shader_maps(export_settings: TexSetExportSettings) -> list[dict[str, object]]:
+    size_log2 = export_settings.resolution
+
+    def png(colorspace: str, bit_depth: str) -> dict[str, object]:
+        return {
+            "colorSpace": colorspace,
+            "bitDepth": bit_depth,
+            "fileFormat": "png",
+            "sizeLog2": size_log2,
+        }
+
     maps: list[dict[str, object]] = [
         {
             "fileName": "$textureSet_BaseColor(_$colorSpace)(.$udim)",
-            "channels": [
-                {
-                    "destChannel": ch,
-                    "srcChannel": ch,
-                    "srcMapType": "documentMap",
-                    "srcMapName": "baseColor",
-                }
-                for ch in "RGB"
-            ],
-            "parameters": {
-                "colorSpace": _COLOR_EXPORT_COLORSPACE,
-                "bitDepth": "16",
-                "fileFormat": "png",
-                "sizeLog2": export_settings.resolution,
-            },
+            "channels": _document_channels("baseColor", "RGB"),
+            "parameters": png(_COLOR_EXPORT_COLORSPACE, "16"),
         },
         {
             "fileName": "$textureSet_Metallic(_$colorSpace)(.$udim)",
-            "channels": [
-                {
-                    "destChannel": "L",
-                    "srcChannel": "L",
-                    "srcMapType": "documentMap",
-                    "srcMapName": "metallic",
-                },
-            ],
-            "parameters": {
-                "colorSpace": _DATA_EXPORT_COLORSPACE,
-                "bitDepth": "8",
-                "fileFormat": "png",
-                "sizeLog2": export_settings.resolution,
-            },
+            "channels": _document_channels("metallic", "L"),
+            "parameters": png(_DATA_EXPORT_COLORSPACE, "8"),
         },
         {
             "fileName": "$textureSet_IOR(_$colorSpace)(.$udim)",
-            "channels": [
-                {
-                    "destChannel": "L",
-                    "srcChannel": "L",
-                    "srcMapType": "documentMap",
-                    "srcMapName": "specular",
-                },
-            ],
-            "parameters": {
-                "colorSpace": _DATA_EXPORT_COLORSPACE,
-                "bitDepth": "8",
-                "fileFormat": "png",
-                "sizeLog2": export_settings.resolution,
-            },
+            "channels": _document_channels("specular", "L"),
+            "parameters": png(_DATA_EXPORT_COLORSPACE, "8"),
         },
         {
             "fileName": "$textureSet_SpecularRoughness(_$colorSpace)(.$udim)",
-            "channels": [
-                {
-                    "destChannel": "L",
-                    "srcChannel": "L",
-                    "srcMapType": "documentMap",
-                    "srcMapName": "roughness",
-                },
-            ],
-            "parameters": {
-                "colorSpace": _DATA_EXPORT_COLORSPACE,
-                "bitDepth": "8",
-                "fileFormat": "png",
-                "sizeLog2": export_settings.resolution,
-            },
+            "channels": _document_channels("roughness", "L"),
+            "parameters": png(_DATA_EXPORT_COLORSPACE, "8"),
         },
         {
             "fileName": "$textureSet_Emissive(_$colorSpace)(.$udim)",
-            "channels": [
-                {
-                    "destChannel": ch,
-                    "srcChannel": ch,
-                    "srcMapType": "documentMap",
-                    "srcMapName": "emissive",
-                }
-                for ch in "RGB"
-            ],
-            "parameters": {
-                "colorSpace": _COLOR_EXPORT_COLORSPACE,
-                "bitDepth": "16",
-                "fileFormat": "png",
-                "sizeLog2": export_settings.resolution,
-            },
+            "channels": _document_channels("emissive", "RGB"),
+            "parameters": png(_COLOR_EXPORT_COLORSPACE, "16"),
         },
         {
             "fileName": "$textureSet_Presence(_$colorSpace)(.$udim)",
-            "channels": [
-                {
-                    "destChannel": "L",
-                    "srcChannel": "L",
-                    "srcMapType": "documentMap",
-                    "srcMapName": "opacity",
-                },
-            ],
-            "parameters": {
-                "colorSpace": _DATA_EXPORT_COLORSPACE,
-                "bitDepth": "8",
-                "fileFormat": "png",
-                "sizeLog2": export_settings.resolution,
-            },
-        },
-        {
-            "fileName": (
-                "$textureSet_Normal(_$colorSpace)(.$udim)"
-                f"{'.pre-b2r' if export_settings.normal_type == NormalType.BUMP_ROUGHNESS else ''}"
-            ),
-            "channels": [
-                {
-                    "destChannel": ch,
-                    "srcChannel": ch,
-                    **(
-                        {
-                            "srcMapType": "virtualMap",
-                            "srcMapName": "Normal_OpenGL",
-                        }
-                        if export_settings.normal_source is NormalSource.NORMAL_HEIGHT
-                        else {
-                            "srcMapType": "documentMap",
-                            "srcMapName": "normal",
-                        }
-                    ),
-                }
-                for ch in "RGB"
-            ],
-            "parameters": {
-                "colorSpace": _DATA_EXPORT_COLORSPACE,
-                **(
-                    {
-                        "bitDepth": "16f",
-                        "fileFormat": "exr",
-                    }
-                    if export_settings.normal_type is NormalType.BUMP_ROUGHNESS
-                    else {
-                        "bitDepth": "16",
-                        "fileFormat": "png",
-                    }
-                ),
-                "sizeLog2": export_settings.resolution,
-            },
+            "channels": _document_channels("opacity", "L"),
+            "parameters": png(_DATA_EXPORT_COLORSPACE, "8"),
         },
     ]
 
-    if export_settings.displacement_source is not DisplacementSource.NONE:
-        maps += [
+    if export_settings.normal_type is NormalType.BUMP_ROUGHNESS:
+        maps.append(
             {
-                "fileName": "$textureSet_Displacement(_$colorSpace)(.$udim)",
-                "channels": [
-                    {
-                        "destChannel": "L",
-                        "srcChannel": "L",
-                        "srcMapType": "documentMap",
-                        "srcMapName": (
-                            "height"
-                            if export_settings.displacement_source
-                            == DisplacementSource.HEIGHT
-                            else "displacement"
-                        ),
-                    },
-                ],
+                "fileName": "$textureSet_Normal(_$colorSpace)(.$udim).pre-b2r",
+                "channels": _normal_channels(export_settings),
                 "parameters": {
                     "colorSpace": _DATA_EXPORT_COLORSPACE,
-                    "bitDepth": "16",
-                    "fileFormat": "png",
-                    "sizeLog2": export_settings.resolution,
+                    "bitDepth": "16f",
+                    "fileFormat": "exr",
+                    "sizeLog2": size_log2,
                 },
             }
-        ]
+        )
+    else:
+        maps.append(
+            {
+                "fileName": "$textureSet_Normal(_$colorSpace)(.$udim)",
+                "channels": _normal_channels(export_settings),
+                "parameters": png(_DATA_EXPORT_COLORSPACE, "16"),
+            }
+        )
+
+    if export_settings.displacement_source is not DisplacementSource.NONE:
+        maps.append(
+            {
+                "fileName": "$textureSet_Displacement(_$colorSpace)(.$udim)",
+                "channels": _document_channels(
+                    "height"
+                    if export_settings.displacement_source is DisplacementSource.HEIGHT
+                    else "displacement",
+                    "L",
+                ),
+                "parameters": png(_DATA_EXPORT_COLORSPACE, "16"),
+            }
+        )
 
     return maps
 
 
-def _preview_surface_maps() -> list[dict[str, object]]:
+def _preview_maps(export_settings: TexSetExportSettings) -> list[dict[str, object]]:
+    """The render maps again as 8-bit jpegs, one per UDIM, for UsdPreviewSurface.
+
+    Same map names as the `.tex` set, so Houdini finds both with one filename
+    rule and the viewport shows the textures the renderer uses.
+    """
+    size_log2 = min(export_settings.resolution, _PREVIEW_SIZE_LOG2)
+
+    def jpeg(colorspace: str, *, dithering: bool = False) -> dict[str, object]:
+        return {
+            "colorSpace": colorspace,
+            "bitDepth": "8",
+            "dithering": dithering,
+            "fileFormat": "jpeg",
+            "sizeLog2": size_log2,
+        }
+
     return [
         {
-            "fileName": "$textureSet_DiffuseColor(_$colorSpace)(.$udim)",
-            "channels": [
-                {
-                    "destChannel": ch,
-                    "srcChannel": ch,
-                    "srcMapType": "documentMap",
-                    "srcMapName": "baseColor",
-                }
-                for ch in "RGB"
-            ],
-            "parameters": {
-                "colorSpace": _COLOR_EXPORT_COLORSPACE,
-                "bitDepth": "8",
-                "dithering": True,
-                "fileFormat": "jpeg",
-            },
+            "fileName": "$textureSet_BaseColor(_$colorSpace)(.$udim)",
+            "channels": _document_channels("baseColor", "RGB"),
+            "parameters": jpeg(_COLOR_EXPORT_COLORSPACE, dithering=True),
         },
         {
-            "fileName": "$textureSet_ORM(_$colorSpace)(.$udim)",
-            "channels": [
-                {
-                    "destChannel": "R",
-                    "srcChannel": "R",
-                    "srcMapType": "documentMap",
-                    "srcMapName": "ambientOcclusion",
-                },
-                {
-                    "destChannel": "G",
-                    "srcChannel": "G",
-                    "srcMapType": "documentMap",
-                    "srcMapName": "roughness",
-                },
-                {
-                    "destChannel": "B",
-                    "srcChannel": "B",
-                    "srcMapType": "documentMap",
-                    "srcMapName": "metallic",
-                },
-            ],
-            "parameters": {
-                "colorSpace": _DATA_EXPORT_COLORSPACE,
-                "bitDepth": "8",
-                "fileFormat": "jpeg",
-            },
+            "fileName": "$textureSet_Metallic(_$colorSpace)(.$udim)",
+            "channels": _document_channels("metallic", "L"),
+            "parameters": jpeg(_DATA_EXPORT_COLORSPACE),
         },
         {
-            "fileName": "$textureSet_Emissive(_$colorSpace)(.$udim)",
-            "channels": [
-                {
-                    "destChannel": ch,
-                    "srcChannel": ch,
-                    "srcMapType": "documentMap",
-                    "srcMapName": "emissive",
-                }
-                for ch in "RGB"
-            ],
-            "parameters": {
-                "colorSpace": _COLOR_EXPORT_COLORSPACE,
-                "bitDepth": "8",
-                "dithering": True,
-                "fileFormat": "jpeg",
-            },
+            "fileName": "$textureSet_SpecularRoughness(_$colorSpace)(.$udim)",
+            "channels": _document_channels("roughness", "L"),
+            "parameters": jpeg(_DATA_EXPORT_COLORSPACE),
         },
         {
-            "fileName": "$textureSet_NormalDX(_$colorSpace)(.$udim)",
-            "channels": [
-                {
-                    "destChannel": ch,
-                    "srcChannel": ch,
-                    "srcMapType": "virtualMap",
-                    "srcMapName": "Normal_DirectX",
-                }
-                for ch in "RGB"
-            ],
-            "parameters": {
-                "colorSpace": _DATA_EXPORT_COLORSPACE,
-                "bitDepth": "8",
-                "fileFormat": "jpeg",
-            },
+            "fileName": "$textureSet_Normal(_$colorSpace)(.$udim)",
+            "channels": _normal_channels(export_settings),
+            "parameters": jpeg(_DATA_EXPORT_COLORSPACE),
         },
+    ]
+
+
+def _document_channels(src_map_name: str, colors: str) -> list[dict[str, str]]:
+    """One Painter channel mapping per colour letter, straight from the document."""
+    return [
+        {
+            "destChannel": ch,
+            "srcChannel": ch,
+            "srcMapType": "documentMap",
+            "srcMapName": src_map_name,
+        }
+        for ch in colors
+    ]
+
+
+def _normal_channels(export_settings: TexSetExportSettings) -> list[dict[str, str]]:
+    return [
+        {
+            "destChannel": ch,
+            "srcChannel": ch,
+            **(
+                {"srcMapType": "virtualMap", "srcMapName": "Normal_OpenGL"}
+                if export_settings.normal_source is NormalSource.NORMAL_HEIGHT
+                else {"srcMapType": "documentMap", "srcMapName": "normal"}
+            ),
+        }
+        for ch in "RGB"
     ]
