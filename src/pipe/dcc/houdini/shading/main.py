@@ -158,24 +158,23 @@ class MaterialGraphBuilder:
         builder.setMaterialFlag(True)  # ty:ignore[unresolved-attribute]
         output = self._material_output(builder)
 
-        surface, shader_nodes = self._build_renderman_shader(builder, material)
+        surface = self._build_renderman_shader(builder, material)
         preview_row = -(len(material.layers) * _LAYER_Y_STEP + 6.0)
-        preview_surface, preview_nodes = (
+        preview_surface = (
             self._build_preview_shader(builder, material, preview_row)
             if build_preview
-            else (None, [])
+            else None
         )
 
+        # RenderMan ships the output left of where our surface lands.
+        output.setPosition(hou.Vector2(14.0, 0.0))
         output.setInput(0, surface, 0)
         if preview_surface is not None:
             output.setInput(1, preview_surface, 0)
 
-        self._group(builder, "RenderMan", (0.22, 0.40, 0.78), [*shader_nodes, output])
-        self._group(builder, "UsdPreview", (0.86, 0.78, 0.28), preview_nodes)
-
     def _build_renderman_shader(
         self, builder: hou.Node, material: textures.MaterialSpec
-    ) -> tuple[hou.Node, list[hou.Node]]:
+    ) -> hou.Node:
         suffix = _node_name(material.texture_set)
         mixer = self._create(
             builder, "pxrlayermixer::3.0", f"{suffix}_LayerMixer", (8.0, 0.0)
@@ -196,22 +195,20 @@ class MaterialGraphBuilder:
             )
             layer_specs = layer_specs[: _MIXER_SLOTS + 1]
 
-        nodes = [mixer, surface]
         for index, layer_spec in enumerate(layer_specs):
-            layer, layer_nodes = self._build_layer(
+            layer = self._build_layer(
                 builder,
                 layer_spec,
                 f"{suffix}_{_node_name(layer_spec.name)}",
                 y=-index * _LAYER_Y_STEP,
             )
-            nodes.extend(layer_nodes)
             slot = "baselayer" if index == 0 else f"layer{index}"
             mixer.setNamedInput(slot, layer, "pxrMaterialOut")
 
         # Stated for every slot so an unconnected one can never stay enabled.
         for slot in range(1, _MIXER_SLOTS + 1):
             _parm(mixer, f"layer{slot}Enabled").set(slot < len(layer_specs))
-        return surface, nodes
+        return surface
 
     def _build_layer(
         self,
@@ -220,7 +217,7 @@ class MaterialGraphBuilder:
         suffix: str,
         *,
         y: float,
-    ) -> tuple[hou.Node, list[hou.Node]]:
+    ) -> hou.Node:
         """A PxrLayer and the texture chain feeding it.
 
         A map that was never published gets no node at all: an empty texture node
@@ -264,20 +261,15 @@ class MaterialGraphBuilder:
             colorspace=_DATA_SPACE,
         )
 
-        nodes: list[hou.Node | None] = [layer, base_color, metallic, roughness, normal]
         if base_color is not None or metallic is not None:
-            nodes.append(
-                self._insert_metallic_workflow(
-                    builder, layer, suffix, y, base_color, metallic
-                )
+            self._insert_metallic_workflow(
+                builder, layer, suffix, y, base_color, metallic
             )
         if roughness is not None:
-            nodes.append(
-                self._insert_roughness_remap(builder, layer, suffix, y, roughness)
-            )
+            self._insert_roughness_remap(builder, layer, suffix, y, roughness)
         if normal is not None:
             layer.setNamedInput("bumpNormal", normal, "resultN")
-        return layer, [node for node in nodes if node is not None]
+        return layer
 
     def _insert_metallic_workflow(
         self,
@@ -329,15 +321,14 @@ class MaterialGraphBuilder:
 
     def _build_preview_shader(
         self, builder: hou.Node, material: textures.MaterialSpec, row_y: float
-    ) -> tuple[hou.Node | None, list[hou.Node]]:
+    ) -> hou.Node | None:
         if not material.preview_maps:
-            return None, []
+            return None
 
         suffix = _node_name(material.texture_set)
         surface = self._create(
             builder, "usdpreviewsurface", f"{suffix}_UsdPreviewSurface", (11.0, row_y)
         )
-        nodes = [surface]
         for preview in _PREVIEW_INPUTS:
             path = material.preview_maps.get(preview.map_name)
             if path is None:
@@ -355,8 +346,7 @@ class MaterialGraphBuilder:
             surface.setNamedInput(
                 preview.surface_input, texture, preview.texture_output
             )
-            nodes.append(texture)
-        return surface, nodes
+        return surface
 
     def _texture(
         self,
@@ -391,24 +381,6 @@ class MaterialGraphBuilder:
                 f"'{_BUILDER_OUTPUT}' child; this RenderMan build is unsupported"
             )
         return output
-
-    @staticmethod
-    def _group(
-        builder: hou.Node,
-        name: str,
-        color: tuple[float, float, float],
-        nodes: Sequence[hou.Node],
-    ) -> None:
-        """Box the nodes for navigation."""
-        if not nodes:
-            return
-        box = builder.createNetworkBox()
-        box.setName(name, unique_name=True)
-        box.setComment(name)
-        box.setColor(hou.Color(color))
-        for node in nodes:
-            box.addItem(node)
-        box.fitAroundContents()
 
     def _create(
         self,
