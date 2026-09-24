@@ -234,22 +234,22 @@ def _preview_maps(export_settings: TexSetExportSettings) -> list[dict[str, objec
 
     return [
         {
-            "fileName": "$textureSet_BaseColor(_$colorSpace)(.$udim)",
+            "fileName": "$textureSet_BaseColor(.$udim)",
             "channels": _document_channels("baseColor", "RGB"),
             "parameters": jpeg(_COLOR_EXPORT_COLORSPACE, dithering=True),
         },
         {
-            "fileName": "$textureSet_Metallic(_$colorSpace)(.$udim)",
+            "fileName": "$textureSet_Metallic(.$udim)",
             "channels": _document_channels("metallic", "L"),
             "parameters": jpeg(_DATA_EXPORT_COLORSPACE),
         },
         {
-            "fileName": "$textureSet_SpecularRoughness(_$colorSpace)(.$udim)",
+            "fileName": "$textureSet_SpecularRoughness(.$udim)",
             "channels": _document_channels("roughness", "L"),
             "parameters": jpeg(_DATA_EXPORT_COLORSPACE),
         },
         {
-            "fileName": "$textureSet_Normal(_$colorSpace)(.$udim)",
+            "fileName": "$textureSet_Normal(.$udim)",
             "channels": _normal_channels(export_settings),
             "parameters": jpeg(_DATA_EXPORT_COLORSPACE),
         },
