@@ -6,6 +6,8 @@ import tractor.api.author as author
 
 from pathlib import Path
 
+from pipe.core import color
+
 
 _shared_module = hou.nodeType(
     hou.lopNodeTypeCategory(), "tlops::shared_python"
@@ -24,12 +26,19 @@ class EncodeParms(metaclass=ParmData):
     keep_files: int
 
 
+# Read by the Display and View parm defaults, so movies default to the show look
+DISPLAY = color.DISPLAY
+DEFAULT_VIEW = color.DEFAULT_VIEW
+
 IMAGES_DIR = "images"
 DENOISE_DIR = "images_dn"
 ENCODE_DIR = "video_tmp"
-DELIVERY_FLAGS = (
+# The frames hold sRGB display pixels from OCIO, so the movie says so and
+# players show it as the Houdini viewer did
+SRGB_TAGS = "-colorspace bt709 -color_primaries bt709 -color_trc iec61966-2-1"
+# Browsers need even dimensions, limited-range BT.709 YUV and the index up front
+WEB_FLAGS = (
     "-vf 'scale=trunc(iw/2)*2:trunc(ih/2)*2:out_color_matrix=bt709:out_range=tv' "
-    "-colorspace bt709 -color_primaries bt709 -color_trc bt709 "
     "-movflags +faststart"
 )
 
@@ -87,7 +96,7 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
     ffmpeg_cmd = (
         f"ffmpeg -y -framerate {parms.framerate} "
         f"-pattern_type glob -i '{tmp_dir}/*.png' "
-        f"{_get_codec_flags(parms.codec, parms.quality)} {DELIVERY_FLAGS} "
+        f"{_get_codec_flags(parms.codec, parms.quality)} {SRGB_TAGS} {WEB_FLAGS} "
         f"'{output_file}'"
     )
     encode_task.newCommand(
@@ -95,8 +104,11 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
         service=parms.service,
     )
 
-    # Step 3: Clean up temp PNGs, and unless kept, the frames and scene files too
-    render_files = [] if parms.keep_files else [str(image_dir), *scene_files(node)]
+    # Step 3: Clean up temp PNGs, and unless kept, the frames and scene files too.
+    # The upstream task above has already written every USD file of this job.
+    render_files = (
+        [] if parms.keep_files else [str(image_dir), *map(str, jd.glob("*.usd"))]
+    )
     encode_task.newCommand(
         argv=["rm", "-rf", str(tmp_dir), *render_files],
         service=parms.service,
@@ -116,8 +128,3 @@ def _get_codec_flags(codec: str, quality: int) -> str:
 def job_directory(node: hou.LopNode) -> Path:
     input_node = node.input(0)
     return input_node.hdaModule().job_directory(input_node)
-
-
-def scene_files(node: hou.LopNode) -> list[str]:
-    input_node = node.input(0)
-    return input_node.hdaModule().scene_files(input_node)

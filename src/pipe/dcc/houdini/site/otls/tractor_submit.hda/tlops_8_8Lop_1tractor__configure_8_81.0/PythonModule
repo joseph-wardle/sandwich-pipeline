@@ -128,11 +128,7 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
         parms.rop_lop = submit_input.path()
 
     job_dir = Path(parms.savetodirectory_directory)
-    before = _file_times(job_dir)
     node.node("usd_rop").parm("execute").pressButton()  # type: ignore[union-attr]
-    # Remembered so a downstream encode can delete exactly what this ROP wrote
-    written = [str(p) for p, t in _file_times(job_dir).items() if before.get(p) != t]
-    node.setCachedUserData("scene_files", written)
     (job_dir / "images").mkdir(0o755, True, True)
 
     husk_cmd = generate_husk_command(parms)
@@ -187,14 +183,6 @@ def job_directory(node: hou.LopNode) -> Path:
     parms = ConfigParms(node)
     return Path(parms.savetodirectory_directory)
 
-
-def scene_files(node: hou.LopNode) -> list[str]:
-    """The USD files the last submit wrote into the job directory."""
-    return node.cachedUserData("scene_files") or []
-
-
-def _file_times(folder: Path) -> dict[Path, int]:
-    return {p: p.stat().st_mtime_ns for p in folder.glob("*") if p.is_file()}
 
 import os
 import re

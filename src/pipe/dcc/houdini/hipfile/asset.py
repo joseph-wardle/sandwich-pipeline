@@ -22,6 +22,8 @@ from .filemanager import HFileManager
 
 log = logging.getLogger(__name__)
 
+TURNAROUND_FRAMES = (1, 120)
+
 
 class HAssetFileManager(HFileManager):
     def __init__(self) -> None:
@@ -32,6 +34,12 @@ class HAssetFileManager(HFileManager):
 
     def _generate_filename_ext(self, entity) -> tuple[str, str]:
         return "asset_builder", "hipnc"
+
+    def _setup_file(self, path: Path, entity: SGEntity) -> None:
+        super()._setup_file(path, entity)
+        hou.playbar.setFrameRange(*TURNAROUND_FRAMES)
+        hou.playbar.setPlaybackRange(*TURNAROUND_FRAMES)
+        hou.hipFile.save()
 
     def _post_open_file(self, entity: SGEntity) -> None:
         asset = cast(Asset, entity)

@@ -31,13 +31,19 @@ def build(path: Path) -> None:
     grey += np.where(centimeter == 0, -SUB_GRID_STEP, SUB_GRID_STEP)
     rgb = np.repeat(grey[:, :, None], 3, axis=2).astype(np.float16)
 
-    spec = oiio.ImageSpec(PIXELS_PER_METER, PIXELS_PER_METER, 3, oiio.HALF)
-    spec.attribute("compression", "zip")
-    spec.attribute("oiio:ColorSpace", "Raw")
-    out = oiio.ImageOutput.create(str(path))
-    if out is None or not out.open(str(path), spec) or not out.write_image(rgb):
+    image = oiio.ImageBuf(
+        oiio.ImageSpec(PIXELS_PER_METER, PIXELS_PER_METER, 3, oiio.HALF)
+    )
+    image.set_pixels(oiio.ROI(), rgb)
+    # Tiled and mipmapped so large backdrops filter the fine grids instead of
+    # shimmering. The size stays 1000 px: no power of two divides into the 100
+    # centimeter squares, which would blur every edge at the top level.
+    config = oiio.ImageSpec()
+    config.attribute("compression", "zip")
+    config.attribute("oiio:ColorSpace", "Raw")
+    config.attribute("wrapmodes", "periodic,periodic")
+    if not oiio.ImageBufAlgo.make_texture(oiio.MakeTxTexture, image, str(path), config):
         raise RuntimeError(f"could not write {path}: {oiio.geterror()}")
-    out.close()
 
 
 if __name__ == "__main__":

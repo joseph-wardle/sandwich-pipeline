@@ -169,6 +169,7 @@
         label   "Render Directory"
         type    directory
         default { "" }
+        help    "The job folder. Send writes render.usd here, plus a file for every unsaved layer the scene references, so the farm can read them."
         menureplace {
             [ "opmenu -l -a usdrender_rop savetodirectory_directory" ]
         }

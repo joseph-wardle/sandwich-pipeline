@@ -35,8 +35,8 @@
         name    "display"
         label   "Display"
         type    string
-        default { [ "hou.Color.ocio_defaultDisplay()" python ] }
-        help    "Defaults to this session's OCIO display."
+        default { [ "hou.phm().DISPLAY" python ] }
+        help    "Defaults to the show's display."
         menureplace {
             [ "[d for d in hou.Color.ocio_activeDisplays() for d in (d, d)]" ]
             language python
@@ -47,8 +47,8 @@
         name    "view"
         label   "View"
         type    string
-        default { [ "hou.Color.ocio_views(hou.pwd().evalParm(\"display\"))[0]" python ] }
-        help    "Defaults to the first view of the display."
+        default { [ "hou.phm().DEFAULT_VIEW" python ] }
+        help    "Defaults to the show look."
         menureplace {
             [ "[v for v in hou.Color.ocio_views(kwargs[\"node\"].evalParm(\"display\")) for v in (v, v)]" ]
             language python
@@ -59,8 +59,8 @@
         name    "keep_files"
         label   "Keep Render Files"
         type    toggle
-        default { "0" }
-        help    "Keep the frames and USD files the movie is made from. Off deletes them once the movie is written, leaving the movie."
+        default { "1" }
+        help    "Keep the frames and USD files the movie is made from. Off deletes them once the movie is written, leaving only the movie, and the job can no longer be retried."
         parmtag { "script_callback_language" "python" }
     }
     groupcollapsible {

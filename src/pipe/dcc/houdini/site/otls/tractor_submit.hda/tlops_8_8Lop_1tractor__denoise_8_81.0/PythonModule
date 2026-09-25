@@ -408,11 +408,6 @@ def job_directory(node: hou.LopNode) -> Path:
     return input.hdaModule().job_directory(input)
 
 
-def scene_files(node: hou.LopNode) -> list[str]:
-    input = node.input(0)
-    return input.hdaModule().scene_files(input)
-
-
 def get_denoise_topo_menu() -> list[str]:
     return [topo.name for topo in Topology for _ in (0, 1)]
 
