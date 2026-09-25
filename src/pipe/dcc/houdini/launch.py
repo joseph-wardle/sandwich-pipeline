@@ -93,6 +93,8 @@ class HoudiniLauncher(Launcher):
             "LD_LIBRARY_PATH": None,
             **ocio_env_vars(),
             "PIPE_LOG_LEVEL": log.getEffectiveLevel(),
+            # Pipeline HDAs read shared assets (HDRIs, reference assets) here
+            "PIPE_RESOURCES": str(resolve_mapped_path(repo_root / "resources")),
             "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
             # Root for vendored Houdini packages (MOPS, LYNX, axiom, ae_SVG)
             "DCC_HOUDINI_THIRD_PARTY": str(third_party),

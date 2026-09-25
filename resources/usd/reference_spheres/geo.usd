@@ -12,17 +12,17 @@ def Xform "ReferenceSpheres"
     {
         def Sphere "chrome"
         {
-            float3[] extent = [(-0.045, -0.045, -0.045), (0.045, 0.045, 0.045)]
-            double radius = 0.045
-            double3 xformOp:translate = (0, 0.055, 0)
+            float3[] extent = [(-0.09, -0.09, -0.09), (0.09, 0.09, 0.09)]
+            double radius = 0.09
+            double3 xformOp:translate = (-0.1, 0.09, 0)
             uniform token[] xformOpOrder = ["xformOp:translate"]
         }
 
         def Sphere "grey"
         {
-            float3[] extent = [(-0.045, -0.045, -0.045), (0.045, 0.045, 0.045)]
-            double radius = 0.045
-            double3 xformOp:translate = (0, -0.055, 0)
+            float3[] extent = [(-0.09, -0.09, -0.09), (0.09, 0.09, 0.09)]
+            double radius = 0.09
+            double3 xformOp:translate = (0.1, 0.09, 0)
             uniform token[] xformOpOrder = ["xformOp:translate"]
         }
     }

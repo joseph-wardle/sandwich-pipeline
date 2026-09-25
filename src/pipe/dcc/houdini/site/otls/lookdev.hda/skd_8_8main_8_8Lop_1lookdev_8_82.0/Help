@@ -1,0 +1,63 @@
+= SKD Lookdev =
+
+"""Stands an asset on a backdrop with lights, a color checker and reference spheres, and turns it for review."""
+
+Wire the asset into the first input. The asset is centered on the origin and set on the floor. The backdrop, camera and lights scale together to fit it, so small props and large sets frame the same way.
+
+The checker backdrop always tiles at true scale in half-meter squares.
+
+Every material is a UsdPreviewSurface, so RenderMan CPU and XPU render the same thing. The viewport shows the same materials, but its lighting is only a preview.
+
+@inputs
+
+Asset:
+    The asset to review, usually the component output of an asset builder.
+
+Lights:
+    Optional lights that replace the built-in rig. They are grafted under `/lookdev/lights`, turn with the turnaround, and are not scaled.
+
+@parameters
+
+Framing:
+    #id: framing
+    *Fit to asset* sizes the frame from the asset's bounds. *Manual* sets its width in meters.
+
+Padding:
+    #id: padding
+    Frame width as a multiple of the circle the asset sweeps as it turns, or of its height for tall assets. The frame widens further when the references need room.
+
+Frame Width:
+    #id: frame_width
+    Width of the view at the asset, in meters.
+
+Camera Angle:
+    #id: camera_angle
+    Degrees the camera looks down at the asset, from 0 (level) to 90 (straight down). Raise it for flat assets such as rugs, decals or maps. The frame follows the angle, and the color checker leans back to face the camera.
+
+Lighting Rig:
+    #id: rig
+    *Studio* is soft and neutral. *Dramatic* has a cool key and a warm rim. Ignored while the Lights input is connected.
+
+Backdrop:
+    #id: backdrop
+    *Checker* shows scale. *Solid* is a single color, useful for demo reels.
+
+Color:
+    #id: backdrop_color
+    The solid backdrop's albedo, in scene-linear ACEScg.
+
+Show References:
+    #id: show_references
+    The chrome and 18% grey spheres stand on camera left and the color checker on camera right, each an equal margin from the edge of frame. They scale with the frame so they stay readable at any size.
+
+== Turnaround ==
+
+The turnaround plays over the hip's frame range.
+
+Rotate Asset:
+    #id: rotate_asset
+    Turn the asset once. When the lights turn too, the asset turns in the first half of the range.
+
+Rotate Lights:
+    #id: rotate_lights
+    Turn the lights once. When the asset turns too, the lights turn in the second half of the range.
