@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import hou
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
@@ -160,6 +161,23 @@ def _reference_layout(
     x = outer - outer_edge * size
     translate = Gf.Vec3d(x, -own.GetMin()[1] * size, 0.0)
     return translate, size, side * (x + inner_edge * size)
+
+
+def next_render_dir() -> str:
+    """The first free v### folder under render/turnaround, for the Output Folder expression."""
+    folder = Path(hou.text.expandString("$HIP")) / "render" / "turnaround"
+    versions = [int(path.name[1:]) for path in folder.glob("v[0-9][0-9][0-9]")]
+    return f"$HIP/render/turnaround/v{max(versions, default=0) + 1:03d}"
+
+
+def send_turnaround(lookdev: hou.Node) -> None:
+    """Send the turnaround to Tractor, rendering into the Output Folder."""
+    # Freeze the folder first: the job creates it partway through, and a live
+    # Output Folder expression would then point at the next version.
+    folder = hou.text.collapseCommonVars(lookdev.evalParm("render_dir"), ["$HIP"])
+    lookdev.parm("job_dir").set(folder)
+    submit = lookdev.node("submit")
+    submit.hdaModule().sendToTractor(submit)
 
 
 def _tan_half_fov(stage: Usd.Stage) -> float:

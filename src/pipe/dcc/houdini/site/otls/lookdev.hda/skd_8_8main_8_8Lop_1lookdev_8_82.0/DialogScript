@@ -108,4 +108,96 @@
         }
     }
 
+    groupsimple {
+        name    "render"
+        label   "Render"
+
+        parm {
+            name    "render_dir"
+            label   "Output Folder"
+            type    directory
+            default { [ "hou.pwd().hdaModule().next_render_dir()" python ] }
+            help    "Where the next Send renders. Defaults to the next free v### folder under $HIP/render/turnaround."
+        }
+        parm {
+            name    "job_title"
+            label   "Job Title"
+            type    string
+            default { [ "hou.text.expandString(\"$HIP\").rstrip(\"/\").rsplit(\"/\", 1)[-1] + \" turnaround\"" python ] }
+            help    "Name of the job on the Tractor dashboard."
+        }
+        parm {
+            name    "priority"
+            label   "Priority"
+            type    integer
+            default { "10" }
+            help    "Tractor priority. Higher runs sooner."
+            range   { 1 100 }
+        }
+        parm {
+            name    "send"
+            label   "Send to Tractor"
+            type    button
+            default { "0" }
+            help    "Render the turnaround on the farm, then denoise it and encode turnaround.mp4."
+            parmtag { "script_callback" "hou.phm().send_turnaround(kwargs['node'])" }
+            parmtag { "script_callback_language" "python" }
+        }
+        parm {
+            name    "job_dir"
+            label   "Last Job"
+            type    string
+            default { "" }
+            help    "Folder of the last job sent. Send fills it in."
+            disablewhen "{ render_dir != \"\" } { render_dir == \"\" }"
+        }
+        groupcollapsible {
+            name    "render_advanced"
+            label   "Advanced"
+
+            parm {
+                name    "renderer"
+                label   "Renderer"
+                type    string
+                default { "HdPrmanXpuLoaderRendererPlugin" }
+                help    "XPU uses each blade's GPU when it has one."
+                menu {
+                    "HdPrmanXpuLoaderRendererPlugin"    "RenderMan XPU"
+                    "HdPrmanXpuCpuLoaderRendererPlugin" "RenderMan XPU (CPU only)"
+                    "HdPrmanLoaderRendererPlugin"       "RenderMan RIS"
+                }
+            }
+            parm {
+                name    "resolution"
+                label   "Resolution"
+                type    intvector2
+                joinnext
+                size    2
+                default { "1280" "720" }
+                help    "Image size in pixels."
+                range   { 1 4096 }
+            }
+            parm {
+                name    "resolution_menu"
+                label   "Choose Resolution"
+                type    ordinal
+                nolabel
+                default { "0" }
+                menumini {
+                    [ "echo `pythonexprs(\"__import__('toolutils').parseDialogScriptMenu('FBres')\")`" ]
+                }
+                parmtag { "script_callback" "opparm . resolution ( `arg(\"$script_value\", 0)` `arg(\"$script_value\", 1)` )" }
+            }
+            parm {
+                name    "pixel_variance"
+                label   "Pixel Variance"
+                type    float
+                default { "0.1" }
+                help    "Noise RenderMan accepts before it stops sampling a pixel. Lower is cleaner and slower. The farm denoises afterwards either way."
+                range   { 0.001! 0.5 }
+            }
+        }
+
+    }
+
 }

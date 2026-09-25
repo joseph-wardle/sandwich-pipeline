@@ -61,3 +61,39 @@ Rotate Asset:
 Rotate Lights:
     #id: rotate_lights
     Turn the lights once. When the asset turns too, the lights turn in the second half of the range.
+
+== Render ==
+
+Send to Tractor renders the turnaround over the hip's frame range, denoises it and encodes `turnaround.mp4` into the job folder.
+
+Output Folder:
+    #id: render_dir
+    Where the next Send renders. It defaults to the next free `v###` folder under `$HIP/render/turnaround`, so every job gets its own folder. Type a path to render somewhere else.
+
+Job Title:
+    #id: job_title
+    Name of the job on the Tractor dashboard. Defaults to the asset folder's name.
+
+Priority:
+    #id: priority
+    Tractor priority. Higher runs sooner.
+
+Send to Tractor:
+    #id: send
+    Render the turnaround on the farm, then denoise it and encode the movie.
+
+Last Job:
+    #id: job_dir
+    Folder of the last job sent. Send fills it in.
+
+Renderer:
+    #id: renderer
+    *RenderMan XPU* uses each blade's GPU when it has one. *XPU (CPU only)* and *RIS* are for comparison.
+
+Resolution:
+    #id: resolution
+    Image size in pixels. The menu beside it lists common sizes.
+
+Pixel Variance:
+    #id: pixel_variance
+    Noise RenderMan accepts before it stops sampling a pixel. Lower is cleaner and slower. The farm denoises afterwards either way.

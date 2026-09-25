@@ -122,7 +122,10 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
     task = author.Task(title=node_name)
 
     parms = ConfigParms(node)
-    parms.rop_lop = submit_input.path()
+    # Inside a locked asset such as SKD Lookdev the path is authored already,
+    # and setting it would raise a permission error.
+    if hou.node(parms.rop_lop) != submit_input:
+        parms.rop_lop = submit_input.path()
 
     node.node("usd_rop").parm("execute").pressButton()  # type: ignore[union-attr]
     (Path(parms.savetodirectory_directory) / "images").mkdir(0o755, True, True)
