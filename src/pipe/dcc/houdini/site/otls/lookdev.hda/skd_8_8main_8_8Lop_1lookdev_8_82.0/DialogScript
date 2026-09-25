@@ -196,6 +196,13 @@
                 help    "Noise RenderMan accepts before it stops sampling a pixel. Lower is cleaner and slower. The farm denoises afterwards either way."
                 range   { 0.001! 0.5 }
             }
+            parm {
+                name    "keep_files"
+                label   "Keep Render Files"
+                type    toggle
+                default { "0" }
+                help    "Keep the denoised frames and the USD files the job rendered from. Off deletes them once turnaround.mp4 is written, leaving just the movie."
+            }
         }
 
     }

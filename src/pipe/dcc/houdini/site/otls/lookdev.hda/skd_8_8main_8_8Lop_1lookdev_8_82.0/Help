@@ -64,7 +64,7 @@ Rotate Lights:
 
 == Render ==
 
-Send to Tractor renders the turnaround over the hip's frame range, denoises it and encodes `turnaround.mp4` into the job folder.
+Send to Tractor renders the turnaround over the hip's frame range, denoises it and encodes `turnaround.mp4` into the job folder, which holds only the movie once the job finishes.
 
 Output Folder:
     #id: render_dir
@@ -97,3 +97,7 @@ Resolution:
 Pixel Variance:
     #id: pixel_variance
     Noise RenderMan accepts before it stops sampling a pixel. Lower is cleaner and slower. The farm denoises afterwards either way.
+
+Keep Render Files:
+    #id: keep_files
+    Keep the denoised frames and the USD files the job rendered from. Off deletes them once `turnaround.mp4` is written, leaving just the movie.

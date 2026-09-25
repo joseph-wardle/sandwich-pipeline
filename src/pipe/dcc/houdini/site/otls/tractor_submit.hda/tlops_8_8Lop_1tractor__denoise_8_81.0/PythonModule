@@ -396,7 +396,7 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
 
     if not parms.keep_aux:
         cleanup_task.newCommand(
-            argv=["rm", "-rf", str(jd / AUX_DIR), str(jd / IMAGES_DIR)],
+            argv=["rm", "-rf", str(jd / AUX_DIR), str(jd / IMAGES_DIR), str(jd / JSON_CONFIG)],
             service=parms.service,
         )
 
@@ -406,6 +406,11 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
 def job_directory(node: hou.LopNode) -> Path:
     input = node.input(0)
     return input.hdaModule().job_directory(input)
+
+
+def scene_files(node: hou.LopNode) -> list[str]:
+    input = node.input(0)
+    return input.hdaModule().scene_files(input)
 
 
 def get_denoise_topo_menu() -> list[str]:

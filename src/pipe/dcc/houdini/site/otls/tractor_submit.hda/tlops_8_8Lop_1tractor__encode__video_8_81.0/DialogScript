@@ -55,6 +55,14 @@
         }
         parmtag { "script_callback_language" "python" }
     }
+    parm {
+        name    "keep_files"
+        label   "Keep Render Files"
+        type    toggle
+        default { "0" }
+        help    "Keep the frames and USD files the movie is made from. Off deletes them once the movie is written, leaving the movie."
+        parmtag { "script_callback_language" "python" }
+    }
     groupcollapsible {
         name    "folder0"
         label   "Advanced"

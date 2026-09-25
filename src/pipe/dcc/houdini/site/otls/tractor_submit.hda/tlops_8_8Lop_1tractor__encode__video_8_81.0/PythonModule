@@ -21,6 +21,7 @@ class EncodeParms(metaclass=ParmData):
     codec: str
     quality: int
     service: str
+    keep_files: int
 
 
 IMAGES_DIR = "images"
@@ -94,9 +95,10 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
         service=parms.service,
     )
 
-    # Step 3: Clean up temp PNGs
+    # Step 3: Clean up temp PNGs, and unless kept, the frames and scene files too
+    render_files = [] if parms.keep_files else [str(image_dir), *scene_files(node)]
     encode_task.newCommand(
-        argv=["rm", "-rf", str(tmp_dir)],
+        argv=["rm", "-rf", str(tmp_dir), *render_files],
         service=parms.service,
     )
 
@@ -114,3 +116,8 @@ def _get_codec_flags(codec: str, quality: int) -> str:
 def job_directory(node: hou.LopNode) -> Path:
     input_node = node.input(0)
     return input_node.hdaModule().job_directory(input_node)
+
+
+def scene_files(node: hou.LopNode) -> list[str]:
+    input_node = node.input(0)
+    return input_node.hdaModule().scene_files(input_node)
