@@ -1,7 +1,7 @@
 Operator:     skd::main::lookdev::2.0
 Label:        SKD Lookdev
 Path:         oplib:/skd::main::Lop/lookdev::2.0?skd::main::Lop/lookdev::2.0
-Icon:         LOP_subnet
+Icon:         opdef:/skd::main::Lop/lookdev::2.0?IconImage
 Table:        Lop
 License:      
 Extra:        
