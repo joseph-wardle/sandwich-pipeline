@@ -1,0 +1,210 @@
+from __future__ import annotations
+
+import hou
+
+import tractor.api.author as author
+
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any, TypeVar
+
+    T = TypeVar("T", bound=type)
+
+
+_shared_module = hou.nodeType(
+    hou.lopNodeTypeCategory(), "tlops::shared_python"
+).hdaModule()
+ParmData = _shared_module.ParmData
+parmfield = _shared_module.parmfield
+
+
+class ConfigParms(metaclass=ParmData):
+    rop_lop: str = parmfield(writable=True)
+    service: str
+    trange: str
+    f1: float
+    f2: float
+    f3: float
+    foffset1: float
+    foffset2: float
+    foffset3: float
+    savetodirectory_directory: str
+    renderer: str
+    husk_purpose: str
+    snapshot: int = parmfield(has_toggle=True)
+    husk_timelimit: int = parmfield(has_toggle=True)
+    verbosity: str
+    husk_usdtrace: str
+    husk_chromefile: str
+    override_camera: str = parmfield(has_toggle=True)
+    rendersettings: str = parmfield(has_toggle=True)
+    husk_instantshutter: int
+    husk_prerender: str
+    husk_preframe: str
+    husk_postrender: str
+    husk_postframe: str
+    husk_tile: int
+    husk_tilecount1: int
+    husk_tilecount2: int
+    husk_tilesuffix: str
+
+
+def get_frame_range(parms: ConfigParms, node: hou.LopNode) -> tuple[int, int, int]:
+    trange = parms.trange
+
+    if trange == "off":
+        return int(hou.frame()), int(hou.frame()), 1
+    elif trange == "normal" or trange == "on":
+        start = int(parms.f1)
+        end = int(parms.f2)
+        inc = int(parms.f3)
+    elif trange == "stage":
+        stage = node.stage()
+        start = int(stage.GetStartTimeCode() - parms.foffset1)
+        end = int(stage.GetEndTimeCode() + parms.foffset2)
+        inc = int(parms.foffset3)
+
+    return start, end, inc
+
+
+def generate_husk_command(parms: ConfigParms) -> str:
+    cmd = [
+        "husk",
+        "--make-output-path",
+        f"--output '{parms.savetodirectory_directory}/images/$F4.exr'",
+        "--frame {fnum}",
+        f"--renderer {parms.renderer}",
+        f"--purpose {parms.husk_purpose}",
+        "--complexity veryhigh",
+        f"--verbose acet{parms.verbosity}",
+    ]
+
+    p: Any
+    if p := parms.snapshot:
+        cmd.append(f"--snapshot {p}")
+    if p := parms.override_camera:
+        cmd.append(f"--camera {p}")
+    if p := parms.rendersettings:
+        cmd.append(f"--settings {p}")
+    if parms.husk_instantshutter:
+        cmd.append("--disable-motionblur")
+    if p := parms.husk_prerender:
+        cmd.append(f"--prerender-script {p}")
+    if p := parms.husk_preframe:
+        cmd.append(f"--prerender-script {p}")
+    if p := parms.husk_postrender:
+        cmd.append(f"--prerender-script {p}")
+    if p := parms.husk_postframe:
+        cmd.append(f"--prerender-script {p}")
+    if parms.husk_tile:
+        cmd.append(f"--tile-count {parms.husk_tilecount1} {parms.husk_tilecount2}")
+        cmd.append("--tile-index {tnum:03}")
+        cmd.append(f"--tile-suffix {parms.husk_tilesuffix}")
+    if p := parms.husk_usdtrace:
+        cmd.append(f"--usd-trace {p}")
+        if p := parms.husk_chromefile:
+            cmd.append(f"--usd-chrome-file {p}")
+
+    cmd.append("--disable-dummy-raster-product")
+    cmd.append(f"'{parms.savetodirectory_directory}/render.usd'")
+
+    return " ".join(cmd)
+
+
+def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> author.Task:
+    """
+    node: current node this function is called in
+    submit_input: the node at the bottom of this stream feeding into the Tractor Submit node
+    """
+    node_name = node.name()
+    task = author.Task(title=node_name)
+
+    parms = ConfigParms(node)
+    # Inside a locked asset such as SKD Lookdev the path is authored already,
+    # and setting it would raise a permission error.
+    if hou.node(parms.rop_lop) != submit_input:
+        parms.rop_lop = submit_input.path()
+
+    job_dir = Path(parms.savetodirectory_directory)
+    node.node("usd_rop").parm("execute").pressButton()  # type: ignore[union-attr]
+    (job_dir / "images").mkdir(0o755, True, True)
+
+    husk_cmd = generate_husk_command(parms)
+
+    timelimit = parms.husk_timelimit
+    tiles = parms.husk_tile
+    tilecount = parms.husk_tilecount1 * parms.husk_tilecount2
+
+    start, end, inc = get_frame_range(parms, node)
+    frame = start
+    while True:
+        if frame > end:
+            break
+
+        frame_tasks: list[author.Task] = []
+        if tiles:
+            frame_tasks = [
+                author.Task(title=f"Frame {frame}t{tile}, {node_name}")
+                for tile in range(tilecount)
+            ]
+        else:
+            frame_tasks = [author.Task(title=f"Frame {frame}, {node_name}")]
+
+        for tile, frame_task in enumerate(frame_tasks):
+            render_command = author.Command(
+                argv=[
+                    "/bin/bash",
+                    "-exc",
+                    'trap "test \$? -eq 3 && hserver -S $HOUDINI_LICENSE_SERVER && exit 3" EXIT && '
+                    + husk_cmd.format(fnum=frame, tnum=tile),
+                ],
+                retryrc=[
+                    -11,  # Segmentation fault
+                    -9,  # Unknown
+                    3,  # Can't get license
+                    135,  # Bus error
+                    139,  # Segmentation fault
+                ],
+                service=parms.service,
+            )
+            if timelimit:
+                render_command.maxrunsecs = timelimit
+            frame_task.addCommand(render_command)
+            task.addChild(frame_task)
+
+        frame += inc
+
+    return task
+
+
+def job_directory(node: hou.LopNode) -> Path:
+    parms = ConfigParms(node)
+    return Path(parms.savetodirectory_directory)
+
+
+import os
+import re
+    
+def _render_base(node: hou.Node) -> Path:
+  hip = Path(hou.text.expandString("$HIP"))
+  if hip.name.lower() == "lighting":
+      return hip.parent / "render" / node.name()
+  return hip / "render"
+
+
+def _next_version_dir(node: hou.Node) -> Path:
+  base = Path(os.path.normpath(_render_base(node)))
+  pattern = re.compile(r"^v(\d+)$")
+  versions = [
+      int(m.group(1))
+      for p in (base.iterdir() if base.is_dir() else [])
+      if p.is_dir() and (m := pattern.match(p.name))
+  ]
+  return base / f"v{max(versions, default=0) + 1:03d}"
+
+
+def refresh_render_dir(node: hou.Node) -> None:
+  node.parm("savetodirectory_directory").set(str(_next_version_dir(node)))
+

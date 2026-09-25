@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+import hou
+
+import tractor.api.author as author
+
+from pathlib import Path
+
+from pipe.core import color
+
+
+_shared_module = hou.nodeType(
+    hou.lopNodeTypeCategory(), "tlops::shared_python"
+).hdaModule()
+ParmData = _shared_module.ParmData
+
+
+class EncodeParms(metaclass=ParmData):
+    output_file: str
+    framerate: int
+    display: str
+    view: str
+    codec: str
+    quality: int
+    service: str
+    keep_files: int
+
+
+# Read by the Display and View parm defaults, so movies default to the show look
+DISPLAY = color.DISPLAY
+DEFAULT_VIEW = color.DEFAULT_VIEW
+
+IMAGES_DIR = "images"
+DENOISE_DIR = "images_dn"
+ENCODE_DIR = "video_tmp"
+# The frames hold sRGB display pixels from OCIO, so the movie says so and
+# players show it as the Houdini viewer did
+SRGB_TAGS = "-colorspace bt709 -color_primaries bt709 -color_trc iec61966-2-1"
+# Browsers need even dimensions, limited-range BT.709 YUV and the index up front
+WEB_FLAGS = (
+    "-vf 'scale=trunc(iw/2)*2:trunc(ih/2)*2:out_color_matrix=bt709:out_range=tv' "
+    "-movflags +faststart"
+)
+
+
+def _input_image_dir(node: hou.LopNode) -> str:
+    """Determine the correct image subdirectory based on the input node type."""
+    input_node = node.input(0)
+    input_type = input_node.type().name()
+    if "tractor_denoise" in input_type:
+        return DENOISE_DIR
+    return IMAGES_DIR
+
+
+def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> author.Task:
+    """
+    node: current node this function is called in
+    submit_input: the node at the bottom of this stream feeding into the Tractor Submit node
+    """
+    node_name = node.name()
+    parms = EncodeParms(node)
+
+    input_node = node.input(0)
+    upstream_task = input_node.hdaModule().generate_tractor_task(input_node, submit_input)
+
+    task = author.Task(title=node_name)
+    task.addChild(upstream_task)
+
+    encode_task = author.Task(title=f"Encode Video ({node_name})")
+    encode_task.addChild(author.Instance(title=upstream_task.title))
+
+    jd = job_directory(node)
+    image_dir = jd / _input_image_dir(node)
+    tmp_dir = jd / ENCODE_DIR
+
+    output_file = parms.output_file
+    if not output_file:
+        ext = ".mov" if parms.codec == "prores" else ".mp4"
+        output_file = str(jd / f"video{ext}")
+
+    # Step 1: Apply the display transform to each EXR, writing PNG via hoiiotool.
+    convert_cmd = (
+        f"rm -rf '{tmp_dir}' && mkdir -p '{tmp_dir}' && "
+        f"for f in '{image_dir}'/[0-9][0-9][0-9][0-9].exr; do "
+        f"  hoiiotool --colorconfig '{hou.Color.ocio_configPath()}' \"$f\" "
+        f"    --ociodisplay:from=scene_linear '{parms.display}' '{parms.view}' "
+        f"    -o '{tmp_dir}/'\"$(basename \"$f\" .exr)\".png; "
+        f"done"
+    )
+    encode_task.newCommand(
+        argv=["/bin/bash", "-exc", convert_cmd],
+        service=parms.service,
+    )
+
+    # Step 2: Assemble video with ffmpeg
+    ffmpeg_cmd = (
+        f"ffmpeg -y -framerate {parms.framerate} "
+        f"-pattern_type glob -i '{tmp_dir}/*.png' "
+        f"{_get_codec_flags(parms.codec, parms.quality)} {SRGB_TAGS} {WEB_FLAGS} "
+        f"'{output_file}'"
+    )
+    encode_task.newCommand(
+        argv=["/bin/bash", "-exc", ffmpeg_cmd],
+        service=parms.service,
+    )
+
+    # Step 3: Clean up temp PNGs, and unless kept, the frames and scene files too.
+    # The upstream task above has already written every USD file of this job.
+    render_files = (
+        [] if parms.keep_files else [str(image_dir), *map(str, jd.glob("*.usd"))]
+    )
+    encode_task.newCommand(
+        argv=["rm", "-rf", str(tmp_dir), *render_files],
+        service=parms.service,
+    )
+
+    task.addChild(encode_task)
+    return task
+
+
+def _get_codec_flags(codec: str, quality: int) -> str:
+    if codec == "prores":
+        return f"-c:v prores_ks -profile:v 3 -qscale:v {quality} -pix_fmt yuv422p10le"
+    # Default: h264
+    return f"-c:v libx264 -crf {quality} -pix_fmt yuv420p"
+
+
+def job_directory(node: hou.LopNode) -> Path:
+    input_node = node.input(0)
+    return input_node.hdaModule().job_directory(input_node)

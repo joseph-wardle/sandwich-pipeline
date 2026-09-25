@@ -1,0 +1,12 @@
+#usda 1.0
+(
+    "Chrome and grey reference spheres asset"
+    defaultPrim = "ReferenceSpheres"
+    metersPerUnit = 1
+    subLayers = [
+        @./mtl.usd@,
+        @./geo.usd@
+    ]
+    upAxis = "Y"
+)
+

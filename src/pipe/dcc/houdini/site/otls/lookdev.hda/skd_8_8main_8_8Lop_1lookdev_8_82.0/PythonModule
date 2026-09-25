@@ -1,0 +1,206 @@
+from __future__ import annotations
+
+import math
+from pathlib import Path
+
+import hou
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
+
+SUBJECT = "/lookdev/subject"
+CAMERA = "/lookdev/cam"
+BACKDROP = "/lookdev/backdrop"
+LIGHTS = "/lookdev/lights"
+CHECKER_TILING = "/lookdev/materials/backdrop_checker/tile_per_meter"
+# Spheres on camera left, color checker on camera right. The flat checker
+# leans back to face a camera looking down on it.
+REFERENCES = (
+    ("/lookdev/references/reference_spheres", -1.0, False),
+    ("/lookdev/references/color_checker", 1.0, True),
+)
+
+# The camera, backdrop and built-in lights are authored for a frame this many
+# meters wide at the origin, then scaled as one to the actual frame width.
+BASE_WIDTH = 4.0
+ASPECT = 16 / 9
+# Each reference is this many times its real size per meter of frame width,
+# its outer edge sits this fraction of the image width from the frame edge,
+# and it keeps this fraction of the frame width clear of the turning asset.
+REFERENCE_SCALE = 0.55
+MARGIN = 0.04
+REFERENCE_GAP = 0.02
+
+
+def frame_rig(node: hou.LopNode) -> None:
+    """Stand the asset on the floor, then fit the rig and references to it."""
+    lookdev = node.parent()
+    stage = node.editableStage()
+    height, reach = _recenter(stage.GetPrimAtPath(SUBJECT))
+    tan_half = _tan_half_fov(stage)
+    angle = lookdev.evalParm("camera_angle")
+    references = []
+    for path, side, leans in REFERENCES:
+        prim = stage.GetPrimAtPath(path)
+        lean = -angle if leans else 0.0
+        # Measure the reference as it will stand, leaning on its bottom edge
+        tilt = Gf.Matrix4d().SetRotate(Gf.Rotation(Gf.Vec3d(1.0, 0.0, 0.0), lean))
+        own = Gf.BBox3d(_bounds(prim), tilt).ComputeAlignedRange()
+        references.append((prim, own, side, lean))
+    width = _frame_width(lookdev, height, reach, references, tan_half, angle)
+    scale = width / BASE_WIDTH
+    # Center the view on the asset, or on the references when they stand taller
+    pivot = height / 2
+    if lookdev.evalParm("show_references"):
+        tallest = max(own.GetSize()[1] for _, own, _, _ in references)
+        pivot = max(pivot, REFERENCE_SCALE * width * tallest / 2)
+
+    # Lights wired into the Lights input are placed by the artist, so only
+    # the built-in rig scales with the frame.
+    rig = [BACKDROP] if lookdev.input(1) else [BACKDROP, LIGHTS]
+    for path in rig:
+        _prepend_op(stage.GetPrimAtPath(path), UsdGeom.XformOp.TypeScale, Gf.Vec3d(scale))
+    # Back the camera away until it frames the base width, tilt it down about
+    # the origin, scale it with the rig and lift it to look at the pivot.
+    camera = stage.GetPrimAtPath(CAMERA)
+    distance = BASE_WIDTH / 2 / tan_half
+    _prepend_op(camera, UsdGeom.XformOp.TypeTranslate, Gf.Vec3d(0.0, 0.0, distance), "distance")
+    _prepend_op(camera, UsdGeom.XformOp.TypeRotateX, -angle)
+    _prepend_op(camera, UsdGeom.XformOp.TypeScale, Gf.Vec3d(scale))
+    _prepend_op(camera, UsdGeom.XformOp.TypeTranslate, Gf.Vec3d(0.0, pivot, 0.0))
+
+    # The backdrop's uv is in meters at the base width; this keeps the checker
+    # in true meters once the backdrop is scaled.
+    UsdShade.Shader(stage.GetPrimAtPath(CHECKER_TILING)).CreateInput(
+        "scale", Sdf.ValueTypeNames.Float2
+    ).Set(Gf.Vec2f(scale))
+
+    for prim, own, side, lean in references:
+        translate, size, _ = _reference_layout(own, side, width, pivot, tan_half, angle)
+        xform = UsdGeom.XformCommonAPI(prim)
+        xform.SetTranslate(translate)
+        xform.SetRotate(Gf.Vec3f(lean, 0.0, 0.0))
+        xform.SetScale(Gf.Vec3f(size))
+
+
+def turn_angle(part: str) -> float:
+    """Degrees the asset or the lights have turned at the current frame.
+
+    Each part turns once over the hip's frame range. With both turning, the
+    asset turns in the first half and the lights in the second.
+    """
+    lookdev = hou.pwd().parent()
+    turning = [p for p in ("asset", "lights") if lookdev.evalParm(f"rotate_{p}")]
+    if part not in turning:
+        return 0.0
+    start = hou.hscriptExpression("$FSTART")
+    frames = (hou.hscriptExpression("$FEND") - start + 1) / len(turning)
+    elapsed = hou.frame() - start - frames * turning.index(part)
+    return 360.0 * min(max(elapsed / frames, 0.0), 1.0)
+
+
+def _recenter(subject: Usd.Prim) -> tuple[float, float]:
+    # Returns the asset's height and the radius of the circle its footprint
+    # sweeps as it turns about the vertical axis.
+    # Before an asset is wired in, the subject prim does not exist
+    bounds = _bounds(subject) if subject else Gf.Range3d()
+    if bounds.IsEmpty():
+        return 0.0, 0.0
+    center = bounds.GetMidpoint()
+    offset = Gf.Vec3d(-center[0], -bounds.GetMin()[1], -center[2])
+    _prepend_op(subject, UsdGeom.XformOp.TypeTranslate, offset)
+    size = bounds.GetSize()
+    return size[1], math.hypot(size[0], size[2]) / 2
+
+
+def _frame_width(
+    lookdev: hou.Node,
+    height: float,
+    reach: float,
+    references: list[tuple[Usd.Prim, Gf.Range3d, float, float]],
+    tan_half: float,
+    angle: float,
+) -> float:
+    if lookdev.evalParm("framing") == "manual":
+        return lookdev.evalParm("frame_width")
+    # Nothing is wired in yet, so show the rig at its authored size
+    if height == 0.0:
+        return BASE_WIDTH
+    # Looking down, the image shows the asset's height and some of its depth
+    tilt = math.radians(angle)
+    seen_height = height * math.cos(tilt) + 2 * reach * math.sin(tilt)
+    width = lookdev.evalParm("padding") * max(2 * reach, ASPECT * seen_height)
+    if lookdev.evalParm("show_references"):
+        for _, own, side, _ in references:
+            # The inner edge moves linearly with the frame width, so two
+            # samples give the width at which it clears the turning asset. A
+            # higher pivot only moves the references outward.
+            at_zero = _reference_layout(own, side, 0.0, height / 2, tan_half, angle)[2]
+            slope = _reference_layout(own, side, 1.0, height / 2, tan_half, angle)[2] - at_zero
+            width = max(width, (reach - at_zero) / (slope - REFERENCE_GAP))
+    return width
+
+
+def _reference_layout(
+    own: Gf.Range3d, side: float, width: float, pivot: float, tan_half: float, angle: float
+) -> tuple[Gf.Vec3d, float, float]:
+    # Returns the translate and scale that stand a reference on the floor with
+    # its outer edge at the margin of the default camera's image, and the
+    # distance from the turning axis to its inner edge.
+    size = REFERENCE_SCALE * width
+    # The camera looks down at the pivot, so the reference's top front corner
+    # is the nearest and reaches furthest across the image.
+    tilt = math.radians(angle)
+    depth = (
+        width / 2 / tan_half
+        + (pivot - own.GetSize()[1] * size) * math.sin(tilt)
+        - own.GetMax()[2] * size * math.cos(tilt)
+    )
+    outer = side * (1 - 2 * MARGIN) * tan_half * depth
+    outer_edge, inner_edge = own.GetMax()[0], own.GetMin()[0]
+    if side < 0:
+        outer_edge, inner_edge = inner_edge, outer_edge
+    x = outer - outer_edge * size
+    translate = Gf.Vec3d(x, -own.GetMin()[1] * size, 0.0)
+    return translate, size, side * (x + inner_edge * size)
+
+
+def next_render_dir() -> str:
+    """The first free v### folder under render/turnaround, for the Output Folder expression."""
+    folder = Path(hou.text.expandString("$HIP")) / "render" / "turnaround"
+    versions = [int(path.name[1:]) for path in folder.glob("v[0-9][0-9][0-9]")]
+    return f"$HIP/render/turnaround/v{max(versions, default=0) + 1:03d}"
+
+
+def send_turnaround(lookdev: hou.Node) -> None:
+    """Send the turnaround to Tractor, rendering into the Output Folder."""
+    # Freeze the folder first: the job creates it partway through, and a live
+    # Output Folder expression would then point at the next version.
+    folder = hou.text.collapseCommonVars(lookdev.evalParm("render_dir"), ["$HIP"])
+    lookdev.parm("job_dir").set(folder)
+    submit = lookdev.node("submit")
+    submit.hdaModule().sendToTractor(submit)
+
+
+def _tan_half_fov(stage: Usd.Stage) -> float:
+    lens = UsdGeom.Camera(stage.GetPrimAtPath(CAMERA)).GetCamera()
+    return lens.horizontalAperture / 2 / lens.focalLength
+
+
+def _bounds(prim: Usd.Prim) -> Gf.Range3d:
+    cache = UsdGeom.BBoxCache(
+        Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render]
+    )
+    return cache.ComputeWorldBound(prim).ComputeAlignedRange()
+
+
+def _prepend_op(
+    prim: Usd.Prim,
+    op_type: UsdGeom.XformOp.Type,
+    value: float | Gf.Vec3d,
+    name: str = "framing",
+) -> None:
+    # First in the op order is applied last, so the op acts in world space.
+    xformable = UsdGeom.Xformable(prim)
+    authored = xformable.GetOrderedXformOps()
+    op = xformable.AddXformOp(op_type, UsdGeom.XformOp.PrecisionDouble, name)
+    op.Set(value)
+    xformable.SetXformOpOrder([op, *authored])

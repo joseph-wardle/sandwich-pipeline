@@ -17,7 +17,7 @@ This module defines the canonical SKD component builder entry points used by
 tool shelves and headless build scripts.
 """
 
-SKD_LOOKDEV_TYPE = "skd::main::SKD_Lookdev::1.0"
+SKD_LOOKDEV_TYPE = "skd::main::lookdev::2.0"
 SKD_MATLIB_TYPE = "skd::main::SKD_MatLib::1.0"
 SKD_COMPONENT_OUTPUT_TYPE_CANDIDATES = (
     "skd.main::Lop/skd_component_output::1.0",
@@ -739,10 +739,6 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
     lookdev = create_skd_lookdev(parent, "lookdev")
     _mark_managed_variant_node(lookdev, owner_path=owner_path)
 
-    env = parent.createNode("fetch")
-    env.setName("env", unique_name=True)
-    _mark_managed_variant_node(env, owner_path=owner_path)
-
     branch_outputs: list[tuple[str, hou.Node]] = []
     branch_bottom_y: float = out_pos.y() + 2.0
     geo_count = len(plan.geometry_variants)
@@ -882,14 +878,11 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
 
     config.setInput(0, upstream)
     output.setInput(0, config)
-    output.setInput(1, env)
     lookdev.setInput(0, output)
-    _set_parm_if_exists(env, "loppath", f"../{lookdev.name()}/OUT_ENV")
 
     publish_anchor_y = upstream.position().y() - 2.0
     config.setPosition(hou.Vector2(out_pos.x(), publish_anchor_y))
     output.setPosition(hou.Vector2(out_pos.x(), publish_anchor_y - 1.6))
-    env.setPosition(hou.Vector2(out_pos.x() + 2.1, publish_anchor_y - 0.9))
     lookdev.setPosition(hou.Vector2(out_pos.x(), publish_anchor_y - 3.3))
 
     _set_variant_generation_warnings(output, warnings)

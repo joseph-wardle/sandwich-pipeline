@@ -62,3 +62,7 @@ resources/splash/users
 
 # Ignore flashbangs
 resources/flashbang
+
+# Generated reference assets are committed because deploys read them directly.
+!resources/usd/**/*.usd
+!resources/tex/*.exr

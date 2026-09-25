@@ -1,0 +1,210 @@
+# Dialog script for skd::main::lookdev::2.0 automatically generated
+
+{
+    name	skd::main::lookdev::2.0
+    script	skd::main::lookdev::2.0
+    label	"SKD Lookdev"
+
+    help {
+    }
+
+    inputlabel	1	"Asset"
+    inputlabel	2	"Lights"
+
+    parm {
+        name    "framing"
+        label   "Framing"
+        type    string
+        default { "fit" }
+        help    "Fit to asset sizes the frame from the asset's bounds. Manual sets its width in meters."
+        menu {
+            "fit"       "Fit to asset"
+            "manual"    "Manual"
+        }
+    }
+    parm {
+        name    "padding"
+        label   "Padding"
+        type    float
+        default { "1.25" }
+        help    "Frame width as a multiple of the circle the asset sweeps as it turns, or of its height for tall assets. The frame widens further when the references need room."
+        hidewhen "{ framing == manual }"
+        range   { 1 3 }
+    }
+    parm {
+        name    "frame_width"
+        label   "Frame Width"
+        type    float
+        default { "4" }
+        help    "Width of the view at the asset, in meters."
+        hidewhen "{ framing == fit }"
+        range   { 0.1 50 }
+        parmtag { "units" "m1" }
+    }
+    parm {
+        name    "camera_angle"
+        label   "Camera Angle"
+        type    float
+        default { "10" }
+        help    "Degrees the camera looks down at the asset. Raise it for flat assets such as rugs, decals or maps."
+        range   { 0! 90! }
+    }
+    parm {
+        name    "rig"
+        label   "Lighting Rig"
+        type    ordinal
+        default { "0" }
+        help    "Built-in lights. Ignored while the Lights input is connected."
+        menu {
+            "studio"    "Studio"
+            "dramatic"  "Dramatic"
+        }
+    }
+    parm {
+        name    "backdrop"
+        label   "Backdrop"
+        type    string
+        default { "checker" }
+        help    "Checker shows scale in half-meter squares. Solid is a single color for demo reels."
+        menu {
+            "checker"   "Checker"
+            "solid"     "Solid"
+        }
+    }
+    parm {
+        name    "backdrop_color"
+        label   "Color"
+        type    color
+        size    3
+        default { "1" "1" "1" }
+        help    "Backdrop albedo, scene-linear ACEScg."
+        hidewhen "{ backdrop == checker }"
+        range   { 0 1 }
+    }
+    parm {
+        name    "show_references"
+        label   "Show References"
+        type    toggle
+        default { "1" }
+        help    "Color checker on camera right, chrome and grey spheres on camera left."
+    }
+    groupsimple {
+        name    "turnaround"
+        label   "Turnaround"
+
+        parm {
+            name    "rotate_asset"
+            label   "Rotate Asset"
+            type    toggle
+            default { "1" }
+            help    "Turn the asset once over the frame range, or over its first half when the lights turn too."
+        }
+        parm {
+            name    "rotate_lights"
+            label   "Rotate Lights"
+            type    toggle
+            default { "1" }
+            help    "Turn the lights once over the frame range, or over its second half when the asset turns too."
+        }
+    }
+
+    groupsimple {
+        name    "render"
+        label   "Render"
+
+        parm {
+            name    "render_dir"
+            label   "Output Folder"
+            type    directory
+            default { [ "hou.pwd().hdaModule().next_render_dir()" python ] }
+            help    "Where the next Send renders. Defaults to the next free v### folder under $HIP/render/turnaround."
+        }
+        parm {
+            name    "job_title"
+            label   "Job Title"
+            type    string
+            default { [ "hou.text.expandString(\"$HIP\").rstrip(\"/\").rsplit(\"/\", 1)[-1] + \" turnaround\"" python ] }
+            help    "Name of the job on the Tractor dashboard."
+        }
+        parm {
+            name    "priority"
+            label   "Priority"
+            type    integer
+            default { "10" }
+            help    "Tractor priority. Higher runs sooner."
+            range   { 1 100 }
+        }
+        parm {
+            name    "send"
+            label   "Send to Tractor"
+            type    button
+            default { "0" }
+            help    "Render the turnaround on the farm, then denoise it and encode turnaround.mp4."
+            parmtag { "script_callback" "hou.phm().send_turnaround(kwargs['node'])" }
+            parmtag { "script_callback_language" "python" }
+        }
+        parm {
+            name    "job_dir"
+            label   "Last Job"
+            type    string
+            default { "" }
+            help    "Folder of the last job sent. Send fills it in."
+            disablewhen "{ render_dir != \"\" } { render_dir == \"\" }"
+        }
+        groupcollapsible {
+            name    "render_advanced"
+            label   "Advanced"
+
+            parm {
+                name    "renderer"
+                label   "Renderer"
+                type    string
+                default { "HdPrmanXpuLoaderRendererPlugin" }
+                help    "XPU uses each blade's GPU when it has one."
+                menu {
+                    "HdPrmanXpuLoaderRendererPlugin"    "RenderMan XPU"
+                    "HdPrmanXpuCpuLoaderRendererPlugin" "RenderMan XPU (CPU only)"
+                    "HdPrmanLoaderRendererPlugin"       "RenderMan RIS"
+                }
+            }
+            parm {
+                name    "resolution"
+                label   "Resolution"
+                type    intvector2
+                joinnext
+                size    2
+                default { "1280" "720" }
+                help    "Image size in pixels."
+                range   { 1 4096 }
+            }
+            parm {
+                name    "resolution_menu"
+                label   "Choose Resolution"
+                type    ordinal
+                nolabel
+                default { "0" }
+                menumini {
+                    [ "echo `pythonexprs(\"__import__('toolutils').parseDialogScriptMenu('FBres')\")`" ]
+                }
+                parmtag { "script_callback" "opparm . resolution ( `arg(\"$script_value\", 0)` `arg(\"$script_value\", 1)` )" }
+            }
+            parm {
+                name    "pixel_variance"
+                label   "Pixel Variance"
+                type    float
+                default { "0.1" }
+                help    "Noise RenderMan accepts before it stops sampling a pixel. Lower is cleaner and slower. The farm denoises afterwards either way."
+                range   { 0.001! 0.5 }
+            }
+            parm {
+                name    "keep_files"
+                label   "Keep Render Files"
+                type    toggle
+                default { "0" }
+                help    "Keep the denoised frames and the USD files the job rendered from. Off deletes them once turnaround.mp4 is written, leaving just the movie."
+            }
+        }
+
+    }
+
+}

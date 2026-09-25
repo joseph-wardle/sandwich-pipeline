@@ -1,0 +1,12 @@
+#usda 1.0
+(
+    "ColorChecker Classic reference card asset"
+    defaultPrim = "ColorChecker"
+    metersPerUnit = 1
+    subLayers = [
+        @./mtl.usd@,
+        @./geo.usd@
+    ]
+    upAxis = "Y"
+)
+

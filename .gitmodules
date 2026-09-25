@@ -23,10 +23,6 @@
 [submodule "pipeline/software/maya/scripts/maya-capture"]
 	path = src/pipe/dcc/maya/third_party/mayacapture
 	url = https://github.com/abstractfactory/maya-capture.git
-[submodule "pipeline/lib/tractor-lops"]
-	path = src/pipe/dcc/houdini/third_party/tractor-lops
-	url = https://github.com/joseph-wardle/tractor-lops.git
-	branch = prod
 [submodule "pipeline/software/maya/scripts/aperture_git"]
 	path = src/pipe/dcc/maya/third_party/aperture_git
 	url = https://github.com/michaelharmonart/aperture.git

@@ -1,0 +1,98 @@
+# Dialog script for tlops::tractor_encode_video::1.0 automatically generated
+
+{
+    name	tlops::tractor_encode_video::1.0
+    script	load_asset::1.0
+    label	"Tractor Encode Video"
+
+    help {
+	"Encodes a rendered frame sequence to a movie through an OCIO display and view, so the movie matches what the artist saw in the viewer."
+    }
+
+    inputlabel	1	"Input Stage"
+    inputlabel	2	"Input 2"
+    inputlabel	3	"Input 3"
+    inputlabel	4	"Input 4"
+
+    parm {
+        name    "output_file"
+        label   "Output File"
+        type    file
+        default { "" }
+        parmtag { "filechooser_mode" "write" }
+        parmtag { "filechooser_pattern" "*.mp4 *.mov" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "framerate"
+        label   "Frame Rate"
+        type    integer
+        default { "24" }
+        range   { 1! 60 }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "display"
+        label   "Display"
+        type    string
+        default { [ "hou.phm().DISPLAY" python ] }
+        help    "Defaults to the show's display."
+        menureplace {
+            [ "[d for d in hou.Color.ocio_activeDisplays() for d in (d, d)]" ]
+            language python
+        }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "view"
+        label   "View"
+        type    string
+        default { [ "hou.phm().DEFAULT_VIEW" python ] }
+        help    "Defaults to the show look."
+        menureplace {
+            [ "[v for v in hou.Color.ocio_views(kwargs[\"node\"].evalParm(\"display\")) for v in (v, v)]" ]
+            language python
+        }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "keep_files"
+        label   "Keep Render Files"
+        type    toggle
+        default { "1" }
+        help    "Keep the frames and USD files the movie is made from. Off deletes them once the movie is written, leaving only the movie, and the job can no longer be retried."
+        parmtag { "script_callback_language" "python" }
+    }
+    groupcollapsible {
+        name    "folder0"
+        label   "Advanced"
+
+        parm {
+            name    "codec"
+            label   "Codec"
+            type    string
+            default { "h264" }
+            menu {
+                "h264"      "H.264 (MP4)"
+                "prores"    "ProRes (MOV)"
+            }
+            parmtag { "script_callback_language" "python" }
+        }
+        parm {
+            name    "quality"
+            label   "Quality"
+            type    integer
+            default { "18" }
+            range   { 0! 51 }
+            parmtag { "script_callback_language" "python" }
+        }
+        parm {
+            name    "service"
+            label   "Service Key"
+            type    string
+            default { "EL9" }
+            parmtag { "script_callback_language" "python" }
+        }
+    }
+
+}

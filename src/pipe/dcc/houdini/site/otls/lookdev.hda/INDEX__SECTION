@@ -1,0 +1,14 @@
+Operator:     skd::main::lookdev::2.0
+Label:        SKD Lookdev
+Path:         oplib:/skd::main::Lop/lookdev::2.0?skd::main::Lop/lookdev::2.0
+Icon:         opdef:/skd::main::Lop/lookdev::2.0?IconImage
+Table:        Lop
+License:      
+Extra:        
+User:         
+Inputs:       0 to 2
+Subnet:       true
+Python:       false
+Empty:        false
+Modified:     Fri Sep 25 16:37:43 2026
+

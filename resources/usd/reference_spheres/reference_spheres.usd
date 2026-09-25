@@ -1,0 +1,27 @@
+#usda 1.0
+(
+    """Chrome and grey reference spheres asset.
+
+Chrome is a perfect mirror (metallic 1, roughness 0) so it shows the lighting
+one to one; a real chrome ball reflects about 60%, but this rig is never
+compared with a photographed one. Grey is pure diffuse 18% (black specular),
+the grey card value, so under uniform white light it renders at 0.18.
+The spheres are 18 cm across and sit side by side on the floor at the
+origin. UsdPreviewSurface renders the same in Storm, RenderMan CPU and
+RenderMan XPU."""
+    defaultPrim = "ReferenceSpheres"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def Xform "ReferenceSpheres" (
+    assetInfo = {
+        asset identifier = @./reference_spheres.usd@
+        string name = "reference_spheres"
+    }
+    kind = "component"
+    prepend payload = @./payload.usd@
+)
+{
+}
+

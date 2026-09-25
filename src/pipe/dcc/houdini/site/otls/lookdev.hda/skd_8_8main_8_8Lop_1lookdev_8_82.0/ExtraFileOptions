@@ -1,0 +1,10 @@
+{
+	"PythonModule/IsPython":{
+		"type":"bool",
+		"value":true
+	},
+	"PythonModule/IsScript":{
+		"type":"bool",
+		"value":true
+	}
+}
