@@ -292,6 +292,24 @@ class Environment(SGEntity):
 
 
 @attrs.define(eq=False)
+class Set(SGEntity):
+    """A ShotGrid Set (an `Asset` row with `sg_asset_type='Set'`)."""
+
+    @property
+    def display_name(self) -> str:
+        return self.code or ""
+
+    @property
+    def name(self) -> str:
+        """Normalized name derived from the ShotGrid display name."""
+        return normalize_display_name(self.display_name)
+
+    @property
+    def path(self) -> str:
+        return f"set/{self.name}"
+
+
+@attrs.define(eq=False)
 class User(SGEntity):
     """A ShotGrid HumanUser."""
 

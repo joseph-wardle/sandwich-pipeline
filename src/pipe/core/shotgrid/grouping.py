@@ -4,19 +4,17 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 
-from pipe.core.shotgrid.entities import Asset, Environment, Shot
+from pipe.core.shotgrid.entities import Asset, Shot
 
 OTHER_GROUP = "Other"
 
-_SubdirectoryEntity = Asset | Environment
-
 
 def group_assets_by_subdirectory(
-    assets: Iterable[_SubdirectoryEntity],
+    assets: Iterable[Asset],
     *,
-    key: Callable[[_SubdirectoryEntity], str] = lambda asset: asset.display_name,
+    key: Callable[[Asset], str] = lambda asset: asset.display_name,
 ) -> dict[str, list[str]] | list[str]:
-    """Group assets (or environments) by their ShotGrid subdirectory."""
+    """Group assets by their ShotGrid subdirectory."""
     return _bucket((asset.as_fetched("subdirectory"), key(asset)) for asset in assets)
 
 
