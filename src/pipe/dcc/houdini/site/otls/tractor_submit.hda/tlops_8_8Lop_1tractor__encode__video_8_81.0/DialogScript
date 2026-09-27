@@ -19,6 +19,7 @@
         label   "Output File"
         type    file
         default { "" }
+        help    "Empty writes video.mp4, or video.mov for ProRes, into the version folder. A file elsewhere needs Keep Render Files on."
         parmtag { "filechooser_mode" "write" }
         parmtag { "filechooser_pattern" "*.mp4 *.mov" }
         parmtag { "script_callback_language" "python" }
@@ -60,7 +61,7 @@
         label   "Keep Render Files"
         type    toggle
         default { "1" }
-        help    "Keep the frames and USD files the movie is made from. Off deletes them once the movie is written, leaving only the movie, and the job can no longer be retried."
+        help    "Keep the frames the movie is made from, with every pass they hold. Off deletes them once the layer's other tasks finish; Encode can't then be rerun for this version."
         parmtag { "script_callback_language" "python" }
     }
     groupcollapsible {

@@ -5,10 +5,13 @@ Each layer renders every frame, then optionally denoises and encodes them:
     <layer>
     ├── Render <layer>      one task per frame (per tile when tiled)
     ├── Denoise <layer>     one task per frame, after the frames it reads
-    └── Encode <layer>      after every frame is final
+    ├── Encode <layer>      after every frame is final
+    └── Cleanup <layer>     after everything else: checks, deletes tmp/, marks complete
 
 Every task is one command that a retry can run again on any blade. Titles
 carry the layer, so they are unique within the job, which Instances rely on.
+Other tasks replace only their own outputs and scratch; only Cleanup deletes
+what another task wrote.
 """
 
 from __future__ import annotations
@@ -77,6 +80,8 @@ class Encode:
     view: str
     codec: str
     quality: int
+    # Off deletes the frames once the video is written.
+    keep_frames: bool
     service: str
 
 
@@ -99,19 +104,28 @@ def build(title: str, priority: int, envkey: str, layers: list[Layer]) -> author
 
 def layer_task(layer: Layer) -> author.Task:
     task = author.Task(title=layer.name)
-    last = _render_task(layer)
-    task.addChild(last)
+    steps = [_render_task(layer)]
     if layer.denoise:
-        last = _denoise_task(layer, layer.denoise)
-        task.addChild(last)
+        steps.append(_denoise_task(layer, layer.denoise))
     if layer.encode:
         encode = _task(
             f"Encode {layer.name}",
             _encode_script(layer.folder, layer.encode, layer.frames),
             layer.encode.service,
         )
-        encode.addChild(author.Instance(title=last.title))
-        task.addChild(encode)
+        encode.addChild(author.Instance(title=steps[-1].title))
+        steps.append(encode)
+    for step in steps:
+        task.addChild(step)
+    # Tiles land in files of their own that nothing stitches yet, so a tiled
+    # layer never has the frames Cleanup checks for.
+    if not layer.render.tiles:
+        cleanup = _task(
+            f"Cleanup {layer.name}", _cleanup_script(layer), layer.render.service
+        )
+        for step in steps:
+            cleanup.addChild(author.Instance(title=step.title))
+        task.addChild(cleanup)
     return task
 
 
@@ -215,6 +229,49 @@ def _encode_script(folder: Path, encode: Encode, frames: list[int]) -> str:
             f"mv -f {q(str(video))} {q(str(encode.video))}",
         ]
     )
+
+
+def _cleanup_script(layer: Layer) -> str:
+    """Check that every final exists, then delete tmp/ and mark the folder complete.
+
+    Tractor counts a skipped task as done, so the files are checked rather than
+    the tasks trusted. Frames that are deleted are not checked: Send keeps their
+    video in the new version folder, so it exists only if Encode read every one,
+    and a retry after a partial delete still passes. A frame re-rendered after
+    Encode needs Encode rerun before Cleanup.
+    """
+    q = shlex.quote
+    encode = layer.encode
+    removed = encode.images if encode and not encode.keep_frames else None
+    # Every output ends in the folder named after its prim, even one that
+    # renders into tmp/ to be denoised.
+    finals = [layer.folder / f.name for f in layer.render.folders]
+    quoted = [q(str(f)) for f in finals if f != removed]
+    lines = ["missing=()"]
+    if quoted:
+        lines += [
+            f"for d in {' '.join(quoted)}; do",
+            f"    for n in {' '.join(f'{frame:04}' for frame in layer.frames)}; do",
+            '        [ -f "$d/$n.exr" ] || missing+=("$d/$n.exr")',
+            "    done",
+            "done",
+        ]
+    if encode:
+        lines.append(
+            f"[ -f {q(str(encode.video))} ] || missing+=({q(str(encode.video))})"
+        )
+    lines += [
+        'if [ "${#missing[@]}" -gt 0 ]; then',
+        '    printf "Missing: %s\\n" "${missing[@]}" >&2',
+        '    echo "Cleanup deleted nothing, since the files above are missing." >&2',
+        "    exit 1",
+        "fi",
+        f"rm -rf {q(str(layer.folder / paths.TMP))}",
+    ]
+    if removed:
+        lines.append(f"rm -rf {q(str(removed))}")
+    lines.append(f"touch {q(str(layer.folder / paths.COMPLETE))}")
+    return "\n".join(lines)
 
 
 def _codec_flags(codec: str, quality: int) -> str:

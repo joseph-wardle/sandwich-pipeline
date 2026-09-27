@@ -100,4 +100,4 @@ Pixel Variance:
 
 Keep Render Files:
     #id: keep_files
-    Keep the denoised frames and the USD files the job rendered from. Off deletes them once `turnaround.mp4` is written, leaving just the movie.
+    Keep the denoised frames. Off deletes them once `turnaround.mp4` is written; remaking it then means sending again.

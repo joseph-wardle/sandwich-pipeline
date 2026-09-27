@@ -287,6 +287,16 @@ def _encode(
     video = _text(node, "output_file") or str(
         folder / ("video.mov" if codec == "prores" else "video.mp4")
     )
+    keep_frames = bool(node.evalParm("keep_files"))
+    # Only a movie in the new version folder can be this job's, so Cleanup
+    # can trust it before deleting the frames it was made from.
+    if not keep_frames and Path(video).resolve().parent != folder.resolve():
+        raise SendRefused(
+            f"{node.path()} writes its movie to {video}, outside {folder}. With "
+            "Keep Render Files off, the frames would be deleted without proof "
+            "that this job made the movie. Clear Output File, or turn on Keep "
+            "Render Files."
+        )
     return job.Encode(
         images=folder / product.GetName(),
         channels=channels,
@@ -298,6 +308,7 @@ def _encode(
         view=_text(node, "view"),
         codec=codec,
         quality=int(node.evalParm("quality")),
+        keep_frames=keep_frames,
         service=_text(node, "service"),
     )
 

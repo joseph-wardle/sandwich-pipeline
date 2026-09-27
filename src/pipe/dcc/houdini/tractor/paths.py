@@ -17,6 +17,9 @@ from pipe.dcc.houdini.tractor import SendRefused
 
 # Written by the USD ROP inside Configure.
 RENDER_USD = "render.usd"
+# Written by Cleanup once it found every output and cleared tmp/; later reruns
+# don't change it. With Keep Render Files off, the encoded frames' folder is gone.
+COMPLETE = "complete"
 # Scratch that no finished output depends on.
 TMP = "tmp"
 # Folders of their own in tmp/, beside the raw frames of the denoised product.
@@ -104,10 +107,11 @@ def author_outputs(
     """Point each output at its folder, save, and return the folders husk writes."""
     names = [prim.GetName() for prim in outputs]
     for name in names:
-        if name in (TMP, DENOISED, ENCODE):
+        if name in (TMP, DENOISED, ENCODE, COMPLETE):
             raise SendRefused(
-                f'Send keeps scratch files in a folder named "{name}", so no output '
-                "can have that name. Rename the render product or Cryptomatte filter."
+                f'Send keeps a file or folder of its own named "{name}", so no '
+                "output can have that name. Rename the render product or "
+                "Cryptomatte filter."
             )
         if names.count(name) > 1:
             raise SendRefused(
