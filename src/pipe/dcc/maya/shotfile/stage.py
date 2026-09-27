@@ -7,7 +7,6 @@ edits made in one scene stay in that scene, never render and never reach Houdini
 from __future__ import annotations
 
 import logging
-from typing import Callable
 
 import maya.cmds as mc
 import mayaUsd  # type: ignore[import-not-found]
@@ -43,14 +42,6 @@ def add_sublayer(root_layer: Sdf.Layer, layer: Sdf.Layer) -> None:
         root_layer.subLayerPaths.append(layer.identifier)
 
 
-def create_stage_proxy() -> None:
-    """Create the scene's `mayaUsdProxyShape` over a new anonymous root layer."""
-    transform = mc.createNode("transform", name="stage_transform")
-    # With no `filePath`, the proxy composes an in-memory stage over an anonymous root.
-    stage_shape = mc.createNode("mayaUsdProxyShape", name="stage", parent=transform)
-    mc.connectAttr("time1.outTime", f"{stage_shape}.time")
-
-
 def serialize_usd_edits_into_scene() -> None:
     """Keep USD edits in the Maya file itself, without prompting on save.
 
@@ -62,21 +53,21 @@ def serialize_usd_edits_into_scene() -> None:
     mc.optionVar(intValue=("mayaUsd_SerializedUsdEditsLocation", 2))
 
 
-def build_shot_stage(shot: Shot, *, populate: Callable[[], object]) -> None:
-    """Build a shot scene's USD stage and stamp the scene with the shot code.
-
-    Sublayer order is strength order, so `populate` decides where the layers it
-    adds land.
-    """
-    create_stage_proxy()
-    populate()
+def build_shot_stage(shot: Shot) -> Usd.Stage:
+    """Give the open scene a new, empty shot stage and stamp it with the shot code."""
+    transform = mc.createNode("transform", name="stage_transform")
+    # With no `filePath`, the proxy composes an in-memory stage over an anonymous root.
+    stage_shape = mc.createNode("mayaUsdProxyShape", name="stage", parent=transform)
+    mc.connectAttr("time1.outTime", f"{stage_shape}.time")
     mc.fileInfo("code", shot.code or "")
+    # The stage this call made, never one looked up afterwards: the scene may hold
+    # other proxies.
+    return mayaUsd.ufe.getStage(mc.ls(stage_shape, long=True)[0])
 
 
 __all__ = [
     "add_sublayer",
     "build_shot_stage",
-    "create_stage_proxy",
     "get_stage",
     "get_stage_shape",
     "serialize_usd_edits_into_scene",

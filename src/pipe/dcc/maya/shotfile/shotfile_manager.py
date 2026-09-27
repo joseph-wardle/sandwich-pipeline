@@ -241,7 +241,8 @@ class MShotFileManager(FileManager):
     def _setup_file(self, path: Path, entity) -> None:
         mc.file(rename=str(path))
         self.shot = cast(Shot, entity)
-        build_shot_stage(self.shot, populate=self._setup_scene)
+        build_shot_stage(self.shot)
+        self._setup_scene()
         mc.file(save=True, force=True)
 
     # ------------------------------------------------------------------

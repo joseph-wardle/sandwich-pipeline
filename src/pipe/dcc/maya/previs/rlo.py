@@ -23,7 +23,7 @@ from pipe.core.shotgrid import (
 from pipe.core.util.paths import get_production_path
 from pipe.core.versioning import save_version
 from pipe.dcc.maya.shotfile.sets import sync_sets
-from pipe.dcc.maya.shotfile.stage import build_shot_stage, get_stage
+from pipe.dcc.maya.shotfile.stage import build_shot_stage
 from pipe.dcc.maya.util.on_open import remove_on_open_node
 
 from . import cameras
@@ -266,9 +266,7 @@ def _save_as_rlo(sg_shot: Shot, destination: Path) -> None:
     mc.file(rename=str(destination))
     # The previs session reopens straight after, so the break-out summary, not a
     # sync dialog, is where the artist hears which sets the RLO composes.
-    build_shot_stage(
-        sg_shot, populate=lambda: sync_sets(get_stage(), sg_shot.sets or [])
-    )
+    sync_sets(build_shot_stage(sg_shot), sg_shot.sets or [])
     mc.file(save=True, force=True)
 
 

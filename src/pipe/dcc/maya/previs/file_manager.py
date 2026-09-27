@@ -16,7 +16,7 @@ from pipe.core.util.filemanager import OpenFileDialog
 from pipe.core.util.paths import get_legacy_previs_path, get_previs_path
 from pipe.core.versioning import VersionStreamSpec
 
-from pipe.dcc.maya.shotfile import stage
+from pipe.dcc.maya.shotfile.stage import build_shot_stage
 from pipe.dcc.maya.shotfile.sets import sync_shot_sets
 from pipe.dcc.maya.shotfile.shotfile_manager import MShotFileManager
 
@@ -147,15 +147,12 @@ class MPrevisFileManager(MShotFileManager):
         mc.file(rename=str(path))
 
         self.shot = cast(Shot, entity)
-        code = self.shot.code or ""
-
-        stage.create_stage_proxy()
+        build_shot_stage(self.shot)
         self._setup_scene()
         # Whatever the scene already holds, not a blank: opening the legacy file
         # can fire the panel's scene callback, and an unconditional blank here
         # would erase a shot list it had just imported.
         state.write_state(state.read_state() or PrevisState())
-        mc.fileInfo("code", code)
         mc.file(save=True, force=True)
 
     @classmethod
