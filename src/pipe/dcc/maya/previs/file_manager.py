@@ -6,15 +6,18 @@ from pathlib import Path
 from typing import cast
 
 import maya.cmds as mc
+from env_sg import DB_Config
 
 from pipe.core.previs import load_manifest
-from pipe.core.shotgrid import SGEntity, Shot, is_previs_shot_code
+from pipe.core.shotgrid import SGEntity, Shot, ShotGrid, is_previs_shot_code
 from pipe.core.ui import MessageDialog
+from pipe.core.util import log_errors
 from pipe.core.util.filemanager import OpenFileDialog
 from pipe.core.util.paths import get_legacy_previs_path, get_previs_path
 from pipe.core.versioning import VersionStreamSpec
 
 from pipe.dcc.maya.shotfile import stage
+from pipe.dcc.maya.shotfile.sets import sync_shot_sets
 from pipe.dcc.maya.shotfile.shotfile_manager import MShotFileManager
 
 from . import active, dialogs, file_ops, state
@@ -127,9 +130,7 @@ class MPrevisFileManager(MShotFileManager):
         return True
 
     def _setup_scene(self) -> None:
-        # Sets only. Per-shot env overrides remain the RLO's responsibility, so a
-        # previs sequence has no shot-level override layer to edit into.
-        stage.add_sets(self.shot)
+        sync_shot_sets(self.shot)
 
     def _setup_file(self, path: Path, entity: SGEntity) -> None:
         mc.file(newFile=True, force=True)
@@ -148,16 +149,8 @@ class MPrevisFileManager(MShotFileManager):
         self.shot = cast(Shot, entity)
         code = self.shot.code or ""
 
-        # The sequence's maya_root.usd is shared by every file in it, so creating a
-        # file is also when its sets are reconciled against ShotGrid.
-        root_layer, _ = stage.create_stage_proxy(
-            get_previs_path() / code / stage.ROOT_LAYER,
-            file_path_ref="./" + stage.ROOT_LAYER,
-        )
+        stage.create_stage_proxy()
         self._setup_scene()
-        root_layer.Save()
-        root_layer.SetPermissionToSave(False)
-
         stage.serialize_usd_edits_into_scene()
         # Whatever the scene already holds, not a blank: opening the legacy file
         # can fire the panel's scene callback, and an unconditional blank here
@@ -167,12 +160,18 @@ class MPrevisFileManager(MShotFileManager):
         mc.file(save=True, force=True)
 
     @classmethod
+    @log_errors
     def run_on_open(cls) -> None:
+        stage.serialize_usd_edits_into_scene()
         mc.setAttr("defaultResolution.width", 1920)  # type: ignore
         mc.setAttr("defaultResolution.height", 1080)  # type: ignore
         mc.setAttr("defaultResolution.pixelAspect", 1.0)  # type: ignore
         mc.setAttr("defaultResolution.deviceAspectRatio", 1920 / 1080)  # type: ignore
         active.install_camera_callback()
+        # Last, so a ShotGrid failure can't cost the scene its camera callback.
+        if not mc.about(batch=True):
+            code = cast("list[str]", mc.fileInfo("code", query=True))[0]
+            sync_shot_sets(ShotGrid.connect(DB_Config).get_shot(code=code))
 
     def _resolve_current_stream(
         self, scene_path: Path

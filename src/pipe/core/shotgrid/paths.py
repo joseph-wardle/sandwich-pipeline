@@ -60,20 +60,6 @@ def build_asset_path(display_name: str | None, subdirectory: str | None) -> str:
     return "/".join(path_parts)
 
 
-def build_environment_path(display_name: str | None, subdirectory: str | None) -> str:
-    """Build the canonical relative environment path.
-
-    Result format: `set/<optional-subdirectory>/<normalized-environment-name>`
-    """
-    env_name = normalize_display_name(display_name) or "set"
-    path_parts = ["set"]
-    normalized_subdirectory = normalize_subdirectory(subdirectory)
-    if normalized_subdirectory:
-        path_parts.append(normalized_subdirectory)
-    path_parts.append(env_name)
-    return "/".join(path_parts)
-
-
 def validate_shot_code_token(shot_code: str | None) -> str:
     """Validate a shot code for safe use as a single path token.
 

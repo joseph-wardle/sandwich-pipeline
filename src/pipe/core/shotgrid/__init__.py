@@ -12,7 +12,6 @@ from __future__ import annotations
 from pipe.core.shotgrid.client import SG_Config, SHOT_TASK_TEMPLATE, ShotGrid
 from pipe.core.shotgrid.entities import (
     Asset,
-    Environment,
     Playlist,
     Sequence,
     Set,
@@ -35,7 +34,6 @@ from pipe.core.shotgrid.grouping import (
 )
 from pipe.core.shotgrid.paths import (
     build_asset_path,
-    build_environment_path,
     build_shot_path,
     is_previs_shot_code,
     normalize_display_name,
@@ -50,7 +48,6 @@ __all__ = [
     "ShotGrid",
     # Entities
     "Asset",
-    "Environment",
     "Playlist",
     "SGEntity",
     "Sequence",
@@ -70,7 +67,6 @@ __all__ = [
     "ShotGridWriteError",
     # Path helpers
     "build_asset_path",
-    "build_environment_path",
     "build_shot_path",
     "is_previs_shot_code",
     "normalize_display_name",

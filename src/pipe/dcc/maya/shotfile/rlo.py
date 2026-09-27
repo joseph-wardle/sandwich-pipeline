@@ -8,7 +8,7 @@ from pipe.core.shotgrid import SGEntity, Shot, is_previs_shot_code
 from pipe.core.versioning import VersionStreamSpec
 
 from .shotfile_manager import MShotFileManager
-from .stage import setup_environment
+from .sets import sync_shot_sets
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class MRLOShotFileManager(MShotFileManager):
         return [e for e in entities if not is_previs_shot_code(e.code)]
 
     def _setup_scene(self) -> None:
-        setup_environment(self.shot)
+        sync_shot_sets(self.shot)
 
     def _setup_file(self, path: Path, entity: SGEntity) -> None:
         if not path.exists():

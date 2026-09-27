@@ -12,8 +12,8 @@ import maya.cmds as mc
 from pipe.core.previs import codes, naming
 from pipe.core.shot import maya_rlo_stream, shot_owner_for
 from pipe.core.shotgrid import (
-    Environment,
     Sequence,
+    Set,
     Shot,
     ShotGrid,
     ShotGridError,
@@ -22,11 +22,8 @@ from pipe.core.shotgrid import (
 )
 from pipe.core.util.paths import get_production_path
 from pipe.core.versioning import save_version
-from pipe.dcc.maya.shotfile.stage import (
-    build_shot_stage,
-    linked_environments,
-    setup_environment,
-)
+from pipe.dcc.maya.shotfile.sets import sync_sets
+from pipe.dcc.maya.shotfile.stage import build_shot_stage, get_stage
 from pipe.dcc.maya.util.on_open import remove_on_open_node
 
 from . import cameras
@@ -132,8 +129,8 @@ def plan_delivery(shot: PrevisShot, proxy: Shot, conn: ShotGrid) -> DeliveryPlan
         sg_shot=sg_shot,
         recuts=held_cut is not None and held_cut != (cut_in, cut_out),
         replaces=_outgoing_rlo(code, sg_shot),
-        previs_sets=_set_codes(linked_environments(proxy)),
-        rlo_sets=_set_codes(_rlo_environments(sequence, sg_shot)),
+        previs_sets=_set_codes(proxy.sets or []),
+        rlo_sets=_set_codes(sg_shot.sets or []) if sg_shot else (),
     )
 
 
@@ -197,15 +194,8 @@ def _outgoing_rlo(code: str, sg_shot: Shot | None) -> Shot | None:
     return sg_shot
 
 
-def _rlo_environments(sequence: Sequence, sg_shot: Shot | None) -> list[Environment]:
-    """The sets `setup_environment` will compose in the delivered RLO."""
-    if sg_shot is not None:
-        return linked_environments(sg_shot)
-    return [sequence.set] if sequence.set else []
-
-
-def _set_codes(environments: list[Environment]) -> tuple[str, ...]:
-    return tuple(sorted(env.code or "?" for env in environments))
+def _set_codes(sets: list[Set]) -> tuple[str, ...]:
+    return tuple(sorted(set.display_name for set in sets))
 
 
 def _save_previs_scene() -> None:
@@ -274,7 +264,11 @@ def _save_as_rlo(sg_shot: Shot, destination: Path) -> None:
     """Re-stage the sliced scene as the shot's RLO file and write it."""
     destination.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
     mc.file(rename=str(destination))
-    build_shot_stage(sg_shot, populate=lambda: setup_environment(sg_shot))
+    # The previs session reopens straight after, so the break-out summary, not a
+    # sync dialog, is where the artist hears which sets the RLO composes.
+    build_shot_stage(
+        sg_shot, populate=lambda: sync_sets(get_stage(), sg_shot.sets or [])
+    )
     mc.file(save=True, force=True)
 
 

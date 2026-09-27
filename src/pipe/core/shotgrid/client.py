@@ -37,7 +37,6 @@ import shotgun_api3
 from pipe.core.shotgrid._memoize import invalidate, ttl_cache
 from pipe.core.shotgrid.entities import (
     Asset,
-    Environment,
     Playlist,
     SGEntity,
     Sequence,
@@ -55,7 +54,6 @@ from pipe.core.shotgrid.errors import (
 )
 from pipe.core.shotgrid.paths import (
     build_asset_path,
-    build_environment_path,
     normalize_display_name,
 )
 
@@ -111,7 +109,6 @@ _SG_FIELDS_SHOT: tuple[str, ...] = (
     "sg_cut_out",
     "sg_cut_duration",
     "sg_sequence",
-    "sg_set",
     "sg_sets",
     "sg_substeps",
 )
@@ -119,10 +116,7 @@ _SG_FIELDS_SEQUENCE: tuple[str, ...] = (
     "id",
     "code",
     "shots",
-    "sg_set",
-    "sg_sets",
 )
-_SG_FIELDS_ENVIRONMENT: tuple[str, ...] = ("id", "code", "sg_subdirectory")
 _SG_FIELDS_SET: tuple[str, ...] = ("id", "code")
 _SG_FIELDS_USER: tuple[str, ...] = ("id", "name", "login")
 _SG_FIELDS_TASK: tuple[str, ...] = ("id", "content", "entity", "sg_status_list")
@@ -185,8 +179,8 @@ _SG_STATUS_ACTIVE_USER_FILTER: tuple[str, str, str] = (
     "dis",
 )
 
-# Assets with these sg_asset_type values are not "real" assets (environments
-# are their own entity surface, the others are legacy). Used by find_assets.
+# Assets with these sg_asset_type values are not "real" assets (sets are their
+# own entity surface, the others are legacy). Used by find_assets.
 _SG_ASSET_TYPE_EXCLUDES: tuple[str, ...] = (
     "Environment",
     SET_ASSET_TYPE,
@@ -489,61 +483,6 @@ class ShotGrid:
             value=None,
         )
         return self._many(rows, Sequence)
-
-    # ---- reads: environments -----------------------------------------------
-
-    @overload
-    def get_environment(self, *, id: int) -> Environment: ...
-    @overload
-    def get_environment(self, *, code: str) -> Environment: ...
-    @overload
-    def get_environment(self, *, path: str) -> Environment: ...
-
-    def get_environment(
-        self,
-        *,
-        id: int | None = None,
-        code: str | None = None,
-        path: str | None = None,
-    ) -> Environment:
-        """Fetch one environment asset by id, code, or canonical path.
-
-        Raises:
-            ShotGridNotFound: No environment matches.
-            ShotGridAmbiguous: Multiple environments match.
-            TypeError: Zero or more than one selector was provided.
-        """
-        _require_exactly_one_selector(id=id, code=code, path=path)
-        selector, value = _selected(id=id, code=code, path=path)
-        filters: list[Any] = [
-            self._project_filter(),
-            _SG_STATUS_ACTIVE_FILTER,
-            ("sg_asset_type", "is", "Environment"),
-        ]
-        if selector == "id":
-            filters.append(("id", "is", value))
-        elif selector == "code":
-            filters.append(("code", "is", value))
-        rows = _read_or_raise(
-            lambda: self._sg.find("Asset", filters, list(_SG_FIELDS_ENVIRONMENT)),
-            entity_type="Environment",
-            selector=selector,
-            value=value,
-        )
-        if selector == "path":
-            rows = [
-                r
-                for r in rows
-                if build_environment_path(r.get("code"), r.get("sg_subdirectory"))
-                == value
-            ]
-        return self._one_or_raise(
-            entity_type="Environment",
-            selector=selector,
-            value=value,
-            rows=rows,
-            cls=Environment,
-        )
 
     # ---- reads: sets -------------------------------------------------------
 
@@ -1212,8 +1151,6 @@ class ShotGrid:
         """
         if isinstance(entity, Asset):
             return cast(_E, self.get_asset(id=entity.id))
-        if isinstance(entity, Environment):
-            return cast(_E, self.get_environment(id=entity.id))
         if isinstance(entity, Set):
             return cast(_E, self.get_set(name=entity.name))
         if isinstance(entity, Shot):

@@ -17,9 +17,8 @@ from bpy.types import (
 from pxr import Sdf, UsdUtils
 
 from env_sg import DB_Config
-from pipe.core.shot import linked_environments
+from pipe.core.sets import current_layer_path
 from pipe.core.shotgrid import ShotGrid
-from pipe.core.util.paths import get_production_path
 from pipe.dcc.blender.fx2d import util
 
 if TYPE_CHECKING:
@@ -136,12 +135,9 @@ def rebuild_holdout(scene: Scene, view_layer: ViewLayer, shot_root: Path) -> str
 
 
 def _set_layers(shot_code: str) -> list[Path]:
-    """The `main.usd` of every set ShotGrid links to the shot."""
+    """The current layer of every set ShotGrid assigns the shot."""
     shot = ShotGrid.connect(DB_Config).get_shot(code=shot_code)
-    return [
-        get_production_path() / env.environment_path / "main.usd"
-        for env in linked_environments(shot)
-    ]
+    return [current_layer_path(set.name) for set in shot.sets or []]
 
 
 # What the dialog may offer, by property name. Looked up once when it opens, because
@@ -213,7 +209,7 @@ class SKD_OT_fx2d_import_holdout(Operator):
                 self.report(
                     {"ERROR"},
                     f"Could not import the set because {shot_root.name} has no set "
-                    "linked in ShotGrid. Nothing was changed.",
+                    "assigned in ShotGrid. Nothing was changed.",
                 )
                 return {"CANCELLED"}
         unreadable = util.unreadable(

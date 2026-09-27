@@ -13,7 +13,7 @@ from pipe.core.ui import FilteredListDialog, MessageDialog
 from pipe.dcc.houdini.hipfile.departments import DEPARTMENT_OPTIONS, Department
 from pipe.dcc.houdini.hipfile.paths import department_from_hip_path
 from pipe.core.sets import current_layer_path
-from pipe.core.shot import assigned_sets, houdini_department_stream, shot_owner_for
+from pipe.core.shot import houdini_department_stream, shot_owner_for
 from pipe.core.shotgrid import (
     Set,
     SGEntity,
@@ -429,7 +429,7 @@ class HShotFileManager(HFileManager):
         hou.playbar.setPlaybackRange(cut_in - 5, cut_out + 5)
 
     def _sync_sets(self, shot: Shot) -> None:
-        sets = assigned_sets(shot)
+        sets = shot.sets or []
         node = self._get_stage().node(SETS_NODE_NAME)
         if node is None:
             if sets:
@@ -459,7 +459,7 @@ class HShotFileManager(HFileManager):
     def _get_muted_departments(self) -> list[str]:
         department = self._department_value()
         if department == self.DEPARTMENT.CFX.value:
-            return ["cfx", "fx", "envfx", "layout", "lighting", "render"]
+            return ["cfx", "fx", "envfx", "lighting", "render"]
         if department == self.DEPARTMENT.FX.value:
             return ["fx"]
         if department == self.DEPARTMENT.FLO.value:

@@ -1,6 +1,5 @@
-"""A shot's paths, version streams and sets."""
+"""A shot's paths and version streams."""
 
-from .sets import assigned_sets, linked_environments
 from .version_adapter import (
     blender_fx2d_stream,
     houdini_department_stream,
@@ -12,10 +11,8 @@ from .version_adapter import (
 )
 
 __all__ = [
-    "assigned_sets",
     "blender_fx2d_stream",
     "houdini_department_stream",
-    "linked_environments",
     "maya_anim_stream",
     "maya_rlo_stream",
     "shot_owner_for",

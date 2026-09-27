@@ -11,7 +11,8 @@ from pipe.core.shotgrid import SGEntity, Shot, is_previs_shot_code
 from pipe.core.versioning import VersionStreamSpec, path_matches_stream
 
 from .shotfile_manager import MShotFileManager
-from .stage import add_sublayer, get_stage, get_stage_shape, setup_environment
+from .sets import sync_shot_sets
+from .stage import add_sublayer, get_stage, get_stage_shape
 
 log = logging.getLogger(__name__)
 
@@ -96,7 +97,6 @@ class MAnimShotFileManager(MShotFileManager):
         return [e for e in entities if not is_previs_shot_code(e.code)]
 
     def _setup_scene(self) -> None:
-        # Sublayer order is strength order, and the shot camera outranks the set.
         self._sublayer_camera()
 
         # Import Rigs. ``self.shot.assets`` carries partial Assets (id + code
@@ -113,12 +113,11 @@ class MAnimShotFileManager(MShotFileManager):
                     f"Couldn't find the rig file for {asset.display_name} even though it's tagged as rigged"
                 )
 
-        setup_environment(self.shot)
+        sync_shot_sets(self.shot)
 
     def _sublayer_camera(self) -> None:
         root_layer = get_stage().GetRootLayer()
-        # Production-root-relative, resolved by `PXR_AR_DEFAULT_SEARCH_PATH` — not
-        # relative to the root layer, which lives a directory deeper.
+        # Production-root-relative, resolved by `PXR_AR_DEFAULT_SEARCH_PATH`.
         cam_layer = Sdf.Layer.FindOrOpen(
             "/".join((self.shot.shot_path, "cam", "cam.usd"))
         )
