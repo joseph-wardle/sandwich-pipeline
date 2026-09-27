@@ -142,6 +142,7 @@ _SG_SHOT_CUT_IN = "sg_cut_in"
 _SG_SHOT_CUT_OUT = "sg_cut_out"
 _SG_SHOT_CUT_DURATION = "sg_cut_duration"
 _SG_SHOT_TASK_TEMPLATE = "task_template"
+_SG_SHOT_SETS = "sg_sets"
 _SG_VERSION_CODE = "code"
 _SG_VERSION_ENTITY = "entity"
 _SG_VERSION_USER = "user"
@@ -834,8 +835,9 @@ class ShotGrid:
         cut_out: int,
         description: str | None = None,
         task_template: str | None = SHOT_TASK_TEMPLATE,
+        sets: list[Set] | None = None,
     ) -> Shot:
-        """Create a Shot with its frame range and task list already in place.
+        """Create a Shot with its frame range, task list and sets already in place.
 
         Used by the previs break-out, which delivers shots production has not
         registered yet. `task_template` names a ShotGrid Shot template whose
@@ -854,6 +856,8 @@ class ShotGrid:
         }
         if description:
             payload[_SG_SHOT_DESCRIPTION] = description
+        if sets:
+            payload[_SG_SHOT_SETS] = [_entity_ref("Asset", set) for set in sets]
         template = self._task_template_ref(task_template) if task_template else None
         if template is not None:
             payload[_SG_SHOT_TASK_TEMPLATE] = template

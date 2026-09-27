@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -95,6 +96,10 @@ class DeliveryPlan:
     # What previs is laid out against, and what the delivered RLO will compose.
     previs_sets: tuple[str, ...]
     rlo_sets: tuple[str, ...]
+    # Assigned to the shot when `deliver` creates it, so a new shot starts dressed
+    # like its previs. Empty for a shot production already holds, whose assignment
+    # is production's.
+    new_shot_sets: tuple[Set, ...]
 
     @property
     def destination(self) -> Path:
@@ -120,6 +125,7 @@ def plan_delivery(shot: PrevisShot, proxy: Shot, conn: ShotGrid) -> DeliveryPlan
     sg_shot = _find_shot(conn, code)
     cut_in, cut_out = _cut_range(shot)
     held_cut = None if sg_shot is None else (sg_shot.cut_in, sg_shot.cut_out)
+    new_shot_sets = () if sg_shot else tuple(proxy.sets or [])
     return DeliveryPlan(
         code=code,
         cut_in=cut_in,
@@ -130,7 +136,8 @@ def plan_delivery(shot: PrevisShot, proxy: Shot, conn: ShotGrid) -> DeliveryPlan
         recuts=held_cut is not None and held_cut != (cut_in, cut_out),
         replaces=_outgoing_rlo(code, sg_shot),
         previs_sets=_set_codes(proxy.sets or []),
-        rlo_sets=_set_codes(sg_shot.sets or []) if sg_shot else (),
+        rlo_sets=_set_codes((sg_shot.sets or []) if sg_shot else new_shot_sets),
+        new_shot_sets=new_shot_sets,
     )
 
 
@@ -194,7 +201,7 @@ def _outgoing_rlo(code: str, sg_shot: Shot | None) -> Shot | None:
     return sg_shot
 
 
-def _set_codes(sets: list[Set]) -> tuple[str, ...]:
+def _set_codes(sets: Iterable[Set]) -> tuple[str, ...]:
     return tuple(sorted(set.display_name for set in sets))
 
 
@@ -234,6 +241,7 @@ def _register_shot(plan: DeliveryPlan, conn: ShotGrid) -> Shot:
                 sequence=plan.sequence,
                 cut_in=plan.cut_in,
                 cut_out=plan.cut_out,
+                sets=list(plan.new_shot_sets),
             )
         if plan.recuts:
             return conn.set_shot_cut_range(
