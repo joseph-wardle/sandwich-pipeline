@@ -13,6 +13,10 @@ def main():
         if plugin not in pluginInfo:
             mc.loadPlugin(plugin)
 
+    from pipe.dcc.maya.shotfile.stage import serialize_usd_edits_into_scene
+
+    serialize_usd_edits_into_scene()
+
     # Apply the pipeline OCIO viewport default
     from pipe.core.color import DEFAULT_VIEW, DISPLAY
 

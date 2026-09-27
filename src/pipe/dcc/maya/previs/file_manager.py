@@ -151,7 +151,6 @@ class MPrevisFileManager(MShotFileManager):
 
         stage.create_stage_proxy()
         self._setup_scene()
-        stage.serialize_usd_edits_into_scene()
         # Whatever the scene already holds, not a blank: opening the legacy file
         # can fire the panel's scene callback, and an unconditional blank here
         # would erase a shot list it had just imported.
@@ -162,7 +161,6 @@ class MPrevisFileManager(MShotFileManager):
     @classmethod
     @log_errors
     def run_on_open(cls) -> None:
-        stage.serialize_usd_edits_into_scene()
         mc.setAttr("defaultResolution.width", 1920)  # type: ignore
         mc.setAttr("defaultResolution.height", 1080)  # type: ignore
         mc.setAttr("defaultResolution.pixelAspect", 1.0)  # type: ignore

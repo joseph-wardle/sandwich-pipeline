@@ -40,7 +40,7 @@ from pipe.core.versioning import (
 )
 
 from .sets import sync_shot_sets
-from .stage import build_shot_stage, serialize_usd_edits_into_scene
+from .stage import build_shot_stage
 from .timeline import shot_timeline_generator
 
 log = logging.getLogger(__name__)
@@ -103,8 +103,6 @@ class MShotFileManager(FileManager):
     @log_errors
     def run_on_open(cls) -> None:
         """Function to run on file open via script node"""
-        serialize_usd_edits_into_scene()
-
         # change default render resolution
         mc.setAttr("defaultResolution.width", 1920)  # type: ignore
         mc.setAttr("defaultResolution.height", 1080)  # type: ignore
@@ -237,7 +235,7 @@ class MShotFileManager(FileManager):
 
     @abstractmethod
     def _setup_scene(self) -> None:
-        """Fill the stage. Runs before the root layer is locked."""
+        """Fill the new scene's stage."""
         ...
 
     def _setup_file(self, path: Path, entity) -> None:
