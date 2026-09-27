@@ -42,17 +42,6 @@ def add_sublayer(root_layer: Sdf.Layer, layer: Sdf.Layer) -> None:
         root_layer.subLayerPaths.append(layer.identifier)
 
 
-def serialize_usd_edits_into_scene() -> None:
-    """Keep USD edits in the Maya file itself, without prompting on save.
-
-    Set once per session at startup, so it holds however a scene was opened. With
-    Maya's default, saving asks the artist where to write USD edits, and one answer
-    writes modified layers back to their files on disk.
-    """
-    mc.optionVar(intValue=("mayaUsd_SerializedUsdEditsLocationPrompt", 0))
-    mc.optionVar(intValue=("mayaUsd_SerializedUsdEditsLocation", 2))
-
-
 def build_shot_stage(shot: Shot) -> Usd.Stage:
     """Give the open scene a new, empty shot stage and stamp it with the shot code."""
     transform = mc.createNode("transform", name="stage_transform")
@@ -70,5 +59,4 @@ __all__ = [
     "build_shot_stage",
     "get_stage",
     "get_stage_shape",
-    "serialize_usd_edits_into_scene",
 ]

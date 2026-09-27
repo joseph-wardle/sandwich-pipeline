@@ -52,13 +52,20 @@ def staging_layer_path(name: str, version: int) -> Path:
 
 
 def create_staging(name: str, version: int) -> Path:
-    """Create the empty folder a version is written into; return its layer path."""
+    """Create the empty folder a version is written into; return its layer path.
+
+    Raises:
+        FileExistsError: Another publish of `version` is running, or one stopped
+            partway and left its folder behind.
+    """
     group = _group(name)
     staging = staging_layer_path(name, version).parent
-    for folder in (staging.parent, staging):
-        if not folder.exists():
-            folder.mkdir()
-            _share(folder, group)
+    if not staging.parent.exists():
+        staging.parent.mkdir()
+        _share(staging.parent, group)
+    # Never reused: whatever is already in it would be committed with this version.
+    staging.mkdir()
+    _share(staging, group)
     return staging_layer_path(name, version)
 
 

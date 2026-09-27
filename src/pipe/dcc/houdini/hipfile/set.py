@@ -192,6 +192,14 @@ class HSetFileManager(HFileManager):
         label = f"{set.display_name} v{version:03d}"
         try:
             staged = create_staging(set.name, version)
+        except FileExistsError as exc:
+            self._message(
+                f"Nothing was published: {exc.filename} already exists. Someone may "
+                f"be publishing {set.display_name} right now. If not, a publish "
+                "stopped partway: delete that folder and publish again.",
+                "Publish Set",
+            )
+            return
         except OSError:
             log.exception("Could not create the staging folder for %s.", label)
             self._message(
@@ -202,9 +210,13 @@ class HSetFileManager(HFileManager):
             return
         try:
             cast(hou.RopNode, rop).render(output_file=str(staged))
+            written = staged.is_file()
         except hou.OperationFailed:
+            # The root layer may exist even so, with a layer it needs left unwritten.
             log.exception("%s failed to write %s.", rop.path(), staged)
-        if not staged.is_file():
+            written = False
+        if not written:
+            discard_staged(set.name, version)
             self._message(
                 f"{rop.path()} failed to write the set, so nothing was published. "
                 "Check the node's errors.",
