@@ -38,5 +38,21 @@
 	"PythonModule/Source":{
 		"type":"string",
 		"value":""
+	},
+	"OnNameChanged/IsExpr":{
+		"type":"bool",
+		"value":false
+	},
+	"OnNameChanged/IsPython":{
+		"type":"bool",
+		"value":true
+	},
+	"OnNameChanged/IsScript":{
+		"type":"bool",
+		"value":true
+	},
+	"OnNameChanged/Source":{
+		"type":"string",
+		"value":""
 	}
 }

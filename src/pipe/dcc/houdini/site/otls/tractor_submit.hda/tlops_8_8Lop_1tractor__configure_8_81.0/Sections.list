@@ -9,3 +9,4 @@ Contents.gz	Contents.gz
 PythonModule	PythonModule
 OnCreated	OnCreated
 ExtraFileOptions	ExtraFileOptions
+OnNameChanged	OnNameChanged

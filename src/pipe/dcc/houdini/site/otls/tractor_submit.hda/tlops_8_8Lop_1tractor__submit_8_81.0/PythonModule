@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hou
+import logging
 import os
+import traceback
 
 import tractor.api.author as author
 
+from pipe.dcc.houdini.tractor import folders
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -14,6 +17,8 @@ _shared_module = hou.nodeType(
     hou.lopNodeTypeCategory(), "tlops::shared_python"
 ).hdaModule()
 ParmData = _shared_module.ParmData
+
+log = logging.getLogger(__name__)
 
 
 class SubmitParms(metaclass=ParmData):
@@ -55,7 +60,63 @@ def sendToTractor(node: hou.LopNode) -> None:
     if not ensure_valid_inputs(node.inputs()):
         return
 
+    configures = [folders.find_configure(input) for input in node.inputs()]
+    try:
+        folders.check_saved()
+        claimed = folders.claim(configures)
+    except folders.SendRefused as refusal:
+        hou.ui.displayMessage(
+            str(refusal),
+            title="Nothing was sent to Tractor",
+            severity=hou.severityType.Error,
+        )
+        return
+
     parms = SubmitParms(node)
+    try:
+        job = build_job(node, parms)
+    except Exception:
+        log.exception("Building the job from %s failed", node.path())
+        folders.release(claimed)
+        hou.ui.displayMessage(
+            "The job could not be built, so nothing was sent to Tractor. The "
+            "details below say what went wrong.",
+            title="Nothing was sent to Tractor",
+            severity=hou.severityType.Error,
+            details=traceback.format_exc(),
+        )
+        return
+
+    try:
+        job_id = job.spool(block=True)
+    except Exception:
+        # A lost reply looks the same as a refusal, and the job may already be
+        # queued and reading its folders, so they stay.
+        log.exception("Tractor did not confirm the job from %s", node.path())
+        job_id = None
+        hou.ui.displayMessage(
+            "Tractor did not confirm the job, but it may still have been queued. "
+            f'Look for "{parms.title}" at {parms.engine_url} before sending again.'
+            "\n\nIts folders were kept:\n" + "\n".join(str(f) for f in claimed),
+            title="Tractor did not confirm the job",
+            severity=hou.severityType.Warning,
+            details=traceback.format_exc(),
+        )
+    else:
+        hou.ui.displayMessage(
+            f"Job {job_id} renders into:\n"
+            + "\n".join(str(folder) for folder in claimed)
+            + f"\n\nVisit {parms.engine_url} to check progress.",
+            title="Job sent to Tractor",
+        )
+
+    # Recorded after the dialog, which must reach the artist even when a locked
+    # parm or take refuses the record.
+    for configure, folder in zip(configures, claimed):
+        folders.record_sent(configure, folder, job_id)
+
+
+def build_job(node: hou.LopNode, parms: SubmitParms) -> author.Job:
     configure_tractor_connection(parms)
     job = author.Job()
     job.title = parms.title
@@ -65,11 +126,4 @@ def sendToTractor(node: hou.LopNode) -> None:
     for input in node.inputs():
         task: author.Task = input.hdaModule().generate_tractor_task(input, input)
         job.addChild(task)
-
-    # configure blades and such
-    job.spool(block=True)
-
-    author.closeEngineClient()
-    hou.ui.displayMessage(
-        f"Visit {parms.engine_url} to check progress.", title="Job sent to Tractor"
-    )
+    return job

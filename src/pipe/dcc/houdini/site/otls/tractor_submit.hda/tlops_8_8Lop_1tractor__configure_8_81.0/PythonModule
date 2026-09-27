@@ -5,6 +5,8 @@ import hou
 import tractor.api.author as author
 
 from pathlib import Path
+from pipe.dcc.houdini.tractor.folders import default_root
+from pipe.dcc.houdini.tractor.folders import show_next_version as refresh_render_dir  # render_network calls this name
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -128,7 +130,11 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
         parms.rop_lop = submit_input.path()
 
     job_dir = Path(parms.savetodirectory_directory)
-    node.node("usd_rop").parm("execute").pressButton()  # type: ignore[union-attr]
+    rop = node.node("usd_rop")
+    rop.parm("execute").pressButton()  # type: ignore[union-attr]
+    # A failed write shows in errors(); the button doesn't raise.
+    if errors := rop.errors():  # type: ignore[union-attr]
+        raise hou.OperationFailed("\n".join(errors))
     (job_dir / "images").mkdir(0o755, True, True)
 
     husk_cmd = generate_husk_command(parms)
@@ -182,29 +188,4 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
 def job_directory(node: hou.LopNode) -> Path:
     parms = ConfigParms(node)
     return Path(parms.savetodirectory_directory)
-
-
-import os
-import re
-    
-def _render_base(node: hou.Node) -> Path:
-  hip = Path(hou.text.expandString("$HIP"))
-  if hip.name.lower() == "lighting":
-      return hip.parent / "render" / node.name()
-  return hip / "render"
-
-
-def _next_version_dir(node: hou.Node) -> Path:
-  base = Path(os.path.normpath(_render_base(node)))
-  pattern = re.compile(r"^v(\d+)$")
-  versions = [
-      int(m.group(1))
-      for p in (base.iterdir() if base.is_dir() else [])
-      if p.is_dir() and (m := pattern.match(p.name))
-  ]
-  return base / f"v{max(versions, default=0) + 1:03d}"
-
-
-def refresh_render_dir(node: hou.Node) -> None:
-  node.parm("savetodirectory_directory").set(str(_next_version_dir(node)))
 
