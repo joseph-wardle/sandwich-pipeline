@@ -3,6 +3,7 @@ from __future__ import annotations
 import hou
 import json
 import re
+import shlex
 
 import tractor.api.author as author
 
@@ -33,7 +34,6 @@ class DenoiseParms(metaclass=ParmData):
     keep_aux: int
     passthrough: str
     service: str
-    rmantree_override: str
     tilesx: int
     tilesy: int
     topology: str
@@ -251,6 +251,7 @@ DENOISED_DIR = AUX_DIR + "/denoised"
 FINAL_DIR = "images_dn"
 IMAGES_DIR = "images"
 JSON_CONFIG = "denoise.json"
+MULTIFRAME_RADIUS = 3
 
 
 def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> author.Task:
@@ -313,7 +314,8 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
 
     # check that we have contiguous frames
     fnum_list = list(findex.keys())
-    if sorted(fnum_list) != list(range(min(fnum_list), max(fnum_list) + 1)):
+    first, last = min(fnum_list), max(fnum_list)
+    if sorted(fnum_list) != list(range(first, last + 1)):
         if config.is_crossframe:
             raise hou.NodeError(
                 "Error! You have selected Multiframe denoising but are not "
@@ -322,50 +324,19 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
 
     for fnum, frame_task in findex.items():
         frame_denoise_task = author.Task(title=("Denoise " + frame_task.title))
-        if config.is_crossframe:
-            frame_include = f"{max(0, fnum - 3)}-{fnum + 3}"
-            frame_exclude = f"{max(0, fnum - 3)}-{fnum - 1},{fnum + 1}-{fnum + 3}"
-        else:
-            frame_include = fnum
-            frame_exclude = -1
-
+        window = denoise_window(fnum, first, last, config.is_crossframe)
         frame_denoise_task.newCommand(
-            argv=[
-                "/bin/bash",
-                "-exc",
-                f"FrameInclude='{frame_include}' "
-                f"FrameExclude='{frame_exclude}' "
-                f"InputFile='{jd / IMAGES_DIR / '####.exr'}' "
-                f"OutputFile='{jd / DENOISED_DIR / '####.exr'}' "
-                + (
-                    f"RMANTREE='{parms.rmantree_override}' "
-                    if parms.rmantree_override
-                    else " "
-                )
-                + f"/bin/bash -exc '$''RMANTREE/bin/denoise_batch --json {jd}/{JSON_CONFIG}'",
-            ],
+            argv=["/bin/bash", "-exc", denoise_script(jd, fnum, window)],
             retryrc=[
                 -11,  # Segmentation fault
                 139,  # Segmentation fault
             ],
             service=parms.service,
         )
-        frame_denoise_task.newCommand(
-            argv=[
-                "test",
-                "-f",
-                f"{jd / DENOISED_DIR}/{fnum:04}.exr",
-            ],
-            service=parms.service,
-        )
 
         if not parms.denoise_only:
-            dep_frame_range = (
-                range(fnum - 3, fnum + 4) if config.is_crossframe else [fnum]
-            )
-            for t in (findex.get(i, None) for i in dep_frame_range):
-                if t is not None:
-                    frame_denoise_task.addChild(author.Instance(title=t.title))
+            for f in window:
+                frame_denoise_task.addChild(author.Instance(title=findex[f].title))
 
         denoise_task.addChild(frame_denoise_task)
 
@@ -401,6 +372,43 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
         )
 
     return task
+
+
+def denoise_window(fnum: int, first: int, last: int, is_crossframe: bool) -> list[int]:
+    # Neighbours outside the rendered range don't exist
+    if not is_crossframe:
+        return [fnum]
+    start = max(first, fnum - MULTIFRAME_RADIUS)
+    end = min(last, fnum + MULTIFRAME_RADIUS)
+    return list(range(start, end + 1))
+
+
+def denoise_script(jd: Path, fnum: int, window: list[int]) -> str:
+    """denoise_batch exits 0 even when it writes nothing, so the output check
+    shares its command: a Tractor retry then re-runs both, never the check alone.
+    """
+    exclude = []
+    if window[0] < fnum:
+        exclude.append(f"{window[0]}-{fnum - 1}")
+    if fnum < window[-1]:
+        exclude.append(f"{fnum + 1}-{window[-1]}")
+    inputs = [jd / JSON_CONFIG, *(jd / IMAGES_DIR / f"{f:04}.exr" for f in window)]
+    q = shlex.quote
+    return "\n".join(
+        [
+            f"export FrameInclude={window[0]}-{window[-1]}",
+            f"export FrameExclude={','.join(exclude) or -1}",
+            f"export InputFile={q(str(jd / IMAGES_DIR / '####.exr'))}",
+            f"export OutputFile={q(str(jd / DENOISED_DIR / '####.exr'))}",
+            f"for f in {' '.join(q(str(p)) for p in inputs)}; do",
+            '    if [ ! -f "$f" ]; then echo "Denoise input is missing: $f" >&2; exit 1; fi',
+            "done",
+            f"out={q(str(jd / DENOISED_DIR / f'{fnum:04}.exr'))}",
+            'rm -f "$out"',
+            f'"$RMANTREE/bin/denoise_batch" --json {q(str(jd / JSON_CONFIG))}',
+            '[ -f "$out" ] || { echo "denoise_batch exited without writing $out" >&2; exit 1; }',
+        ]
+    )
 
 
 def job_directory(node: hou.LopNode) -> Path:

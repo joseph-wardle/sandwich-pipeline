@@ -172,6 +172,7 @@
             name    "rmantree_override"
             label   "RMANTREE Override"
             type    string
+            invisible
             default { "" }
             parmtag { "script_callback_language" "python" }
         }
