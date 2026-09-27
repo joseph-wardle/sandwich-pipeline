@@ -11,6 +11,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
+from pipe.dcc.houdini.tractor import paths
 from pxr import Sdf, Usd, UsdRender
 from typing import TYPE_CHECKING
 
@@ -29,7 +30,6 @@ parmfield = _shared_module.parmfield
 
 class DenoiseParms(metaclass=ParmData):
     asymmetry: float
-    cryptomatte: int
     denoise_only: int
     keep_aux: int
     passthrough: str
@@ -246,10 +246,8 @@ def generate_denoise_config(parms: DenoiseParms, vars: Iterable[str]) -> Denoise
 
 
 AUX_DIR = "aux"
-CRYPTOMATTE_DIR = AUX_DIR + "/cryptomatte"
 DENOISED_DIR = AUX_DIR + "/denoised"
 FINAL_DIR = "images_dn"
-IMAGES_DIR = "images"
 JSON_CONFIG = "denoise.json"
 MULTIFRAME_RADIUS = 3
 
@@ -300,12 +298,12 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
     passthrough_cleanup = ",".join(passthrough_aovs)
 
     jd = job_directory(node)
+    product = paths.single_product_folder(jd / paths.RENDER_USD)
 
     with open(jd / JSON_CONFIG, "w") as cf:
         cf_json = json.dumps(asdict(config)).replace("frame_", "frame-")
         cf.write(cf_json)
 
-    (jd / CRYPTOMATTE_DIR).mkdir(0o755, True, True)
     (jd / DENOISED_DIR).mkdir(0o755, True, True)
     (jd / FINAL_DIR).mkdir(0o755, True, True)
 
@@ -326,7 +324,7 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
         frame_denoise_task = author.Task(title=("Denoise " + frame_task.title))
         window = denoise_window(fnum, first, last, config.is_crossframe)
         frame_denoise_task.newCommand(
-            argv=["/bin/bash", "-exc", denoise_script(jd, fnum, window)],
+            argv=["/bin/bash", "-exc", denoise_script(jd, product, fnum, window)],
             retryrc=[
                 -11,  # Segmentation fault
                 139,  # Segmentation fault
@@ -348,12 +346,7 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
                 "--metamerge",
                 str(jd / DENOISED_DIR / f"{fnum:04}.exr"),
                 *(
-                    [str(jd / CRYPTOMATTE_DIR / f"{fnum:04}.exr"), "--chappend"]
-                    if parms.cryptomatte
-                    else []
-                ),
-                *(
-                    [str(jd / IMAGES_DIR / f"{fnum:04}.exr"), "--ch", passthrough_cleanup, "--chappend"]
+                    [str(product / f"{fnum:04}.exr"), "--ch", passthrough_cleanup, "--chappend"]
                     if passthrough_cleanup
                     else []
                 ),
@@ -367,7 +360,7 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
 
     if not parms.keep_aux:
         cleanup_task.newCommand(
-            argv=["rm", "-rf", str(jd / AUX_DIR), str(jd / IMAGES_DIR), str(jd / JSON_CONFIG)],
+            argv=["rm", "-rf", str(jd / AUX_DIR), str(product), str(jd / JSON_CONFIG)],
             service=parms.service,
         )
 
@@ -383,7 +376,7 @@ def denoise_window(fnum: int, first: int, last: int, is_crossframe: bool) -> lis
     return list(range(start, end + 1))
 
 
-def denoise_script(jd: Path, fnum: int, window: list[int]) -> str:
+def denoise_script(jd: Path, product: Path, fnum: int, window: list[int]) -> str:
     """denoise_batch exits 0 even when it writes nothing, so the output check
     shares its command: a Tractor retry then re-runs both, never the check alone.
     """
@@ -392,13 +385,13 @@ def denoise_script(jd: Path, fnum: int, window: list[int]) -> str:
         exclude.append(f"{window[0]}-{fnum - 1}")
     if fnum < window[-1]:
         exclude.append(f"{fnum + 1}-{window[-1]}")
-    inputs = [jd / JSON_CONFIG, *(jd / IMAGES_DIR / f"{f:04}.exr" for f in window)]
+    inputs = [jd / JSON_CONFIG, *(product / f"{f:04}.exr" for f in window)]
     q = shlex.quote
     return "\n".join(
         [
             f"export FrameInclude={window[0]}-{window[-1]}",
             f"export FrameExclude={','.join(exclude) or -1}",
-            f"export InputFile={q(str(jd / IMAGES_DIR / '####.exr'))}",
+            f"export InputFile={q(str(product / '####.exr'))}",
             f"export OutputFile={q(str(jd / DENOISED_DIR / '####.exr'))}",
             f"for f in {' '.join(q(str(p)) for p in inputs)}; do",
             '    if [ ! -f "$f" ]; then echo "Denoise input is missing: $f" >&2; exit 1; fi',

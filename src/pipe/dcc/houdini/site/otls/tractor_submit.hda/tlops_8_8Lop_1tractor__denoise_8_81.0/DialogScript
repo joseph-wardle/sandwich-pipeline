@@ -143,13 +143,6 @@
         parmtag { "script_callback_language" "python" }
     }
     parm {
-        name    "cryptomatte"
-        label   "Generate Cryptomatte"
-        type    toggle
-        default { "0" }
-        parmtag { "script_callback_language" "python" }
-    }
-    parm {
         name    "service"
         label   "Denoise Service Key"
         type    string
@@ -167,6 +160,7 @@
     groupcollapsible {
         name    "folder0"
         label   "Advanced"
+        grouptag { "group_type" "collapsible" }
 
         parm {
             name    "rmantree_override"

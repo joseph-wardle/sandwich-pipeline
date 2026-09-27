@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hou
 
+import shlex
 import tractor.api.author as author
 
 from pathlib import Path
+from pipe.dcc.houdini.tractor import paths
 from pipe.dcc.houdini.tractor.folders import default_root
 from pipe.dcc.houdini.tractor.folders import show_next_version as refresh_render_dir  # render_network calls this name
 from typing import TYPE_CHECKING
@@ -43,10 +45,6 @@ class ConfigParms(metaclass=ParmData):
     override_camera: str = parmfield(has_toggle=True)
     rendersettings: str = parmfield(has_toggle=True)
     husk_instantshutter: int
-    husk_prerender: str
-    husk_preframe: str
-    husk_postrender: str
-    husk_postframe: str
     husk_tile: int
     husk_tilecount1: int
     husk_tilecount2: int
@@ -74,8 +72,6 @@ def get_frame_range(parms: ConfigParms, node: hou.LopNode) -> tuple[int, int, in
 def generate_husk_command(parms: ConfigParms) -> str:
     cmd = [
         "husk",
-        "--make-output-path",
-        f"--output '{parms.savetodirectory_directory}/images/$F4.exr'",
         "--frame {fnum}",
         f"--renderer {parms.renderer}",
         f"--purpose {parms.husk_purpose}",
@@ -92,14 +88,6 @@ def generate_husk_command(parms: ConfigParms) -> str:
         cmd.append(f"--settings {p}")
     if parms.husk_instantshutter:
         cmd.append("--disable-motionblur")
-    if p := parms.husk_prerender:
-        cmd.append(f"--prerender-script {p}")
-    if p := parms.husk_preframe:
-        cmd.append(f"--prerender-script {p}")
-    if p := parms.husk_postrender:
-        cmd.append(f"--prerender-script {p}")
-    if p := parms.husk_postframe:
-        cmd.append(f"--prerender-script {p}")
     if parms.husk_tile:
         cmd.append(f"--tile-count {parms.husk_tilecount1} {parms.husk_tilecount2}")
         cmd.append("--tile-index {tnum:03}")
@@ -110,7 +98,7 @@ def generate_husk_command(parms: ConfigParms) -> str:
             cmd.append(f"--usd-chrome-file {p}")
 
     cmd.append("--disable-dummy-raster-product")
-    cmd.append(f"'{parms.savetodirectory_directory}/render.usd'")
+    cmd.append(shlex.quote(str(Path(parms.savetodirectory_directory) / paths.RENDER_USD)))
 
     return " ".join(cmd)
 
@@ -135,20 +123,19 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
     # A failed write shows in errors(); the button doesn't raise.
     if errors := rop.errors():  # type: ignore[union-attr]
         raise hou.OperationFailed("\n".join(errors))
-    (job_dir / "images").mkdir(0o755, True, True)
 
+    start, end, inc = get_frame_range(parms, node)
+    frames = list(range(start, end + 1, inc))
+    outputs = paths.author_outputs(job_dir / paths.RENDER_USD, frames)
+    # husk makes no output folders, and exits 0 having written nothing.
+    mkdir = " ".join(["mkdir -p", *(shlex.quote(str(o)) for o in outputs)])
     husk_cmd = generate_husk_command(parms)
 
     timelimit = parms.husk_timelimit
     tiles = parms.husk_tile
     tilecount = parms.husk_tilecount1 * parms.husk_tilecount2
 
-    start, end, inc = get_frame_range(parms, node)
-    frame = start
-    while True:
-        if frame > end:
-            break
-
+    for frame in frames:
         frame_tasks: list[author.Task] = []
         if tiles:
             frame_tasks = [
@@ -164,6 +151,7 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
                     "/bin/bash",
                     "-exc",
                     'trap "test \$? -eq 3 && hserver -S $HOUDINI_LICENSE_SERVER && exit 3" EXIT && '
+                    + f"{mkdir} && "
                     + husk_cmd.format(fnum=frame, tnum=tile),
                 ],
                 retryrc=[
@@ -179,8 +167,6 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
                 render_command.maxrunsecs = timelimit
             frame_task.addCommand(render_command)
             task.addChild(frame_task)
-
-        frame += inc
 
     return task
 

@@ -7,6 +7,7 @@ import tractor.api.author as author
 from pathlib import Path
 
 from pipe.core import color
+from pipe.dcc.houdini.tractor import paths
 
 
 _shared_module = hou.nodeType(
@@ -30,7 +31,6 @@ class EncodeParms(metaclass=ParmData):
 DISPLAY = color.DISPLAY
 DEFAULT_VIEW = color.DEFAULT_VIEW
 
-IMAGES_DIR = "images"
 DENOISE_DIR = "images_dn"
 ENCODE_DIR = "video_tmp"
 # The frames hold sRGB display pixels from OCIO, so the movie says so and
@@ -43,13 +43,13 @@ WEB_FLAGS = (
 )
 
 
-def _input_image_dir(node: hou.LopNode) -> str:
-    """Determine the correct image subdirectory based on the input node type."""
+def _input_image_dir(node: hou.LopNode, jd: Path) -> Path:
+    """Determine the correct image folder based on the input node type."""
     input_node = node.input(0)
     input_type = input_node.type().name()
     if "tractor_denoise" in input_type:
-        return DENOISE_DIR
-    return IMAGES_DIR
+        return jd / DENOISE_DIR
+    return paths.single_product_folder(jd / paths.RENDER_USD)
 
 
 def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> author.Task:
@@ -70,7 +70,7 @@ def generate_tractor_task(node: hou.LopNode, submit_input: hou.LopNode) -> autho
     encode_task.addChild(author.Instance(title=upstream_task.title))
 
     jd = job_directory(node)
-    image_dir = jd / _input_image_dir(node)
+    image_dir = _input_image_dir(node, jd)
     tmp_dir = jd / ENCODE_DIR
 
     output_file = parms.output_file
