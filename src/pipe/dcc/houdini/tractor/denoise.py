@@ -1,0 +1,194 @@
+"""RenderMan's `denoise_batch`: the product it reads, its config and its command.
+
+The product that carries the denoise passes renders into `tmp/`. Each frame's
+command denoises it and writes the finished frame into the product's folder.
+
+The config names layers as RenderMan writes them, not as the vars are named:
+the alpha var `a` is written as `A`, and the beauty as `R, G, B` or `ci.*`.
+"""
+
+from __future__ import annotations
+
+import json
+import shlex
+from enum import Enum
+from pathlib import Path
+
+from pxr import Usd
+
+from pipe.dcc.houdini.tractor import SendRefused, paths
+
+CONFIG = "denoise.json"
+MULTIFRAME_RADIUS = 3
+# The product Denoise adds its passes to.
+PRODUCT = "/Render/Products/renderproduct"
+
+DENOISE_ROOT = "${RMANTREE}/lib/denoise/"
+
+
+class Topology(str, Enum):
+    MINI = DENOISE_ROOT + "mini.topo"
+    MULTIFRAME_ASYM = DENOISE_ROOT + "full_w7_4sv2_asym.topo"
+    MULTIFRAME_SYM = DENOISE_ROOT + "full_w7_4sv2_sym_gen2.topo"
+    SINGLEFRAME_ASYM = DENOISE_ROOT + "full_w1_5s_asym.topo"
+    SINGLEFRAME_SYM = DENOISE_ROOT + "full_w1_5s_sym_gen2.topo"
+
+
+PARAM_MAP: dict[Topology, str] = {
+    Topology.MINI: DENOISE_ROOT + "21531-renderman.param",
+    Topology.MULTIFRAME_ASYM: DENOISE_ROOT + "14579-renderman.param",
+    Topology.MULTIFRAME_SYM: DENOISE_ROOT + "20970-renderman.param",
+    Topology.SINGLEFRAME_ASYM: DENOISE_ROOT + "14433-renderman.param",
+    Topology.SINGLEFRAME_SYM: DENOISE_ROOT + "20973-renderman.param",
+}
+MULTIFRAME = (Topology.MULTIFRAME_ASYM, Topology.MULTIFRAME_SYM)
+
+# The vars Denoise adds that its config reads. RenderMan writes the beauty as
+# R, G, B whatever its var is called, so the beauty isn't among them.
+PASSES = frozenset(
+    {"a", "mse", "sampleCount", "albedo", "albedo_mse", "normal", "normal_mse"}
+    | {"diffuse", "diffuse_mse", "specular", "specular_mse"}
+)
+
+
+def config(
+    vars: list[str], topology: Topology, asymmetry: float, tiles: tuple[int, int]
+) -> dict:
+    """denoise_batch's config for a product with these vars.
+
+    The finished beauty is denoised diffuse plus denoised specular, which
+    denoise_batch sums into R, G, B.
+    """
+    outputs: dict[str, list[dict]] = {
+        "albedo": [],
+        "alpha": [_output("A", "A")],
+        "diffuse": [_output("diffuse", "RGB")],
+        "specular": [_output("specular", "RGB")],
+        "copy": [],
+    }
+    for var in vars:
+        # The denoiser's own inputs, the alpha and the beauty are written above.
+        if var.endswith(("mse", "_var")) or var in ("a", "ci", "sampleCount"):
+            continue
+        kind = var.partition("_")[0]
+        if var.startswith(("backward", "forward")) or var in ("__depth", "zfiltered"):
+            outputs["alpha"].append(_output(var, var))
+        elif kind in ("albedo", "diffuse", "specular"):
+            outputs[kind].append(_output(var, var))
+        else:
+            outputs["copy"].append(_output(var, var))
+
+    passes = [
+        _pass("albedo", "albedo", "albedo_mse", outputs["albedo"]),
+        _pass("alpha", "A", "mse", outputs["alpha"]),
+        _pass("diffuse", "diffuse", "diffuse_mse", outputs["diffuse"]),
+        _pass("specular", "specular", "specular_mse", outputs["specular"]),
+    ]
+    if outputs["copy"]:
+        # No layer is named Ci, so denoise_batch skips this pass's filter and
+        # copies its outputs unchanged.
+        passes.append(_pass("copy", "Ci", "mse", outputs["copy"]))
+
+    return {
+        "settings": {
+            "albedo": _read("albedo"),
+            "albedo_variance": _read("albedo_mse"),
+            "normal": _read("normal"),
+            "normal_variance": _read("normal_mse"),
+            "sample_count": _read("sampleCount"),
+            "frame-include": "${FrameInclude}",
+            "frame-exclude": "${FrameExclude}",
+            "topology": topology.value,
+            "parameters": PARAM_MAP[topology],
+            "asymmetry": asymmetry,
+            "overwrite": "OverwriteChannels",
+            "progress": True,
+            "tiles": list(tiles),
+        },
+        "passes": passes,
+    }
+
+
+def _read(layer: str) -> dict:
+    return {"layer": layer, "filename": "${InputFile}"}
+
+
+def _output(read: str, write: str) -> dict:
+    return {"read": _read(read), "write": {"layer": write, "filename": "${OutputFile}"}}
+
+
+def _pass(name: str, input: str, variance: str, outputs: list[dict]) -> dict:
+    return {
+        "name": name,
+        "input": _read(input),
+        "input_variance": _read(variance),
+        "outputs": outputs,
+    }
+
+
+def write_config(folder: Path, config: dict) -> None:
+    (folder / CONFIG).write_text(json.dumps(config))
+
+
+def var_names(product: Usd.Prim) -> list[str]:
+    return [paths.aov_name(var) for var in paths.render_vars(product)]
+
+
+def product(products: list[Usd.Prim]) -> Usd.Prim:
+    """The one product that carries every denoise pass."""
+    found = [p for p in products if PASSES <= set(var_names(p))]
+    if not found:
+        raise SendRefused(
+            f"Denoise adds its passes to {PRODUCT}, but the render settings don't "
+            "render it. Render that product, or remove Denoise."
+        )
+    if len(found) > 1:
+        names = ", ".join(str(p.GetPath()) for p in found)
+        raise SendRefused(
+            f"More than one render product carries Denoise's passes: {names}. "
+            "Keep them in one."
+        )
+    return found[0]
+
+
+def window(frame: int, frames: list[int], topology: Topology) -> list[int]:
+    # Neighbours outside the rendered range don't exist.
+    if topology not in MULTIFRAME:
+        return [frame]
+    start = max(frames[0], frame - MULTIFRAME_RADIUS)
+    end = min(frames[-1], frame + MULTIFRAME_RADIUS)
+    return list(range(start, end + 1))
+
+
+def script(folder: Path, product: str, frame: int, window: list[int]) -> str:
+    """denoise_batch exits 0 even when it writes nothing, so the output check
+    shares its command: a Tractor retry then re-runs both, never the check alone.
+    """
+    raw = folder / paths.TMP / product
+    denoised = folder / paths.TMP / paths.DENOISED / f"{frame:04}.exr"
+    final = folder / product / f"{frame:04}.exr"
+    exclude = []
+    if window[0] < frame:
+        exclude.append(f"{window[0]}-{frame - 1}")
+    if frame < window[-1]:
+        exclude.append(f"{frame + 1}-{window[-1]}")
+    inputs = [folder / CONFIG, *(raw / f"{f:04}.exr" for f in window)]
+    q = shlex.quote
+    return "\n".join(
+        [
+            f"export FrameInclude={window[0]}-{window[-1]}",
+            f"export FrameExclude={','.join(exclude) or -1}",
+            f"export InputFile={q(str(raw / '####.exr'))}",
+            f"export OutputFile={q(str(denoised.parent / '####.exr'))}",
+            f"for f in {' '.join(q(str(p)) for p in inputs)}; do",
+            '    if [ ! -f "$f" ]; then echo "Denoise input is missing: $f" >&2; exit 1; fi',
+            "done",
+            f"mkdir -p {q(str(denoised.parent))} {q(str(final.parent))}",
+            f"out={q(str(denoised))}",
+            'rm -f "$out"',
+            f'"$RMANTREE/bin/denoise_batch" --json {q(str(folder / CONFIG))}',
+            '[ -f "$out" ] || { echo "denoise_batch exited without writing $out" >&2; exit 1; }',
+            # Written aside and renamed in, so the folder only ever holds whole frames.
+            f'mv -f "$out" {q(str(final))}',
+        ]
+    )

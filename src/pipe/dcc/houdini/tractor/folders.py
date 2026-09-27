@@ -15,8 +15,8 @@ from pathlib import Path
 import hou
 
 from pipe.dcc.houdini.hipfile.departments import Department
+from pipe.dcc.houdini.tractor import SendRefused
 
-CONFIGURE = "tractor_configure"
 LAYER = "layer"
 ROOT = "render_root"
 # Named for the USD ROP parm inside Configure that reads it.
@@ -24,10 +24,6 @@ OUTPUT = "savetodirectory_directory"
 LAST_JOB = "last_job"
 
 _VERSION = re.compile(r"v(\d+)")
-
-
-class SendRefused(Exception):
-    """Why Send did nothing, worded for the artist."""
 
 
 def _text(node: hou.Node, name: str) -> str:
@@ -55,12 +51,6 @@ def next_version(root: Path) -> Path:
 
 def show_next_version(node: hou.Node) -> None:
     node.setParms({OUTPUT: str(next_version(Path(_text(node, ROOT))))})
-
-
-def find_configure(node: hou.Node) -> hou.Node:
-    while node.type().nameComponents()[2] != CONFIGURE:
-        node = node.input(0)
-    return node
 
 
 def check_saved() -> None:
@@ -95,9 +85,11 @@ def claim(configures: list[hou.Node]) -> list[Path]:
 
 
 def _create(node: hou.Node, folder: Path) -> None:
+    # An enclosing asset picks its folder again on every Send.
+    shown = " Output Folder now shows the next one." if _owned(node) else ""
     stale = SendRefused(
         f"{node.path()} was about to render into {folder}, which is not the next "
-        "free version. Output Folder now shows the next one. Send again to render there."
+        f"free version.{shown} Send again to render into the next one."
     )
     if _owned(node) and folder != next_version(Path(_text(node, ROOT))):
         raise stale
