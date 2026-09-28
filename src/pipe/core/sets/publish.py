@@ -18,10 +18,6 @@ SOURCE_KEY = "source"
 _NAME = re.compile(r"[a-z][a-z0-9]*(_[a-z0-9]+)*")
 _VERSION = re.compile(r"v([0-9]{3,})")
 _STAGE_INFO_KEYS = ("metersPerUnit", "upAxis")
-# Whoever publishes next must be able to add a version and replace the current
-# layer, whatever the publishing session's umask and primary group.
-_SHARED_DIR_MODE = 0o770
-_SHARED_FILE_MODE = 0o660
 
 
 def valid_set_name(name: str) -> bool:
@@ -58,14 +54,10 @@ def create_staging(name: str, version: int) -> Path:
         FileExistsError: Another publish of `version` is running, or one stopped
             partway and left its folder behind.
     """
-    group = _group(name)
     staging = staging_layer_path(name, version).parent
-    if not staging.parent.exists():
-        staging.parent.mkdir()
-        _share(staging.parent, group)
+    staging.parent.mkdir(exist_ok=True)
     # Never reused: whatever is already in it would be committed with this version.
     staging.mkdir()
-    _share(staging, group)
     return staging_layer_path(name, version)
 
 
@@ -115,9 +107,6 @@ def discard_staged(name: str, version: int) -> None:
 def commit_version(name: str, version: int) -> Path:
     """Rename the staged version into place. Shots read it once it is made current."""
     staging = staging_layer_path(name, version).parent
-    group = _group(name)
-    for path in (staging, *staging.rglob("*")):
-        _share(path, group)
     staging.rename(version_layer_path(name, version).parent)
     return version_layer_path(name, version)
 
@@ -145,17 +134,7 @@ def make_current(name: str, version: int) -> None:
     current = current_layer_path(name)
     temp = current.with_name(f".{name}.tmp.usda")
     layer.Export(str(temp))
-    _share(temp, _group(name))
     os.replace(temp, current)
-
-
-def _group(name: str) -> int:
-    return set_dir(name).stat().st_gid
-
-
-def _share(path: Path, group: int) -> None:
-    os.chown(path, -1, group)
-    path.chmod(_SHARED_DIR_MODE if path.is_dir() else _SHARED_FILE_MODE)
 
 
 def _version_dirname(version: int) -> str:

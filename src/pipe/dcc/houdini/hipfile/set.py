@@ -52,7 +52,7 @@ class HSetFileManager(HFileManager):
 
     def _prompt_create_if_not_exist(self, path: Path) -> bool:
         # Every set in ShotGrid gets its folder; there is nothing to confirm.
-        path.mkdir(mode=0o770, parents=True, exist_ok=True)
+        path.mkdir(parents=True, exist_ok=True)
         return True
 
     def _setup_file(self, path: Path, entity: SGEntity) -> None:
