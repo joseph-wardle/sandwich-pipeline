@@ -45,10 +45,6 @@ def _holder(node: hou.Node, name: str) -> hou.Parm | None:
     return parm
 
 
-def _owned(node: hou.Node) -> bool:
-    return _holder(node, OUTPUT) is not None
-
-
 def default_root(node: hou.Node) -> str:
     # Lighting renders sit beside the shot, where Nuke's auto-read looks;
     # every other hip keeps its test renders to itself.
@@ -79,7 +75,13 @@ def claim(configures: list[hou.Node]) -> list[Path]:
     targets = [Path(_text(node, OUTPUT)) for node in configures]
     claimed: list[Path] = []
     try:
-        for folder in targets:
+        for node, folder in zip(configures, targets):
+            if _holder(node, OUTPUT) is None:
+                raise SendRefused(
+                    f"{node.path()} is locked inside its asset, so its Output Folder "
+                    "cannot show the next version. Ask the asset's owner to make it "
+                    "editable, or to reference its Output Folder from the asset."
+                )
             if targets.count(folder) > 1:
                 raise SendRefused(
                     f"More than one Submit input renders into {folder}. Wire each "
@@ -98,17 +100,12 @@ def claim(configures: list[hou.Node]) -> list[Path]:
 
 
 def _create(node: hou.Node, folder: Path) -> None:
-    # A locked asset picks its folder again on every Send.
-    next_step = (
-        "It now shows the next one; Send again to render into it."
-        if _owned(node)
-        else "Send again to render into the next one."
-    )
     stale = SendRefused(
         f"The Output Folder of {node.path()} was {_text(node, OUTPUT) or 'empty'}, "
-        f"which is not the next free version. {next_step}"
+        "which is not the next free version. It now shows the next one; Send "
+        "again to render into it."
     )
-    if _owned(node) and folder != next_version(Path(_text(node, ROOT))):
+    if folder != next_version(Path(_text(node, ROOT))):
         raise stale
     try:
         folder.mkdir(parents=True)

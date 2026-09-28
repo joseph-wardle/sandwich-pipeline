@@ -15,7 +15,7 @@ from pathlib import Path
 
 import hou
 import tractor.api.author as author
-from pxr import Sdf, Usd, UsdRender
+from pxr import Sdf, Tf, Usd, UsdRender
 
 from pipe.dcc.houdini.tractor import SendRefused, denoise, folders, job, paths
 
@@ -214,8 +214,12 @@ def _check_camera(
             f"Camera, or set the camera on {settings.GetPath()}."
         )
     if path.IsAbsolutePath():
-        # A camera inside a payload exists only once the payload is loaded.
-        stage.Load(path, Usd.LoadWithoutDescendants)
+        # A camera inside a payload exists only once the payload is loaded; Load
+        # raises for a path under no prim at all.
+        try:
+            stage.Load(path, Usd.LoadWithoutDescendants)
+        except Tf.ErrorException:
+            pass
         prim = stage.GetPrimAtPath(path)
         if prim and prim.IsA(paths.CAMERA):
             return
