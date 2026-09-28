@@ -1,9 +1,3 @@
-import hou
-
-try:
-  me: hou.Node = kwargs["node"]  # type: ignore[name-defined] # noqa: F821
-  me.parm("renderer").set("HdPrmanXpuCpuLoaderRendererPlugin")
-  me.parm("overscan").set(6.0)
-  me.hdaModule().refresh_render_dir(me)
-except Exception:
-  pass
+# Output Folder shows the version the first Send claims.
+node = kwargs["node"]  # type: ignore[name-defined] # noqa: F821
+node.hdaModule().show_next_version(node)

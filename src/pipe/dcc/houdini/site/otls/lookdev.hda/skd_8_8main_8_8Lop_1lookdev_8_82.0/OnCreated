@@ -1,0 +1,5 @@
+# Output Folder shows the version the first Send claims.
+from pipe.dcc.houdini.tractor import folders
+
+lookdev = kwargs["node"]  # type: ignore[name-defined] # noqa: F821
+folders.show_next_version(lookdev.node("render"))

@@ -19,17 +19,9 @@
         label   "Output File"
         type    file
         default { "" }
-        help    "Empty writes video.mp4, or video.mov for ProRes, into the version folder. A file elsewhere needs Keep Render Files on."
+        help    "Empty writes video.mp4, or video.mov for ProRes, into the version folder. A file elsewhere needs Remove Encoded Frames off."
         parmtag { "filechooser_mode" "write" }
         parmtag { "filechooser_pattern" "*.mp4 *.mov" }
-        parmtag { "script_callback_language" "python" }
-    }
-    parm {
-        name    "framerate"
-        label   "Frame Rate"
-        type    integer
-        default { "24" }
-        range   { 1! 60 }
         parmtag { "script_callback_language" "python" }
     }
     parm {
@@ -57,11 +49,11 @@
         parmtag { "script_callback_language" "python" }
     }
     parm {
-        name    "keep_files"
-        label   "Keep Render Files"
+        name    "remove_frames"
+        label   "Remove Encoded Frames"
         type    toggle
-        default { "1" }
-        help    "Keep the frames the movie is made from, with every pass they hold. Off deletes them once the layer's other tasks finish; Encode can't then be rerun for this version."
+        default { "0" }
+        help    "Delete the frames the movie is made from once the layer's other tasks finish. Encode can't then be rerun for this version."
         parmtag { "script_callback_language" "python" }
     }
     groupcollapsible {
@@ -85,13 +77,6 @@
             type    integer
             default { "18" }
             range   { 0! 51 }
-            parmtag { "script_callback_language" "python" }
-        }
-        parm {
-            name    "service"
-            label   "Service Key"
-            type    string
-            default { "EL9" }
             parmtag { "script_callback_language" "python" }
         }
     }

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import shlex
-from enum import Enum
 from pathlib import Path
 
 from pxr import Usd, UsdRender
@@ -19,27 +18,12 @@ from pxr import Usd, UsdRender
 from pipe.dcc.houdini.tractor import SendRefused, paths
 
 CONFIG = "denoise.json"
-MULTIFRAME_RADIUS = 3
 
-DENOISE_ROOT = "${RMANTREE}/lib/denoise/"
-
-
-class Topology(str, Enum):
-    MINI = DENOISE_ROOT + "mini.topo"
-    MULTIFRAME_ASYM = DENOISE_ROOT + "full_w7_4sv2_asym.topo"
-    MULTIFRAME_SYM = DENOISE_ROOT + "full_w7_4sv2_sym_gen2.topo"
-    SINGLEFRAME_ASYM = DENOISE_ROOT + "full_w1_5s_asym.topo"
-    SINGLEFRAME_SYM = DENOISE_ROOT + "full_w1_5s_sym_gen2.topo"
-
-
-PARAM_MAP: dict[Topology, str] = {
-    Topology.MINI: DENOISE_ROOT + "21531-renderman.param",
-    Topology.MULTIFRAME_ASYM: DENOISE_ROOT + "14579-renderman.param",
-    Topology.MULTIFRAME_SYM: DENOISE_ROOT + "20970-renderman.param",
-    Topology.SINGLEFRAME_ASYM: DENOISE_ROOT + "14433-renderman.param",
-    Topology.SINGLEFRAME_SYM: DENOISE_ROOT + "20973-renderman.param",
-}
-MULTIFRAME = (Topology.MULTIFRAME_ASYM, Topology.MULTIFRAME_SYM)
+# RenderMan's symmetric multiframe denoiser, which reads RADIUS frames either
+# side of each frame.
+TOPOLOGY = "${RMANTREE}/lib/denoise/full_w7_4sv2_sym_gen2.topo"
+PARAMETERS = "${RMANTREE}/lib/denoise/20970-renderman.param"
+RADIUS = 3
 
 # The vars Denoise adds that its config reads. RenderMan writes the beauty as
 # R, G, B whatever its var is called, so the beauty isn't among them.
@@ -49,9 +33,7 @@ PASSES = frozenset(
 )
 
 
-def config(
-    vars: list[str], topology: Topology, asymmetry: float, tiles: tuple[int, int]
-) -> dict:
+def config(vars: list[str]) -> dict:
     """denoise_batch's config for a product with these vars.
 
     The finished beauty is denoised diffuse plus denoised specular, which
@@ -96,12 +78,12 @@ def config(
             "sample_count": _read("sampleCount"),
             "frame-include": "${FrameInclude}",
             "frame-exclude": "${FrameExclude}",
-            "topology": topology.value,
-            "parameters": PARAM_MAP[topology],
-            "asymmetry": asymmetry,
+            "topology": TOPOLOGY,
+            "parameters": PARAMETERS,
+            "asymmetry": 0.0,
             "overwrite": "OverwriteChannels",
             "progress": True,
-            "tiles": list(tiles),
+            "tiles": [1, 1],
         },
         "passes": passes,
     }
@@ -158,12 +140,10 @@ def product(settings: UsdRender.Settings, products: list[Usd.Prim]) -> Usd.Prim:
     return found
 
 
-def window(frame: int, frames: list[int], topology: Topology) -> list[int]:
+def window(frame: int, frames: list[int]) -> list[int]:
     # Neighbours outside the rendered range don't exist.
-    if topology not in MULTIFRAME:
-        return [frame]
-    start = max(frames[0], frame - MULTIFRAME_RADIUS)
-    end = min(frames[-1], frame + MULTIFRAME_RADIUS)
+    start = max(frames[0], frame - RADIUS)
+    end = min(frames[-1], frame + RADIUS)
     return list(range(start, end + 1))
 
 

@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-from pipe.dcc.houdini.tractor.denoise import Topology
 from pxr import Sdf, Usd
-
-
-def get_denoise_topo_menu() -> list[str]:
-    return [topo.name for topo in Topology for _ in (0, 1)]
 
 
 def create_mse_aov(stage: Usd.Stage, vars_prim: Usd.Prim, aov_name: str, renderer: str):

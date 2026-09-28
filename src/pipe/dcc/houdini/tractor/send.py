@@ -23,6 +23,26 @@ CONFIGURE = "tractor_configure"
 DENOISE = "tractor_denoise"
 ENCODE = "tractor_encode_video"
 
+ENGINE = "tractor-engine.cs.byu.edu"
+ENGINE_PORT = 443
+LICENSE_SERVER = "animlic.cs.byu.edu"
+# Sent with the job so the blades find the same Houdini, RenderMan and colour
+# config as the artist's session.
+ENV_VARS = (
+    "HOUDINI_PATH",
+    "OCIO",
+    "PATH",
+    "PIXAR_LICENSE_FILE",
+    "PXR_AR_DEFAULT_SEARCH_PATH",
+    "PXR_PLUGINPATH_NAME",
+    "RFHTREE",
+    "RMAN_COLOR_CONFIG_DIR",
+    "RMAN_PROCEDURALPATH",
+    "RMANTREE",
+)
+# husk writes the image so far this often while it renders.
+SNAPSHOT_SECONDS = 300
+
 # Task titles join the layer to other words with spaces, and Tractor finds
 # tasks by title, so a layer with a space could take another layer's title.
 LAYER_NAME = re.compile(r"[A-Za-z0-9_-]+")
@@ -51,7 +71,6 @@ def send(submit: hou.Node, inputs: list[hou.Node] | None = None) -> None:
         return
 
     title = _text(submit, "title")
-    url = _text(submit, "engine_url")
     try:
         built = build(submit, chains)
     except SendRefused as refusal:
@@ -79,7 +98,7 @@ def send(submit: hou.Node, inputs: list[hou.Node] | None = None) -> None:
         job_id = None
         hou.ui.displayMessage(
             "Tractor did not confirm the job, but it may still have been queued. "
-            f'Look for "{title}" at {url} before sending again.'
+            f'Look for "{title}" at {ENGINE} before sending again.'
             "\n\nIts folders were kept:\n" + "\n".join(str(f) for f in claimed),
             title="Tractor did not confirm the job",
             severity=hou.severityType.Warning,
@@ -89,7 +108,7 @@ def send(submit: hou.Node, inputs: list[hou.Node] | None = None) -> None:
         hou.ui.displayMessage(
             f"Job {job_id} renders into:\n"
             + "\n".join(str(folder) for folder in claimed)
-            + f"\n\nVisit {url} to check progress.",
+            + f"\n\nVisit {ENGINE} to check progress.",
             title="Job sent to Tractor",
         )
 
@@ -143,26 +162,17 @@ def check_layers(chains: list[Chain]) -> None:
 
 
 def build(submit: hou.Node, chains: list[Chain]) -> author.Job:
-    author.setEngineClientParam(
-        hostname=_text(submit, "engine_url"), port=int(submit.evalParm("engine_port"))
-    )
+    author.setEngineClientParam(hostname=ENGINE, port=ENGINE_PORT)
     return job.build(
         _text(submit, "title"),
         int(submit.evalParm("priority")),
-        _setenv(submit),
+        _setenv(),
         [_layer(c) for c in chains],
     )
 
 
 def _layer(chain: Chain) -> job.Layer:
     configure = chain.configure
-    tiled = bool(configure.evalParm("husk_tile"))
-    if tiled and (chain.denoise or chain.encode):
-        raise SendRefused(
-            f"{configure.path()} renders tiles, which nothing stitches into frames "
-            "yet, so Denoise and Encode would have no frames to read. Turn off "
-            "Tiled Render, or remove Denoise and Encode."
-        )
     folder = Path(_text(configure, folders.OUTPUT))
     _write_render_usd(configure, chain.output)
 
@@ -177,17 +187,10 @@ def _layer(chain: Chain) -> job.Layer:
         stage, frames, outputs, [denoised] if denoised else []
     )
 
-    tiles = configure.evalParmTuple("husk_tilecount")
-    render = job.Render(
-        husk=_husk(configure),
-        folders=written,
-        tiles=int(tiles[0]) * int(tiles[1]) if tiled else 0,
-        timelimit=int(_toggled(configure, "husk_timelimit") or 0),
-        service=_text(configure, "service"),
-    )
+    render = job.Render(husk=_husk(configure), folders=written)
     denoise_spec = None
-    if chain.denoise and denoised:
-        denoise_spec = _write_denoise(chain.denoise, folder, denoised, frames)
+    if denoised:
+        denoise_spec = _write_denoise(folder, denoised, frames)
     encode_spec = None
     if chain.encode:
         encode_spec = _encode(chain.encode, folder, settings, products, denoised)
@@ -249,9 +252,9 @@ def _frames(configure: hou.LopNode) -> list[int]:
         return [int(hou.frame())]
     if trange == "stage":
         stage = configure.stage()
-        start = int(stage.GetStartTimeCode() - float(configure.evalParm("foffset1")))
-        end = int(stage.GetEndTimeCode() + float(configure.evalParm("foffset2")))
-        return list(range(start, end + 1, int(configure.evalParm("foffset3"))))
+        return list(
+            range(int(stage.GetStartTimeCode()), int(stage.GetEndTimeCode()) + 1)
+        )
     start, end, step = (int(v) for v in configure.evalParmTuple("f"))
     return list(range(start, end + 1, step))
 
@@ -259,54 +262,28 @@ def _frames(configure: hou.LopNode) -> list[int]:
 def _husk(configure: hou.Node) -> list[str]:
     words = [
         *("--renderer", _text(configure, "renderer")),
-        *("--purpose", _text(configure, "husk_purpose")),
+        *("--purpose", "geometry,render"),
         *("--complexity", "veryhigh"),
-        *("--verbose", f"acet{_text(configure, 'verbosity')}"),
+        *("--verbose", "acet"),
+        *("--snapshot", str(SNAPSHOT_SECONDS)),
     ]
-    if int(_toggled(configure, "snapshot") or 0):
-        words += ["--snapshot", _text(configure, "snapshot")]
     if camera := _toggled(configure, "override_camera"):
         words += ["--camera", camera]
     if settings := _toggled(configure, "rendersettings"):
         words += ["--settings", settings]
-    if configure.evalParm("husk_instantshutter"):
-        words.append("--disable-motionblur")
-    if configure.evalParm("husk_tile"):
-        count = configure.evalParmTuple("husk_tilecount")
-        words += ["--tile-count", str(count[0]), str(count[1])]
-        words += ["--tile-suffix", _text(configure, "husk_tilesuffix")]
-    if trace := _text(configure, "husk_usdtrace"):
-        words += ["--usd-trace", trace]
-        if chrome := _text(configure, "husk_chromefile"):
-            words += ["--usd-chrome-file", chrome]
     words.append("--disable-dummy-raster-product")
     return words
 
 
-def _write_denoise(
-    node: hou.Node, folder: Path, product: Usd.Prim, frames: list[int]
-) -> job.Denoise:
+def _write_denoise(folder: Path, product: Usd.Prim, frames: list[int]) -> job.Denoise:
     """Write denoise.json and return what the denoise tasks need."""
-    topology = denoise.Topology[_text(node, "topology")]
-    if topology in denoise.MULTIFRAME and frames != list(
-        range(frames[0], frames[-1] + 1)
-    ):
+    if frames != list(range(frames[0], frames[-1] + 1)):
         raise SendRefused(
-            "Multiframe denoising reads each frame's neighbours, so render every "
-            "frame of the range, or choose a single-frame topology."
+            "Denoise reads each frame's neighbours, so render every frame of the "
+            "range, or remove Denoise."
         )
-    config = denoise.config(
-        denoise.var_names(product),
-        topology,
-        float(node.evalParm("asymmetry")),
-        (int(node.evalParm("tilesx")), int(node.evalParm("tilesy"))),
-    )
-    denoise.write_config(folder, config)
-    return job.Denoise(
-        product=product.GetName(),
-        topology=topology,
-        service=_text(node, "service"),
-    )
+    denoise.write_config(folder, denoise.config(denoise.var_names(product)))
+    return job.Denoise(product=product.GetName())
 
 
 def _encode(
@@ -330,38 +307,35 @@ def _encode(
     video = _text(node, "output_file") or str(
         folder / ("video.mov" if codec == "prores" else "video.mp4")
     )
-    keep_frames = bool(node.evalParm("keep_files"))
+    remove_frames = bool(node.evalParm("remove_frames"))
     # Only a movie in the new version folder can be this job's, so Cleanup
     # can trust it before deleting the frames it was made from.
-    if not keep_frames and Path(video).resolve().parent != folder.resolve():
+    if remove_frames and Path(video).resolve().parent != folder.resolve():
         raise SendRefused(
             f"{node.path()} writes its movie to {video}, outside {folder}. With "
-            "Keep Render Files off, the frames would be deleted without proof "
-            "that this job made the movie. Clear Output File, or turn on Keep "
-            "Render Files."
+            "Remove Encoded Frames on, the frames would be deleted without proof "
+            "that this job made the movie. Clear Output File, or turn off Remove "
+            "Encoded Frames."
         )
     return job.Encode(
         images=folder / product.GetName(),
         channels=channels,
         video=Path(video),
-        framerate=int(node.evalParm("framerate")),
         # A static method the stubs declare as an instance one.
         colorconfig=hou.Color.ocio_configPath(),  # ty: ignore[missing-argument]
         display=_text(node, "display"),
         view=_text(node, "view"),
         codec=codec,
         quality=int(node.evalParm("quality")),
-        keep_frames=keep_frames,
-        service=_text(node, "service"),
+        remove_frames=remove_frames,
     )
 
 
-def _setenv(submit: hou.Node) -> str:
-    names = _text(submit, "env_vars").split()
+def _setenv() -> str:
     return " ".join(
         ["setenv"]
-        + [f"{name}={os.getenv(name)}" for name in names]
-        + [f"HOUDINI_LICENSE_SERVER={_text(submit, 'license_server')}"]
+        + [f"{name}={os.getenv(name)}" for name in ENV_VARS]
+        + [f"HOUDINI_LICENSE_SERVER={LICENSE_SERVER}"]
     )
 
 

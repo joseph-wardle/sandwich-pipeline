@@ -6,7 +6,7 @@
     label	"Tractor Denoise"
 
     help {
-	""
+	"Denoises the layer's beauty on the farm with RenderMan's multiframe denoiser, which reads three frames either side of each frame. Wire it between Configure and Encode or Submit."
     }
 
     inputlabel	1	"Input Stage"
@@ -110,67 +110,20 @@
     inputlabel	99	"Input #99"
 
     parm {
-        name    "topology"
-        label   "Mode"
-        type    string
-        joinnext
-        default { "MULTIFRAME_SYM" }
-        menu {
-            [ "if menu := hou.phm().get_denoise_topo_menu():" ]
-            [ "    return menu" ]
-            [ "else:" ]
-            [ "    return [None, None]" ]
-            language python
-        }
-        parmtag { "script_callback_language" "python" }
-    }
-    parm {
-        name    "asymmetry"
-        label   "Asymmetry"
-        type    float
-        default { "0" }
-        hidewhen "{ is_asym == 0 }"
-        range   { 0! 1 }
-        parmtag { "script_callback_language" "python" }
-    }
-    parm {
         name    "is_asym"
-        label   "Label"
+        label   "Unused"
         type    toggle
         invisible
-        nolabel
-        default { [ "hou.pwd().parm(\"topology\").evalAsString().endswith(\"_ASYM\")" python ] }
-        parmtag { "script_callback_language" "python" }
+        default { "0" }
+        help    "Holds nothing. Hips saved before September 2026 keep an expression for this removed parm, which Houdini would otherwise load as a visible spare parameter."
     }
     parm {
-        name    "service"
-        label   "Denoise Service Key"
-        type    string
-        default { "EL9" }
-        parmtag { "script_callback_language" "python" }
-    }
-    groupcollapsible {
-        name    "folder0"
-        label   "Advanced"
-        grouptag { "group_type" "collapsible" }
-
-        parm {
-            name    "rmantree_override"
-            label   "RMANTREE Override"
-            type    string
-            invisible
-            default { "" }
-            parmtag { "script_callback_language" "python" }
-        }
-        parm {
-            name    "tiles"
-            label   "Tiling"
-            type    intvector2
-            size    2
-            default { "1" "1" }
-            range   { 1! 8 }
-            parmtag { "script_callback_language" "python" }
-        }
+        name    "cryptomatte"
+        label   "Unused"
+        type    toggle
+        invisible
+        default { "0" }
+        help    "Holds nothing. Hips saved before September 2026 keep an expression for this removed parm, which Houdini would otherwise load as a visible spare parameter."
     }
 
 }

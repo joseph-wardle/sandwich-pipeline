@@ -31,9 +31,22 @@ def _text(node: hou.Node, name: str) -> str:
     return str(node.evalParm(name))
 
 
+def _holder(node: hou.Node, name: str) -> hou.Parm | None:
+    """The parm Send sets for `name`, or None when a locked asset picks the value.
+
+    A Configure inside an asset such as SKD Lookdev references the asset's own
+    Output Folder and Last Job, which are set where they live.
+    """
+    # Every Configure has the folder parms.
+    parm = node.parm(name).getReferencedParm()  # ty: ignore[unresolved-attribute]
+    held = parm.node()
+    if held.isInsideLockedHDA() and not held.isEditableInsideLockedHDA():
+        return None
+    return parm
+
+
 def _owned(node: hou.Node) -> bool:
-    # An enclosing asset such as SKD Lookdev picks the folder and shows it itself.
-    return not node.isInsideLockedHDA()
+    return _holder(node, OUTPUT) is not None
 
 
 def default_root(node: hou.Node) -> str:
@@ -50,7 +63,8 @@ def next_version(root: Path) -> Path:
 
 
 def show_next_version(node: hou.Node) -> None:
-    node.setParms({OUTPUT: str(next_version(Path(_text(node, ROOT))))})
+    if parm := _holder(node, OUTPUT):
+        parm.set(str(next_version(Path(_text(node, ROOT)))))
 
 
 def check_saved() -> None:
@@ -78,18 +92,21 @@ def claim(configures: list[hou.Node]) -> list[Path]:
         # Release before showing the next version, so it can count these again.
         release(claimed)
         for node in configures:
-            if _owned(node):
-                show_next_version(node)
+            show_next_version(node)
         raise
     return claimed
 
 
 def _create(node: hou.Node, folder: Path) -> None:
-    # An enclosing asset picks its folder again on every Send.
-    shown = " Output Folder now shows the next one." if _owned(node) else ""
+    # A locked asset picks its folder again on every Send.
+    next_step = (
+        "It now shows the next one; Send again to render into it."
+        if _owned(node)
+        else "Send again to render into the next one."
+    )
     stale = SendRefused(
-        f"{node.path()} was about to render into {folder}, which is not the next "
-        f"free version.{shown} Send again to render into the next one."
+        f"The Output Folder of {node.path()} was {_text(node, OUTPUT) or 'empty'}, "
+        f"which is not the next free version. {next_step}"
     )
     if _owned(node) and folder != next_version(Path(_text(node, ROOT))):
         raise stale
@@ -112,8 +129,7 @@ def record_sent(node: hou.Node, folder: Path, job_id: int | None) -> None:
 
     `job_id` is None when Tractor never confirmed the job.
     """
-    if not _owned(node):
-        return
-    job = f"job {job_id}" if job_id is not None else "not confirmed by Tractor"
-    node.setParms({LAST_JOB: f"{folder}  ({job})"})
+    if parm := _holder(node, LAST_JOB):
+        job = f"job {job_id}" if job_id is not None else "not confirmed by Tractor"
+        parm.set(f"{folder}  ({job})")
     show_next_version(node)

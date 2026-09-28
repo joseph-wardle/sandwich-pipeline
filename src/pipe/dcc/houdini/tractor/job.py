@@ -3,7 +3,7 @@
 Each layer renders every frame, then optionally denoises and encodes them:
 
     <layer>
-    ├── Render <layer>      one task per frame (per tile when tiled)
+    ├── Render <layer>      one task per frame
     ├── Denoise <layer>     one task per frame, after the frames it reads
     ├── Encode <layer>      after every frame is final
     └── Cleanup <layer>     after everything else: checks, deletes tmp/, marks complete
@@ -23,6 +23,10 @@ from pathlib import Path
 import tractor.api.author as author
 
 from pipe.dcc.houdini.tractor import denoise, paths
+
+# Tractor runs every command on blades that offer this service.
+SERVICE = "EL9"
+FRAMERATE = 24
 
 # Tractor retries these exit codes on its own.
 RENDER_RETRIES = [
@@ -53,19 +57,14 @@ WEB_FLAGS = (
 
 @dataclass(frozen=True)
 class Render:
-    # husk's options besides the frame and tile it renders
+    # husk's options besides the frame it renders
     husk: list[str]
     folders: list[Path]
-    tiles: int  # 0 renders whole frames
-    timelimit: int  # seconds, 0 for none
-    service: str
 
 
 @dataclass(frozen=True)
 class Denoise:
     product: str
-    topology: denoise.Topology
-    service: str
 
 
 @dataclass(frozen=True)
@@ -74,15 +73,13 @@ class Encode:
     # Candidate beauty channel sets, the first one the frames have is used.
     channels: list[str]
     video: Path
-    framerate: int
     colorconfig: str
     display: str
     view: str
     codec: str
     quality: int
-    # Off deletes the frames once the video is written.
-    keep_frames: bool
-    service: str
+    # Cleanup deletes the frames once the video is written.
+    remove_frames: bool
 
 
 @dataclass(frozen=True)
@@ -111,21 +108,14 @@ def layer_task(layer: Layer) -> author.Task:
         encode = _task(
             f"Encode {layer.name}",
             _encode_script(layer.folder, layer.encode, layer.frames),
-            layer.encode.service,
         )
         encode.addChild(author.Instance(title=steps[-1].title))
         steps.append(encode)
+    cleanup = _task(f"Cleanup {layer.name}", _cleanup_script(layer))
     for step in steps:
         task.addChild(step)
-    # Tiles land in files of their own that nothing stitches yet, so a tiled
-    # layer never has the frames Cleanup checks for.
-    if not layer.render.tiles:
-        cleanup = _task(
-            f"Cleanup {layer.name}", _cleanup_script(layer), layer.render.service
-        )
-        for step in steps:
-            cleanup.addChild(author.Instance(title=step.title))
-        task.addChild(cleanup)
+        cleanup.addChild(author.Instance(title=step.title))
+    task.addChild(cleanup)
     return task
 
 
@@ -139,53 +129,28 @@ def _render_task(layer: Layer) -> author.Task:
     mkdir = shlex.join(["mkdir", "-p", *map(str, render.folders)])
     task = author.Task(title=f"Render {layer.name}")
     for frame in layer.frames:
-        frame_task = author.Task(title=_render_title(layer, frame))
-        tiles = [
-            author.Task(title=f"{frame_task.title} tile {tile}")
-            for tile in range(render.tiles)
-        ]
-        for tile, tile_task in enumerate(tiles or [frame_task]):
-            husk = ["husk", "--frame", str(frame), *render.husk]
-            if render.tiles:
-                husk += ["--tile-index", str(tile)]
-            husk.append(str(layer.folder / paths.RENDER_USD))
-            command = author.Command(
-                argv=[
-                    "/bin/bash",
-                    "-exc",
-                    f"{LICENSE_TRAP} && {mkdir} && {shlex.join(husk)}",
-                ],
-                retryrc=RENDER_RETRIES,
-                service=render.service,
-            )
-            if render.timelimit:
-                command.maxrunsecs = render.timelimit
-            tile_task.addCommand(command)
-            if tile_task is not frame_task:
-                frame_task.addChild(tile_task)
-        task.addChild(frame_task)
+        husk = ["husk", "--frame", str(frame), *render.husk]
+        husk.append(str(layer.folder / paths.RENDER_USD))
+        script = f"{LICENSE_TRAP} && {mkdir} && {shlex.join(husk)}"
+        task.addChild(_task(_render_title(layer, frame), script, RENDER_RETRIES))
     return task
 
 
 def _denoise_task(layer: Layer, spec: Denoise) -> author.Task:
     task = author.Task(title=f"Denoise {layer.name}")
     for frame in layer.frames:
-        window = denoise.window(frame, layer.frames, spec.topology)
+        window = denoise.window(frame, layer.frames)
         script = denoise.script(layer.folder, spec.product, frame, window)
-        frame_task = _task(
-            f"Denoise {layer.name} {frame}", script, spec.service, DENOISE_RETRIES
-        )
+        frame_task = _task(f"Denoise {layer.name} {frame}", script, DENOISE_RETRIES)
         for neighbour in window:
             frame_task.addChild(author.Instance(title=_render_title(layer, neighbour)))
         task.addChild(frame_task)
     return task
 
 
-def _task(
-    title: str, script: str, service: str, retries: list[int] | None = None
-) -> author.Task:
+def _task(title: str, script: str, retries: list[int] | None = None) -> author.Task:
     task = author.Task(title=title)
-    command = author.Command(argv=["/bin/bash", "-exc", script], service=service)
+    command = author.Command(argv=["/bin/bash", "-exc", script], service=SERVICE)
     if retries:
         command.retryrc = retries
     task.addCommand(command)
@@ -222,7 +187,7 @@ def _encode_script(folder: Path, encode: Encode, frames: list[int]) -> str:
             f" --ociodisplay:from=scene_linear {q(encode.display)} {q(encode.view)}"
             f" -o {q(str(scratch))}/$n.png",
             "done",
-            f"ffmpeg -y -framerate {encode.framerate}"
+            f"ffmpeg -y -framerate {FRAMERATE}"
             f" -pattern_type glob -i {q(f'{scratch}/*.png')}"
             f" {_codec_flags(encode.codec, encode.quality)} {SRGB_TAGS} {WEB_FLAGS}"
             f" {q(str(video))}",
@@ -242,7 +207,7 @@ def _cleanup_script(layer: Layer) -> str:
     """
     q = shlex.quote
     encode = layer.encode
-    removed = encode.images if encode and not encode.keep_frames else None
+    removed = encode.images if encode and encode.remove_frames else None
     # Every output ends in the folder named after its prim, even one that
     # renders into tmp/ to be denoised.
     finals = [layer.folder / f.name for f in layer.render.folders]

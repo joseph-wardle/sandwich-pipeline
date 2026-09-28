@@ -1,2 +1,1 @@
-from pipe.dcc.houdini.tractor.folders import default_root
-from pipe.dcc.houdini.tractor.folders import show_next_version as refresh_render_dir  # render_network calls this name
+from pipe.dcc.houdini.tractor.folders import default_root, show_next_version
