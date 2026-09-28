@@ -15,7 +15,7 @@ from pathlib import Path
 
 import hou
 import tractor.api.author as author
-from pxr import Usd, UsdRender
+from pxr import Sdf, Usd, UsdRender
 
 from pipe.dcc.houdini.tractor import SendRefused, denoise, folders, job, paths
 
@@ -156,15 +156,23 @@ def build(submit: hou.Node, chains: list[Chain]) -> author.Job:
 
 def _layer(chain: Chain) -> job.Layer:
     configure = chain.configure
+    tiled = bool(configure.evalParm("husk_tile"))
+    if tiled and (chain.denoise or chain.encode):
+        raise SendRefused(
+            f"{configure.path()} renders tiles, which nothing stitches into frames "
+            "yet, so Denoise and Encode would have no frames to read. Turn off "
+            "Tiled Render, or remove Denoise and Encode."
+        )
     folder = Path(_text(configure, folders.OUTPUT))
     _write_render_usd(configure, chain.output)
 
     stage = Usd.Stage.Open(str(folder / paths.RENDER_USD), Usd.Stage.LoadNone)
     settings = paths.rendered_settings(stage, _toggled(configure, "rendersettings"))
+    _check_camera(configure, stage, settings)
     products = paths.products(settings)
-    denoised = denoise.product(products) if chain.denoise else None
+    denoised = denoise.product(settings, products) if chain.denoise else None
     frames = _frames(configure)
-    outputs = products + paths.cryptomattes(settings)
+    outputs = products + paths.cryptomattes(settings, products)
     written = paths.author_outputs(
         stage, frames, outputs, [denoised] if denoised else []
     )
@@ -173,7 +181,7 @@ def _layer(chain: Chain) -> job.Layer:
     render = job.Render(
         husk=_husk(configure),
         folders=written,
-        tiles=int(tiles[0]) * int(tiles[1]) if configure.evalParm("husk_tile") else 0,
+        tiles=int(tiles[0]) * int(tiles[1]) if tiled else 0,
         timelimit=int(_toggled(configure, "husk_timelimit") or 0),
         service=_text(configure, "service"),
     )
@@ -187,6 +195,39 @@ def _layer(chain: Chain) -> job.Layer:
     return job.Layer(name, folder, frames, render, denoise_spec, encode_spec)
 
 
+def _check_camera(
+    configure: hou.Node, stage: Usd.Stage, settings: UsdRender.Settings
+) -> None:
+    """husk fails every frame when Override Camera is no camera, and renders
+    through a default camera, exiting 0, when the settings' camera is missing.
+    With neither, it renders through the first camera it finds, or fails every
+    frame when there is none."""
+    override = _toggled(configure, "override_camera")
+    targets = settings.GetCameraRel().GetForwardedTargets()
+    path = Sdf.Path(override) if override else next(iter(targets), None)
+    if path is None:
+        raise SendRefused(
+            f"Nothing chooses the camera for {configure.path()}. Turn on Override "
+            f"Camera, or set the camera on {settings.GetPath()}."
+        )
+    if path.IsAbsolutePath():
+        # A camera inside a payload exists only once the payload is loaded.
+        stage.Load(path, Usd.LoadWithoutDescendants)
+        prim = stage.GetPrimAtPath(path)
+        if prim and prim.IsA(paths.CAMERA):
+            return
+    if override:
+        raise SendRefused(
+            f"Override Camera on {configure.path()} names {override}, which is not "
+            "a camera on the stage. Correct it, or turn it off."
+        )
+    raise SendRefused(
+        f"{settings.GetPath()} renders through {path}, which is not a camera on "
+        "the stage. Correct the camera on the render settings, or set Override "
+        f"Camera on {configure.path()}."
+    )
+
+
 def _write_render_usd(configure: hou.Node, output: hou.Node) -> None:
     # Inside a locked asset such as SKD Lookdev the path is authored already,
     # and setting it would raise a permission error.
@@ -197,7 +238,9 @@ def _write_render_usd(configure: hou.Node, output: hou.Node) -> None:
     rop.parm("execute").pressButton()  # ty: ignore[unresolved-attribute]
     # A failed write shows in errors(); the button doesn't raise.
     if errors := rop.errors():  # ty: ignore[unresolved-attribute]
-        raise hou.OperationFailed("\n".join(errors))
+        raise SendRefused(
+            f"{configure.path()} could not write render.usd:\n\n" + "\n".join(errors)
+        )
 
 
 def _frames(configure: hou.LopNode) -> list[int]:
@@ -277,7 +320,7 @@ def _encode(
         # denoise_batch writes the finished beauty as R, G, B.
         product, channels = denoised, ["R,G,B"]
     else:
-        product = _beauty_product(settings, products)
+        product = paths.beauty_product(settings, products)
         name = paths.beauty(product)
         # RenderMan names the beauty after its var, or R, G, B when it is
         # first; a var named in the frame is the surer match.
@@ -311,20 +354,6 @@ def _encode(
         keep_frames=keep_frames,
         service=_text(node, "service"),
     )
-
-
-def _beauty_product(settings: UsdRender.Settings, products: list[Usd.Prim]) -> Usd.Prim:
-    # RenderMan fills R, G, B with whichever var comes first, so a product
-    # without a beauty var would make a movie of another pass.
-    found = [p for p in products if paths.beauty(p)]
-    if len(found) != 1:
-        names = ", ".join(str(p.GetPath()) for p in found) or "none"
-        raise SendRefused(
-            f"Encode needs exactly one render product of {settings.GetPath()} with "
-            f"a beauty (Ci) render var, but found: {names}. Add the beauty to one "
-            "product, or remove Encode."
-        )
-    return found[0]
 
 
 def _setenv(submit: hou.Node) -> str:

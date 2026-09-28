@@ -1,7 +1,7 @@
 """RenderMan's `denoise_batch`: the product it reads, its config and its command.
 
-The product that carries the denoise passes renders into `tmp/`. Each frame's
-command denoises it and writes the finished frame into the product's folder.
+The beauty product, which carries the denoise passes, renders into `tmp/`. Each
+frame's command denoises it and writes the finished frame into the product's folder.
 
 The config names layers as RenderMan writes them, not as the vars are named:
 the alpha var `a` is written as `A`, and the beauty as `R, G, B` or `ci.*`.
@@ -14,14 +14,12 @@ import shlex
 from enum import Enum
 from pathlib import Path
 
-from pxr import Usd
+from pxr import Usd, UsdRender
 
 from pipe.dcc.houdini.tractor import SendRefused, paths
 
 CONFIG = "denoise.json"
 MULTIFRAME_RADIUS = 3
-# The product Denoise adds its passes to.
-PRODUCT = "/Render/Products/renderproduct"
 
 DENOISE_ROOT = "${RMANTREE}/lib/denoise/"
 
@@ -134,21 +132,30 @@ def var_names(product: Usd.Prim) -> list[str]:
     return [paths.aov_name(var) for var in paths.render_vars(product)]
 
 
-def product(products: list[Usd.Prim]) -> Usd.Prim:
-    """The one product that carries every denoise pass."""
-    found = [p for p in products if PASSES <= set(var_names(p))]
-    if not found:
+def add_passes(stage: Usd.Stage, configured: Usd.Stage, settings: str) -> None:
+    """Append the render vars Denoise defined to the beauty product it denoises.
+
+    `configured` is the stage before Denoise, so its vars are the artist's. Other
+    products, such as Cryptomatte or another settings' utility passes, keep
+    their own vars.
+    """
+    rendered = paths.rendered_settings(stage, settings)
+    product = paths.beauty_product(rendered, paths.products(rendered))
+    rel = UsdRender.Product(product).GetOrderedVarsRel()
+    for prim in Usd.PrimRange(stage.GetPrimAtPath("/Render")):
+        if prim.IsA(paths.VAR) and not configured.GetPrimAtPath(prim.GetPath()):
+            rel.AddTarget(prim.GetPath())
+
+
+def product(settings: UsdRender.Settings, products: list[Usd.Prim]) -> Usd.Prim:
+    """The beauty product, which Denoise gave its passes."""
+    found = paths.beauty_product(settings, products)
+    if not PASSES <= set(var_names(found)):
         raise SendRefused(
-            f"Denoise adds its passes to {PRODUCT}, but the render settings don't "
-            "render it. Render that product, or remove Denoise."
+            f"{found.GetPath()} lacks the passes Denoise adds, so it can't be "
+            "denoised. Check that Denoise follows Configure and isn't bypassed."
         )
-    if len(found) > 1:
-        names = ", ".join(str(p.GetPath()) for p in found)
-        raise SendRefused(
-            f"More than one render product carries Denoise's passes: {names}. "
-            "Keep them in one."
-        )
-    return found[0]
+    return found
 
 
 def window(frame: int, frames: list[int], topology: Topology) -> list[int]:

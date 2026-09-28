@@ -26,9 +26,13 @@ TMP = "tmp"
 DENOISED = "denoised"
 ENCODE = "encode"
 
+CAMERA = "Camera"
 SETTINGS = "RenderSettings"
 PRODUCT = "RenderProduct"
+VAR = "RenderVar"
 CRYPTOMATTE = "PxrCryptomatte"
+# The productType of Cryptomatte authored as a product rather than a filter.
+CRYPTOMATTE_PRODUCT = "cryptomatte"
 FILENAME = "inputs:ri:filename"
 SAMPLE_FILTERS = "ri:sampleFilters"
 STATISTICS = "driver:parameters:aov:statistics"
@@ -69,10 +73,25 @@ def products(settings: UsdRender.Settings) -> list[Usd.Prim]:
     return found
 
 
-def cryptomattes(settings: UsdRender.Settings) -> list[Usd.Prim]:
+def cryptomattes(
+    settings: UsdRender.Settings, products: list[Usd.Prim]
+) -> list[Usd.Prim]:
     rel = settings.GetPrim().GetRelationship(SAMPLE_FILTERS)
     found = _targets(rel) if rel else []
-    return [prim for prim in found if prim.GetTypeName() == CRYPTOMATTE]
+    filters = [prim for prim in found if prim.GetTypeName() == CRYPTOMATTE]
+    as_products = [
+        p
+        for p in products
+        if UsdRender.Product(p).GetProductTypeAttr().Get() == CRYPTOMATTE_PRODUCT
+    ]
+    if filters and as_products:
+        raise SendRefused(
+            f"{settings.GetPath()} renders Cryptomatte both as the product "
+            f"{as_products[0].GetPath()} and as the filter {filters[0].GetPath()}, "
+            "and on XPU the product stops the filter writing anything. Remove the "
+            "Cryptomatte product; the filter works on RIS and XPU."
+        )
+    return filters
 
 
 def render_vars(product: Usd.Prim) -> list[Usd.Prim]:
@@ -99,6 +118,23 @@ def beauty(product: Usd.Prim) -> str | None:
         and not var.GetAttribute(STATISTICS).Get()
     ]
     return names[0] if names else None
+
+
+def beauty_product(settings: UsdRender.Settings, products: list[Usd.Prim]) -> Usd.Prim:
+    """The product Denoise and Encode read: the one with a beauty var.
+
+    RenderMan fills R, G, B with whichever var comes first, so a product
+    without a beauty var would make a movie of another pass.
+    """
+    found = [p for p in products if beauty(p)]
+    if len(found) != 1:
+        names = ", ".join(str(p.GetPath()) for p in found) or "none"
+        raise SendRefused(
+            f"Denoise and Encode read the one render product of "
+            f"{settings.GetPath()} with a beauty (Ci) render var, but found: "
+            f"{names}. Add the beauty to one product, or remove Denoise and Encode."
+        )
+    return found[0]
 
 
 def author_outputs(
