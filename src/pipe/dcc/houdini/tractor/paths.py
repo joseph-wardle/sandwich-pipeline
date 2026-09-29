@@ -14,21 +14,8 @@ from pathlib import Path
 
 from pxr import Sdf, Usd, UsdRender
 
+from pipe.core.render import COMPLETE, DENOISED, ENCODE, LEGACY_DIRS, TMP
 from pipe.dcc.houdini.tractor import SendRefused
-
-# Written by the USD ROP inside Configure.
-RENDER_USD = "render.usd"
-# Written by Cleanup once it found every output and cleared tmp/; later reruns
-# don't change it. With Remove Encoded Frames on, the encoded frames' folder is gone.
-COMPLETE = "complete"
-# Scratch that no finished output depends on.
-TMP = "tmp"
-# Folders of their own in tmp/, beside the raw frames of the denoised product.
-DENOISED = "denoised"
-ENCODE = "encode"
-# Where versions from before each output had a folder of its own keep their
-# frames. Comp and fx2d read an unfinished version holding one as such a version.
-LEGACY_DIRS = ("images_dn", "images")
 
 CAMERA = "Camera"
 SETTINGS = "RenderSettings"

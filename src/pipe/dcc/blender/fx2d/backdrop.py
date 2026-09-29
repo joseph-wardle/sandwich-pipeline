@@ -10,6 +10,7 @@ import bpy
 import OpenImageIO as oiio
 from bpy.types import Camera, Context, Event, Operator
 
+from pipe.core import render
 from pipe.dcc.blender.fx2d import util
 
 if TYPE_CHECKING:
@@ -19,13 +20,8 @@ log = logging.getLogger(__name__)
 
 BACKDROP = "backdrop"
 
-# Tractor's Cleanup writes this once it has found every output of a version.
-_COMPLETE = "complete"
 # The render layer names its beauty product this.
 _BEAUTY = "beauty"
-# Where versions from before each output had a folder of its own keep their
-# frames; they were never marked complete.
-_LEGACY_DIRS = ("images_dn", "images")
 # RenderMan writes the beauty as R, G, B when its product is written as RGBA,
 # and otherwise under its var's name, wherever the var sits among the others.
 _BEAUTY_CHANNELS = (
@@ -42,16 +38,11 @@ def latest_frames(layer_dir: Path) -> list[Path]:
     A version folder exists from the moment a render is submitted, so the newest
     one is often still empty or half-rendered.
     """
-    versions = sorted(
-        (path for path in layer_dir.glob("v*") if util.VERSION.match(path.name)),
-        key=lambda path: int(path.name[1:]),
-        reverse=True,
-    )
-    for version in versions:
-        names = [_BEAUTY] if (version / _COMPLETE).is_file() else _LEGACY_DIRS
-        for name in names:
-            frames = sorted((version / name).glob("*.exr"))
-            if frames:
+    for version in render.versions(layer_dir):
+        for folder in render.output_dirs(version):
+            if folder.name not in (_BEAUTY, *render.LEGACY_DIRS):
+                continue
+            if frames := sorted(folder.glob("*.exr")):
                 return frames
     return []
 

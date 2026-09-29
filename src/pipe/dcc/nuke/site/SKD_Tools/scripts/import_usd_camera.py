@@ -3,6 +3,7 @@ import random
 import re
 import time
 from functools import partial
+from pathlib import Path
 from typing import Any, cast
 
 import nuke
@@ -11,6 +12,7 @@ from env_sg import DB_Config
 from Qt import QtCore, QtGui, QtWidgets
 from pipe.core.util.paths import get_production_path
 
+from pipe.core import render
 from pipe.core.shotgrid import ShotGrid
 
 simple_window = None
@@ -136,9 +138,9 @@ class CascadingComboBox(QtWidgets.QWidget):
 
         camera_path = ""
         label = render_folder
-        if skd_read_node.versions(render_dir):
+        if render.versions(Path(render_dir)):
             # The camera of the version auto-read reads, so it matches comp's Reads.
-            found = skd_read_node.newest_readable(render_dir)
+            found = skd_read_node.newest_readable(Path(render_dir))
             if not found:
                 QtWidgets.QMessageBox.warning(
                     self,
@@ -150,7 +152,7 @@ class CascadingComboBox(QtWidgets.QWidget):
                 return
             version = found[0]
             label = f"{render_folder} {version}"
-            candidate = os.path.join(render_dir, version, "render.usd")
+            candidate = os.path.join(render_dir, version, render.RENDER_USD)
             if os.path.exists(candidate):
                 camera_path = candidate
         else:

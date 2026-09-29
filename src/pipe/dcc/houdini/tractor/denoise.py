@@ -1,4 +1,4 @@
-"""RenderMan's `denoise_batch`: the product it reads, its config and its command.
+"""RenderMan's `denoise_batch`: the product it reads and its config.
 
 The beauty product, which carries the denoise passes, renders into `tmp/`. Each
 frame's command denoises it and writes the finished frame into the product's folder.
@@ -11,21 +11,18 @@ beauty `Ci` as `R, G, B`.
 from __future__ import annotations
 
 import json
-import shlex
 from pathlib import Path
 
 from pxr import Sdf, Usd, UsdRender
 
+from pipe.core.render import DENOISE_CONFIG
 from pipe.dcc.houdini.tractor import SendRefused, paths
 
-CONFIG = "denoise.json"
 ASRGBA = "driver:parameters:openexr:asrgba"
 
-# RenderMan's symmetric multiframe denoiser, which reads RADIUS frames either
-# side of each frame.
+# RenderMan's symmetric multiframe denoiser.
 TOPOLOGY = "${RMANTREE}/lib/denoise/full_w7_4sv2_sym_gen2.topo"
 PARAMETERS = "${RMANTREE}/lib/denoise/20970-renderman.param"
-RADIUS = 3
 
 # The vars Denoise adds that its config reads. The beauty is read as R, G, B,
 # so it isn't among them.
@@ -109,7 +106,7 @@ def _pass(name: str, input: str, variance: str, outputs: list[dict]) -> dict:
 
 
 def write_config(folder: Path, config: dict) -> None:
-    (folder / CONFIG).write_text(json.dumps(config))
+    (folder / DENOISE_CONFIG).write_text(json.dumps(config))
 
 
 def var_names(product: Usd.Prim) -> list[str]:
@@ -145,44 +142,3 @@ def product(settings: UsdRender.Settings, products: list[Usd.Prim]) -> Usd.Prim:
             "denoised. Check that Denoise follows Configure and isn't bypassed."
         )
     return found
-
-
-def window(frame: int, frames: list[int]) -> list[int]:
-    # Neighbours outside the rendered range don't exist.
-    start = max(frames[0], frame - RADIUS)
-    end = min(frames[-1], frame + RADIUS)
-    return list(range(start, end + 1))
-
-
-def script(folder: Path, product: str, frame: int, window: list[int]) -> str:
-    """denoise_batch exits 0 even when it writes nothing, so the output check
-    shares its command: a Tractor retry then re-runs both, never the check alone.
-    """
-    raw = folder / paths.TMP / product
-    denoised = folder / paths.TMP / paths.DENOISED / f"{frame:04}.exr"
-    final = folder / product / f"{frame:04}.exr"
-    exclude = []
-    if window[0] < frame:
-        exclude.append(f"{window[0]}-{frame - 1}")
-    if frame < window[-1]:
-        exclude.append(f"{frame + 1}-{window[-1]}")
-    inputs = [folder / CONFIG, *(raw / f"{f:04}.exr" for f in window)]
-    q = shlex.quote
-    return "\n".join(
-        [
-            f"export FrameInclude={window[0]}-{window[-1]}",
-            f"export FrameExclude={','.join(exclude) or -1}",
-            f"export InputFile={q(str(raw / '####.exr'))}",
-            f"export OutputFile={q(str(denoised.parent / '####.exr'))}",
-            f"for f in {' '.join(q(str(p)) for p in inputs)}; do",
-            '    if [ ! -f "$f" ]; then echo "Denoise input is missing: $f" >&2; exit 1; fi',
-            "done",
-            f"mkdir -p {q(str(denoised.parent))} {q(str(final.parent))}",
-            f"out={q(str(denoised))}",
-            'rm -f "$out"',
-            f'"$RMANTREE/bin/denoise_batch" --json {q(str(folder / CONFIG))}',
-            '[ -f "$out" ] || { echo "denoise_batch exited without writing $out" >&2; exit 1; }',
-            # Written aside and renamed in, so the folder only ever holds whole frames.
-            f'mv -f "$out" {q(str(final))}',
-        ]
-    )

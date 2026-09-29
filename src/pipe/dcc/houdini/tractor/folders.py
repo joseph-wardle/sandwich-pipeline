@@ -8,29 +8,17 @@ taking another.
 
 from __future__ import annotations
 
-import re
 import shutil
 from pathlib import Path
 
 import hou
 
 from pipe.core.cache import RENDER_DIRNAME, link_to_cache
+from pipe.core.render import next_version
 from pipe.core.util.paths import get_production_path
 from pipe.dcc.houdini.hipfile.departments import Department
 from pipe.dcc.houdini.tractor import SendRefused
-
-LAYER = "layer"
-ROOT = "render_root"
-# Named for the USD ROP parm inside Configure that reads it.
-OUTPUT = "savetodirectory_directory"
-LAST_JOB = "last_job"
-
-_VERSION = re.compile(r"v(\d+)")
-
-
-def _text(node: hou.Node, name: str) -> str:
-    # Every folder parm is a string parm; evalParm's type covers all kinds.
-    return str(node.evalParm(name))
+from pipe.dcc.houdini.tractor.parms import LAST_JOB, LAYER, OUTPUT, ROOT, text
 
 
 def _holder(node: hou.Node, name: str) -> hou.Parm | None:
@@ -52,17 +40,12 @@ def default_root(node: hou.Node) -> str:
     # every other hip keeps its test renders to itself.
     hip = Path(hou.text.expandString("$HIP"))
     base = hip.parent if hip.name == Department.LIGHTING else hip
-    return str(base / RENDER_DIRNAME / _text(node, LAYER))
-
-
-def next_version(root: Path) -> Path:
-    taken = [int(m[1]) for p in root.glob("v*") if (m := _VERSION.fullmatch(p.name))]
-    return root / f"v{max(taken, default=0) + 1:03}"
+    return str(base / RENDER_DIRNAME / text(node, LAYER))
 
 
 def show_next_version(node: hou.Node) -> None:
     if parm := _holder(node, OUTPUT):
-        parm.set(str(next_version(Path(_text(node, ROOT)))))
+        parm.set(str(next_version(Path(text(node, ROOT)))))
 
 
 def check_saved() -> None:
@@ -74,7 +57,7 @@ def check_saved() -> None:
 
 def claim(configures: list[hou.Node]) -> list[Path]:
     """Create every Configure's Output Folder, or none of them."""
-    targets = [Path(_text(node, OUTPUT)) for node in configures]
+    targets = [Path(text(node, OUTPUT)) for node in configures]
     claimed: list[Path] = []
     # Before the refusals below, which show the next version in these parms.
     for node in configures:
@@ -134,11 +117,11 @@ def _link_render(root: Path) -> None:
 
 def _create(node: hou.Node, folder: Path) -> None:
     stale = SendRefused(
-        f"The Output Folder of {node.path()} was {_text(node, OUTPUT) or 'empty'}, "
+        f"The Output Folder of {node.path()} was {text(node, OUTPUT) or 'empty'}, "
         "which is not the next free version. It now shows the next one; Send "
         "again to render into it."
     )
-    root = Path(_text(node, ROOT))
+    root = Path(text(node, ROOT))
     if folder != next_version(root):
         raise stale
     _link_render(root)

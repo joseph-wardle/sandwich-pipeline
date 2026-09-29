@@ -2,12 +2,14 @@ import os
 import re
 import time
 from functools import partial
+from pathlib import Path
 
 import nuke
 import skd_read_node
 from env_sg import DB_Config
 from Qt import QtCore, QtWidgets
 
+from pipe.core import render
 from pipe.core.shotgrid import ShotGrid
 from pipe.core.util.paths import get_production_path
 
@@ -205,7 +207,7 @@ class CascadingComboBox(QtWidgets.QWidget):
             return
         self.current_layer = selected_items[0].text()
         layer_dir = os.path.join(_render_dir(self.default_shot), self.current_layer)
-        versions = skd_read_node.versions(layer_dir)
+        versions = render.versions(Path(layer_dir))
         if not versions:
             QtWidgets.QMessageBox.warning(
                 self,
@@ -219,10 +221,10 @@ class CascadingComboBox(QtWidgets.QWidget):
         self.thumbnail_list.setSelectionMode(
             QtWidgets.QAbstractItemView.ExtendedSelection
         )
-        for version, path in versions:
-            date = time.strftime("%m-%d-%Y", time.localtime(os.path.getmtime(path)))
-            item = QtWidgets.QListWidgetItem(f"{version}\n{date}")
-            item.setData(QtCore.Qt.UserRole, path)
+        for version in versions:
+            date = time.strftime("%m-%d-%Y", time.localtime(version.stat().st_mtime))
+            item = QtWidgets.QListWidgetItem(f"{version.name}\n{date}")
+            item.setData(QtCore.Qt.UserRole, str(version))
             item.setTextAlignment(int(QtCore.Qt.AlignCenter))
             self.thumbnail_list.addItem(item)
 
@@ -266,8 +268,8 @@ class CascadingComboBox(QtWidgets.QWidget):
             return
 
         for item in selected_items:
-            path = item.data(QtCore.Qt.UserRole)
-            version = os.path.basename(path)
+            path = Path(item.data(QtCore.Qt.UserRole))
+            version = path.name
             sequences = skd_read_node.version_sequences(path)
             if not sequences:
                 QtWidgets.QMessageBox.warning(

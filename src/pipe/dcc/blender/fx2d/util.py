@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -23,10 +22,6 @@ SET = "set"
 HOLDOUT_SOURCES = (CHARACTERS, SET)
 DEFAULT_LAYER = "main"
 LAYER_PREFIX = "fx2d_"
-
-# The spelling Tractor Configure gives the version folders it renders into, so a
-# layer folder reads the same whether the farm or fx2d filled it.
-VERSION = re.compile(r"^v(\d+)$")
 
 NOT_FX2D_FILE = "This is not an fx2d file. Open one with SKD > Open Shot."
 

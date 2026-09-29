@@ -25,7 +25,7 @@ Inputs:       1 to 1
 Subnet:       true
 Python:       false
 Empty:        false
-Modified:     Tue Sep 29 16:54:56 2026
+Modified:     Tue Sep 29 17:30:59 2026
 
 Operator:     tlops::tractor_denoise::1.0
 Label:        Tractor Denoise
@@ -39,7 +39,7 @@ Inputs:       1 to 1
 Subnet:       true
 Python:       false
 Empty:        false
-Modified:     Tue Sep 29 16:52:26 2026
+Modified:     Tue Sep 29 17:30:59 2026
 
 Operator:     tlops::tractor_encode_video::1.0
 Label:        Tractor Encode Video

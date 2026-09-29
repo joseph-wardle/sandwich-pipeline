@@ -18,7 +18,16 @@ import tractor.api.author as author
 from pxr import Sdf, Tf, Usd, UsdRender
 
 from pipe.core.playblast.presets import FFmpegPreset
-from pipe.dcc.houdini.tractor import SendRefused, denoise, folders, job, paths
+from pipe.core.render import RENDER_USD
+from pipe.dcc.houdini.tractor import (
+    SendRefused,
+    commands,
+    denoise,
+    folders,
+    job,
+    parms,
+    paths,
+)
 
 CONFIGURE = "tractor_configure"
 DENOISE = "tractor_denoise"
@@ -141,7 +150,7 @@ def chain(node: hou.Node | None) -> Chain:
 def check_layers(chains: list[Chain]) -> None:
     if not chains:
         raise SendRefused("Wire a Tractor Configure into Submit first.")
-    names = [_text(c.configure, folders.LAYER) for c in chains]
+    names = [parms.text(c.configure, parms.LAYER) for c in chains]
     for c, name in zip(chains, names):
         if not LAYER_NAME.fullmatch(name):
             raise SendRefused(
@@ -158,21 +167,21 @@ def check_layers(chains: list[Chain]) -> None:
 def check_parms(chains: list[Chain]) -> None:
     """Refuse what the parms alone show is wrong, before any folder is claimed."""
     for c in chains:
-        root = _text(c.configure, folders.ROOT)
+        root = parms.text(c.configure, parms.ROOT)
         # A relative one would be read from wherever Houdini was started.
         if not Path(root).is_absolute():
             raise SendRefused(
                 f'Render Root on {c.configure.path()} is "{root}", which is not a '
                 "full path. Start it with / or $HIP."
             )
-        renderer = _text(c.configure, "renderer")
+        renderer = parms.text(c.configure, parms.RENDERER)
         if (c.denoise or c.encode) and RENDERMAN not in renderer:
             raise SendRefused(
                 f"{c.configure.path()} renders with {renderer}, but Denoise and "
                 "Encode read only RenderMan's frames. Remove them, or choose a "
                 "RenderMan renderer on Configure."
             )
-        frames = _frames(c.configure)
+        frames = parms.frames(c.configure)
         skips = frames != list(range(frames[0], frames[-1] + 1))
         if skips and (c.denoise or c.encode):
             raise SendRefused(
@@ -186,11 +195,11 @@ def check_parms(chains: list[Chain]) -> None:
 
 def _title(submit: hou.Node, chains: list[Chain]) -> str:
     """Submit's Title, or one that tells the job apart in Tractor's list."""
-    if title := _text(submit, "title"):
+    if title := parms.text(submit, "title"):
         return title
     # The last folders of a shot's lighting hip are <shot>/lighting.
     hip = Path(hou.text.expandString("$HIP"))
-    layers = ", ".join(_text(c.configure, folders.LAYER) for c in chains)
+    layers = ", ".join(parms.text(c.configure, parms.LAYER) for c in chains)
     return f"{hip.parent.name} {hip.name}: {layers}"
 
 
@@ -203,38 +212,42 @@ def build(submit: hou.Node, title: str, chains: list[Chain]) -> author.Job:
     )
 
 
-def _layer(chain: Chain) -> job.Layer:
+def _layer(chain: Chain) -> commands.Layer:
     configure = chain.configure
-    folder = Path(_text(configure, folders.OUTPUT))
-    frames = _frames(configure)
+    folder = Path(parms.text(configure, parms.OUTPUT))
+    frames = parms.frames(configure)
     _write_render_usd(configure, chain.output)
 
-    stage = Usd.Stage.Open(str(folder / paths.RENDER_USD), Usd.Stage.LoadNone)
-    settings = paths.rendered_settings(stage, _toggled(configure, "rendersettings"))
+    stage = Usd.Stage.Open(str(folder / RENDER_USD), Usd.Stage.LoadNone)
+    settings = paths.rendered_settings(stage, parms.toggled(configure, parms.SETTINGS))
     _check_camera(configure, stage, settings)
     products = paths.products(settings)
     denoised = denoise.product(settings, products) if chain.denoise else None
-    renderer = _text(configure, "renderer")
-    outputs = products + paths.cryptomattes(settings, products, renderer)
-    written = paths.author_outputs(
-        stage, frames, outputs, [denoised] if denoised else []
-    )
+    written = _write_outputs(configure, settings, products, denoised, frames)
 
-    render = job.Render(husk=_husk(configure), folders=written)
-    denoise_spec = None
-    if denoised:
-        denoise_spec = _write_denoise(folder, denoised)
-    encode_spec = None
-    if chain.encode:
-        encode_spec = _encode(chain.encode, configure, settings, products, denoised)
-    return job.Layer(
-        _text(configure, folders.LAYER),
+    encode = chain.encode
+    return commands.Layer(
+        parms.text(configure, parms.LAYER),
         folder,
         frames,
-        render,
-        denoise_spec,
-        encode_spec,
+        commands.Render(husk=parms.husk(configure), folders=written),
+        _write_denoise(folder, denoised) if denoised else None,
+        _encode(encode, configure, settings, products, denoised) if encode else None,
     )
+
+
+def _write_outputs(
+    configure: hou.Node,
+    settings: UsdRender.Settings,
+    products: list[Usd.Prim],
+    denoised: Usd.Prim | None,
+    frames: list[int],
+) -> list[Path]:
+    """Write every output's path into render.usd, and return the folders husk writes."""
+    renderer = parms.text(configure, parms.RENDERER)
+    outputs = products + paths.cryptomattes(settings, products, renderer)
+    stage = settings.GetPrim().GetStage()
+    return paths.author_outputs(stage, frames, outputs, [denoised] if denoised else [])
 
 
 def _check_camera(
@@ -244,7 +257,7 @@ def _check_camera(
     through a default camera, exiting 0, when the settings' camera is missing.
     With neither, it renders through the first camera it finds, or fails every
     frame when there is none."""
-    override = _toggled(configure, "override_camera")
+    override = parms.toggled(configure, parms.CAMERA)
     targets = settings.GetCameraRel().GetForwardedTargets()
     path = Sdf.Path(override) if override else next(iter(targets), None)
     if path is None:
@@ -277,7 +290,7 @@ def _check_camera(
 def _write_render_usd(configure: hou.Node, output: hou.Node) -> None:
     # Inside a locked asset such as SKD Lookdev the path is authored already,
     # and setting it would raise a permission error.
-    if hou.node(_text(configure, "rop_lop")) != output:
+    if hou.node(parms.text(configure, "rop_lop")) != output:
         configure.setParms({"rop_lop": output.path()})
     # Configure's contents always hold this ROP and its button.
     rop = configure.node("usd_rop")
@@ -289,49 +302,18 @@ def _write_render_usd(configure: hou.Node, output: hou.Node) -> None:
         )
 
 
-def _frames(configure: hou.LopNode) -> list[int]:
-    trange = configure.parm("trange").evalAsString()  # ty: ignore[unresolved-attribute]
-    if trange == "off":
-        return [int(hou.frame())]
-    if trange == "stage":
-        stage = configure.stage()
-        return list(
-            range(int(stage.GetStartTimeCode()), int(stage.GetEndTimeCode()) + 1)
-        )
-    start, end, step = (int(v) for v in configure.evalParmTuple("f"))
-    if step < 1 or end < start:
-        raise SendRefused(
-            f"{configure.path()} renders frames {start} to {end} by {step}, which "
-            "is no frames. Set End at or after Start, and Inc to 1 or more."
-        )
-    return list(range(start, end + 1, step))
-
-
-def _husk(configure: hou.Node) -> list[str]:
-    words = [
-        *("--renderer", _text(configure, "renderer")),
-        *("--verbose", "acet"),
-    ]
-    if camera := _toggled(configure, "override_camera"):
-        words += ["--camera", camera]
-    if settings := _toggled(configure, "rendersettings"):
-        words += ["--settings", settings]
-    words.append("--disable-dummy-raster-product")
-    return words
-
-
-def _write_denoise(folder: Path, product: Usd.Prim) -> job.Denoise:
+def _write_denoise(folder: Path, product: Usd.Prim) -> commands.Denoise:
     """Write denoise.json and return what the denoise tasks need."""
     denoise.write_config(folder, denoise.config(denoise.var_names(product)))
-    return job.Denoise(product=product.GetName())
+    return commands.Denoise(product=product.GetName())
 
 
 def _movie(node: hou.Node, configure: hou.Node) -> tuple[FFmpegPreset, Path, bool]:
     """Encode's preset, its movie, and whether Cleanup removes the encoded frames."""
-    folder = Path(_text(configure, folders.OUTPUT))
-    layer = _text(configure, folders.LAYER)
-    preset = FFmpegPreset[_text(node, "preset")]
-    video = _text(node, "output_file") or str(folder / f"{layer}.{preset.ext}")
+    folder = Path(parms.text(configure, parms.OUTPUT))
+    layer = parms.text(configure, parms.LAYER)
+    preset = FFmpegPreset[parms.text(node, "preset")]
+    video = parms.text(node, "output_file") or str(folder / f"{layer}.{preset.ext}")
     if not Path(video).is_absolute():
         raise SendRefused(
             f'Output File on {node.path()} is "{video}", which is not a full path. '
@@ -361,7 +343,7 @@ def _encode(
     settings: UsdRender.Settings,
     products: list[Usd.Prim],
     denoised: Usd.Prim | None,
-) -> job.Encode:
+) -> commands.Encode:
     if denoised:
         # denoise_batch writes the finished beauty as R, G, B.
         product, channels = denoised, ["R,G,B"]
@@ -371,15 +353,15 @@ def _encode(
         channels = [f"{name}.r,{name}.g,{name}.b", f"{name}.R,{name}.G,{name}.B"]
         channels.append("R,G,B")
     preset, video, remove_frames = _movie(node, configure)
-    folder = Path(_text(configure, folders.OUTPUT))
-    return job.Encode(
+    folder = Path(parms.text(configure, parms.OUTPUT))
+    return commands.Encode(
         images=folder / product.GetName(),
         channels=channels,
         video=video,
         # A static method the stubs declare as an instance one.
         colorconfig=hou.Color.ocio_configPath(),  # ty: ignore[missing-argument]
-        display=_text(node, "display"),
-        view=_text(node, "view"),
+        display=parms.text(node, "display"),
+        view=parms.text(node, "view"),
         preset=preset,
         frame_rate=hou.fps(),
         remove_frames=remove_frames,
@@ -394,12 +376,3 @@ def _setenv() -> str:
 
 def _kind(node: hou.Node) -> str:
     return node.type().nameComponents()[2]
-
-
-def _text(node: hou.Node, name: str) -> str:
-    return str(node.evalParm(name))
-
-
-def _toggled(node: hou.Node, name: str) -> str:
-    """A parm's value when its checkbox is on, else empty."""
-    return _text(node, name) if node.evalParm(f"toggle_{name}") else ""
