@@ -106,8 +106,6 @@ def send(submit: hou.Node, inputs: list[hou.Node] | None = None) -> None:
             title="Job sent to Tractor",
         )
 
-    # Recorded after the dialog, which must reach the artist even when a locked
-    # parm or take refuses the record.
     for c, folder in zip(chains, claimed):
         folders.record_sent(c.configure, folder, job_id)
 

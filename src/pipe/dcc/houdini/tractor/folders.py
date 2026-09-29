@@ -14,6 +14,8 @@ from pathlib import Path
 
 import hou
 
+from pipe.core.cache import RENDER_DIRNAME, link_to_cache
+from pipe.core.util.paths import get_production_path
 from pipe.dcc.houdini.hipfile.departments import Department
 from pipe.dcc.houdini.tractor import SendRefused
 
@@ -50,7 +52,7 @@ def default_root(node: hou.Node) -> str:
     # every other hip keeps its test renders to itself.
     hip = Path(hou.text.expandString("$HIP"))
     base = hip.parent if hip.name == Department.LIGHTING else hip
-    return str(base / "render" / _text(node, LAYER))
+    return str(base / RENDER_DIRNAME / _text(node, LAYER))
 
 
 def next_version(root: Path) -> Path:
@@ -74,6 +76,9 @@ def claim(configures: list[hou.Node]) -> list[Path]:
     """Create every Configure's Output Folder, or none of them."""
     targets = [Path(_text(node, OUTPUT)) for node in configures]
     claimed: list[Path] = []
+    # Before the refusals below, which show the next version in these parms.
+    for node in configures:
+        _check_settable(node)
     try:
         for node, folder in zip(configures, targets):
             if _holder(node, OUTPUT) is None:
@@ -99,18 +104,55 @@ def claim(configures: list[hou.Node]) -> list[Path]:
     return claimed
 
 
+def _check_settable(node: hou.Node) -> None:
+    """Send sets Output Folder and Last Job, which a lock or a take forbids."""
+    take = hou.takes.currentTake()
+    for name in (OUTPUT, LAST_JOB):
+        parm = _holder(node, name)
+        if parm is None:
+            continue
+        label = f"{parm.description()} on {parm.node().path()}"
+        if parm.isLocked():
+            raise SendRefused(
+                f"{label} is locked, so Send can't show this render in it. "
+                "Unlock the parameter, then Send again."
+            )
+        if take != hou.takes.rootTake() and not take.hasParmTuple(parm.tuple()):
+            raise SendRefused(
+                f'The take "{take.name()}" leaves out {label}, so Send '
+                "can't show this render in it. Switch to the Main take, then "
+                "Send again."
+            )
+
+
+def _link_render(root: Path) -> None:
+    """Creates a symlink on disk: the `render` folder of a production hip."""
+    render = root.parent
+    if render.name == RENDER_DIRNAME and render.is_relative_to(get_production_path()):
+        link_to_cache(render)
+
+
 def _create(node: hou.Node, folder: Path) -> None:
     stale = SendRefused(
         f"The Output Folder of {node.path()} was {_text(node, OUTPUT) or 'empty'}, "
         "which is not the next free version. It now shows the next one; Send "
         "again to render into it."
     )
-    if folder != next_version(Path(_text(node, ROOT))):
+    root = Path(_text(node, ROOT))
+    if folder != next_version(root):
         raise stale
+    _link_render(root)
     try:
         folder.mkdir(parents=True)
     except FileExistsError:
-        raise stale from None
+        if folder.exists():
+            raise stale from None
+        # mkdir reports a link to a missing folder as a file in its way.
+        link = next(p for p in folder.parents if p.is_symlink() and not p.exists())
+        raise SendRefused(
+            f"Could not create {folder}: {link} links to {link.readlink()}, which "
+            "does not exist. Ask a TD to repair the link, then Send again."
+        ) from None
     except OSError as error:
         raise SendRefused(f"Could not create {folder}: {error.strerror}.") from None
 
