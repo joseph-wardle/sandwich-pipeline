@@ -48,7 +48,7 @@ from pipe.dcc.substance_painter.util.metadata import (
     get_active_asset_from_project,
     get_asset_selection_metadata,
     run_when_project_editable,
-    store_asset_metadata_when_ready,
+    tag_project,
 )
 from pipe.core.versioning import (
     VersionRecord,
@@ -285,10 +285,9 @@ def _open_existing_project_for_asset(
 
     cur = current_project_path()
     if cur and cur.resolve() == project_path.resolve():
+        tag_project(asset, geo_variant)
         if sp.project.needs_saving():
-            if not _save_current_project_as(project_path, parent):
-                return
-        store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
+            _save_current_project_as(project_path, parent)
         return
 
     if sp.project.is_open():
@@ -301,7 +300,7 @@ def _open_existing_project_for_asset(
 
     if not _open_existing_project(project_path, parent):
         return
-    store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
+    tag_project(asset, geo_variant)
     asset_label = asset.display_name or asset.name
     log.info(
         f"Opened Substance project for asset {asset_label} (variant={geo_variant})"
@@ -325,16 +324,20 @@ def _save_current_project_as_asset(
 
     cur = current_project_path()
     if cur and cur.resolve() == project_path.resolve():
-        store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
+        tag_project(asset, geo_variant)
         return
 
     if project_path.exists() and not _confirm_overwrite_project(parent, project_path):
         return
 
     project_path.parent.mkdir(parents=True, exist_ok=True)
+    # Tag only after the project is at its new path, so a failed save cannot
+    # leave the original file carrying the new asset's tag.
     if not _save_current_project_as(project_path, parent):
         return
-    store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
+    tag_project(asset, geo_variant)
+    if sp.project.needs_saving() and not _save_current_project_as(project_path, parent):
+        return
     log.info(f"Saved Substance project to {project_path} (variant={geo_variant})")
 
 
@@ -423,9 +426,8 @@ def _create_default_project_for_asset(
     resolved_project_path = resolve_mapped_path(project_path)
 
     def _finalize_save() -> None:
-        if not _save_current_project_as(resolved_project_path, parent):
-            return
-        store_asset_metadata_when_ready(asset, geo_variant=variant)
+        tag_project(asset, variant)
+        _save_current_project_as(resolved_project_path, parent)
 
     run_when_project_editable(_finalize_save)
     asset_label = asset.display_name or asset.name
@@ -603,7 +605,7 @@ def _restore_project_version(
 
     if not _open_existing_project(working_path, parent):
         return
-    store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
+    tag_project(asset, geo_variant)
     MessageDialog(
         parent,
         restored_message(record),
@@ -685,32 +687,3 @@ def _write_named_version(
         "Version Saved",
     ).exec_()
     return True
-
-
-# ---------------------------------------------------------------------------
-# Re-exports for public API stability
-# ---------------------------------------------------------------------------
-
-# These symbols were historically imported from this module by other code.
-# They now live in pipe.dcc.substance_painter.util.metadata but are re-exported here so that
-# existing import paths continue to work.
-from pipe.dcc.substance_painter.util.metadata import (  # noqa: E402, F401
-    PIPE_SP_METADATA_CONTEXT,
-    PIPE_SP_METADATA_KEY,
-    PIPE_SP_METADATA_SCHEMA_VERSION,
-    store_asset_metadata_for_project,
-    store_asset_selection_metadata,
-)
-
-__all__ = [
-    "PIPE_SP_METADATA_CONTEXT",
-    "PIPE_SP_METADATA_KEY",
-    "PIPE_SP_METADATA_SCHEMA_VERSION",
-    "get_active_asset_from_project",
-    "get_asset_selection_metadata",
-    "store_asset_metadata_for_project",
-    "store_asset_selection_metadata",
-    "launch_open_asset_textures",
-    "launch_save_version",
-    "launch_version_browser_for_current_project",
-]

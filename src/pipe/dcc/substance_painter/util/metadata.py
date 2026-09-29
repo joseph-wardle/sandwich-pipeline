@@ -8,10 +8,8 @@ Substance Painter project belongs to without relying on file paths alone.
 Public API
 ----------
 - get_asset_selection_metadata()
-- store_asset_selection_metadata()
 - get_active_asset_from_project()
-- store_asset_metadata_for_project()
-- store_asset_metadata_when_ready()
+- tag_project()
 
 Scheduling helpers (used by other sp modules)
 ---------------------------------------------
@@ -168,7 +166,7 @@ def get_asset_selection_metadata() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Metadata write helpers
+# Metadata write
 # ---------------------------------------------------------------------------
 
 
@@ -181,95 +179,33 @@ def _utc_now_iso() -> str:
     )
 
 
-def _build_asset_selection_payload(
-    asset_map: dict[str, str],
-    last_asset: str | None = None,
-    asset_id: int | None = None,
-    asset_path: str | None = None,
-    asset_subdirectory: str | None = None,
-    geo_variant: str | None = None,
-) -> dict[str, Any]:
-    """Assemble the metadata payload dict from the given fields."""
+def tag_project(asset: Asset, geo_variant: str) -> None:
+    """Record *asset* and *geo_variant* in the open project's metadata."""
+    asset_name = asset.display_name
+    if not sp.project.is_open() or not asset_name:
+        return
+
     payload: dict[str, Any] = {
         "schema_version": PIPE_SP_METADATA_SCHEMA_VERSION,
         "dcc": DCC_SUBSTANCE,
-        "asset_map": asset_map,
-        "updated_at": _utc_now_iso(),
+        "asset_map": {
+            texture_set_name(texset): asset_name
+            for texset in sp.textureset.all_texture_sets()
+        },
+        "last_asset": asset_name,
+        "asset_id": asset.id,
+        "asset_path": asset.asset_path,
+        "geo_variant": geo_variant,
     }
-    if last_asset:
-        payload["last_asset"] = last_asset
-    if asset_id:
-        payload["asset_id"] = asset_id
-    if asset_path:
-        payload["asset_path"] = asset_path
-    if asset_subdirectory is not None:
-        payload["asset_subdirectory"] = asset_subdirectory
-    if geo_variant:
-        payload["geo_variant"] = geo_variant
-    return payload
+    if asset.subdirectory is not None:
+        payload["asset_subdirectory"] = asset.subdirectory
 
-
-def store_asset_selection_metadata(
-    asset_map: dict[str, str],
-    *,
-    last_asset: str | None = None,
-    asset_id: int | None = None,
-    asset_path: str | None = None,
-    asset_subdirectory: str | None = None,
-    geo_variant: str | None = None,
-) -> None:
-    """Persist a texture-set-to-asset mapping in the project metadata.
-
-    If the project is busy or not yet in edition state, the write is
-    automatically deferred until it is safe.
-    """
-    if not sp.project.is_open():
+    stored = {k: v for k, v in _safe_get_metadata().items() if k != "updated_at"}
+    if stored == payload:
         return
-
-    if sp.project.is_busy():
-        run_when_project_editable(
-            lambda: store_asset_selection_metadata(
-                asset_map,
-                last_asset=last_asset,
-                asset_id=asset_id,
-                asset_path=asset_path,
-                asset_subdirectory=asset_subdirectory,
-                geo_variant=geo_variant,
-            )
-        )
-        return
-
-    try:
-        if not sp.project.is_in_edition_state():
-            run_when_project_editable(
-                lambda: store_asset_selection_metadata(
-                    asset_map,
-                    last_asset=last_asset,
-                    asset_id=asset_id,
-                    asset_path=asset_path,
-                    asset_subdirectory=asset_subdirectory,
-                    geo_variant=geo_variant,
-                )
-            )
-            return
-    except ServiceNotFoundError:
-        return
-
-    resolved_last_asset = last_asset
-    if not resolved_last_asset and asset_map:
-        unique = set(asset_map.values())
-        if len(unique) == 1:
-            resolved_last_asset = next(iter(unique))
-
-    payload = _build_asset_selection_payload(
-        asset_map,
-        last_asset=resolved_last_asset,
-        asset_id=asset_id,
-        asset_path=asset_path,
-        asset_subdirectory=asset_subdirectory,
-        geo_variant=geo_variant,
-    )
+    payload["updated_at"] = _utc_now_iso()
     _metadata_handle().set(PIPE_SP_METADATA_KEY, payload)
+    log.info(f"Tagged project with asset {asset_name} (variant={geo_variant})")
 
 
 # ---------------------------------------------------------------------------
@@ -361,43 +297,3 @@ def _asset_from_project_path(conn: ShotGrid) -> Asset | None:
     except Exception as exc:
         log.warning(f"Failed to resolve asset from project path: {exc}")
         return None
-
-
-# ---------------------------------------------------------------------------
-# Convenience: store metadata for a single asset
-# ---------------------------------------------------------------------------
-
-
-def store_asset_metadata_for_project(
-    asset: Asset, *, geo_variant: str | None = None
-) -> None:
-    """Map all current texture sets to a single asset and persist to metadata."""
-    if not sp.project.is_open():
-        return
-
-    asset_display_name = asset.display_name or asset.code or asset.name
-    if not asset_display_name:
-        return
-
-    asset_map = {
-        texture_set_name(texset): asset_display_name
-        for texset in sp.textureset.all_texture_sets()
-    }
-    store_asset_selection_metadata(
-        asset_map,
-        last_asset=asset_display_name,
-        asset_id=asset.id,
-        asset_path=asset.asset_path,
-        asset_subdirectory=asset.subdirectory,
-        geo_variant=geo_variant,
-    )
-    log.info(f"Stored asset metadata for project: {asset_display_name}")
-
-
-def store_asset_metadata_when_ready(
-    asset: Asset, *, geo_variant: str | None = None
-) -> None:
-    """Defer :func:`store_asset_metadata_for_project` until the project is editable."""
-    run_when_project_editable(
-        lambda: store_asset_metadata_for_project(asset, geo_variant=geo_variant)
-    )
