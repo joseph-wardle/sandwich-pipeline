@@ -80,6 +80,28 @@ def check_project_editable(parent: QtWidgets.QWidget | None, action_name: str) -
     return True
 
 
+def save_project(show_error: Callable[[str, str], object]) -> bool:
+    """Save the open project; on failure call *show_error(message, title)*."""
+    try:
+        sp.project.save()
+    except ProjectError:
+        log.exception("Failed to save the Substance Painter project.")
+        show_error(
+            "Failed to save the project. Resolve file issues and try again.",
+            "Save Failed",
+        )
+        return False
+
+    if sp.project.needs_saving():
+        show_error(
+            "The project still appears unsaved. Save manually and try again.",
+            "Save Required",
+        )
+        return False
+
+    return True
+
+
 def run_when_project_editable(callback: Callable[[], None]) -> None:
     """Run *callback* once the open project is loaded and idle.
 

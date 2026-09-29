@@ -47,6 +47,7 @@ from pipe.dcc.substance_painter.util.project import (
     check_project_editable,
     current_project_path,
     is_open_project,
+    save_project,
 )
 from pipe.dcc.substance_painter.util.docs import docs_link_html
 from pipe.dcc.substance_painter.util.texture_set import texture_set_name
@@ -467,14 +468,9 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         self._active_publish_context = context
         self._set_publish_controls_enabled(False)
 
-        initial_stage = (
-            PublishStage.SAVING_PROJECT
-            if request.save_required
-            else PublishStage.PREPARING_PUBLISH
-        )
         self._send_publish_progress(
             PublishProgressUpdate(
-                stage=initial_stage,
+                stage=request.stage_sequence[0],
                 message=(
                     "Preparing to save the Substance Painter project and start publish."
                     if request.save_required
@@ -500,14 +496,9 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             return
 
         request = context.request
-        wait_stage = (
-            PublishStage.SAVING_PROJECT
-            if request.save_required
-            else PublishStage.PREPARING_PUBLISH
-        )
         self._send_publish_progress(
             PublishProgressUpdate(
-                stage=wait_stage,
+                stage=request.stage_sequence[0],
                 message=(
                     "Waiting for Substance Painter to become idle before saving and publishing."
                     if request.save_required
@@ -527,13 +518,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             )
 
     def _run_publish_request(self, context: _ActivePublishContext) -> None:
-        """Execute the full publish pipeline: save, export, backup, Houdini build.
-
-        Called by ``_schedule_publish_when_idle`` once Painter is idle.
-        Runs synchronously — the progress dialog was already shown by
-        ``_begin_publish``.  On completion (success or failure), dismisses
-        the progress dialog and re-enables the publish UI.
-        """
+        """Save, export, back up, and run Houdini; then report and clean up."""
         if not self._is_active_publish_context(context):
             return
         if not self._curr_asset:
@@ -545,52 +530,12 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             return
 
         request = context.request
-        exporter = Exporter(self._curr_asset)
-
         try:
-            current_variants = self._curr_asset.material_variants or set()
-            if request.mat_var not in current_variants:
-                log.info(f"Updating new material variant: {request.mat_var}")
-                self._curr_asset = self._conn.add_material_variant(
-                    self._curr_asset, request.mat_var
-                )
+            asset = self._register_material_selection(self._curr_asset, request)
+            self._curr_asset = asset
 
-            current_layers = self._curr_asset.material_layers or set()
-            if request.material_layer not in current_layers:
-                log.info(f"Updating new material layer: {request.material_layer}")
-                self._curr_asset = self._conn.add_material_layer(
-                    self._curr_asset, request.material_layer
-                )
-
-            log.info("Exporting!")
-
-            if request.save_required:
-                self._send_publish_progress(
-                    PublishProgressUpdate(
-                        stage=PublishStage.SAVING_PROJECT,
-                        message="Saving the Substance Painter project before publish.",
-                    )
-                )
-                try:
-                    sp.project.save()
-                except ProjectError:
-                    log.exception(
-                        "Failed to save Substance Painter project before publish."
-                    )
-                    self._show_publish_message(
-                        context,
-                        "Failed to save the project. Resolve any file issues and try again.",
-                        title="Save Failed",
-                    )
-                    return
-
-                if sp.project.needs_saving():
-                    self._show_publish_message(
-                        context,
-                        "The project still appears unsaved. Please save manually before publishing.",
-                        title="Save Required",
-                    )
-                    return
+            if request.save_required and not self._save_before_publish(context):
+                return
 
             self._send_publish_progress(
                 PublishProgressUpdate(
@@ -598,7 +543,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                     message="Preparing the publish configuration and enabled texture sets.",
                 )
             )
-
+            exporter = Exporter(asset)
             export_success = exporter.export(
                 request.export_settings,
                 request.mat_var,
@@ -620,102 +565,19 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 )
                 return
 
-            backup_status = None
-            project_path = current_project_path()
-            asset_paths = paths_for_asset(self._curr_asset)
-            # The backup follows the project's variant; the textures follow the dropdown.
-            project_stream = substance_project_stream(
-                asset_paths,
-                current_geo_variant(),
-                owner=asset_owner_for(self._curr_asset),
-            )
-            if project_path is None:
-                backup_status = "Backup skipped: project has no file path."
-                log.warning("Backup skipped: project has no file path.")
-            elif not is_open_project(project_stream.working_path):
-                backup_status = f"Backup skipped: this file isn't the asset's {project_stream.label}."
-                log.warning(
-                    f"Backup skipped: {project_path} is not "
-                    f"{project_stream.working_path}."
-                )
+            backup_ok, backup_status = self._backup_project(asset, request)
+            houdini_ok, houdini_status = self._run_houdini_publish(asset, request)
+            if backup_ok and houdini_ok:
+                sp.logging.info(f"Publish complete for {request.asset_label}")
+                title = "Publish Textures"
             else:
-                self._send_publish_progress(
-                    PublishProgressUpdate(
-                        stage=PublishStage.BACKING_UP_PROJECT,
-                        message="Saving a versioned backup of the Substance Painter project.",
-                    )
-                )
-                publish_path = asset_paths.publish_textures_layer_dir(
-                    request.geo_var,
-                    request.mat_var,
-                    request.material_layer,
-                )
-                result = backup_if_changed(
-                    source_path=project_path,
-                    backup_dir=project_stream.backup_dir,
-                    manifest_path=project_stream.manifest_path,
-                    dcc=project_stream.dcc,
-                    stream_key=project_stream.stream_key,
-                    stem=project_stream.stem,
-                    ext=project_stream.ext,
-                    stream_label=project_stream.label,
-                    working_path=project_stream.working_path,
-                    title=request.version_title,
-                    publish_path=publish_path,
-                    context="publish",
-                    note=request.version_note,
-                    extra={
-                        "geo": request.geo_var,
-                        "material": request.mat_var,
-                        "material_layer": request.material_layer,
-                    },
-                    owner=project_stream.owner,
-                )
-
-                if result is None:
-                    backup_status = "Backup skipped: source file missing."
-                    log.warning("Backup skipped: source file missing.")
-                elif result.changed:
-                    if result.backup_path:
-                        version_label = (
-                            f"v{int(result.version):03d}"
-                            if result.version is not None
-                            else result.backup_path.name
-                        )
-                        backup_status = (
-                            f'Backup created: {version_label} "{request.version_title}"'
-                        )
-                        log.info(f"Backup created at {result.backup_path}")
-                    else:
-                        backup_status = "Backup created."
-                        log.info(f"Backup created for {project_path}")
-                else:
-                    backup_status = "Backup skipped: no changes detected."
-                    log.info("Backup skipped: no changes detected.")
-
-            houdini_status: str | None = None
-            try:
-                self._send_publish_progress(
-                    PublishProgressUpdate(
-                        stage=PublishStage.RUNNING_HOUDINI,
-                        message="Running the Houdini asset publish step.",
-                    )
-                )
-                houdini_result = run_asset_builder(
-                    self._curr_asset, geo_variant=request.geo_var
-                )
-                houdini_status = summarize_result(houdini_result)
-            except HoudiniPublishError as exc:
-                houdini_status = f"Houdini publish failed: {exc}"
-                log.error(f"Headless Houdini publish failed from Substance: {exc}")
-
-            message = "Textures successfully exported!"
-            if backup_status:
-                message = f"{message}\n{backup_status}"
-            if houdini_status:
-                message = f"{message}\n{houdini_status}"
-            sp.logging.info(f"Publish complete for {request.asset_label}")
-            self._show_publish_message(context, message)
+                sp.logging.warning(f"Publish incomplete for {request.asset_label}")
+                title = "Publish Incomplete"
+            self._show_publish_message(
+                context,
+                f"Textures successfully exported!\n{backup_status}\n{houdini_status}",
+                title=title,
+            )
         except Exception as exc:
             log.exception(
                 f"Unexpected error while publishing textures for {request.asset_label}"
@@ -728,6 +590,133 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             )
         finally:
             self._finish_publish_context(context)
+
+    def _register_material_selection(
+        self, asset: Asset, request: _PendingPublishRequest
+    ) -> Asset:
+        """Add the request's material variant and layer to ShotGrid if new."""
+        if request.mat_var not in (asset.material_variants or set()):
+            log.info(f"Updating new material variant: {request.mat_var}")
+            asset = self._conn.add_material_variant(asset, request.mat_var)
+
+        if request.material_layer not in (asset.material_layers or set()):
+            log.info(f"Updating new material layer: {request.material_layer}")
+            asset = self._conn.add_material_layer(asset, request.material_layer)
+
+        return asset
+
+    def _save_before_publish(self, context: _ActivePublishContext) -> bool:
+        self._send_publish_progress(
+            PublishProgressUpdate(
+                stage=PublishStage.SAVING_PROJECT,
+                message="Saving the Substance Painter project before publish.",
+            )
+        )
+        return save_project(
+            lambda message, title: self._show_publish_message(
+                context, message, title=title
+            )
+        )
+
+    def _backup_project(
+        self, asset: Asset, request: _PendingPublishRequest
+    ) -> tuple[bool, str]:
+        """Back up the open project if it changed; return (succeeded, status line)."""
+        project_path = current_project_path()
+        if project_path is None:
+            log.warning("Backup skipped: project has no file path.")
+            return True, "Backup skipped: project has no file path."
+
+        asset_paths = paths_for_asset(asset)
+        # The backup follows the project's variant; the textures follow the dropdown.
+        project_stream = substance_project_stream(
+            asset_paths,
+            current_geo_variant(),
+            owner=asset_owner_for(asset),
+        )
+        if not is_open_project(project_stream.working_path):
+            log.warning(
+                f"Backup skipped: {project_path} is not {project_stream.working_path}."
+            )
+            return (
+                True,
+                f"Backup skipped: this file isn't the asset's {project_stream.label}.",
+            )
+
+        self._send_publish_progress(
+            PublishProgressUpdate(
+                stage=PublishStage.BACKING_UP_PROJECT,
+                message="Saving a versioned backup of the Substance Painter project.",
+            )
+        )
+        try:
+            result = backup_if_changed(
+                source_path=project_path,
+                backup_dir=project_stream.backup_dir,
+                manifest_path=project_stream.manifest_path,
+                dcc=project_stream.dcc,
+                stream_key=project_stream.stream_key,
+                stem=project_stream.stem,
+                ext=project_stream.ext,
+                stream_label=project_stream.label,
+                working_path=project_stream.working_path,
+                title=request.version_title,
+                publish_path=asset_paths.publish_textures_layer_dir(
+                    request.geo_var,
+                    request.mat_var,
+                    request.material_layer,
+                ),
+                context="publish",
+                note=request.version_note,
+                extra={
+                    "geo": request.geo_var,
+                    "material": request.mat_var,
+                    "material_layer": request.material_layer,
+                },
+                owner=project_stream.owner,
+            )
+        except (OSError, ValueError):
+            log.exception(
+                f"Backup of {project_path} to {project_stream.backup_dir} failed."
+            )
+            return False, (
+                "Backup failed: the project version could not be saved. "
+                "Check the console for details."
+            )
+
+        if result is None:
+            log.warning("Backup skipped: source file missing.")
+            return True, "Backup skipped: source file missing."
+        if not result.changed:
+            log.info("Backup skipped: no changes detected.")
+            return True, "Backup skipped: no changes detected."
+        if not result.backup_path:
+            log.info(f"Backup created for {project_path}")
+            return True, "Backup created."
+        log.info(f"Backup created at {result.backup_path}")
+        version_label = (
+            f"v{int(result.version):03d}"
+            if result.version is not None
+            else result.backup_path.name
+        )
+        return True, f'Backup created: {version_label} "{request.version_title}"'
+
+    def _run_houdini_publish(
+        self, asset: Asset, request: _PendingPublishRequest
+    ) -> tuple[bool, str]:
+        """Run the headless Houdini asset build; return (succeeded, status line)."""
+        self._send_publish_progress(
+            PublishProgressUpdate(
+                stage=PublishStage.RUNNING_HOUDINI,
+                message="Running the Houdini asset publish step.",
+            )
+        )
+        try:
+            result = run_asset_builder(asset, geo_variant=request.geo_var)
+        except HoudiniPublishError as exc:
+            log.error(f"Headless Houdini publish failed from Substance: {exc}")
+            return False, f"Houdini publish failed: {exc}"
+        return True, summarize_result(result)
 
     def _is_active_publish_context(self, context: _ActivePublishContext) -> bool:
         return self._active_publish_context is context

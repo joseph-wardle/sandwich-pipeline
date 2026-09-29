@@ -53,6 +53,7 @@ from pipe.dcc.substance_painter.util.project import (
     current_project_path,
     is_open_project,
     run_when_project_editable,
+    save_project,
 )
 from pipe.core.versioning import (
     VersionRecord,
@@ -132,23 +133,9 @@ def _ensure_project_saved_for_version_action(
         )
         if not dialog.exec_():
             return None
-        try:
-            sp.project.save()
-        except ProjectError:
-            log.exception(f"Failed to save project before {action_name}.")
-            MessageDialog(
-                parent,
-                "Failed to save the current project. Resolve file issues and try again.",
-                "Save Failed",
-            ).exec_()
-            return None
-
-        if sp.project.needs_saving():
-            MessageDialog(
-                parent,
-                "The project still appears unsaved. Save manually and try again.",
-                "Save Required",
-            ).exec_()
+        if not save_project(
+            lambda message, title: MessageDialog(parent, message, title).exec_()
+        ):
             return None
 
         project_path = current_project_path()
