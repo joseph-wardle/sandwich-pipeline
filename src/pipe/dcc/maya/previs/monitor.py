@@ -72,10 +72,23 @@ def look_through(camera_shape: str) -> None:
     panel = get_monitor()
     if panel is None:
         return
-    if (mc.lookThru(panel, query=True) or "") == camera_shape:
+    # Runs on every frame change, so re-masking the same camera would undo any
+    # overscan the artist set and pile up reference edits.
+    current = _camera_shape(cast(str | None, mc.lookThru(panel, query=True)))
+    if current is not None and current == _camera_shape(camera_shape):
         return
     mc.lookThru(panel, camera_shape)
     apply_gate_mask(camera_shape)
+
+
+def _camera_shape(node: str | None) -> str | None:
+    """Long path of the camera shape at or under `node`; lookThru reports either form."""
+    if not node or not mc.objExists(node):
+        return None
+    if mc.nodeType(node) == "camera":
+        return mc.ls(node, long=True)[0]
+    shapes = mc.listRelatives(node, shapes=True, type="camera", fullPath=True) or []
+    return shapes[0] if shapes else None
 
 
 def _bind_under_pointer(

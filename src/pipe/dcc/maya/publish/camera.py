@@ -4,8 +4,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from Qt.QtCore import QRegExp
-from Qt.QtGui import QRegExpValidator
 from Qt.QtWidgets import QComboBox, QHBoxLayout, QLabel, QWidget
 
 if TYPE_CHECKING:
@@ -14,9 +12,8 @@ if TYPE_CHECKING:
 import maya.cmds as mc
 from pipe.core.util.paths import get_production_path
 
-from pipe.core.ui import FilteredListDialog, MessageDialogCustomButtons
+from pipe.core.ui import FilteredListDialog, MessageDialog, MessageDialogCustomButtons
 from pipe.core.shotgrid import SGEntity, Shot
-from pipe.dcc.maya.util.camera import has_shot_aspect
 
 from .publisher import Publisher
 from .usdchaser import ExportChaser, ExportChaserMode
@@ -25,14 +22,39 @@ log = logging.getLogger(__name__)
 
 _MM_PER_INCH = 25.4  # Maya stores film aperture in inches
 
+_SHOT_ASPECT = 16 / 9
+# Loose enough for the old D-sequence rig (OLDShotCam)
+_ASPECT_TOLERANCE = 0.01
+
 
 def _publishable_cameras() -> list[str]:
+    """Scene cameras, 16:9 first so the dialog opens on one whenever the scene has one."""
     cameras = [
         camera
         for camera in mc.ls(cameras=True) or []
         if not mc.camera(camera, query=True, startupCamera=True)
     ]
-    return sorted(cameras, key=lambda camera: not has_shot_aspect(camera))
+    return sorted(cameras, key=lambda camera: not _has_shot_aspect(camera))
+
+
+def _shot_camera(cameras: Sequence[str], shot_code: str | None) -> str | None:
+    """The camera in the shot's own namespace, e.g. `A_040:shotCamShape`."""
+    for camera in cameras:
+        leaf = camera.rsplit("|", 1)[-1]
+        if leaf.rpartition(":")[0] == shot_code:
+            return camera
+    return None
+
+
+def _film_back_mm(camera: str) -> tuple[float, float]:
+    width = mc.getAttr(f"{camera}.horizontalFilmAperture") * _MM_PER_INCH
+    height = mc.getAttr(f"{camera}.verticalFilmAperture") * _MM_PER_INCH
+    return width, height
+
+
+def _has_shot_aspect(camera: str) -> bool:
+    width, height = _film_back_mm(camera)
+    return abs(width / height - _SHOT_ASPECT) < _ASPECT_TOLERANCE
 
 
 class PublishCameraDialog(FilteredListDialog):
@@ -47,15 +69,8 @@ class PublishCameraDialog(FilteredListDialog):
             accept_button_name="Publish",
         )
 
-        self._camera = QComboBox(
-            self,
-        )
-        cameras = _publishable_cameras()
-        self._camera.addItems(cameras)
-        if cameras:
-            self._camera.setCurrentText(cameras[0])
-        validator = QRegExpValidator(QRegExp("|".join(cameras)))
-        self._camera.setValidator(validator)
+        self._camera = QComboBox(self)
+        self._camera.addItems(_publishable_cameras())
 
         camera_widget = QWidget()
         camera_layout = QHBoxLayout(camera_widget)
@@ -65,12 +80,30 @@ class PublishCameraDialog(FilteredListDialog):
 
         self._layout.insertWidget(0, camera_widget)
 
+    def _on_item_selected(self) -> None:
+        # Break-out names each RLO camera after its shot, so picking the shot picks
+        # its camera. Scenes without one keep whatever camera is showing.
+        cameras = [self._camera.itemText(i) for i in range(self._camera.count())]
+        if shot_camera := _shot_camera(cameras, self.get_selected_item()):
+            self._camera.setCurrentText(shot_camera)
+
 
 class CameraPublisher(Publisher):
     _PUBLISH_KIND = "camera"
 
     def __init__(self) -> None:
         super().__init__(PublishCameraDialog)
+
+    def _prepublish(self) -> bool:
+        if _publishable_cameras():
+            return True
+        MessageDialog(
+            self._window,
+            "There are no cameras in this scene to publish. Open the shot's "
+            "RLO scene, or add a camera, then publish again.",
+            "Cannot Publish: No Camera",
+        ).exec_()
+        return False
 
     def _get_entity_list(self) -> list[str]:
         return sorted(s.code for s in self._conn.find_shots() if s.code is not None)
@@ -83,20 +116,21 @@ class CameraPublisher(Publisher):
         return get_production_path() / shot.shot_path / "cam" / "cam.usd"
 
     def _presave(self) -> bool:
-        if not has_shot_aspect(self._camera) and not self._confirm_off_aspect():
+        if not _has_shot_aspect(self._camera) and not self._confirm_off_aspect():
             return False
         mc.select(self._camera, replace=True)
         return True
 
     def _confirm_off_aspect(self) -> bool:
-        width = mc.getAttr(f"{self._camera}.horizontalFilmAperture") * _MM_PER_INCH
-        height = mc.getAttr(f"{self._camera}.verticalFilmAperture") * _MM_PER_INCH
+        width, height = _film_back_mm(self._camera)
         return bool(
             MessageDialogCustomButtons(
                 self._window,
                 f"{self._camera} has a {width:.2f} x {height:.2f} mm film back "
                 f"({width / height:.2f}:1), not 16:9 (1.78:1).\n\n"
-                "Shot cameras are normally 16:9. Publish this camera anyway?",
+                "Shot cameras are normally 16:9. Renders crop this camera to 16:9, "
+                "so its viewport frame won't match the final image. "
+                "Publish this camera anyway?",
                 "Camera Is Not 16:9",
                 has_cancel_button=True,
                 ok_name="Publish Anyway",
