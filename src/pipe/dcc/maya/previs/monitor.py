@@ -13,6 +13,7 @@ from typing import Callable, cast
 
 import maya.cmds as mc
 
+from pipe.dcc.maya.util.camera import apply_gate_mask
 from pipe.dcc.maya.util.optionvar import BoolOptionVar, StringOptionVar
 
 log = logging.getLogger(__name__)
@@ -20,9 +21,6 @@ log = logging.getLogger(__name__)
 _BOUND_PANEL = StringOptionVar("previs.monitorPanel", "")
 _CLEAN_VIEW = BoolOptionVar("previs.monitorClean", False)
 _PICK_CONTEXT = "previsMonitorPick"
-
-_MASK_COLOR = (0.0, 0.0, 0.0)  # opaque black bars outside the resolution gate
-_MASK_OPACITY = 1.0
 
 
 def get_monitor() -> str | None:
@@ -77,7 +75,7 @@ def look_through(camera_shape: str) -> None:
     if (mc.lookThru(panel, query=True) or "") == camera_shape:
         return
     mc.lookThru(panel, camera_shape)
-    _apply_gate(camera_shape)
+    apply_gate_mask(camera_shape)
 
 
 def _bind_under_pointer(
@@ -117,19 +115,3 @@ def _apply_clean(panel: str, on: bool) -> None:
         controlVertices=visible,
         hulls=visible,
     )
-
-
-def _apply_gate(camera_shape: str) -> None:
-    # filmFit="overscan" fits the whole frame inside the viewport, so the mask bars
-    # fill the slack on whichever axis — letterbox in tall ports, pillarbox in wide.
-    # (Fill scales the frame to fill the window instead, leaving no bars.)
-    mc.camera(
-        camera_shape,
-        edit=True,
-        filmFit="overscan",
-        displayResolution=True,
-        displayGateMask=True,
-        overscan=1.0,
-    )
-    mc.setAttr(f"{camera_shape}.displayGateMaskColor", *_MASK_COLOR, type="double3")  # type: ignore
-    mc.setAttr(f"{camera_shape}.displayGateMaskOpacity", _MASK_OPACITY)  # type: ignore

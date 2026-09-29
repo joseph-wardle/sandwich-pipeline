@@ -5,6 +5,7 @@ from typing import Any, cast
 import maya.cmds as mc
 from pxr import Sdf, Usd, UsdGeom
 
+from pipe.dcc.maya.util.camera import apply_gate_mask
 from pipe.dcc.maya.rig.utils import get_rig_filepath_from_asset
 from pipe.core.shot import maya_anim_stream, shot_owner_for
 from pipe.core.shotgrid import SGEntity, Shot, is_previs_shot_code
@@ -77,6 +78,10 @@ class MAnimShotFileManager(MShotFileManager):
             cam_path = _find_usd_shotcam()
             if cam_path:
                 _lock_camera_chain(cam_path)
+                for shape in (
+                    mc.listRelatives(cam_path, shapes=True, fullPath=True) or []
+                ):
+                    apply_gate_mask(shape)
                 mc.lookThru(cam_path)
             else:
                 # fallback to legacy name if discovery fails

@@ -14,22 +14,25 @@ if TYPE_CHECKING:
 import maya.cmds as mc
 from pipe.core.util.paths import get_production_path
 
-from pipe.core.ui import FilteredListDialog
+from pipe.core.ui import FilteredListDialog, MessageDialogCustomButtons
 from pipe.core.shotgrid import SGEntity, Shot
+from pipe.dcc.maya.util.camera import has_shot_aspect
 
 from .publisher import Publisher
 from .usdchaser import ExportChaser, ExportChaserMode
 
 log = logging.getLogger(__name__)
 
+_MM_PER_INCH = 25.4  # Maya stores film aperture in inches
+
 
 def _publishable_cameras() -> list[str]:
-    """Every camera in the scene except Maya's own persp/top/front/side."""
-    return [
+    cameras = [
         camera
         for camera in mc.ls(cameras=True) or []
         if not mc.camera(camera, query=True, startupCamera=True)
     ]
+    return sorted(cameras, key=lambda camera: not has_shot_aspect(camera))
 
 
 class PublishCameraDialog(FilteredListDialog):
@@ -80,8 +83,26 @@ class CameraPublisher(Publisher):
         return get_production_path() / shot.shot_path / "cam" / "cam.usd"
 
     def _presave(self) -> bool:
+        if not has_shot_aspect(self._camera) and not self._confirm_off_aspect():
+            return False
         mc.select(self._camera, replace=True)
         return True
+
+    def _confirm_off_aspect(self) -> bool:
+        width = mc.getAttr(f"{self._camera}.horizontalFilmAperture") * _MM_PER_INCH
+        height = mc.getAttr(f"{self._camera}.verticalFilmAperture") * _MM_PER_INCH
+        return bool(
+            MessageDialogCustomButtons(
+                self._window,
+                f"{self._camera} has a {width:.2f} x {height:.2f} mm film back "
+                f"({width / height:.2f}:1), not 16:9 (1.78:1).\n\n"
+                "Shot cameras are normally 16:9. Publish this camera anyway?",
+                "Camera Is Not 16:9",
+                has_cancel_button=True,
+                ok_name="Publish Anyway",
+                cancel_name="Cancel",
+            ).exec_()
+        )
 
     def _get_mayausd_kwargs(self) -> dict[str, Any]:
         shot = cast(Shot, self._entity)
