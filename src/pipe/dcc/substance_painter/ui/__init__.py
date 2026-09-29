@@ -46,6 +46,7 @@ from pipe.dcc.substance_painter.util.metadata import (
 from pipe.dcc.substance_painter.util.project import (
     check_project_editable,
     current_project_path,
+    is_open_project,
 )
 from pipe.dcc.substance_painter.util.docs import docs_link_html
 from pipe.dcc.substance_painter.util.texture_set import texture_set_name
@@ -621,9 +622,22 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
             backup_status = None
             project_path = current_project_path()
+            asset_paths = paths_for_asset(self._curr_asset)
+            # The backup follows the project's variant; the textures follow the dropdown.
+            project_stream = substance_project_stream(
+                asset_paths,
+                current_geo_variant(),
+                owner=asset_owner_for(self._curr_asset),
+            )
             if project_path is None:
                 backup_status = "Backup skipped: project has no file path."
                 log.warning("Backup skipped: project has no file path.")
+            elif not is_open_project(project_stream.working_path):
+                backup_status = f"Backup skipped: this file isn't the asset's {project_stream.label}."
+                log.warning(
+                    f"Backup skipped: {project_path} is not "
+                    f"{project_stream.working_path}."
+                )
             else:
                 self._send_publish_progress(
                     PublishProgressUpdate(
@@ -631,16 +645,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                         message="Saving a versioned backup of the Substance Painter project.",
                     )
                 )
-                asset_paths = paths_for_asset(self._curr_asset)
                 publish_path = asset_paths.publish_textures_layer_dir(
                     request.geo_var,
                     request.mat_var,
                     request.material_layer,
-                )
-                project_stream = substance_project_stream(
-                    asset_paths,
-                    request.geo_var,
-                    owner=asset_owner_for(self._curr_asset),
                 )
                 result = backup_if_changed(
                     source_path=project_path,

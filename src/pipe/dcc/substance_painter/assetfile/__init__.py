@@ -51,6 +51,7 @@ from pipe.dcc.substance_painter.util.metadata import (
 from pipe.dcc.substance_painter.util.project import (
     check_project_editable,
     current_project_path,
+    is_open_project,
     run_when_project_editable,
 )
 from pipe.core.versioning import (
@@ -160,6 +161,28 @@ def _ensure_project_saved_for_version_action(
             return None
 
     return project_path
+
+
+def _check_is_working_file(
+    parent: QtWidgets.QWidget | None,
+    project_stream: VersionStreamSpec,
+    action_name: str,
+) -> bool:
+    """Return True if the open file is *project_stream*'s working file.
+
+    Otherwise tells the artist how to fix it and returns False.
+    """
+    if is_open_project(project_stream.working_path):
+        return True
+    label = project_stream.label
+    MessageDialog(
+        parent,
+        f"The open file isn't this asset's {label}, so it has no version history "
+        f"of its own.\n\nUse Open Asset to open {label}, or Create Asset Project → "
+        "Use Currently Open Project to save this file as it.",
+        action_name,
+    ).exec_()
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -487,6 +510,8 @@ def launch_version_browser_for_current_project() -> None:
         geo_variant,
         owner=asset_owner_for(asset),
     )
+    if not _check_is_working_file(parent, project_stream, "Version History"):
+        return
     records = list_version_records(project_stream)
     if not records:
         MessageDialog(
@@ -595,6 +620,8 @@ def launch_save_version() -> None:
         geo_variant,
         owner=asset_owner_for(asset),
     )
+    if not _check_is_working_file(parent, project_stream, "Save Version"):
+        return
     _write_named_version(parent, project_path, project_stream)
 
 
