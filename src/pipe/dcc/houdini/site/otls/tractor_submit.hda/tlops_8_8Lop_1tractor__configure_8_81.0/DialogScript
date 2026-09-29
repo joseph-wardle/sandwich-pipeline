@@ -217,7 +217,7 @@
             default { "" }
             disablewhen "{ toggle_rendersettings == 0 }"
             menureplace {
-                [ "opmenu -l -a usdrender_rop rendersettings" ]
+                [ "opmenu -l -a usdrender_rop1 rendersettings" ]
             }
             parmtag { "autoscope" "0000000000000000" }
             parmtag { "sidefx::usdpathtype" "prim" }
@@ -305,7 +305,7 @@
             default { [ "640 480 1" hscript-expr ] }
             hidewhen "{ override_res != specific }"
             menumini {
-                [ "opmenu -l -a usdrender_rop res_userMenu" ]
+                [ "opmenu -l -a usdrender_rop1 res_userMenu" ]
             }
             parmtag { "autoscope" "0000000000000000" }
             parmtag { "script_callback_language" "python" }
