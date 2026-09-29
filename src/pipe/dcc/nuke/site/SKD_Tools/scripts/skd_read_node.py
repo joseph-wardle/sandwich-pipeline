@@ -109,7 +109,7 @@ def version_sequences(version_dir: str) -> list[dict]:
     return found
 
 
-def _newest_readable(layer_dir: str) -> tuple[str, list[dict]] | None:
+def newest_readable(layer_dir: str) -> tuple[str, list[dict]] | None:
     # A version folder exists from the moment its job is sent, so the newest
     # may have nothing to read yet.
     for version, path in versions(layer_dir):
@@ -142,7 +142,7 @@ def get_latest_exr_sequences(render_root):
         # Skips hidden folders and stray files
         if layer.startswith(".") or not os.path.isdir(layer_dir):
             continue
-        found = _newest_readable(layer_dir)
+        found = newest_readable(layer_dir)
         if not found:
             continue
         version, seqs = found
@@ -192,8 +192,8 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
       its wiring and the artist's settings.
     - Project frame range is set to the union [min(first), max(last)] across all sequences.
     - For sequences detected as rendered on 2s/4s (or any N-s cadence), the Read node's
-      'frame' knob is set to hold the nearest available frame so playback never errors.
-    - If ALL sequences share the same cadence of 2 or 4, project FPS is divided by that cadence.
+      'frame' knob is set to hold the nearest available frame, so they play at the
+      project's fps like any other.
     """
     script_path = nuke.root()["name"].value()
     # ex: /groups/sandwich/05_production/shot/A_010/comp/A_010.nk
@@ -248,21 +248,6 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
     # Set the project frame range to cover all sequences
     nuke.root()["first_frame"].setValue(global_first)
     nuke.root()["last_frame"].setValue(global_last)
-
-    # If ALL sequences share cadence 2 or 4, adjust project FPS accordingly
-    steps = set(s["step"] for s in sequences)
-    if len(steps) == 1:
-        only_step = steps.pop()
-        if only_step in (2, 4):
-            try:
-                current_fps = float(nuke.root()["fps"].value())
-                new_fps = current_fps / float(only_step)
-                nuke.root()["fps"].setValue(new_fps)
-                nuke.tprint(
-                    f"[Auto Read] Detected cadence {only_step}s; FPS set to {new_fps:.3f}"
-                )
-            except Exception as e:
-                nuke.tprint(f"[Auto Read] Could not adjust FPS: {e}")
 
     return reads
 

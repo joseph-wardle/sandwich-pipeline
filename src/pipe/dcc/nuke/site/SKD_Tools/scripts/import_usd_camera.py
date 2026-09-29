@@ -6,6 +6,7 @@ from functools import partial
 from typing import Any, cast
 
 import nuke
+import skd_read_node
 from env_sg import DB_Config
 from Qt import QtCore, QtGui, QtWidgets
 from pipe.core.util.paths import get_production_path
@@ -134,6 +135,50 @@ class CascadingComboBox(QtWidgets.QWidget):
         render_dir = os.path.join(base_path, self.default_shot, "render", render_folder)
 
         camera_path = ""
+        label = render_folder
+        if skd_read_node.versions(render_dir):
+            # The camera of the version auto-read reads, so it matches comp's Reads.
+            found = skd_read_node.newest_readable(render_dir)
+            if not found:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "No Frames Yet",
+                    f"{render_folder} has no version with frames to read yet, so "
+                    "there is no camera to match them. It may still be rendering; "
+                    "check its job in Tractor.",
+                )
+                return
+            version = found[0]
+            label = f"{render_folder} {version}"
+            candidate = os.path.join(render_dir, version, "render.usd")
+            if os.path.exists(candidate):
+                camera_path = candidate
+        else:
+            # Renders from before render layers had version folders.
+            camera_path = self._unversioned_camera(render_dir)
+
+        if not camera_path:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "File Not Found",
+                f"Could not find a valid render.usd in the expected locations:\n{render_dir}",
+            )
+            return
+
+        try:
+            cam = nuke.createNode("Camera3")
+            cam["read_from_file"].setValue(True)
+            cam["file"].setValue(camera_path)
+            cam["label"].setValue(label)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Import Failed", f"Could not import camera:\n{e}"
+            )
+
+        self.close()
+
+    def _unversioned_camera(self, render_dir):
+        camera_path = ""
         # 1. Check for the 'beauty' folder first.
         beauty_path = os.path.join(render_dir, "beauty", "render.usd")
         if os.path.exists(beauty_path):
@@ -155,25 +200,7 @@ class CascadingComboBox(QtWidgets.QWidget):
             candidate = os.path.join(render_dir, "render.usd")
             if os.path.exists(candidate):
                 camera_path = candidate
-
-        if not camera_path:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "File Not Found",
-                f"Could not find a valid render.usd in the expected locations:\n{render_dir}",
-            )
-            return
-
-        try:
-            cam = nuke.createNode("Camera3")
-            cam["read_from_file"].setValue(True)
-            cam["file"].setValue(camera_path)
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(
-                self, "Import Failed", f"Could not import camera:\n{e}"
-            )
-
-        self.close()
+        return camera_path
 
     def categorize_data(self, all_shots):
         categorized_data = {"Other": []}

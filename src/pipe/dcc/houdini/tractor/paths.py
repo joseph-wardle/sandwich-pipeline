@@ -26,6 +26,9 @@ TMP = "tmp"
 # Folders of their own in tmp/, beside the raw frames of the denoised product.
 DENOISED = "denoised"
 ENCODE = "encode"
+# Where versions from before each output had a folder of its own keep their
+# frames. Comp and fx2d read an unfinished version holding one as such a version.
+LEGACY_DIRS = ("images_dn", "images")
 
 CAMERA = "Camera"
 SETTINGS = "RenderSettings"
@@ -195,6 +198,12 @@ def author_outputs(
             raise SendRefused(
                 f'Send keeps a file or folder of its own named "{name}", so no '
                 "output can have that name. Rename the render product or "
+                "Cryptomatte filter."
+            )
+        if name in LEGACY_DIRS:
+            raise SendRefused(
+                f'An output named "{name}" would make comp read this version\'s '
+                "frames while they still render. Rename the render product or "
                 "Cryptomatte filter."
             )
         if names.count(name) > 1:

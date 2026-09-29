@@ -19,14 +19,20 @@ log = logging.getLogger(__name__)
 
 BACKDROP = "backdrop"
 
-_IMAGE_DIRS = ("beauty", "images_dn", "images")
+# Tractor's Cleanup writes this once it has found every output of a version.
+_COMPLETE = "complete"
+# The render layer names its beauty product this.
+_BEAUTY = "beauty"
+# Where versions from before each output had a folder of its own keep their
+# frames; they were never marked complete.
+_LEGACY_DIRS = ("images_dn", "images")
 
 
 def latest_frames(layer_dir: Path) -> list[Path]:
-    """The frames of the newest version that has any, or [] when none does.
+    """The frames of the newest finished version that has any, or [] when none does.
 
     A version folder exists from the moment a render is submitted, so the newest
-    one is often still empty.
+    one is often still empty or half-rendered.
     """
     versions = sorted(
         (path for path in layer_dir.glob("v*") if util.VERSION.match(path.name)),
@@ -34,7 +40,8 @@ def latest_frames(layer_dir: Path) -> list[Path]:
         reverse=True,
     )
     for version in versions:
-        for name in _IMAGE_DIRS:
+        names = [_BEAUTY] if (version / _COMPLETE).is_file() else _LEGACY_DIRS
+        for name in names:
             frames = sorted((version / name).glob("*.exr"))
             if frames:
                 return frames
