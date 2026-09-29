@@ -19,8 +19,7 @@ log = logging.getLogger(__name__)
 
 BACKDROP = "backdrop"
 
-# Denoised frames are what comp reads, so they are what the artist should draw over.
-_IMAGE_DIRS = ("images_dn", "images")
+_IMAGE_DIRS = ("beauty", "images_dn", "images")
 
 
 def latest_frames(layer_dir: Path) -> list[Path]:
@@ -56,19 +55,20 @@ def _render_layers(shot_root: Path) -> dict[str, list[Path]]:
 
 
 def label(frames: list[Path]) -> str:
-    """`env v006` for frames under `env/v006/images_dn/`."""
+    """`env v006` for frames under `env/v006/beauty/`."""
     return f"{frames[0].parents[2].name} {frames[0].parents[1].name}"
 
 
 def _write_proxy(source: Path, target: Path) -> None:
-    reader = oiio.ImageInput.open(str(source))
-    if reader is None:
-        raise OSError(f"Could not read {source}: {oiio.geterror()}")
-    spec = reader.spec()
-    pixels = reader.read_image(0, 0, 0, 4, oiio.HALF)
-    reader.close()
+    image = oiio.ImageBuf(str(source))
+    if not image.read(0, 0, 0, 4, True, oiio.TypeHalf):
+        raise OSError(f"Could not read {source}: {image.geterror()}")
+    # Blender fits the whole image to the camera frame, so pixels rendered as
+    # overscan are cut away.
+    frame = image.roi_full
+    pixels = image.get_pixels(oiio.HALF, frame)
 
-    out_spec = oiio.ImageSpec(spec.width, spec.height, 4, oiio.HALF)
+    out_spec = oiio.ImageSpec(frame.width, frame.height, 4, oiio.HALF)
     out_spec.channelnames = ("R", "G", "B", "A")
     out_spec.attribute("compression", "dwaa")
     # Written under a hidden name and renamed, so an interrupted run never leaves a

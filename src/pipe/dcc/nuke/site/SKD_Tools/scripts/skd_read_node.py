@@ -6,13 +6,29 @@ import math
 from functools import reduce
 
 
-def _find_images_dir(base):
-    """Return images dir under base, preferring images_dn over images."""
-    for sub in ("images_dn", "images"):
-        p = os.path.join(base, sub)
-        if os.path.isdir(p):
-            return p
-    return None
+# Tractor's Cleanup writes this once it has found every output of a version.
+COMPLETE = "complete"
+# Tractor's scratch, which Cleanup empties.
+TMP = "tmp"
+# Where frames went before Tractor gave each output a folder of its own. fx2d still
+# delivers into images/.
+LEGACY_DIRS = ("images_dn", "images")
+
+
+def _output_dirs(version_dir: str) -> list[str]:
+    """The folders of a version comp should read, or [] while it has none."""
+    if os.path.isfile(os.path.join(version_dir, COMPLETE)):
+        return [
+            path
+            for name in sorted(os.listdir(version_dir))
+            if name != TMP and os.path.isdir(path := os.path.join(version_dir, name))
+        ]
+    # Versions from before Tractor marked them complete, and fx2d deliveries.
+    for name in LEGACY_DIRS:
+        path = os.path.join(version_dir, name)
+        if os.path.isdir(path):
+            return [path]
+    return []
 
 
 def _gcd_list(values):
@@ -58,11 +74,12 @@ def _scan_exr_sequence(images_dir):
 
 def get_latest_exr_sequences(render_root):
     """
-    Discover EXR sequences in each render layer's most recent version.
+    Discover EXR sequences in each render layer's newest version with frames.
 
-    Returns a list of dicts:
+    Returns a list of dicts, one per output folder:
       [{
-        'label': <subfolder or 'root'>,
+        'name': <layer>_<output folder>, or <layer> for a legacy version,
+        'label': '<layer> v### <output folder>',
         'pattern': '/…/%04d.exr',
         'first': int,
         'last': int,
@@ -84,33 +101,43 @@ def get_latest_exr_sequences(render_root):
             continue
 
         versions = []
-        # Appends a tuple of the version number and the path to versions.
         for n in os.listdir(layer_dir):
             m = version_pattern.match(n)
             version_dir = os.path.join(layer_dir, n)
             if m and os.path.isdir(version_dir):
-                versions.append((int(m.group(1)), version_dir))
-        if not versions:
-            continue
+                versions.append((int(m.group(1)), n, version_dir))
 
-        images_dir = _find_images_dir(max(versions, key=lambda v: v[0])[1])
-        if not images_dir:
-            continue
-
-        seq = _scan_exr_sequence(images_dir)
-        if not seq:
-            continue
-
-        pattern, first, last, _pad, step = seq
-        sequences.append(
-            {
-                "label": layer,
-                "pattern": pattern,
-                "first": first,
-                "last": last,
-                "step": step,
-            }
+        # A version folder exists from the moment its job is sent, so the newest
+        # may have nothing to read yet.
+        found = next(
+            (
+                (version, dirs)
+                for _, version, path in sorted(versions, reverse=True)
+                if (dirs := _output_dirs(path))
+            ),
+            None,
         )
+        if not found:
+            continue
+
+        version, dirs = found
+        for images_dir in dirs:
+            seq = _scan_exr_sequence(images_dir)
+            if not seq:
+                continue
+            folder = os.path.basename(images_dir)
+            pattern, first, last, _pad, step = seq
+            sequences.append(
+                {
+                    # Legacy versions keep the one Read per layer they always had.
+                    "name": layer if folder in LEGACY_DIRS else f"{layer}_{folder}",
+                    "label": f"{layer} {version} {folder}",
+                    "pattern": pattern,
+                    "first": first,
+                    "last": last,
+                    "step": step,
+                }
+            )
     if not sequences:
         nuke.message(f"[Auto Read] No sequences found in {render_root}")
         return []
@@ -179,8 +206,7 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
     global_last = max(s["last"] for s in sequences)
 
     for s in sequences:
-        label = _sanitize_for_nuke(s["label"])
-        node_name = f"{node_name_prefix}_{label}"
+        node_name = f"{node_name_prefix}_{_sanitize_for_nuke(s['name'])}"
         read = nuke.nodes.Read(name=node_name, file=s["pattern"], on_error="black")
         # native sequence range
         read["origfirst"].setValue(s["first"])

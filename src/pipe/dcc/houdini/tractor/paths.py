@@ -111,7 +111,35 @@ def cryptomattes(
             "writes only the last. Keep one, and render the others in another "
             "layer or with RIS."
         )
+    # XPU's Cryptomatte writer crashes husk on every frame.
+    if filters and XPU in renderer and any(_overscan(settings, p) for p in products):
+        raise SendRefused(
+            f"{settings.GetPath()} renders Cryptomatte with overscan, which crashes "
+            "XPU. Set Overscan on Configure to 0, or render with RIS."
+        )
     return filters
+
+
+def _overscan(settings: UsdRender.Settings, product: Usd.Prim) -> bool:
+    attr = UsdRender.Product(product).GetDataWindowNDCAttr()
+    # A product without its own data window renders the settings'.
+    if not attr.HasAuthoredValue():
+        attr = settings.GetDataWindowNDCAttr()
+    x0, y0, x1, y1 = attr.Get()
+    return x0 < 0 or y0 < 0 or x1 > 1 or y1 > 1
+
+
+def resolution(
+    settings: UsdRender.Settings, products: list[Usd.Prim]
+) -> tuple[int, int]:
+    """What husk renders at: the first product's own resolution, else the settings'."""
+    authored = [
+        attr
+        for p in products
+        if (attr := UsdRender.Product(p).GetResolutionAttr()).HasAuthoredValue()
+    ]
+    x, y = (authored[0] if authored else settings.GetResolutionAttr()).Get()
+    return int(x), int(y)
 
 
 def render_vars(product: Usd.Prim) -> list[Usd.Prim]:
