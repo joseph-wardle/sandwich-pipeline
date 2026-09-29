@@ -60,28 +60,27 @@ def send(submit: hou.Node, inputs: list[hou.Node] | None = None) -> None:
         chains = [chain(n) for n in (submit.inputs() if inputs is None else inputs)]
         check_layers(chains)
         folders.check_saved()
+        check_parms(chains)
         claimed = folders.claim([c.configure for c in chains])
     except SendRefused as refusal:
-        _refuse(refusal)
+        _refuse(str(refusal))
         return
 
     title = _text(submit, "title")
+    built = None
     try:
         built = build(submit, chains)
     except SendRefused as refusal:
-        folders.release(claimed)
-        _refuse(refusal)
-        return
+        _refuse(str(refusal))
     except Exception:
         log.exception("Building the job from %s failed", submit.path())
-        folders.release(claimed)
-        hou.ui.displayMessage(
+        _refuse(
             "The job could not be built, so nothing was sent to Tractor. The "
             "details below say what went wrong.",
-            title="Nothing was sent to Tractor",
-            severity=hou.severityType.Error,
-            details=traceback.format_exc(),
+            traceback.format_exc(),
         )
+    if built is None:
+        folders.release(claimed)
         return
 
     try:
@@ -113,11 +112,12 @@ def send(submit: hou.Node, inputs: list[hou.Node] | None = None) -> None:
         folders.record_sent(c.configure, folder, job_id)
 
 
-def _refuse(refusal: SendRefused) -> None:
+def _refuse(message: str, details: str | None = None) -> None:
     hou.ui.displayMessage(
-        str(refusal),
+        message,
         title="Nothing was sent to Tractor",
         severity=hou.severityType.Error,
+        details=details,
     )
 
 
@@ -156,6 +156,21 @@ def check_layers(chains: list[Chain]) -> None:
             )
 
 
+def check_parms(chains: list[Chain]) -> None:
+    """Refuse what the parms alone show is wrong, before any folder is claimed."""
+    for c in chains:
+        frames = _frames(c.configure)
+        skips = frames != list(range(frames[0], frames[-1] + 1))
+        if skips and (c.denoise or c.encode):
+            raise SendRefused(
+                f"{c.configure.path()} skips frames, but Denoise reads each frame's "
+                "neighbours and Encode plays the frames back to back. Render every "
+                "frame of the range, or remove Denoise and Encode."
+            )
+        if c.encode:
+            _movie(c.encode, c.configure)
+
+
 def build(submit: hou.Node, chains: list[Chain]) -> author.Job:
     return job.build(
         _text(submit, "title"),
@@ -169,13 +184,6 @@ def _layer(chain: Chain) -> job.Layer:
     configure = chain.configure
     folder = Path(_text(configure, folders.OUTPUT))
     frames = _frames(configure)
-    skips = frames != list(range(frames[0], frames[-1] + 1))
-    if skips and (chain.denoise or chain.encode):
-        raise SendRefused(
-            f"{configure.path()} skips frames, but Denoise reads each frame's "
-            "neighbours and Encode plays the frames back to back. Render every "
-            "frame of the range, or remove Denoise and Encode."
-        )
     _write_render_usd(configure, chain.output)
 
     stage = Usd.Stage.Open(str(folder / paths.RENDER_USD), Usd.Stage.LoadNone)
@@ -193,11 +201,17 @@ def _layer(chain: Chain) -> job.Layer:
     denoise_spec = None
     if denoised:
         denoise_spec = _write_denoise(folder, denoised)
-    name = _text(configure, folders.LAYER)
     encode_spec = None
     if chain.encode:
-        encode_spec = _encode(chain.encode, name, folder, settings, products, denoised)
-    return job.Layer(name, folder, frames, render, denoise_spec, encode_spec)
+        encode_spec = _encode(chain.encode, configure, settings, products, denoised)
+    return job.Layer(
+        _text(configure, folders.LAYER),
+        folder,
+        frames,
+        render,
+        denoise_spec,
+        encode_spec,
+    )
 
 
 def _check_camera(
@@ -291,24 +305,10 @@ def _write_denoise(folder: Path, product: Usd.Prim) -> job.Denoise:
     return job.Denoise(product=product.GetName())
 
 
-def _encode(
-    node: hou.Node,
-    layer: str,
-    folder: Path,
-    settings: UsdRender.Settings,
-    products: list[Usd.Prim],
-    denoised: Usd.Prim | None,
-) -> job.Encode:
-    if denoised:
-        # denoise_batch writes the finished beauty as R, G, B.
-        product, channels = denoised, ["R,G,B"]
-    else:
-        product = paths.beauty_product(settings, products)
-        name = paths.beauty(product)
-        # RenderMan names the beauty after its var, or R, G, B when it is
-        # first; a var named in the frame is the surer match.
-        channels = [f"{name}.r,{name}.g,{name}.b", f"{name}.R,{name}.G,{name}.B"]
-        channels.append("R,G,B")
+def _movie(node: hou.Node, configure: hou.Node) -> tuple[FFmpegPreset, Path, bool]:
+    """Encode's preset, its movie, and whether Cleanup removes the encoded frames."""
+    folder = Path(_text(configure, folders.OUTPUT))
+    layer = _text(configure, folders.LAYER)
     preset = FFmpegPreset[_text(node, "preset")]
     video = _text(node, "output_file") or str(folder / f"{layer}.{preset.ext}")
     if Path(video).suffix != f".{preset.ext}":
@@ -326,10 +326,30 @@ def _encode(
             "that this job made the movie. Clear Output File, or turn off Remove "
             "Encoded Frames."
         )
+    return preset, Path(video), remove_frames
+
+
+def _encode(
+    node: hou.Node,
+    configure: hou.Node,
+    settings: UsdRender.Settings,
+    products: list[Usd.Prim],
+    denoised: Usd.Prim | None,
+) -> job.Encode:
+    if denoised:
+        # denoise_batch writes the finished beauty as R, G, B.
+        product, channels = denoised, ["R,G,B"]
+    else:
+        product = paths.beauty_product(settings, products)
+        name = paths.beauty(product)
+        channels = [f"{name}.r,{name}.g,{name}.b", f"{name}.R,{name}.G,{name}.B"]
+        channels.append("R,G,B")
+    preset, video, remove_frames = _movie(node, configure)
+    folder = Path(_text(configure, folders.OUTPUT))
     return job.Encode(
         images=folder / product.GetName(),
         channels=channels,
-        video=Path(video),
+        video=video,
         # A static method the stubs declare as an instance one.
         colorconfig=hou.Color.ocio_configPath(),  # ty: ignore[missing-argument]
         display=_text(node, "display"),
