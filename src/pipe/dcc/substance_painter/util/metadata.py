@@ -54,6 +54,8 @@ PIPE_SP_METADATA_KEY = "asset_selection"
 PIPE_SP_METADATA_SCHEMA_VERSION = 1
 """Schema version stamped into every metadata payload for future migration."""
 
+_TEMPLATE_SUFFIX = ".spt"
+
 
 # ---------------------------------------------------------------------------
 # Shared utilities
@@ -63,14 +65,22 @@ PIPE_SP_METADATA_SCHEMA_VERSION = 1
 
 
 def current_project_path() -> Path | None:
-    """Return the file path of the currently open project, or None."""
+    """Return the file path of the currently open project, or None.
+
+    A project created from a template reports the template's ``.spt`` path
+    until it is first saved, and Painter refuses to save onto a template, so
+    that project counts as having no file path.
+    """
     try:
         path_str = sp.project.file_path()
     except (ProjectError, ServiceNotFoundError):
         return None
     if not path_str:
         return None
-    return Path(path_str)
+    path = Path(path_str)
+    if path.suffix.lower() == _TEMPLATE_SUFFIX:
+        return None
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -90,11 +100,11 @@ def run_once_on_project_edition_entered(callback: Callable[[], None]) -> None:
     """
 
     def _on_edition_entered(_event: sp.event.Event) -> None:
-        try:
-            sp.event.DISPATCHER.disconnect(_on_edition_entered)
-        except RuntimeError:
-            # Already disconnected or never connected — safe to ignore.
-            pass
+        # Painter's dispatcher prints and swallows exceptions from listeners,
+        # so a failure here would silently drop the callback.
+        sp.event.DISPATCHER.disconnect(
+            sp.event.ProjectEditionEntered, _on_edition_entered
+        )
         callback()
 
     sp.event.DISPATCHER.connect_strong(

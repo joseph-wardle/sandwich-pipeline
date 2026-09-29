@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from math import log2
-from pathlib import Path
 from re import findall
 from typing import TYPE_CHECKING
 
@@ -35,7 +34,10 @@ from pipe.dcc.substance_painter.util.houdini_bridge import (
     summarize_result,
 )
 from pipe.dcc.substance_painter.runtime import get_main_qt_window
-from pipe.dcc.substance_painter.util.metadata import get_active_asset_from_project
+from pipe.dcc.substance_painter.util.metadata import (
+    current_project_path,
+    get_active_asset_from_project,
+)
 from pipe.dcc.substance_painter.util.docs import docs_link_html
 from pipe.dcc.substance_painter.util.texture_set import texture_set_name
 from pipe.dcc.substance_painter.util.progress import (
@@ -590,8 +592,8 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 return
 
             backup_status = None
-            project_path = sp.project.file_path() or ""
-            if not project_path:
+            project_path = current_project_path()
+            if project_path is None:
                 backup_status = "Backup skipped: project has no file path."
                 log.warning("Backup skipped: project has no file path.")
             else:
@@ -613,7 +615,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                     owner=asset_owner_for(self._curr_asset),
                 )
                 result = backup_if_changed(
-                    source_path=Path(project_path),
+                    source_path=project_path,
                     backup_dir=project_stream.backup_dir,
                     manifest_path=project_stream.manifest_path,
                     dcc=project_stream.dcc,
@@ -772,8 +774,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             log.exception("Failed to query project edition state before publish.")
             return False
 
-        project_path = sp.project.file_path() or ""
-        if not project_path:
+        if current_project_path() is None:
             MessageDialog(
                 get_main_qt_window(),
                 "This project has no file path yet. Use Save As before publishing.",
