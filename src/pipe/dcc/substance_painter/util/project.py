@@ -70,40 +70,77 @@ def check_project_editable(parent: QtWidgets.QWidget | None, action_name: str) -
 
 
 def run_when_project_editable(callback: Callable[[], None]) -> None:
-    """Run *callback* as soon as the project is open, loaded, and idle."""
+    """Run *callback* once the open project is loaded and idle.
+
+    Dropped if that project closes first, so it never runs on the next one.
+    """
     if not sp.project.is_open():
-        _run_once_on_project_edition_entered(
-            lambda: run_when_project_editable(callback)
+        log.warning("No project is open; dropping the deferred project callback.")
+        return
+    _ProjectBoundCallback(callback).attempt()
+
+
+class _ProjectBoundCallback:
+    """Run a callback once its project is editable, unless the project closes."""
+
+    def __init__(self, callback: Callable[[], None]) -> None:
+        self._callback = callback
+        self._finished = False
+        self._waiting_for_edition = False
+        sp.event.DISPATCHER.connect_strong(
+            sp.event.ProjectAboutToClose, self._on_project_about_to_close
         )
-        return
 
-    if sp.project.is_busy():
-        sp.project.execute_when_not_busy(lambda: run_when_project_editable(callback))
-        return
-
-    try:
-        if not sp.project.is_in_edition_state():
-            _run_once_on_project_edition_entered(
-                lambda: run_when_project_editable(callback)
-            )
+    def attempt(self) -> None:
+        if self._finished:
             return
-    except ServiceNotFoundError:
-        return
 
-    callback()
+        if sp.project.is_busy():
+            sp.project.execute_when_not_busy(self.attempt)
+            return
 
+        try:
+            in_edition_state = sp.project.is_in_edition_state()
+        except ServiceNotFoundError:
+            log.exception("Failed to query project edition state; dropping callback.")
+            self._finish()
+            return
+        if not in_edition_state:
+            self._wait_for_edition()
+            return
 
-def _run_once_on_project_edition_entered(callback: Callable[[], None]) -> None:
-    """Run *callback* the next time the project enters edition state."""
-
-    def _on_edition_entered(_event: sp.event.Event) -> None:
+        self._finish()
         # Painter's dispatcher prints and swallows exceptions from listeners,
-        # so a failure here would silently drop the callback.
-        sp.event.DISPATCHER.disconnect(
-            sp.event.ProjectEditionEntered, _on_edition_entered
-        )
-        callback()
+        # so a failure here shows up only in Painter's log.
+        self._callback()
 
-    sp.event.DISPATCHER.connect_strong(
-        sp.event.ProjectEditionEntered, _on_edition_entered
-    )
+    def _wait_for_edition(self) -> None:
+        if self._waiting_for_edition:
+            return
+        self._waiting_for_edition = True
+        sp.event.DISPATCHER.connect_strong(
+            sp.event.ProjectEditionEntered, self._on_edition_entered
+        )
+
+    def _stop_waiting_for_edition(self) -> None:
+        if not self._waiting_for_edition:
+            return
+        self._waiting_for_edition = False
+        sp.event.DISPATCHER.disconnect(
+            sp.event.ProjectEditionEntered, self._on_edition_entered
+        )
+
+    def _on_edition_entered(self, _event: sp.event.Event) -> None:
+        self._stop_waiting_for_edition()
+        self.attempt()
+
+    def _on_project_about_to_close(self, _event: sp.event.Event) -> None:
+        log.warning("Project closed before it was editable; dropping callback.")
+        self._finish()
+
+    def _finish(self) -> None:
+        self._finished = True
+        self._stop_waiting_for_edition()
+        sp.event.DISPATCHER.disconnect(
+            sp.event.ProjectAboutToClose, self._on_project_about_to_close
+        )
