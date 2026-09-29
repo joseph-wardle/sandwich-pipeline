@@ -29,16 +29,12 @@ from pipe.dcc.houdini.tractor import denoise, paths
 # Tractor runs every command on blades that offer this service.
 SERVICE = "EL9"
 
-# Tractor retries these exit codes on its own.
 RENDER_RETRIES = [
-    -11,  # Segmentation fault
-    -9,  # Unknown
     3,  # Can't get license
     135,  # Bus error
     139,  # Segmentation fault
 ]
 DENOISE_RETRIES = [
-    -11,  # Segmentation fault
     139,  # Segmentation fault
 ]
 LICENSE_SERVER = "animlic.cs.byu.edu"

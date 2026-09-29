@@ -41,6 +41,7 @@ ENV_VARS = (
 # Task titles join the layer to other words with spaces, and Tractor finds
 # tasks by title, so a layer with a space could take another layer's title.
 LAYER_NAME = re.compile(r"[A-Za-z0-9_-]+")
+RENDERMAN = "HdPrman"
 
 log = logging.getLogger(__name__)
 
@@ -66,10 +67,10 @@ def send(submit: hou.Node, inputs: list[hou.Node] | None = None) -> None:
         _refuse(str(refusal))
         return
 
-    title = _text(submit, "title")
+    title = _title(submit, chains)
     built = None
     try:
-        built = build(submit, chains)
+        built = build(submit, title, chains)
     except SendRefused as refusal:
         _refuse(str(refusal))
     except Exception:
@@ -157,6 +158,20 @@ def check_layers(chains: list[Chain]) -> None:
 def check_parms(chains: list[Chain]) -> None:
     """Refuse what the parms alone show is wrong, before any folder is claimed."""
     for c in chains:
+        root = _text(c.configure, folders.ROOT)
+        # A relative one would be read from wherever Houdini was started.
+        if not Path(root).is_absolute():
+            raise SendRefused(
+                f'Render Root on {c.configure.path()} is "{root}", which is not a '
+                "full path. Start it with / or $HIP."
+            )
+        renderer = _text(c.configure, "renderer")
+        if (c.denoise or c.encode) and RENDERMAN not in renderer:
+            raise SendRefused(
+                f"{c.configure.path()} renders with {renderer}, but Denoise and "
+                "Encode read only RenderMan's frames. Remove them, or choose a "
+                "RenderMan renderer on Configure."
+            )
         frames = _frames(c.configure)
         skips = frames != list(range(frames[0], frames[-1] + 1))
         if skips and (c.denoise or c.encode):
@@ -169,9 +184,19 @@ def check_parms(chains: list[Chain]) -> None:
             _movie(c.encode, c.configure)
 
 
-def build(submit: hou.Node, chains: list[Chain]) -> author.Job:
+def _title(submit: hou.Node, chains: list[Chain]) -> str:
+    """Submit's Title, or one that tells the job apart in Tractor's list."""
+    if title := _text(submit, "title"):
+        return title
+    # The last folders of a shot's lighting hip are <shot>/lighting.
+    hip = Path(hou.text.expandString("$HIP"))
+    layers = ", ".join(_text(c.configure, folders.LAYER) for c in chains)
+    return f"{hip.parent.name} {hip.name}: {layers}"
+
+
+def build(submit: hou.Node, title: str, chains: list[Chain]) -> author.Job:
     return job.build(
-        _text(submit, "title"),
+        title,
         int(submit.evalParm("priority")),
         _setenv(),
         [_layer(c) for c in chains],
@@ -285,8 +310,6 @@ def _frames(configure: hou.LopNode) -> list[int]:
 def _husk(configure: hou.Node) -> list[str]:
     words = [
         *("--renderer", _text(configure, "renderer")),
-        *("--purpose", "geometry,render"),
-        *("--complexity", "veryhigh"),
         *("--verbose", "acet"),
     ]
     if camera := _toggled(configure, "override_camera"):
@@ -309,6 +332,11 @@ def _movie(node: hou.Node, configure: hou.Node) -> tuple[FFmpegPreset, Path, boo
     layer = _text(configure, folders.LAYER)
     preset = FFmpegPreset[_text(node, "preset")]
     video = _text(node, "output_file") or str(folder / f"{layer}.{preset.ext}")
+    if not Path(video).is_absolute():
+        raise SendRefused(
+            f'Output File on {node.path()} is "{video}", which is not a full path. '
+            "Start it with / or $HIP, or clear it."
+        )
     if Path(video).suffix != f".{preset.ext}":
         raise SendRefused(
             f"The Preset of {node.path()} makes a .{preset.ext} movie, but its "
@@ -359,7 +387,9 @@ def _encode(
 
 
 def _setenv() -> str:
-    return " ".join(["setenv"] + [f"{name}={os.getenv(name)}" for name in ENV_VARS])
+    # A variable the session lacks is left for the blade to choose.
+    found = [f"{name}={value}" for name in ENV_VARS if (value := os.getenv(name))]
+    return " ".join(["setenv", *found])
 
 
 def _kind(node: hou.Node) -> str:
