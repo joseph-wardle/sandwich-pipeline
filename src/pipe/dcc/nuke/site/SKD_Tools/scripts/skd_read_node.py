@@ -13,9 +13,22 @@ TMP = "tmp"
 # Where frames went before Tractor gave each output a folder of its own. fx2d still
 # delivers into images/.
 LEGACY_DIRS = ("images_dn", "images")
+# The spelling Tractor Configure gives the version folders it renders into.
+VERSION = re.compile(r"^v(\d+)$")
 
 
-def _output_dirs(version_dir: str) -> list[str]:
+def versions(layer_dir: str) -> list[tuple[str, str]]:
+    """(name, path) of each version folder of a render layer, newest first."""
+    found = [
+        (int(m.group(1)), name, path)
+        for name in os.listdir(layer_dir)
+        if (m := VERSION.match(name))
+        and os.path.isdir(path := os.path.join(layer_dir, name))
+    ]
+    return [(name, path) for _, name, path in sorted(found, reverse=True)]
+
+
+def output_dirs(version_dir: str) -> list[str]:
     """The folders of a version comp should read, or [] while it has none."""
     if os.path.isfile(os.path.join(version_dir, COMPLETE)):
         return [
@@ -72,6 +85,39 @@ def _scan_exr_sequence(images_dir):
     return pattern, first_frame, last_frame, pad, step
 
 
+def version_sequences(version_dir: str) -> list[dict]:
+    """
+    The EXR sequence of each output folder of a version, or [] while it has none.
+
+    A complete version can still hold no frames, such as one with only a movie.
+    """
+    found = []
+    for images_dir in output_dirs(version_dir):
+        seq = _scan_exr_sequence(images_dir)
+        if not seq:
+            continue
+        pattern, first, last, _pad, step = seq
+        found.append(
+            {
+                "folder": os.path.basename(images_dir),
+                "pattern": pattern,
+                "first": first,
+                "last": last,
+                "step": step,
+            }
+        )
+    return found
+
+
+def _newest_readable(layer_dir: str) -> tuple[str, list[dict]] | None:
+    # A version folder exists from the moment its job is sent, so the newest
+    # may have nothing to read yet.
+    for version, path in versions(layer_dir):
+        if found := version_sequences(path):
+            return version, found
+    return None
+
+
 def get_latest_exr_sequences(render_root):
     """
     Discover EXR sequences in each render layer's newest version with frames.
@@ -90,52 +136,24 @@ def get_latest_exr_sequences(render_root):
         nuke.message(f"[Auto Read] Render folder does not exist:\n  {render_root}")
         return []
 
-    # The spelling Tractor Configure gives the version folders it renders into.
-    version_pattern = re.compile(r"^v(\d+)$")
     sequences = []
-
     for layer in sorted(os.listdir(render_root)):
         layer_dir = os.path.join(render_root, layer)
         # Skips hidden folders and stray files
         if layer.startswith(".") or not os.path.isdir(layer_dir):
             continue
-
-        versions = []
-        for n in os.listdir(layer_dir):
-            m = version_pattern.match(n)
-            version_dir = os.path.join(layer_dir, n)
-            if m and os.path.isdir(version_dir):
-                versions.append((int(m.group(1)), n, version_dir))
-
-        # A version folder exists from the moment its job is sent, so the newest
-        # may have nothing to read yet.
-        found = next(
-            (
-                (version, dirs)
-                for _, version, path in sorted(versions, reverse=True)
-                if (dirs := _output_dirs(path))
-            ),
-            None,
-        )
+        found = _newest_readable(layer_dir)
         if not found:
             continue
-
-        version, dirs = found
-        for images_dir in dirs:
-            seq = _scan_exr_sequence(images_dir)
-            if not seq:
-                continue
-            folder = os.path.basename(images_dir)
-            pattern, first, last, _pad, step = seq
+        version, seqs = found
+        for seq in seqs:
+            folder = seq["folder"]
             sequences.append(
                 {
+                    **seq,
                     # Legacy versions keep the one Read per layer they always had.
                     "name": layer if folder in LEGACY_DIRS else f"{layer}_{folder}",
                     "label": f"{layer} {version} {folder}",
-                    "pattern": pattern,
-                    "first": first,
-                    "last": last,
-                    "step": step,
                 }
             )
     if not sequences:
