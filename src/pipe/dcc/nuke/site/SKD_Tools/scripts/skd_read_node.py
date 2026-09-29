@@ -185,9 +185,11 @@ def _nearest_hold_expr(first, last, step):
 
 def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
     """
-    Create one Read node per discovered sequence inside the newest date/version folder.
+    Make or update one Read per output folder of each layer's newest readable version.
 
-    - Nodes are named: <prefix>_<label> (e.g., EXR_read_beauty)
+    - Nodes are named: <prefix>_<layer>_<output folder> (e.g., EXR_read_xpu_beauty)
+    - A Read of that name that already exists is pointed at the new version, keeping
+      its wiring and the artist's settings.
     - Project frame range is set to the union [min(first), max(last)] across all sequences.
     - For sequences detected as rendered on 2s/4s (or any N-s cadence), the Read node's
       'frame' knob is set to hold the nearest available frame so playback never errors.
@@ -209,23 +211,18 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
     if not sequences:
         return []
 
-    # This was originally implemented and works, but I found it personally annoying.
-
-    # removes any existing nodes created by this tool (by prefix)
-    # for n in nuke.allNodes("Read"):
-    #     try:
-    #         if n.name().startswith(node_name_prefix):
-    #             nuke.delete(n)
-    #     except Exception:
-    #         pass
-
-    created = []
+    reads = []
     global_first = min(s["first"] for s in sequences)
     global_last = max(s["last"] for s in sequences)
 
     for s in sequences:
         node_name = f"{node_name_prefix}_{_sanitize_for_nuke(s['name'])}"
-        read = nuke.nodes.Read(name=node_name, file=s["pattern"], on_error="black")
+        # Every Send makes a new version, so artists re-run this often; a twin Read
+        # would leave comp wired to the old one.
+        read = nuke.toNode(node_name) or nuke.nodes.Read(
+            name=node_name, on_error="black"
+        )
+        read["file"].setValue(s["pattern"])
         # native sequence range
         read["origfirst"].setValue(s["first"])
         read["origlast"].setValue(s["last"])
@@ -246,9 +243,9 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
         except Exception:
             pass
 
-        created.append(read)
+        reads.append(read)
 
-    # Set the project frame range to cover all created sequences
+    # Set the project frame range to cover all sequences
     nuke.root()["first_frame"].setValue(global_first)
     nuke.root()["last_frame"].setValue(global_last)
 
@@ -267,7 +264,7 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
             except Exception as e:
                 nuke.tprint(f"[Auto Read] Could not adjust FPS: {e}")
 
-    return created
+    return reads
 
 
 def auto_read_latest_fx_exr():
