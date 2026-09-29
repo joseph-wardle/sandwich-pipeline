@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     import typing
 
 import substance_painter as sp
-from env_sg import DB_Config
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
 from pipe.core.asset import (
@@ -41,7 +40,6 @@ from pipe.dcc.substance_painter.util.houdini_bridge import (
 from pipe.dcc.substance_painter.runtime import get_main_qt_window
 from pipe.dcc.substance_painter.util.metadata import (
     current_geo_variant,
-    get_active_asset_from_project,
 )
 from pipe.dcc.substance_painter.util.project import (
     check_project_editable,
@@ -85,7 +83,7 @@ class _ActivePublishContext:
 
 class SubstanceExportWindow(QMainWindow, ButtonPair):
     _active_publish_context: _ActivePublishContext | None
-    _curr_asset: Asset | None
+    _curr_asset: Asset
     _central_widget: QtWidgets.QWidget
     _conn: ShotGrid
     _main_layout: QLayout
@@ -97,45 +95,27 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
     _tex_set_dict: dict[sp.textureset.TextureSet, "TexSetWidget"]
 
-    def __init__(self, flags: QtCore.Qt.WindowFlags | None = None) -> None:
+    def __init__(self, conn: ShotGrid, asset: Asset) -> None:
         super().__init__(get_main_qt_window())
 
         self._active_publish_context = None
         self._tex_set_dict = {}
-
-        self._conn = ShotGrid.connect(DB_Config)
-        if not sp.project.is_open():
-            MessageDialog(
-                get_main_qt_window(),
-                "No Substance Painter project is open. Open a project first.",
-            ).exec_()
-            self.close()
-            return
-
-        self._curr_asset = get_active_asset_from_project(self._conn)
-        if not self._curr_asset:
-            MessageDialog(
-                get_main_qt_window(),
-                "Could not resolve the current asset from project metadata. "
-                "Use Open Asset to create or open the asset project first.",
-            ).exec_()
-            self.close()
-            return
-
+        self._conn = conn
+        self._curr_asset = asset
         self._setup_publish_ui()
 
+    @property
+    def is_publishing(self) -> bool:
+        return self._active_publish_context is not None
+
     def event(self, event: QtCore.QEvent) -> bool:
-        if (
-            self._active_publish_context is not None
-            and event.type() == QtCore.QEvent.Close
-        ):
+        if self.is_publishing and event.type() == QtCore.QEvent.Close:
             event.ignore()
             return True
         return super().event(event)
 
     def _setup_publish_ui(self) -> None:
         asset = self._curr_asset
-        assert asset is not None
 
         self.setWindowTitle("Publish Textures")
         self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
@@ -371,9 +351,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         hands off to ``_begin_publish`` which manages the async progress
         dialog and scheduling.
         """
-        if self._active_publish_context is not None:
-            return
-        if not self._curr_asset:
+        if self.is_publishing:
             return
         if not self._preflight():
             return
@@ -520,13 +498,6 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     def _run_publish_request(self, context: _ActivePublishContext) -> None:
         """Save, export, back up, and run Houdini; then report and clean up."""
         if not self._is_active_publish_context(context):
-            return
-        if not self._curr_asset:
-            self._show_publish_message(
-                context,
-                "The current asset could not be resolved for publish.",
-                title="Texture Export Failed",
-            )
             return
 
         request = context.request
