@@ -8,7 +8,14 @@ from pxr import Sdf, Usd, UsdGeom
 from pipe.dcc.maya.util.camera import apply_gate_mask
 from pipe.dcc.maya.rig.utils import get_rig_filepath_from_asset
 from pipe.core.shot import maya_anim_stream, shot_owner_for
-from pipe.core.shotgrid import SGEntity, Shot, is_previs_shot_code
+from pipe.core.shotgrid import (
+    SGEntity,
+    Shot,
+    build_shot_path,
+    is_previs_shot_code,
+)
+from pipe.core.ui import MessageDialog
+from pipe.dcc.maya.runtime import get_main_qt_window
 from pipe.core.versioning import VersionStreamSpec, path_matches_stream
 
 from .shotfile_manager import MShotFileManager
@@ -16,6 +23,41 @@ from .sets import sync_shot_sets
 from .stage import add_sublayer, get_stage, get_stage_shape
 
 log = logging.getLogger(__name__)
+
+SHOT_CAMERA_NAME = "shotCam"
+
+
+def _find_camera_prim(stage: Usd.Stage) -> Usd.Prim | None:
+    return next(
+        (
+            prim
+            for prim in stage.Traverse(Usd.PrimIsDefined)
+            # `cast`: ty does not see `IsA` on the prims `Traverse` yields.
+            if cast(Any, prim).IsA(UsdGeom.Camera)
+            and prim.GetName() == SHOT_CAMERA_NAME
+        ),
+        None,
+    )
+
+
+def _sublayer_camera(stage: Usd.Stage, shot_path: str) -> bool:
+    """Sublayer the shot's published camera into `stage`. False if none is published."""
+    # Production-root-relative, resolved by `PXR_AR_DEFAULT_SEARCH_PATH`.
+    cam_layer = Sdf.Layer.FindOrOpen("/".join((shot_path, "cam", "cam.usd")))
+    if not cam_layer:
+        return False
+    add_sublayer(stage.GetRootLayer(), cam_layer)
+    return True
+
+
+def _report_missing_camera() -> None:
+    message = (
+        "No shot camera was loaded because this shot has no published camera.\n\n"
+        "Publish the camera from the shot's RLO scene, then reopen this scene."
+    )
+    mc.warning(message.replace("\n\n", " "))
+    if not mc.about(batch=True):
+        MessageDialog(get_main_qt_window(), message, "Shot Camera").exec_()
 
 
 def _find_usd_shotcam() -> str | None:
@@ -60,39 +102,39 @@ class MAnimShotFileManager(MShotFileManager):
     def run_on_open(cls):
         super().run_on_open()
 
-        # Duplicate the USD camera into a temp Maya camera
-        CAM_NAME = "shotCam"
+        stage = get_stage()
+        camera_prim = _find_camera_prim(stage)
+        if camera_prim is None:
+            shot_code = cls._shot_code_from_file_info()
+            if shot_code and _sublayer_camera(stage, build_shot_path(shot_code)):
+                camera_prim = _find_camera_prim(stage)
+        if camera_prim is None:
+            _report_missing_camera()
+            return
+
         try:
-            mc.mayaUsdDiscardEdits(CAM_NAME)  # type: ignore
+            mc.mayaUsdDiscardEdits(SHOT_CAMERA_NAME)  # type: ignore
         except RuntimeError:
             pass
-        finally:
-            camera_prim = next(
-                prim
-                for prim in get_stage().Traverse(Usd.PrimIsDefined)
-                if cast(Any, prim).IsA(UsdGeom.Camera) and prim.GetName() == CAM_NAME
-            )
-            mc.mayaUsdEditAsMaya(  # type: ignore
-                get_stage_shape() + "," + str(camera_prim.GetPrimPath())
-            )
-            cam_path = _find_usd_shotcam()
-            if cam_path:
-                _lock_camera_chain(cam_path)
-                for shape in (
-                    mc.listRelatives(cam_path, shapes=True, fullPath=True) or []
-                ):
-                    apply_gate_mask(shape)
-                mc.lookThru(cam_path)
-            else:
-                # fallback to legacy name if discovery fails
-                try:
-                    camera_shape = mc.listRelatives(
-                        CAM_NAME, fullPath=True, shapes=True
-                    )[0]
-                    mc.camera(camera_shape, edit=True, lockTransform=True)
-                    mc.lookThru(CAM_NAME)
-                except Exception:
-                    log.warning("Could not locate USD shot camera in Maya scene.")
+        mc.mayaUsdEditAsMaya(  # type: ignore
+            get_stage_shape() + "," + str(camera_prim.GetPrimPath())
+        )
+        cam_path = _find_usd_shotcam()
+        if cam_path:
+            _lock_camera_chain(cam_path)
+            for shape in mc.listRelatives(cam_path, shapes=True, fullPath=True) or []:
+                apply_gate_mask(shape)
+            mc.lookThru(cam_path)
+        else:
+            # fallback to legacy name if discovery fails
+            try:
+                camera_shape = mc.listRelatives(
+                    SHOT_CAMERA_NAME, fullPath=True, shapes=True
+                )[0]
+                mc.camera(camera_shape, edit=True, lockTransform=True)
+                mc.lookThru(SHOT_CAMERA_NAME)
+            except Exception:
+                log.warning("Could not locate USD shot camera in Maya scene.")
 
     def _get_subpath(self) -> str:
         return "anim"
@@ -102,7 +144,8 @@ class MAnimShotFileManager(MShotFileManager):
         return [e for e in entities if not is_previs_shot_code(e.code)]
 
     def _setup_scene(self) -> None:
-        self._sublayer_camera()
+        if not _sublayer_camera(get_stage(), self.shot.shot_path):
+            mc.warning("No exported camera found")
 
         # Import Rigs. ``self.shot.assets`` carries partial Assets (id + code
         # only); accessing ``asset.is_rigged`` lazy-fetches the full record.
@@ -119,17 +162,6 @@ class MAnimShotFileManager(MShotFileManager):
                 )
 
         sync_shot_sets(self.shot)
-
-    def _sublayer_camera(self) -> None:
-        root_layer = get_stage().GetRootLayer()
-        # Production-root-relative, resolved by `PXR_AR_DEFAULT_SEARCH_PATH`.
-        cam_layer = Sdf.Layer.FindOrOpen(
-            "/".join((self.shot.shot_path, "cam", "cam.usd"))
-        )
-        if not cam_layer:
-            mc.warning("No exported camera found")
-            return
-        add_sublayer(root_layer, cam_layer)
 
     def _setup_file(self, path: Path, entity) -> None:
         mc.file(newFile=True, force=True)
