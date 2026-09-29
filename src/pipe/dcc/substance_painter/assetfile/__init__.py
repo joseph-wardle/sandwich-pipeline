@@ -18,7 +18,7 @@ from pathlib import Path
 
 import substance_painter as sp
 from env_sg import DB_Config
-from substance_painter.exception import ProjectError, ServiceNotFoundError
+from substance_painter.exception import ProjectError
 from Qt import QtWidgets
 from pipe.core.util.paths import resolve_mapped_path
 
@@ -44,11 +44,14 @@ from pipe.dcc.substance_painter.ui.dialogs import (
 )
 from pipe.dcc.substance_painter.runtime import get_main_qt_window
 from pipe.dcc.substance_painter.util.metadata import (
-    current_project_path,
+    current_geo_variant,
     get_active_asset_from_project,
-    get_asset_selection_metadata,
-    run_when_project_editable,
     tag_project,
+)
+from pipe.dcc.substance_painter.util.project import (
+    check_project_editable,
+    current_project_path,
+    run_when_project_editable,
 )
 from pipe.core.versioning import (
     VersionRecord,
@@ -98,54 +101,6 @@ def _confirm_overwrite_project(parent: QtWidgets.QWidget | None, path: Path) -> 
 # ---------------------------------------------------------------------------
 
 
-def _current_geo_variant() -> str:
-    """Return the geometry variant stored in project metadata, or "main"."""
-    metadata = get_asset_selection_metadata()
-    variant = metadata.get("geo_variant")
-    if variant is None:
-        return "main"
-    text = str(variant).strip()
-    return text or "main"
-
-
-def _ensure_project_ready_for_version_action(
-    parent: QtWidgets.QWidget | None, *, action_name: str
-) -> bool:
-    """Return True if the project is open, loaded, and idle.
-
-    Shows an appropriate message dialog and returns False otherwise.
-    """
-    if not sp.project.is_open():
-        MessageDialog(
-            parent,
-            "No Substance Painter project is open. Open an asset project first.",
-            action_name,
-        ).exec_()
-        return False
-
-    if sp.project.is_busy():
-        MessageDialog(
-            parent,
-            "Substance Painter is busy. Wait for the current operation to finish.",
-            action_name,
-        ).exec_()
-        return False
-
-    try:
-        if not sp.project.is_in_edition_state():
-            MessageDialog(
-                parent,
-                "The project is still loading. Wait for it to finish before continuing.",
-                action_name,
-            ).exec_()
-            return False
-    except ServiceNotFoundError:
-        log.exception(f"Failed to query project edition state for {action_name}.")
-        return False
-
-    return True
-
-
 def _ensure_project_saved_for_version_action(
     parent: QtWidgets.QWidget | None, *, action_name: str
 ) -> Path | None:
@@ -153,7 +108,7 @@ def _ensure_project_saved_for_version_action(
 
     Prompts the user to save if there are unsaved changes.
     """
-    if not _ensure_project_ready_for_version_action(parent, action_name=action_name):
+    if not check_project_editable(parent, action_name):
         return None
 
     project_path = current_project_path()
@@ -512,9 +467,7 @@ def launch_version_browser_for_current_project() -> None:
         return
 
     parent = get_main_qt_window()
-    if not _ensure_project_ready_for_version_action(
-        parent, action_name="Version History"
-    ):
+    if not check_project_editable(parent, "Version History"):
         return
 
     conn = ShotGrid.connect(DB_Config)
@@ -527,7 +480,7 @@ def launch_version_browser_for_current_project() -> None:
         ).exec_()
         return
 
-    geo_variant = _current_geo_variant()
+    geo_variant = current_geo_variant()
     asset_paths = paths_for_asset(asset)
     project_stream = substance_project_stream(
         asset_paths,
@@ -636,7 +589,7 @@ def launch_save_version() -> None:
         ).exec_()
         return
 
-    geo_variant = _current_geo_variant()
+    geo_variant = current_geo_variant()
     project_stream = substance_project_stream(
         paths_for_asset(asset),
         geo_variant,

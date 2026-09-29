@@ -23,7 +23,7 @@ from Qt import QtCore, QtWidgets
 from pipe.core.util.paths import get_production_path, resolve_mapped_path
 from substance_painter.project import NormalMapFormat, ProjectWorkflow, TangentSpace
 
-from pipe.core.asset import AssetPaths, paths_for_asset
+from pipe.core.asset import DEFAULT_GEO_VARIANT, AssetPaths, paths_for_asset
 from pipe.core.ui import DialogFilteredList, FilteredListDialog, ItemSource
 from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.dcc.substance_painter.util.docs import docs_link_html
@@ -62,9 +62,11 @@ def resolve_default_mesh_paths(
     if use_custom_mesh:
         return custom_mesh_path, None, None
 
-    variant_name = variant.strip() or "main"
+    variant_name = variant.strip() or DEFAULT_GEO_VARIANT
     variant_path = paths.publish_source_variant_usd(variant_name)
-    fallback_path = paths.publish_source_model_usd if variant_name == "main" else None
+    fallback_path = (
+        paths.publish_source_model_usd if variant_name == DEFAULT_GEO_VARIANT else None
+    )
 
     if variant_path.exists():
         return variant_path, variant_path, fallback_path
@@ -97,11 +99,14 @@ def project_template_path() -> Path:
 
 
 def _geo_variants_for_asset(asset: Asset) -> list[str]:
-    """Return a sorted list of geometry variant names, defaulting to ["main"]."""
+    """Return the asset's geometry variant names, sorted.
+
+    Falls back to ``[DEFAULT_GEO_VARIANT]`` when the asset lists none.
+    """
     variants = sorted(v for v in (asset.geometry_variants or ()) if v)
     if variants:
         return [str(v) for v in variants]
-    return ["main"]
+    return [DEFAULT_GEO_VARIANT]
 
 
 # ---------------------------------------------------------------------------
@@ -154,9 +159,11 @@ class SubstanceAssetDialog(FilteredListDialog):
             return
 
         paths = paths_for_asset(asset)
-        path = project_path_for_variant(paths, "main")
+        path = project_path_for_variant(paths, DEFAULT_GEO_VARIANT)
         status = "exists" if path.exists() else "missing"
-        self._info_label.setText(f"Substance Painter project (main): {path} ({status})")
+        self._info_label.setText(
+            f"Substance Painter project ({DEFAULT_GEO_VARIANT}): {path} ({status})"
+        )
 
 
 class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
@@ -275,7 +282,7 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         return self._asset
 
     def get_selected_variant(self) -> str:
-        return self._geo_variant_dropdown.currentText().strip() or "main"
+        return self._geo_variant_dropdown.currentText().strip() or DEFAULT_GEO_VARIANT
 
     # -- Internal --
 
@@ -315,7 +322,7 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         self._geo_variant_dropdown.clear()
         self._geo_variant_dropdown.addItems(variants)
         self._geo_variant_dropdown.setCurrentText(
-            "main" if "main" in variants else variants[0]
+            DEFAULT_GEO_VARIANT if DEFAULT_GEO_VARIANT in variants else variants[0]
         )
         self._update_project_info()
         self._update_button_state()
@@ -362,7 +369,7 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
     ) -> None:
         super().__init__(parent)
         self._action = None
-        variant_name = geo_variant.strip() or "main"
+        variant_name = geo_variant.strip() or DEFAULT_GEO_VARIANT
 
         self.setParent(parent)
         self.setWindowTitle("Create Asset Project")
@@ -446,7 +453,7 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self._asset = asset
         self._paths = paths
-        self._geo_variant = geo_variant.strip() or "main"
+        self._geo_variant = geo_variant.strip() or DEFAULT_GEO_VARIANT
         self._resolved_mesh_path = None
 
         self.setParent(parent)

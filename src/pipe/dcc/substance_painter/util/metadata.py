@@ -9,32 +9,24 @@ Public API
 ----------
 - get_asset_selection_metadata()
 - get_active_asset_from_project()
+- current_geo_variant()
 - tag_project()
-
-Scheduling helpers (used by other sp modules)
----------------------------------------------
-- run_when_project_editable()
-- run_once_on_project_edition_entered()
-
-Utilities (used by other sp modules)
--------------------------------------
-- texture_set_name()
-- current_project_path()
 """
 
 from __future__ import annotations
 
 import datetime
 import logging
-from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import substance_painter as sp
+from pipe.core.asset import DEFAULT_GEO_VARIANT
 from pipe.core.util.paths import get_production_path
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
 from pipe.core.versioning import DCC_SUBSTANCE
 from pipe.core.shotgrid import Asset, ShotGrid, build_asset_path
+from pipe.dcc.substance_painter.util.project import current_project_path
 from pipe.dcc.substance_painter.util.texture_set import texture_set_name
 
 log = logging.getLogger(__name__)
@@ -51,89 +43,6 @@ PIPE_SP_METADATA_KEY = "asset_selection"
 
 PIPE_SP_METADATA_SCHEMA_VERSION = 1
 """Schema version stamped into every metadata payload for future migration."""
-
-_TEMPLATE_SUFFIX = ".spt"
-
-
-# ---------------------------------------------------------------------------
-# Shared utilities
-# ---------------------------------------------------------------------------
-
-# texture_set_name is imported from pipe.dcc.substance_painter.util.texture_set
-
-
-def current_project_path() -> Path | None:
-    """Return the file path of the currently open project, or None.
-
-    A project created from a template reports the template's ``.spt`` path
-    until it is first saved, and Painter refuses to save onto a template, so
-    that project counts as having no file path.
-    """
-    try:
-        path_str = sp.project.file_path()
-    except (ProjectError, ServiceNotFoundError):
-        return None
-    if not path_str:
-        return None
-    path = Path(path_str)
-    if path.suffix.lower() == _TEMPLATE_SUFFIX:
-        return None
-    return path
-
-
-# ---------------------------------------------------------------------------
-# Project-readiness scheduling
-#
-# Substance Painter projects go through several states before they can be
-# modified: the project must be open, in "edition" state (fully loaded), and
-# not busy with another operation.  These two helpers let callers defer work
-# until all three conditions are met.
-# ---------------------------------------------------------------------------
-
-
-def run_once_on_project_edition_entered(callback: Callable[[], None]) -> None:
-    """Run *callback* the next time the project enters edition state.
-
-    The listener disconnects itself after firing once.
-    """
-
-    def _on_edition_entered(_event: sp.event.Event) -> None:
-        # Painter's dispatcher prints and swallows exceptions from listeners,
-        # so a failure here would silently drop the callback.
-        sp.event.DISPATCHER.disconnect(
-            sp.event.ProjectEditionEntered, _on_edition_entered
-        )
-        callback()
-
-    sp.event.DISPATCHER.connect_strong(
-        sp.event.ProjectEditionEntered, _on_edition_entered
-    )
-
-
-def run_when_project_editable(callback: Callable[[], None]) -> None:
-    """Run *callback* as soon as the project is open, loaded, and idle.
-
-    If any precondition is not yet met, the call is transparently deferred
-    until it is.  Safe to call at any point in the project lifecycle.
-    """
-    if not sp.project.is_open():
-        run_once_on_project_edition_entered(lambda: run_when_project_editable(callback))
-        return
-
-    if sp.project.is_busy():
-        sp.project.execute_when_not_busy(lambda: run_when_project_editable(callback))
-        return
-
-    try:
-        if not sp.project.is_in_edition_state():
-            run_once_on_project_edition_entered(
-                lambda: run_when_project_editable(callback)
-            )
-            return
-    except ServiceNotFoundError:
-        return
-
-    callback()
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +72,15 @@ def get_asset_selection_metadata() -> dict[str, Any]:
     Returns an empty dict when no project is open or no metadata is stored.
     """
     return _safe_get_metadata()
+
+
+def current_geo_variant() -> str:
+    """Return the geometry variant the open project is tagged with.
+
+    Falls back to ``DEFAULT_GEO_VARIANT`` when the project carries no tag.
+    """
+    variant = get_asset_selection_metadata().get("geo_variant")
+    return str(variant or "").strip() or DEFAULT_GEO_VARIANT
 
 
 # ---------------------------------------------------------------------------

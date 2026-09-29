@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 from pipe.core.util.paths import resolve_mapped_path
 from substance_painter.exception import ProjectError
 
-from pipe.core.asset import paths_for_asset
+from pipe.core.asset import DEFAULT_GEO_VARIANT, paths_for_asset
 from pipe.core.shotgrid import Asset
 from pipe.dcc.substance_painter.publish.config import (
     count_udim_sets,
@@ -110,7 +110,7 @@ class Exporter:
         udim_set_count: int,
     ) -> dict[str, object]:
         return {
-            "geo_variant": str(geo_variant or "main"),
+            "geo_variant": str(geo_variant or DEFAULT_GEO_VARIANT),
             "material_variant": str(material_variant or "main"),
             "renderman_variant": str(renderman_variant or "main"),
             "texture_set_count": max(0, int(texture_set_count)),

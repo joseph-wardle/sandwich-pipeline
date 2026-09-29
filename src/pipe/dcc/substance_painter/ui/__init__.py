@@ -23,7 +23,12 @@ import substance_painter as sp
 from env_sg import DB_Config
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
-from pipe.core.asset import asset_owner_for, paths_for_asset, substance_project_stream
+from pipe.core.asset import (
+    DEFAULT_GEO_VARIANT,
+    asset_owner_for,
+    paths_for_asset,
+    substance_project_stream,
+)
 from pipe.core.ui import ButtonPair, MessageDialog, MessageDialogCustomButtons
 from pipe.core.ui.progress import ProgressDialog
 from pipe.core.shotgrid import Asset, ShotGrid
@@ -34,9 +39,10 @@ from pipe.dcc.substance_painter.util.houdini_bridge import (
     summarize_result,
 )
 from pipe.dcc.substance_painter.runtime import get_main_qt_window
-from pipe.dcc.substance_painter.util.metadata import (
+from pipe.dcc.substance_painter.util.metadata import get_active_asset_from_project
+from pipe.dcc.substance_painter.util.project import (
+    check_project_editable,
     current_project_path,
-    get_active_asset_from_project,
 )
 from pipe.dcc.substance_painter.util.docs import docs_link_html
 from pipe.dcc.substance_painter.util.texture_set import texture_set_name
@@ -190,8 +196,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
         geo_items = [
             str(v) for v in sorted(v for v in (asset.geometry_variants or ()) if v)
-        ] or ["main"]
-        geo_default = "main" if "main" in geo_items else geo_items[0]
+        ] or [DEFAULT_GEO_VARIANT]
+        geo_default = (
+            DEFAULT_GEO_VARIANT if DEFAULT_GEO_VARIANT in geo_items else geo_items[0]
+        )
         self._geo_var_dropdown = self._build_variant_dropdown(
             label_text="Geometry Variant:",
             tooltip=("Geometry variant to match the published model."),
@@ -363,14 +371,14 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 "Publish Textures",
             ).exec_()
             return
-        if not self._ensure_project_ready():
+        if not self._check_can_publish():
             return
         save_required = sp.project.needs_saving()
         if save_required and not self._confirm_save_before_publish():
             return
 
         mat_var = self.mat_var.strip() or "default"
-        geo_var = self.geo_var.strip() or "main"
+        geo_var = self.geo_var.strip() or DEFAULT_GEO_VARIANT
         material_layer = self.material_layer.strip() or "default"
 
         asset_label = (
@@ -739,39 +747,12 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             title or "Publish Textures",
         ).exec_()
 
-    def _ensure_project_ready(self) -> bool:
+    def _check_can_publish(self) -> bool:
         """Check that the project is open, idle, loaded, and saved to disk.
 
         Shows a message dialog and returns False if any precondition fails.
         """
-        if not sp.project.is_open():
-            MessageDialog(
-                get_main_qt_window(),
-                "No Substance Painter project is open.",
-                "Publish Textures",
-            ).exec_()
-            return False
-
-        if sp.project.is_busy():
-            MessageDialog(
-                get_main_qt_window(),
-                "Substance Painter is busy. Wait for the current operation to finish "
-                "before publishing.",
-                "Painter Busy",
-            ).exec_()
-            return False
-
-        try:
-            if not sp.project.is_in_edition_state():
-                MessageDialog(
-                    get_main_qt_window(),
-                    "The project is still loading. Wait for the project to finish "
-                    "loading before publishing.",
-                    "Project Loading",
-                ).exec_()
-                return False
-        except ServiceNotFoundError:
-            log.exception("Failed to query project edition state before publish.")
+        if not check_project_editable(get_main_qt_window(), "Publish Textures"):
             return False
 
         if current_project_path() is None:
