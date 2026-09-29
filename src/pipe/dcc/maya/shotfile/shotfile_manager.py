@@ -5,7 +5,6 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import cast
 
-import maya.api.OpenMaya as om
 import maya.cmds as mc
 from env_sg import DB_Config
 from timeline_marker.ui import TimelineMarker  # type: ignore[import-not-found]
@@ -40,12 +39,8 @@ from pipe.core.versioning import (
     save_version as _save_version,
 )
 
-from .stage import (
-    build_shot_stage,
-    get_stage,
-    get_stage_shape,
-    shot_override_layer_path,
-)
+from .sets import sync_shot_sets
+from .stage import build_shot_stage
 from .timeline import shot_timeline_generator
 
 log = logging.getLogger(__name__)
@@ -108,27 +103,12 @@ class MShotFileManager(FileManager):
     @log_errors
     def run_on_open(cls) -> None:
         """Function to run on file open via script node"""
-
-        # save edit target layer on save
-        beforeSaveId = om.MSceneMessage.addCallback(
-            om.MSceneMessage.kBeforeSave,
-            lambda _: get_stage().GetEditTarget().GetLayer().Save(),
-        )
-
-        # remove callback before opening a new file
-        om.MSceneMessage.addCallback(
-            om.MSceneMessage.kBeforeOpen,
-            lambda kwargs: om.MSceneMessage.removeCallback(kwargs["ID"]),
-            {"ID": beforeSaveId},
-        )
-
         # change default render resolution
         mc.setAttr("defaultResolution.width", 1920)  # type: ignore
         mc.setAttr("defaultResolution.height", 1080)  # type: ignore
         mc.setAttr("defaultResolution.pixelAspect", 1.0)  # type: ignore
         mc.setAttr("defaultResolution.deviceAspectRatio", 1920 / 1080)  # type: ignore
 
-        # set session USD target layer to the override layer
         try:
             shot_code = cls._shot_code_from_file_info()
             if not shot_code:
@@ -138,17 +118,15 @@ class MShotFileManager(FileManager):
                 if shot_code:
                     mc.fileInfo("code", shot_code)
                 else:
-                    mc.warning("Could not determine shot code; USD edit target not set")
+                    mc.warning(
+                        "Could not determine shot code; sets and timeline not set"
+                    )
                     return
-            assert shot_code is not None
-            mc.mayaUsdEditTarget(  # type: ignore
-                get_stage_shape(),
-                edit=True,
-                editTarget=shot_override_layer_path(shot_code),
-            )
 
             conn = ShotGrid.connect(DB_Config)
             shot = conn.get_shot(code=shot_code)
+            if not mc.about(batch=True):
+                sync_shot_sets(shot)
 
             # Import Timeline
             frames, colors, comments = shot_timeline_generator(
@@ -164,7 +142,7 @@ class MShotFileManager(FileManager):
             )
         except Exception:
             # Workflow boundary: many things can fail during file-open setup
-            # (ShotGrid lookup, USD edit target, timeline marker). Log + warn
+            # (ShotGrid lookup, set sync, timeline marker). Log + warn
             # rather than crash the open.
             log.exception("run_on_open failed")
             mc.error(
@@ -257,13 +235,14 @@ class MShotFileManager(FileManager):
 
     @abstractmethod
     def _setup_scene(self) -> None:
-        """Fill the stage. Runs before the root layer is locked."""
+        """Fill the new scene's stage."""
         ...
 
     def _setup_file(self, path: Path, entity) -> None:
         mc.file(rename=str(path))
         self.shot = cast(Shot, entity)
-        build_shot_stage(self.shot, populate=self._setup_scene)
+        build_shot_stage(self.shot)
+        self._setup_scene()
         mc.file(save=True, force=True)
 
     # ------------------------------------------------------------------

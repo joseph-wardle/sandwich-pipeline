@@ -16,13 +16,14 @@ from pipe.core.ui import (
 )
 from pipe.core.shotgrid import (
     Asset,
-    Environment,
     SGEntity,
     Sequence,
+    Set,
     Shot,
     ShotGrid,
     group_assets_by_subdirectory,
     group_shots_by_sequence,
+    normalize_display_name,
 )
 from pipe.core.util.paths import get_production_path
 
@@ -37,8 +38,8 @@ def _find_entities_for_type(
     """
     if entity_type is Asset:
         return list(conn.find_assets(roots_only=roots_only))
-    if entity_type is Environment:
-        return list(conn.find_environments())
+    if entity_type is Set:
+        return list(conn.find_sets())
     if entity_type is Shot:
         return list(conn.find_shots())
     if entity_type is Sequence:
@@ -52,8 +53,8 @@ def _get_entity_by_display_name(
     """Resolve a single entity by its display name (a.k.a. ShotGrid ``code``)."""
     if entity_type is Asset:
         return conn.get_asset(display_name=display_name)
-    if entity_type is Environment:
-        return conn.get_environment(code=display_name)
+    if entity_type is Set:
+        return conn.get_set(name=normalize_display_name(display_name))
     if entity_type is Shot:
         return conn.get_shot(code=display_name)
     if entity_type is Sequence:
@@ -66,6 +67,7 @@ log = logging.getLogger(__name__)
 
 class OpenFileDialog(FilteredListDialog):
     _version_cb: QtWidgets.QCheckBox | None
+    wants_new: bool
 
     def __init__(
         self,
@@ -74,6 +76,7 @@ class OpenFileDialog(FilteredListDialog):
         entity_type: type[SGEntity],
         versioning: bool,
         version_msg: str,
+        can_create: bool = False,
     ) -> None:
         super().__init__(
             parent,
@@ -89,6 +92,17 @@ class OpenFileDialog(FilteredListDialog):
         else:
             self._version_cb = None
 
+        self.wants_new = False
+        if can_create:
+            new_button = self.buttons.addButton(
+                "New…", QtWidgets.QDialogButtonBox.ActionRole
+            )
+            new_button.clicked.connect(self._accept_new)
+
+    def _accept_new(self) -> None:
+        self.wants_new = True
+        self.accept()
+
     @property
     def open_old_file(self) -> bool:
         if self._version_cb:
@@ -97,6 +111,8 @@ class OpenFileDialog(FilteredListDialog):
 
 
 class FileManager(metaclass=ABCMeta):
+    # Subclasses that can make a new entity set this and override `_new_entity`.
+    _can_create: bool = False
     _conn: ShotGrid
     _entity_type: type[SGEntity]
     _main_window: QtWidgets.QWidget | None
@@ -145,6 +161,10 @@ class FileManager(metaclass=ABCMeta):
         """Setup a new file in the current session"""
         pass
 
+    def _new_entity(self) -> SGEntity | None:
+        """Create an entity for the dialog's New… button, or None if cancelled."""
+        raise NotImplementedError
+
     def _post_open_file(self, entity: SGEntity) -> None:
         """Execute additional code after opening or creating a scene"""
         pass
@@ -166,10 +186,8 @@ class FileManager(metaclass=ABCMeta):
         """Rows for the open-file dialog, bucketed into collapsible groups."""
         if self._entity_type is Shot:
             return group_shots_by_sequence(cast("list[Shot]", entities))
-        if self._entity_type in (Asset, Environment):
-            return group_assets_by_subdirectory(
-                cast("list[Asset | Environment]", entities)
-            )
+        if self._entity_type is Asset:
+            return group_assets_by_subdirectory(cast("list[Asset]", entities))
         return sorted(e.code for e in entities if e.code)
 
     def _prompt_create_if_not_exist(self, path: Path) -> bool:
@@ -201,20 +219,28 @@ class FileManager(metaclass=ABCMeta):
                 self._entity_type,
                 versioning=self._versioning,
                 version_msg=self._version_msg,
+                can_create=self._can_create,
             )
 
             if not open_file_dialog.exec_():
                 log.debug("error intializing dialog")
                 return
 
-            response = open_file_dialog.get_selected_item()
+            if open_file_dialog.wants_new:
+                entity = self._new_entity()
+                if entity is None:
+                    return
+            else:
+                response = open_file_dialog.get_selected_item()
+                if not response:
+                    return
+                entity = _get_entity_by_display_name(
+                    self._conn, self._entity_type, response
+                )
         else:
-            response = self._override_entity_code
-
-        if not response:
-            return
-
-        entity = _get_entity_by_display_name(self._conn, self._entity_type, response)
+            entity = _get_entity_by_display_name(
+                self._conn, self._entity_type, self._override_entity_code
+            )
 
         try:
             assert entity is not None

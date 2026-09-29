@@ -37,10 +37,10 @@ import shotgun_api3
 from pipe.core.shotgrid._memoize import invalidate, ttl_cache
 from pipe.core.shotgrid.entities import (
     Asset,
-    Environment,
     Playlist,
     SGEntity,
     Sequence,
+    Set,
     Shot,
     Task,
     User,
@@ -54,7 +54,6 @@ from pipe.core.shotgrid.errors import (
 )
 from pipe.core.shotgrid.paths import (
     build_asset_path,
-    build_environment_path,
     normalize_display_name,
 )
 
@@ -110,7 +109,6 @@ _SG_FIELDS_SHOT: tuple[str, ...] = (
     "sg_cut_out",
     "sg_cut_duration",
     "sg_sequence",
-    "sg_set",
     "sg_sets",
     "sg_substeps",
 )
@@ -118,10 +116,8 @@ _SG_FIELDS_SEQUENCE: tuple[str, ...] = (
     "id",
     "code",
     "shots",
-    "sg_set",
-    "sg_sets",
 )
-_SG_FIELDS_ENVIRONMENT: tuple[str, ...] = ("id", "code", "sg_subdirectory")
+_SG_FIELDS_SET: tuple[str, ...] = ("id", "code")
 _SG_FIELDS_USER: tuple[str, ...] = ("id", "name", "login")
 _SG_FIELDS_TASK: tuple[str, ...] = ("id", "content", "entity", "sg_status_list")
 _SG_FIELDS_VERSION: tuple[str, ...] = (
@@ -146,6 +142,7 @@ _SG_SHOT_CUT_IN = "sg_cut_in"
 _SG_SHOT_CUT_OUT = "sg_cut_out"
 _SG_SHOT_CUT_DURATION = "sg_cut_duration"
 _SG_SHOT_TASK_TEMPLATE = "task_template"
+_SG_SHOT_SETS = "sg_sets"
 _SG_VERSION_CODE = "code"
 _SG_VERSION_ENTITY = "entity"
 _SG_VERSION_USER = "user"
@@ -154,6 +151,20 @@ _SG_VERSION_DESCRIPTION = "description"
 _SG_VERSION_UPLOADED_MOVIE = "sg_uploaded_movie"
 _SG_VERSION_PATH_TO_FRAMES = "sg_path_to_frames"
 _SG_PLAYLIST_VERSIONS = "versions"
+_SG_ASSET_CODE = "code"
+_SG_ASSET_TYPE = "sg_asset_type"
+_SG_PUBLISHED_FILE_ENTITY = "entity"
+_SG_PUBLISHED_FILE_NAME = "name"
+_SG_PUBLISHED_FILE_VERSION = "version_number"
+_SG_PUBLISHED_FILE_CODE = "code"
+_SG_PUBLISHED_FILE_PATH = "path"
+_SG_PUBLISHED_FILE_DESCRIPTION = "description"
+
+# The `sg_asset_type` of an Asset row that is a set.
+SET_ASSET_TYPE = "Set"
+# Every set version registers as a PublishedFile with this name, the way Piper
+# names a product.
+SET_PUBLISHED_FILE_NAME = "set"
 
 # ShotGrid seeds a new Shot's task list from a template of this entity type.
 _SG_TASK_TEMPLATE_TYPE = "TaskTemplate"
@@ -169,10 +180,11 @@ _SG_STATUS_ACTIVE_USER_FILTER: tuple[str, str, str] = (
     "dis",
 )
 
-# Assets with these sg_asset_type values are not "real" assets (environments
-# are their own entity surface, the others are legacy). Used by find_assets.
+# Assets with these sg_asset_type values are not "real" assets (sets are their
+# own entity surface, the others are legacy). Used by find_assets.
 _SG_ASSET_TYPE_EXCLUDES: tuple[str, ...] = (
     "Environment",
+    SET_ASSET_TYPE,
     "FX",
     "Graphic",
     "Matte Painting",
@@ -473,76 +485,36 @@ class ShotGrid:
         )
         return self._many(rows, Sequence)
 
-    # ---- reads: environments -----------------------------------------------
+    # ---- reads: sets -------------------------------------------------------
 
-    @overload
-    def get_environment(self, *, id: int) -> Environment: ...
-    @overload
-    def get_environment(self, *, code: str) -> Environment: ...
-    @overload
-    def get_environment(self, *, path: str) -> Environment: ...
-
-    def get_environment(
-        self,
-        *,
-        id: int | None = None,
-        code: str | None = None,
-        path: str | None = None,
-    ) -> Environment:
-        """Fetch one environment asset by id, code, or canonical path.
+    def get_set(self, *, name: str) -> Set:
+        """Fetch one set by its normalized name, which is its folder and root prim.
 
         Raises:
-            ShotGridNotFound: No environment matches.
-            ShotGridAmbiguous: Multiple environments match.
-            TypeError: Zero or more than one selector was provided.
+            ShotGridNotFound: No set has this name.
+            ShotGridAmbiguous: Several sets have this name.
         """
-        _require_exactly_one_selector(id=id, code=code, path=path)
-        selector, value = _selected(id=id, code=code, path=path)
-        filters: list[Any] = [
-            self._project_filter(),
-            _SG_STATUS_ACTIVE_FILTER,
-            ("sg_asset_type", "is", "Environment"),
-        ]
-        if selector == "id":
-            filters.append(("id", "is", value))
-        elif selector == "code":
-            filters.append(("code", "is", value))
         rows = _read_or_raise(
-            lambda: self._sg.find("Asset", filters, list(_SG_FIELDS_ENVIRONMENT)),
-            entity_type="Environment",
-            selector=selector,
-            value=value,
+            lambda: self._sg.find("Asset", self._set_filters(), list(_SG_FIELDS_SET)),
+            entity_type="Set",
+            selector="name",
+            value=name,
         )
-        if selector == "path":
-            rows = [
-                r
-                for r in rows
-                if build_environment_path(r.get("code"), r.get("sg_subdirectory"))
-                == value
-            ]
+        rows = [r for r in rows if normalize_display_name(r.get("code")) == name]
         return self._one_or_raise(
-            entity_type="Environment",
-            selector=selector,
-            value=value,
-            rows=rows,
-            cls=Environment,
+            entity_type="Set", selector="name", value=name, rows=rows, cls=Set
         )
 
     @ttl_cache(seconds=60)
-    def find_environments(self) -> list[Environment]:
-        """Return every environment asset on the project."""
-        filters = [
-            self._project_filter(),
-            _SG_STATUS_ACTIVE_FILTER,
-            ("sg_asset_type", "is", "Environment"),
-        ]
+    def find_sets(self) -> list[Set]:
+        """Return every set on the project."""
         rows = _read_or_raise(
-            lambda: self._sg.find("Asset", filters, list(_SG_FIELDS_ENVIRONMENT)),
-            entity_type="Environment",
+            lambda: self._sg.find("Asset", self._set_filters(), list(_SG_FIELDS_SET)),
+            entity_type="Set",
             selector="filters",
             value=None,
         )
-        return self._many(rows, Environment)
+        return self._many(rows, Set)
 
     # ---- reads: users ------------------------------------------------------
 
@@ -863,8 +835,9 @@ class ShotGrid:
         cut_out: int,
         description: str | None = None,
         task_template: str | None = SHOT_TASK_TEMPLATE,
+        sets: list[Set] | None = None,
     ) -> Shot:
-        """Create a Shot with its frame range and task list already in place.
+        """Create a Shot with its frame range, task list and sets already in place.
 
         Used by the previs break-out, which delivers shots production has not
         registered yet. `task_template` names a ShotGrid Shot template whose
@@ -883,6 +856,8 @@ class ShotGrid:
         }
         if description:
             payload[_SG_SHOT_DESCRIPTION] = description
+        if sets:
+            payload[_SG_SHOT_SETS] = [_entity_ref("Asset", set) for set in sets]
         template = self._task_template_ref(task_template) if task_template else None
         if template is not None:
             payload[_SG_SHOT_TASK_TEMPLATE] = template
@@ -894,6 +869,72 @@ class ShotGrid:
         )
         invalidate(self)
         return self._created(row, Shot)
+
+    # ---- writes: sets ------------------------------------------------------
+
+    def create_set(self, display_name: str) -> Set:
+        """Create the ShotGrid Asset that makes `display_name` a set.
+
+        The caller checks the derived name is a valid set name and unused on disk.
+
+        Raises:
+            ValueError: An Asset already has this normalized name.
+            ShotGridWriteError: ShotGrid rejected the create.
+        """
+        name = normalize_display_name(display_name)
+        rows = _read_or_raise(
+            lambda: self._sg.find(
+                "Asset", [self._project_filter()], ["id", _SG_ASSET_CODE]
+            ),
+            entity_type="Asset",
+            selector="name",
+            value=name,
+        )
+        taken = [
+            r for r in rows if normalize_display_name(r.get(_SG_ASSET_CODE)) == name
+        ]
+        if taken:
+            raise ValueError(
+                f"The asset {taken[0][_SG_ASSET_CODE]!r} (id {taken[0]['id']}) "
+                f"already has the name {name}."
+            )
+        payload = {
+            _SG_ASSET_CODE: display_name,
+            _SG_ASSET_TYPE: SET_ASSET_TYPE,
+            _SG_PROJECT: self._project_ref(),
+        }
+        row = _write_or_raise(
+            lambda: self._sg.create("Asset", payload, list(_SG_FIELDS_SET)),
+            entity_type="Asset",
+            entity_id=None,
+            field=None,
+        )
+        invalidate(self)
+        return self._created(row, Set)
+
+    def create_set_published_file(
+        self, set: Set, *, version: int, path: Path, description: str
+    ) -> None:
+        """Register one published set version.
+
+        Raises:
+            ShotGridWriteError: ShotGrid rejected the create.
+        """
+        payload = {
+            _SG_PROJECT: self._project_ref(),
+            _SG_PUBLISHED_FILE_ENTITY: _entity_ref("Asset", set),
+            _SG_PUBLISHED_FILE_NAME: SET_PUBLISHED_FILE_NAME,
+            _SG_PUBLISHED_FILE_VERSION: version,
+            _SG_PUBLISHED_FILE_CODE: f"{set.name}_v{version:03d}",
+            _SG_PUBLISHED_FILE_PATH: {"url": path.as_uri(), "name": path.name},
+            _SG_PUBLISHED_FILE_DESCRIPTION: description,
+        }
+        _write_or_raise(
+            lambda: self._sg.create("PublishedFile", payload, ["id"]),
+            entity_type="PublishedFile",
+            entity_id=None,
+            field=None,
+        )
 
     def _require_unused_shot_code(self, code: str) -> None:
         """Refuse a code some Shot already holds."""
@@ -1114,8 +1155,8 @@ class ShotGrid:
         """
         if isinstance(entity, Asset):
             return cast(_E, self.get_asset(id=entity.id))
-        if isinstance(entity, Environment):
-            return cast(_E, self.get_environment(id=entity.id))
+        if isinstance(entity, Set):
+            return cast(_E, self.get_set(name=entity.name))
         if isinstance(entity, Shot):
             return cast(_E, self.get_shot(id=entity.id))
         if isinstance(entity, Sequence):
@@ -1172,6 +1213,13 @@ class ShotGrid:
                     ("sg_asset_type", "is_not", t) for t in _SG_ASSET_TYPE_EXCLUDES
                 ],
             },
+        ]
+
+    def _set_filters(self) -> list[Any]:
+        return [
+            self._project_filter(),
+            _SG_STATUS_ACTIVE_FILTER,
+            (_SG_ASSET_TYPE, "is", SET_ASSET_TYPE),
         ]
 
     def _attach_db(self, value: Any) -> None:

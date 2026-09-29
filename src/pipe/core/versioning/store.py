@@ -32,9 +32,7 @@ History entries may also include optional compound snapshot metadata:
   "backup_file": "/abs/path/to/primary/file",
   "backup_root": "/abs/path/to/version/bundle",
   "backup_members": [
-    "rlo/A_010.mb",
-    "maya_root.usd",
-    "set/maya_override.usd"
+    "rlo/A_010.mb"
   ]
 }
 ```

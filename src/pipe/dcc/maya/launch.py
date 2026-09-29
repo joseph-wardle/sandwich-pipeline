@@ -178,9 +178,14 @@ class MayaLauncher(Launcher):
         self.set_up_splash_path()
 
     def set_up_shelf_path(self) -> None:
-        prod_dir = str(Path(__file__).parent / "site/shelves")
-        local_dir = self.shelf_path
+        prod_dir = Path(__file__).parent / "site/shelves"
+        local_dir = Path(self.shelf_path)
 
+        # The copy outlives launches, so a shelf the pipeline no longer ships would
+        # keep loading, with buttons that import deleted modules.
+        for shelf in local_dir.glob("shelf_SKD_*.mel"):
+            if not (prod_dir / shelf.name).exists():
+                shelf.unlink()
         shutil.copytree(prod_dir, local_dir, dirs_exist_ok=True)
 
     def set_up_splash_path(self) -> None:

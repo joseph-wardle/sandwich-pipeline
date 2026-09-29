@@ -17,7 +17,6 @@ def dummy_shot(code: str, cut_in: int, cut_out: int, cut_duration: int) -> Shot:
         cut_out=cut_out,
         cut_duration=cut_duration,
         sequence=None,
-        set=None,
         sets=[],
     )
 

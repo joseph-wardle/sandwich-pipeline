@@ -12,12 +12,12 @@ from pipe.dcc.houdini import runtime as houdini_runtime
 from pipe.core.ui import FilteredListDialog, MessageDialog
 from pipe.dcc.houdini.hipfile.departments import DEPARTMENT_OPTIONS, Department
 from pipe.dcc.houdini.hipfile.paths import department_from_hip_path
+from pipe.core.sets import current_layer_path
 from pipe.core.shot import houdini_department_stream, shot_owner_for
 from pipe.core.shotgrid import (
-    Environment,
+    Set,
     SGEntity,
     Shot,
-    ShotGridError,
     ShotGridNotFound,
     validate_shot_code_token,
 )
@@ -25,6 +25,7 @@ from pipe.core.versioning import VersionStreamSpec, path_matches_stream
 from pipe.dcc.houdini.util import nodetypes
 
 from .filemanager import HFileManager
+from .shot_sets import SETS_NODE_NAME, create_sets_node, sync_sets
 
 log = logging.getLogger(__name__)
 
@@ -100,7 +101,7 @@ class HShotFileManager(HFileManager):
     def _post_open_file(self, entity: SGEntity) -> None:
         shot = cast(Shot, entity)
         self._set_playbar_ranges(shot)
-        self._set_environment_paths(shot)
+        self._sync_sets(shot)
         # update SHOT_SUBSTEPS variable, this is read by the
         # sync_motion_substeps HDA
         hou.putenv("SHOT_SUBSTEPS", str(shot.substeps))
@@ -190,15 +191,13 @@ class HShotFileManager(HFileManager):
             stage = self._get_stage()
             muted_departments = self._get_muted_departments()
 
-            load_layers = self._build_load_layers(
-                stage=stage,
-                shot=shot,
-                muted_departments=muted_departments,
+            sets = create_sets_node(stage)
+            load_layers = self._create_load_layers(
+                stage=stage, muted_departments=muted_departments
             )
-
-            input_node = self._merge_load_layers(stage=stage, load_layers=load_layers)
+            load_layers.setInput(0, sets)
             layer_break = stage.createNode("layerbreak")
-            layer_break.setInput(0, input_node)
+            layer_break.setInput(0, load_layers)
 
             department_name = self._department_value().upper()
             begin_dep = stage.createNode("null")
@@ -218,7 +217,8 @@ class HShotFileManager(HFileManager):
             end_dep.setPosition((0, 1))
             begin_dep.setPosition((0, 4))
             layer_break.setPosition((0, 5))
-            input_node.setPosition((0, 6))
+            load_layers.setPosition((0, 6))
+            sets.setPosition((0, 7))
 
             self._post_open_file(shot)
 
@@ -281,12 +281,6 @@ class HShotFileManager(HFileManager):
     ) -> tuple[str, str, str]:
         if isinstance(exc, ShotGridNotFound):
             entity_type = exc.entity_type.lower()
-            if entity_type == "environment":
-                return (
-                    "SHOT_SETUP_ENV_NOT_FOUND",
-                    "The environment assigned to this shot could not be found.",
-                    "Check the shot's set(s) or sequence environment assignment in ShotGrid.",
-                )
             if entity_type == "sequence":
                 return (
                     "SHOT_SETUP_SEQUENCE_NOT_FOUND",
@@ -434,44 +428,38 @@ class HShotFileManager(HFileManager):
         hou.playbar.setFrameRange(cut_in - 5, cut_out + 5)
         hou.playbar.setPlaybackRange(cut_in - 5, cut_out + 5)
 
-    @staticmethod
-    def _environment_path_or_none(env: Environment | None) -> str | None:
-        """Read ``env.environment_path``; partials lazy-fetch on access."""
-        if env is None:
-            return None
-        try:
-            return env.environment_path
-        except ShotGridError:
-            # Partial-entity hydration failed (deleted ref or network blip).
-            # Skipping gracefully so a single bad linked ref doesn't block the
-            # whole open-shot workflow.
-            log.warning(
-                "Skipping environment id=%s; could not resolve from ShotGrid.",
-                env.id,
-                exc_info=True,
-            )
-            return None
-
-    def _set_environment_paths(self, shot: Shot) -> None:
-        sets = shot.sets
-        if sets:
-            for idx, env in enumerate(sets):
-                env_path = self._environment_path_or_none(env)
-                if env_path:
-                    hou.putenv(f"SET{idx + 1}_PATH", env_path)
+    def _sync_sets(self, shot: Shot) -> None:
+        sets = shot.sets or []
+        node = self._get_stage().node(SETS_NODE_NAME)
+        if node is None:
+            if sets:
+                MessageDialog(
+                    self._main_window,
+                    f"This hip has no {SETS_NODE_NAME} node, so these sets weren't "
+                    f"loaded: {_names(sets)}. Add a Reference LOP named "
+                    f"{SETS_NODE_NAME} above the load layers node, then reopen the shot.",
+                    "Shot Sets",
+                ).exec_()
             return
 
-        # Fallback to deprecated single-set logic if no sets are assigned.
-        sequence = shot.sequence
-        fallback_env = shot.set or (sequence.set if sequence else None)
-        env_path = self._environment_path_or_none(fallback_env)
-        if env_path:
-            hou.putenv("SET_PATH", env_path)
+        added = sync_sets(node, sets)
+        if not added:
+            return
+        unpublished = [
+            set for set in added if not current_layer_path(set.name).exists()
+        ]
+        lines = [f"Added to the {SETS_NODE_NAME} node: {_names(added)}."]
+        if unpublished:
+            lines.append(
+                f"Not published yet: {_names(unpublished)}. The shot won't cook until "
+                "they are. Disable their entries to work without them."
+            )
+        MessageDialog(self._main_window, "\n\n".join(lines), "Shot Sets").exec_()
 
     def _get_muted_departments(self) -> list[str]:
         department = self._department_value()
         if department == self.DEPARTMENT.CFX.value:
-            return ["cfx", "fx", "envfx", "layout", "lighting", "render"]
+            return ["cfx", "fx", "envfx", "lighting", "render"]
         if department == self.DEPARTMENT.FX.value:
             return ["fx"]
         if department == self.DEPARTMENT.FLO.value:
@@ -484,78 +472,16 @@ class HShotFileManager(HFileManager):
             return []
         return []
 
-    def _build_load_layers(
-        self,
-        *,
-        stage: hou.Node,
-        shot: Shot,
-        muted_departments: list[str],
-    ) -> list[hou.Node]:
-        load_layers: list[hou.Node] = []
-        sets = shot.sets
-
-        if sets:
-            for idx, env in enumerate(sets):
-                load_layer = self._create_load_layer(
-                    stage=stage,
-                    shot=shot,
-                    muted_departments=muted_departments,
-                    environment=env,
-                )
-                load_layer.setPosition((idx * 2, 6))
-                load_layers.append(load_layer)
-            return load_layers
-
-        # Fallback to depreciated single set logic if no sets are assigned.
-        sequence = shot.sequence
-        fallback_env = shot.set or (sequence.set if sequence else None)
-        load_layer = self._create_load_layer(
-            stage=stage,
-            shot=shot,
-            muted_departments=muted_departments,
-            environment=fallback_env,
-        )
-        load_layers.append(load_layer)
+    def _create_load_layers(
+        self, *, stage: hou.Node, muted_departments: list[str]
+    ) -> hou.Node:
+        load_layers = stage.createNode(nodetypes.LOAD_LAYERS)
+        load_layers.setUserData("nodeshape", "bulge_down")
+        load_layers.parm("shot").set("$JOB/`@SHOT`")  # type: ignore
+        for department in muted_departments:
+            load_layers.parm(f"{department}_enable").set(0)  # type: ignore
         return load_layers
 
-    def _create_load_layer(
-        self,
-        *,
-        stage: hou.Node,
-        shot: Shot,
-        muted_departments: list[str],
-        environment: Environment | None,
-    ) -> hou.Node:
-        load_layer = stage.createNode(nodetypes.LOAD_LAYERS)
-        load_layer.setUserData("nodeshape", "bulge_down")
-        load_layer.parm("shot").set("$JOB/`@SHOT`")  # type: ignore
 
-        for department in muted_departments:
-            load_layer.parm(f"{department}_enable").set(0)  # type: ignore
-
-        env_path = self._environment_path_or_none(environment)
-        if env_path:
-            load_layer.parm("layout_path").set(  # type: ignore
-                f"$JOB/{env_path}/main.usd"
-            )
-
-        return load_layer
-
-    def _merge_load_layers(
-        self,
-        *,
-        stage: hou.Node,
-        load_layers: list[hou.Node],
-    ) -> hou.Node:
-        if len(load_layers) > 1:
-            merge_node = stage.createNode("merge")
-            merge_node.setName("LOAD_LAYERS")
-            for idx, load_layer in enumerate(load_layers):
-                merge_node.setInput(idx, load_layer)
-            return merge_node
-        if load_layers:
-            return load_layers[0]
-
-        input_node = stage.createNode("null")
-        input_node.setName("NO_ENVIRONMENT", unique_name=True)
-        return input_node
+def _names(sets: list[Set]) -> str:
+    return ", ".join(set.display_name for set in sets)

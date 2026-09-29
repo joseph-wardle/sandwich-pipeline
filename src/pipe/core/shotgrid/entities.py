@@ -1,7 +1,7 @@
 """Entity classes for ShotGrid records.
 
 Every Python object that represents a ShotGrid record lives here:
-`Asset`, `Shot`, `Sequence`, `Environment`,
+`Asset`, `Set`, `Shot`, `Sequence`,
 `User`, `Task`, `Version`, `Playlist`.  They are
 constructed via `Entity.from_sg(sg_dict)` at the ShotGrid boundary and are
 the only form ShotGrid data takes inside the pipeline.
@@ -33,7 +33,6 @@ from attrs import field
 from pipe.core.shotgrid.errors import ShotGridError
 from pipe.core.shotgrid.paths import (
     build_asset_path,
-    build_environment_path,
     build_shot_path,
     normalize_display_name,
     normalize_subdirectory,
@@ -255,21 +254,11 @@ class Asset(SGEntity):
 
 
 @attrs.define(eq=False)
-class Environment(SGEntity):
-    """A ShotGrid Environment (an `Asset` row with `sg_asset_type='Environment'`)."""
-
-    subdirectory: str | None = field(
-        default=None,
-        kw_only=True,
-        metadata={
-            _SG_NAME: "sg_subdirectory",
-            _STRUCT_HOOK: lambda subdir, _: normalize_subdirectory(subdir),
-        },
-    )
+class Set(SGEntity):
+    """A ShotGrid Set (an `Asset` row with `sg_asset_type='Set'`)."""
 
     @property
     def display_name(self) -> str:
-        """ShotGrid display name (code)."""
         return self.code or ""
 
     @property
@@ -278,17 +267,8 @@ class Environment(SGEntity):
         return normalize_display_name(self.display_name)
 
     @property
-    def environment_path(self) -> str:
-        """Canonical relative path for this environment."""
-        return build_environment_path(self.display_name, self.subdirectory)
-
-    @property
     def path(self) -> str:
-        """Alias for `environment_path`. Always derived; never stored."""
-        return self.environment_path
-
-    def __attrs_post_init__(self) -> None:
-        self.subdirectory = normalize_subdirectory(self.subdirectory)
+        return f"set/{self.name}"
 
 
 @attrs.define(eq=False)
@@ -314,28 +294,6 @@ class Sequence(SGEntity):
             _STRUCT_HOOK: lambda ss, _: (
                 [Shot(id=s["id"], code=s.get("name")) for s in ss]
                 if ss is not None
-                else None
-            ),
-        },
-    )
-    set: Environment | None = field(
-        default=None,
-        kw_only=True,
-        metadata={
-            _SG_NAME: "sg_set",
-            _STRUCT_HOOK: lambda e, _: (
-                Environment(id=e["id"], code=e.get("name")) if e else None
-            ),
-        },
-    )
-    sets: list[Environment] | None = field(
-        default=None,
-        kw_only=True,
-        metadata={
-            _SG_NAME: "sg_sets",
-            _STRUCT_HOOK: lambda raw_sets, _: (
-                [Environment(id=e["id"], code=e.get("name")) for e in raw_sets]
-                if raw_sets is not None
                 else None
             ),
         },
@@ -377,23 +335,13 @@ class Shot(SGEntity):
             ),
         },
     )
-    set: Environment | None = field(
-        default=None,
-        kw_only=True,
-        metadata={
-            _SG_NAME: "sg_set",
-            _STRUCT_HOOK: lambda e, _: (
-                Environment(id=e["id"], code=e.get("name")) if e else None
-            ),
-        },
-    )
-    sets: list[Environment] | None = field(
+    sets: list[Set] | None = field(
         default=None,
         kw_only=True,
         metadata={
             _SG_NAME: "sg_sets",
             _STRUCT_HOOK: lambda raw_sets, _: (
-                [Environment(id=e["id"], code=e.get("name")) for e in raw_sets]
+                [Set(id=e["id"], code=e.get("name")) for e in raw_sets]
                 if raw_sets is not None
                 else None
             ),

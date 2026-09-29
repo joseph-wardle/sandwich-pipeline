@@ -43,5 +43,8 @@ def main():
         install_asset_menu(create_menu=os.getenv("PIPE_MAYA_CREATE_MENU", "0") == "1")
 
 
+mc.optionVar(intValue=("mayaUsd_SerializedUsdEditsLocationPrompt", 0))
+mc.optionVar(intValue=("mayaUsd_SerializedUsdEditsLocation", 2))
+
 if not mc.about(batch=True):
     mc.evalDeferred(main)

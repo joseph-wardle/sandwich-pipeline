@@ -111,19 +111,13 @@ def maya_rlo_stream(
         ext="mb",
         owner=owner,
         label="RLO Scene",
+        # A bundle of one: older RLO versions also captured the shot's shared USD
+        # layers, and keeping the stream compound keeps their history readable.
         snapshot_members=(
             VersionSnapshotMember(
                 relative_path=scene_relative_path,
                 label="RLO Scene",
                 primary=True,
-            ),
-            VersionSnapshotMember(
-                relative_path=Path("maya_root.usd"),
-                label="Shot Root Layer",
-            ),
-            VersionSnapshotMember(
-                relative_path=Path("set") / "maya_override.usd",
-                label="Shot Override Layer",
             ),
         ),
     )

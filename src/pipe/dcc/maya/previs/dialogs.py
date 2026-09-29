@@ -359,7 +359,8 @@ def _break_out_message(plan: DeliveryPlan) -> str:
     if plan.sg_shot is None:
         lines.append(
             f"  • Create shot {plan.code} in ShotGrid, in sequence "
-            f"{plan.sequence.code}, with its standard task list."
+            f"{plan.sequence.code}, with its standard task list, assigned "
+            f"{_set_list(plan.rlo_sets)}."
         )
     elif plan.recuts:
         lines.append(

@@ -16,6 +16,7 @@
     <memberTool name="open_set"/>
     <memberTool name="save_set_version"/>
     <memberTool name="set_version_history"/>
+    <memberTool name="publish_set"/>
     <memberTool name="skd_playblast"/>
   </toolshelf>
 
@@ -56,21 +57,26 @@ fm.open_version_browser()]]></script>
   </tool>
 
   <tool name="open_set" label="Open Set" icon="LOP_layout">
-    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HEnvFileManager
-fm = HEnvFileManager()
+    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HSetFileManager
+fm = HSetFileManager()
 fm.open_file()]]></script>
   </tool>
 
   <tool name="save_set_version" label="Save Set Version" icon="BUTTONS_save">
-    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HEnvFileManager
-fm = HEnvFileManager()
+    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HSetFileManager
+fm = HSetFileManager()
 fm.save_version()]]></script>
   </tool>
 
   <tool name="set_version_history" label="Set Version History" icon="BUTTONS_history">
-    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HEnvFileManager
-fm = HEnvFileManager()
+    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HSetFileManager
+fm = HSetFileManager()
 fm.open_version_browser()]]></script>
+  </tool>
+
+  <tool name="publish_set" label="Publish Set" icon="BUTTONS_upload">
+    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HSetFileManager
+HSetFileManager().publish()]]></script>
   </tool>
 
   <tool name="open_shot" label="Open Shot" icon="NETWORKS_scene">
