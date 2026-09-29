@@ -183,7 +183,8 @@ def _layer(chain: Chain) -> job.Layer:
     _check_camera(configure, stage, settings)
     products = paths.products(settings)
     denoised = denoise.product(settings, products) if chain.denoise else None
-    outputs = products + paths.cryptomattes(settings, products)
+    renderer = _text(configure, "renderer")
+    outputs = products + paths.cryptomattes(settings, products, renderer)
     written = paths.author_outputs(
         stage, frames, outputs, [denoised] if denoised else []
     )

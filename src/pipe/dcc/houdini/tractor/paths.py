@@ -9,6 +9,7 @@ denoised renders into `tmp/` instead, and Denoise fills its folder.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from pxr import Sdf, Usd, UsdRender
@@ -31,8 +32,10 @@ SETTINGS = "RenderSettings"
 PRODUCT = "RenderProduct"
 VAR = "RenderVar"
 CRYPTOMATTE = "PxrCryptomatte"
-# The productType of Cryptomatte authored as a product rather than a filter.
+
 CRYPTOMATTE_PRODUCT = "cryptomatte"
+INLINE_FILTER = re.compile(r"ri:samplefilter\d+:name")
+XPU = "Xpu"
 FILENAME = "inputs:ri:filename"
 SAMPLE_FILTERS = "ri:sampleFilters"
 STATISTICS = "driver:parameters:aov:statistics"
@@ -74,9 +77,19 @@ def products(settings: UsdRender.Settings) -> list[Usd.Prim]:
 
 
 def cryptomattes(
-    settings: UsdRender.Settings, products: list[Usd.Prim]
+    settings: UsdRender.Settings, products: list[Usd.Prim], renderer: str
 ) -> list[Usd.Prim]:
-    rel = settings.GetPrim().GetRelationship(SAMPLE_FILTERS)
+    prim = settings.GetPrim()
+    if any(
+        INLINE_FILTER.fullmatch(a.GetName()) and a.Get() == CRYPTOMATTE
+        for a in prim.GetAttributes()
+    ):
+        raise SendRefused(
+            f"{settings.GetPath()} chooses PxrCryptomatte as a Sample Filter. XPU "
+            "ignores it, and Send can't put its frames in the version folder. Set "
+            "that Sample Filter to None, and choose Cryptomatte on the render layer."
+        )
+    rel = prim.GetRelationship(SAMPLE_FILTERS)
     found = _targets(rel) if rel else []
     filters = [prim for prim in found if prim.GetTypeName() == CRYPTOMATTE]
     as_products = [
@@ -90,6 +103,13 @@ def cryptomattes(
             f"{as_products[0].GetPath()} and as the filter {filters[0].GetPath()}, "
             "and on XPU the product stops the filter writing anything. Remove the "
             "Cryptomatte product; the filter works on RIS and XPU."
+        )
+    # The others write nothing, and husk still exits 0.
+    if len(filters) > 1 and XPU in renderer:
+        raise SendRefused(
+            f"{settings.GetPath()} has {len(filters)} Cryptomatte filters, but XPU "
+            "writes only the last. Keep one, and render the others in another "
+            "layer or with RIS."
         )
     return filters
 
