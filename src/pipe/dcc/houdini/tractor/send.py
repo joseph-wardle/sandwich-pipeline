@@ -253,7 +253,7 @@ def _write_render_usd(configure: hou.Node, output: hou.Node) -> None:
 
 
 def _frames(configure: hou.LopNode) -> list[int]:
-    trange = _text(configure, "trange")
+    trange = configure.parm("trange").evalAsString()  # ty: ignore[unresolved-attribute]
     if trange == "off":
         return [int(hou.frame())]
     if trange == "stage":
@@ -262,6 +262,11 @@ def _frames(configure: hou.LopNode) -> list[int]:
             range(int(stage.GetStartTimeCode()), int(stage.GetEndTimeCode()) + 1)
         )
     start, end, step = (int(v) for v in configure.evalParmTuple("f"))
+    if step < 1 or end < start:
+        raise SendRefused(
+            f"{configure.path()} renders frames {start} to {end} by {step}, which "
+            "is no frames. Set End at or after Start, and Inc to 1 or more."
+        )
     return list(range(start, end + 1, step))
 
 
