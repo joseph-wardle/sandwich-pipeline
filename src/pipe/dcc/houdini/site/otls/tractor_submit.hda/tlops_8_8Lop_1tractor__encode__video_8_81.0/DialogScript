@@ -19,9 +19,22 @@
         label   "Output File"
         type    file
         default { "" }
-        help    "Empty writes video.mp4, or video.mov for ProRes, into the version folder. A file elsewhere needs Remove Encoded Frames off."
+        help    "Empty writes <layer>.mp4, or <layer>.mov for Edit and Master, into the version folder. A file elsewhere needs Remove Encoded Frames off."
         parmtag { "filechooser_mode" "write" }
         parmtag { "filechooser_pattern" "*.mp4 *.mov" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "preset"
+        label   "Preset"
+        type    string
+        default { "WEB" }
+        help    "Web: H.264 MP4 for review and browsers. Edit: DNxHR SQ MOV for editorial. Master: ProRes 422 HQ 10-bit MOV for finishing."
+        menu {
+            "WEB"       "Web (H.264 MP4)"
+            "EDIT_SQ"   "Edit (DNxHR SQ MOV)"
+            "MASTER"    "Master (ProRes 422 HQ MOV)"
+        }
         parmtag { "script_callback_language" "python" }
     }
     parm {
@@ -30,7 +43,7 @@
         type    string
         default { [ "hou.phm().DISPLAY" python ] }
         help    "Defaults to the show's display."
-        menureplace {
+        menu {
             [ "[d for d in hou.Color.ocio_activeDisplays() for d in (d, d)]" ]
             language python
         }
@@ -56,29 +69,4 @@
         help    "Delete the frames the movie is made from once the layer's other tasks finish. Encode can't then be rerun for this version."
         parmtag { "script_callback_language" "python" }
     }
-    groupcollapsible {
-        name    "folder0"
-        label   "Advanced"
-
-        parm {
-            name    "codec"
-            label   "Codec"
-            type    string
-            default { "h264" }
-            menu {
-                "h264"      "H.264 (MP4)"
-                "prores"    "ProRes (MOV)"
-            }
-            parmtag { "script_callback_language" "python" }
-        }
-        parm {
-            name    "quality"
-            label   "Quality"
-            type    integer
-            default { "18" }
-            range   { 0! 51 }
-            parmtag { "script_callback_language" "python" }
-        }
-    }
-
 }

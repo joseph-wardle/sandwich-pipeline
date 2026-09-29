@@ -22,11 +22,12 @@ from pathlib import Path
 
 import tractor.api.author as author
 
+from pipe.core.playblast.encoding import timecode
+from pipe.core.playblast.presets import FFmpegPreset
 from pipe.dcc.houdini.tractor import denoise, paths
 
 # Tractor runs every command on blades that offer this service.
 SERVICE = "EL9"
-FRAMERATE = 24
 
 # Tractor retries these exit codes on its own.
 RENDER_RETRIES = [
@@ -43,15 +44,6 @@ DENOISE_RETRIES = [
 # husk exits 3 without a license; point hserver at the license server before Tractor retries.
 LICENSE_TRAP = (
     r'trap "test \$? -eq 3 && hserver -S $HOUDINI_LICENSE_SERVER && exit 3" EXIT'
-)
-
-# The frames hold sRGB display pixels from OCIO, so the movie says so and
-# players show it as the Houdini viewer did
-SRGB_TAGS = "-colorspace bt709 -color_primaries bt709 -color_trc iec61966-2-1"
-# Browsers need even dimensions, limited-range BT.709 YUV and the index up front
-WEB_FLAGS = (
-    "-vf 'scale=trunc(iw/2)*2:trunc(ih/2)*2:out_color_matrix=bt709:out_range=tv' "
-    "-movflags +faststart"
 )
 
 
@@ -76,8 +68,8 @@ class Encode:
     colorconfig: str
     display: str
     view: str
-    codec: str
-    quality: int
+    preset: FFmpegPreset
+    frame_rate: float
     # Cleanup deletes the frames once the video is written.
     remove_frames: bool
 
@@ -162,6 +154,7 @@ def _encode_script(folder: Path, encode: Encode, frames: list[int]) -> str:
 
     Beauty channel names vary with the product's vars, and hoiiotool fills a
     missing channel with black rather than failing, so the names are checked.
+    The PNGs are 16-bit, so Master keeps its 10 bits.
     """
     q = shlex.quote
     scratch = folder / paths.TMP / paths.ENCODE
@@ -185,11 +178,12 @@ def _encode_script(folder: Path, encode: Encode, frames: list[int]) -> str:
             f"    hoiiotool --colorconfig {q(encode.colorconfig)}"
             f' {q(str(encode.images))}/$n.exr --ch "$ch"'
             f" --ociodisplay:from=scene_linear {q(encode.display)} {q(encode.view)}"
-            f" -o {q(str(scratch))}/$n.png",
+            f" -d uint16 -o {q(str(scratch))}/$n.png",
             "done",
-            f"ffmpeg -y -framerate {FRAMERATE}"
+            f"ffmpeg -y -framerate {encode.frame_rate:g}"
             f" -pattern_type glob -i {q(f'{scratch}/*.png')}"
-            f" {_codec_flags(encode.codec, encode.quality)} {SRGB_TAGS} {WEB_FLAGS}"
+            f" {shlex.join(encode.preset.args())}"
+            f" -timecode {timecode(frames[0], round(encode.frame_rate))}"
             f" {q(str(video))}",
             f"mv -f {q(str(video))} {q(str(encode.video))}",
         ]
@@ -237,9 +231,3 @@ def _cleanup_script(layer: Layer) -> str:
         lines.append(f"rm -rf {q(str(removed))}")
     lines.append(f"touch {q(str(layer.folder / paths.COMPLETE))}")
     return "\n".join(lines)
-
-
-def _codec_flags(codec: str, quality: int) -> str:
-    if codec == "prores":
-        return f"-c:v prores_ks -profile:v 3 -qscale:v {quality} -pix_fmt yuv422p10le"
-    return f"-c:v libx264 -crf {quality} -pix_fmt yuv420p"

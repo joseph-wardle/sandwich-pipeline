@@ -1,6 +1,5 @@
-"""Shared FFmpeg encode primitive used by the cross-DCC `Playblaster` base
-class and by Maya turnaround playblasts. The two flows differ in how they
-*produce* PNG sequences but share a single encode shape."""
+"""A playblast's FFmpeg steps: burn the HUD onto its PNG frames, then encode
+them with a preset."""
 
 from __future__ import annotations
 
@@ -33,6 +32,14 @@ class FFmpegEncodeError(RuntimeError):
         return cls(f"FFmpeg encode failed for {output_path}: {stderr or stdout}")
 
 
+def timecode(frame: int, frame_rate: int) -> str:
+    """Non-drop SMPTE timecode of `frame`, counting frame 0 as 00:00:00:00."""
+    seconds, frames = divmod(frame, frame_rate)
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours:02}:{minutes:02}:{seconds:02}:{frames:02}"
+
+
 def build_image_input_chain(
     image_pattern: str,
     *,
@@ -43,14 +50,7 @@ def build_image_input_chain(
 
     `image_pattern` is the printf-style path like `/tmp/foo.%04d.png`.
     """
-    return ffmpeg.input(
-        image_pattern,
-        start_number=start_frame,
-        r=frame_rate,
-        # precisely define input colorspace
-        colorspace="bt709",
-        color_trc="iec61966-2-1",
-    ).filter("format", "yuv422p")
+    return ffmpeg.input(image_pattern, start_number=start_frame, r=frame_rate)
 
 
 def burn_hud_frames(
@@ -86,16 +86,12 @@ def encode_movie(
     Raises `FFmpegEncodeError` on non-zero exit, with stdout/stderr logged
     via `log.error` for production-side debugging.
     """
-    timecode = "00:00:{:02}:{:02}".format(
-        start_frame // frame_rate,
-        start_frame % frame_rate,
-    )
     try:
         ffmpeg.output(
             input_chain,
             str(output_path),
             **preset.out_kwargs,
-            timecode=timecode,
+            timecode=timecode(start_frame, frame_rate),
             r=frame_rate,
         ).overwrite_output().run()
     except ffmpeg.Error as exc:
@@ -108,4 +104,5 @@ __all__ = [
     "build_image_input_chain",
     "burn_hud_frames",
     "encode_movie",
+    "timecode",
 ]

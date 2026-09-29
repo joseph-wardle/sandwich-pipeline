@@ -17,6 +17,7 @@ import hou
 import tractor.api.author as author
 from pxr import Sdf, Tf, Usd, UsdRender
 
+from pipe.core.playblast.presets import FFmpegPreset
 from pipe.dcc.houdini.tractor import SendRefused, denoise, folders, job, paths
 
 CONFIGURE = "tractor_configure"
@@ -174,6 +175,14 @@ def build(submit: hou.Node, chains: list[Chain]) -> author.Job:
 def _layer(chain: Chain) -> job.Layer:
     configure = chain.configure
     folder = Path(_text(configure, folders.OUTPUT))
+    frames = _frames(configure)
+    skips = frames != list(range(frames[0], frames[-1] + 1))
+    if skips and (chain.denoise or chain.encode):
+        raise SendRefused(
+            f"{configure.path()} skips frames, but Denoise reads each frame's "
+            "neighbours and Encode plays the frames back to back. Render every "
+            "frame of the range, or remove Denoise and Encode."
+        )
     _write_render_usd(configure, chain.output)
 
     stage = Usd.Stage.Open(str(folder / paths.RENDER_USD), Usd.Stage.LoadNone)
@@ -181,7 +190,6 @@ def _layer(chain: Chain) -> job.Layer:
     _check_camera(configure, stage, settings)
     products = paths.products(settings)
     denoised = denoise.product(settings, products) if chain.denoise else None
-    frames = _frames(configure)
     outputs = products + paths.cryptomattes(settings, products)
     written = paths.author_outputs(
         stage, frames, outputs, [denoised] if denoised else []
@@ -190,11 +198,11 @@ def _layer(chain: Chain) -> job.Layer:
     render = job.Render(husk=_husk(configure), folders=written)
     denoise_spec = None
     if denoised:
-        denoise_spec = _write_denoise(folder, denoised, frames)
+        denoise_spec = _write_denoise(folder, denoised)
+    name = _text(configure, folders.LAYER)
     encode_spec = None
     if chain.encode:
-        encode_spec = _encode(chain.encode, folder, settings, products, denoised)
-    name = _text(configure, folders.LAYER)
+        encode_spec = _encode(chain.encode, name, folder, settings, products, denoised)
     return job.Layer(name, folder, frames, render, denoise_spec, encode_spec)
 
 
@@ -279,19 +287,15 @@ def _husk(configure: hou.Node) -> list[str]:
     return words
 
 
-def _write_denoise(folder: Path, product: Usd.Prim, frames: list[int]) -> job.Denoise:
+def _write_denoise(folder: Path, product: Usd.Prim) -> job.Denoise:
     """Write denoise.json and return what the denoise tasks need."""
-    if frames != list(range(frames[0], frames[-1] + 1)):
-        raise SendRefused(
-            "Denoise reads each frame's neighbours, so render every frame of the "
-            "range, or remove Denoise."
-        )
     denoise.write_config(folder, denoise.config(denoise.var_names(product)))
     return job.Denoise(product=product.GetName())
 
 
 def _encode(
     node: hou.Node,
+    layer: str,
     folder: Path,
     settings: UsdRender.Settings,
     products: list[Usd.Prim],
@@ -307,10 +311,13 @@ def _encode(
         # first; a var named in the frame is the surer match.
         channels = [f"{name}.r,{name}.g,{name}.b", f"{name}.R,{name}.G,{name}.B"]
         channels.append("R,G,B")
-    codec = _text(node, "codec")
-    video = _text(node, "output_file") or str(
-        folder / ("video.mov" if codec == "prores" else "video.mp4")
-    )
+    preset = FFmpegPreset[_text(node, "preset")]
+    video = _text(node, "output_file") or str(folder / f"{layer}.{preset.ext}")
+    if Path(video).suffix != f".{preset.ext}":
+        raise SendRefused(
+            f"The Preset of {node.path()} makes a .{preset.ext} movie, but its "
+            f"Output File is {video}. Change its extension, or clear Output File."
+        )
     remove_frames = bool(node.evalParm("remove_frames"))
     # Only a movie in the new version folder can be this job's, so Cleanup
     # can trust it before deleting the frames it was made from.
@@ -329,8 +336,8 @@ def _encode(
         colorconfig=hou.Color.ocio_configPath(),  # ty: ignore[missing-argument]
         display=_text(node, "display"),
         view=_text(node, "view"),
-        codec=codec,
-        quality=int(node.evalParm("quality")),
+        preset=preset,
+        frame_rate=hou.fps(),
         remove_frames=remove_frames,
     )
 
