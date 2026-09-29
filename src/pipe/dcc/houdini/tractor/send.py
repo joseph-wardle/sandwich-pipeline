@@ -24,9 +24,6 @@ CONFIGURE = "tractor_configure"
 DENOISE = "tractor_denoise"
 ENCODE = "tractor_encode_video"
 
-ENGINE = "tractor-engine.cs.byu.edu"
-ENGINE_PORT = 443
-LICENSE_SERVER = "animlic.cs.byu.edu"
 # Sent with the job so the blades find the same Houdini, RenderMan and colour
 # config as the artist's session.
 ENV_VARS = (
@@ -41,9 +38,6 @@ ENV_VARS = (
     "RMAN_PROCEDURALPATH",
     "RMANTREE",
 )
-# husk writes the image so far this often while it renders.
-SNAPSHOT_SECONDS = 300
-
 # Task titles join the layer to other words with spaces, and Tractor finds
 # tasks by title, so a layer with a space could take another layer's title.
 LAYER_NAME = re.compile(r"[A-Za-z0-9_-]+")
@@ -99,7 +93,7 @@ def send(submit: hou.Node, inputs: list[hou.Node] | None = None) -> None:
         job_id = None
         hou.ui.displayMessage(
             "Tractor did not confirm the job, but it may still have been queued. "
-            f'Look for "{title}" at {ENGINE} before sending again.'
+            f'Look for "{title}" in Tractor before sending again.'
             "\n\nIts folders were kept:\n" + "\n".join(str(f) for f in claimed),
             title="Tractor did not confirm the job",
             severity=hou.severityType.Warning,
@@ -109,7 +103,7 @@ def send(submit: hou.Node, inputs: list[hou.Node] | None = None) -> None:
         hou.ui.displayMessage(
             f"Job {job_id} renders into:\n"
             + "\n".join(str(folder) for folder in claimed)
-            + f"\n\nVisit {ENGINE} to check progress.",
+            + "\n\nCheck its progress in Tractor.",
             title="Job sent to Tractor",
         )
 
@@ -163,7 +157,6 @@ def check_layers(chains: list[Chain]) -> None:
 
 
 def build(submit: hou.Node, chains: list[Chain]) -> author.Job:
-    author.setEngineClientParam(hostname=ENGINE, port=ENGINE_PORT)
     return job.build(
         _text(submit, "title"),
         int(submit.evalParm("priority")),
@@ -277,7 +270,6 @@ def _husk(configure: hou.Node) -> list[str]:
         *("--purpose", "geometry,render"),
         *("--complexity", "veryhigh"),
         *("--verbose", "acet"),
-        *("--snapshot", str(SNAPSHOT_SECONDS)),
     ]
     if camera := _toggled(configure, "override_camera"):
         words += ["--camera", camera]
@@ -343,11 +335,7 @@ def _encode(
 
 
 def _setenv() -> str:
-    return " ".join(
-        ["setenv"]
-        + [f"{name}={os.getenv(name)}" for name in ENV_VARS]
-        + [f"HOUDINI_LICENSE_SERVER={LICENSE_SERVER}"]
-    )
+    return " ".join(["setenv"] + [f"{name}={os.getenv(name)}" for name in ENV_VARS])
 
 
 def _kind(node: hou.Node) -> str:

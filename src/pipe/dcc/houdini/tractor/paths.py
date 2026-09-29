@@ -18,7 +18,7 @@ from pipe.dcc.houdini.tractor import SendRefused
 # Written by the USD ROP inside Configure.
 RENDER_USD = "render.usd"
 # Written by Cleanup once it found every output and cleared tmp/; later reruns
-# don't change it. With Keep Render Files off, the encoded frames' folder is gone.
+# don't change it. With Remove Encoded Frames on, the encoded frames' folder is gone.
 COMPLETE = "complete"
 # Scratch that no finished output depends on.
 TMP = "tmp"

@@ -41,10 +41,9 @@ DENOISE_RETRIES = [
     -11,  # Segmentation fault
     139,  # Segmentation fault
 ]
+LICENSE_SERVER = "animlic.cs.byu.edu"
 # husk exits 3 without a license; point hserver at the license server before Tractor retries.
-LICENSE_TRAP = (
-    r'trap "test \$? -eq 3 && hserver -S $HOUDINI_LICENSE_SERVER && exit 3" EXIT'
-)
+LICENSE_TRAP = rf'trap "test \$? -eq 3 && hserver -S {LICENSE_SERVER} && exit 3" EXIT'
 
 
 @dataclass(frozen=True)
