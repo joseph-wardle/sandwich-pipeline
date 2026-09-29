@@ -14,8 +14,7 @@ from .stage import get_stage
 
 SETS_PRIM = Sdf.Path("/sets")
 
-# Sets are authored in metres and Maya shot scenes are in centimetres. The stage is
-# unit-mixed (ADR-0013), so the conversion is scoped to the prim the pipeline owns.
+# Sets are authored in metres and Maya shot scenes are in centimetres.
 _SET_SCALE = (100.0, 100.0, 100.0)
 
 

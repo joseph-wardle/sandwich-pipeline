@@ -43,9 +43,6 @@ def main():
         install_asset_menu(create_menu=os.getenv("PIPE_MAYA_CREATE_MENU", "0") == "1")
 
 
-# Keep USD edits inside the Maya file on save, in every session, batch included
-# (ADR-0024). Maya's default asks in the GUI and, in batch, writes the stage's layers
-# to files beside the scene, where other scenes can pick them up.
 mc.optionVar(intValue=("mayaUsd_SerializedUsdEditsLocationPrompt", 0))
 mc.optionVar(intValue=("mayaUsd_SerializedUsdEditsLocation", 2))
 

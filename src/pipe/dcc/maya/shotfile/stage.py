@@ -1,8 +1,4 @@
-"""The USD stage a Maya shot scene composes: one proxy shape over a scene-owned layer.
-
-The proxy's root layer is anonymous and saved inside the `.mb` (ADR-0024), so USD
-edits made in one scene stay in that scene, never render and never reach Houdini.
-"""
+"""The USD stage a Maya shot scene composes: one proxy shape over a scene-owned layer."""
 
 from __future__ import annotations
 
