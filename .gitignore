@@ -37,10 +37,13 @@ scratch/
 *.usdc
 *.usda
 
+# RenderMan texture conversions (txmake output; regenerated on render)
+*.tex
+
 # Editor/backups
 *~
 *.tmp
-*.bak
+*.bak*
 *.swp
 *.sh#
 
