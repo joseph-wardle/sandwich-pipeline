@@ -26,6 +26,14 @@ _BEAUTY = "beauty"
 # Where versions from before each output had a folder of its own keep their
 # frames; they were never marked complete.
 _LEGACY_DIRS = ("images_dn", "images")
+# RenderMan writes the beauty as R, G, B when its product is written as RGBA,
+# and otherwise under its var's name, wherever the var sits among the others.
+_BEAUTY_CHANNELS = (
+    ("R", "G", "B"),
+    ("Ci.r", "Ci.g", "Ci.b"),
+    ("ci.r", "ci.g", "ci.b"),
+)
+_ALPHA_CHANNELS = ("A", "a")
 
 
 def latest_frames(layer_dir: Path) -> list[Path]:
@@ -66,9 +74,24 @@ def label(frames: list[Path]) -> str:
     return f"{frames[0].parents[2].name} {frames[0].parents[1].name}"
 
 
+def _rgba(source: Path, names: tuple[str, ...]) -> tuple[str | float, ...]:
+    """The channels of a render frame that make its picture."""
+    beauty = next((c for c in _BEAUTY_CHANNELS if set(c) <= set(names)), None)
+    if beauty is None:
+        raise OSError(f"{source} has no beauty channels. It holds: {', '.join(names)}.")
+    # A frame without alpha shows opaque.
+    alpha = next((a for a in _ALPHA_CHANNELS if a in names), 1.0)
+    return (*beauty, alpha)
+
+
 def _write_proxy(source: Path, target: Path) -> None:
-    image = oiio.ImageBuf(str(source))
-    if not image.read(0, 0, 0, 4, True, oiio.TypeHalf):
+    render = oiio.ImageBuf(str(source))
+    if render.has_error:
+        raise OSError(f"Could not read {source}: {render.geterror()}")
+    image = oiio.ImageBufAlgo.channels(
+        render, _rgba(source, render.spec().channelnames)
+    )
+    if image.has_error:
         raise OSError(f"Could not read {source}: {image.geterror()}")
     # Blender fits the whole image to the camera frame, so pixels rendered as
     # overscan are cut away.
@@ -209,8 +232,8 @@ class SKD_OT_fx2d_set_backdrop(Operator):
             log.exception("Could not build the backdrop proxy for %s.", label(frames))
             self.report(
                 {"ERROR"},
-                f"Could not set the backdrop because its preview frames could not be "
-                f"written under {util.backdrop_root(shot_root)}: {error}",
+                f"Could not set the backdrop to {label(frames)}, so the last "
+                f"backdrop stays. {error}",
             )
             return {"CANCELLED"}
         message = (
