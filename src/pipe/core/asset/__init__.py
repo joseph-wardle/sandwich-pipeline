@@ -6,6 +6,7 @@ from .paths import (
     asset_root,
     asset_root_from_path,
     paths_for_asset,
+    textures_variant_from_filename,
 )
 from .version_adapter import (
     asset_owner_for,
@@ -28,4 +29,5 @@ __all__ = [
     "maya_model_stream",
     "paths_for_asset",
     "substance_project_stream",
+    "textures_variant_from_filename",
 ]

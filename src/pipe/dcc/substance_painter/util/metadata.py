@@ -20,7 +20,7 @@ import logging
 from typing import Any
 
 import substance_painter as sp
-from pipe.core.asset import DEFAULT_GEO_VARIANT
+from pipe.core.asset import DEFAULT_GEO_VARIANT, textures_variant_from_filename
 from pipe.core.util.paths import get_production_path
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
@@ -75,12 +75,20 @@ def get_asset_selection_metadata() -> dict[str, Any]:
 
 
 def current_geo_variant() -> str:
-    """Return the geometry variant the open project is tagged with.
+    """Return the open project's geometry variant.
 
-    Falls back to ``DEFAULT_GEO_VARIANT`` when the project carries no tag.
+    Uses the project's tag, then its ``textures.<variant>.spp`` filename, then
+    ``DEFAULT_GEO_VARIANT``.
     """
-    variant = get_asset_selection_metadata().get("geo_variant")
-    return str(variant or "").strip() or DEFAULT_GEO_VARIANT
+    tagged = str(get_asset_selection_metadata().get("geo_variant") or "").strip()
+    if tagged:
+        return tagged
+    project_path = current_project_path()
+    if project_path is not None:
+        from_filename = textures_variant_from_filename(project_path.name)
+        if from_filename:
+            return from_filename
+    return DEFAULT_GEO_VARIANT
 
 
 # ---------------------------------------------------------------------------

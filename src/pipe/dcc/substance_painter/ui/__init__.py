@@ -39,7 +39,10 @@ from pipe.dcc.substance_painter.util.houdini_bridge import (
     summarize_result,
 )
 from pipe.dcc.substance_painter.runtime import get_main_qt_window
-from pipe.dcc.substance_painter.util.metadata import get_active_asset_from_project
+from pipe.dcc.substance_painter.util.metadata import (
+    current_geo_variant,
+    get_active_asset_from_project,
+)
 from pipe.dcc.substance_painter.util.project import (
     check_project_editable,
     current_project_path,
@@ -194,19 +197,26 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             validator=QRegExpValidator(QRegExp("[a-z][a-z_\\d]*")),
         )
 
-        geo_items = [
-            str(v) for v in sorted(v for v in (asset.geometry_variants or ()) if v)
-        ] or [DEFAULT_GEO_VARIANT]
-        geo_default = (
-            DEFAULT_GEO_VARIANT if DEFAULT_GEO_VARIANT in geo_items else geo_items[0]
+        project_variant = current_geo_variant()
+        geo_items = self._variant_items(
+            asset.geometry_variants or (), DEFAULT_GEO_VARIANT
         )
         self._geo_var_dropdown = self._build_variant_dropdown(
             label_text="Geometry Variant:",
             tooltip=("Geometry variant to match the published model."),
             items=geo_items,
-            default_value=geo_default,
+            default_value=project_variant,
             editable=False,
         )
+        if project_variant not in geo_items:
+            self._geo_var_dropdown.setCurrentIndex(-1)
+            geo_warning = QLabel(
+                f"This project is for geometry variant '{project_variant}', which "
+                "this asset doesn't list. Choose where to publish."
+            )
+            geo_warning.setWordWrap(True)
+            geo_warning.setStyleSheet("color: #d28d42;")
+            self._main_layout.addWidget(geo_warning)
 
         material_layer_items = self._variant_items(
             asset.material_layers or (), "default"
@@ -234,6 +244,9 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         if cancel_btn:
             cancel_btn.setToolTip("Close without exporting.")
         self._main_layout.addWidget(self.buttons)
+        self._geo_var_dropdown.currentIndexChanged.connect(
+            self._update_export_button_state
+        )
         self._update_export_button_state()
 
         footer = QLabel(
@@ -314,7 +327,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     def _update_export_button_state(self) -> None:
         ok_btn = self.buttons.button(QtWidgets.QDialogButtonBox.Ok)
         if ok_btn:
-            ok_btn.setEnabled(bool(self.version_title))
+            ok_btn.setEnabled(bool(self.version_title and self.geo_var))
 
     @staticmethod
     def _variant_items(options: typing.Iterable[str], default_value: str) -> list[str]:
@@ -371,6 +384,14 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 "Publish Textures",
             ).exec_()
             return
+        geo_var = self.geo_var.strip()
+        if not geo_var:
+            MessageDialog(
+                get_main_qt_window(),
+                "Choose a geometry variant before exporting textures.",
+                "Publish Textures",
+            ).exec_()
+            return
         if not self._check_can_publish():
             return
         save_required = sp.project.needs_saving()
@@ -378,7 +399,6 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             return
 
         mat_var = self.mat_var.strip() or "default"
-        geo_var = self.geo_var.strip() or DEFAULT_GEO_VARIANT
         material_layer = self.material_layer.strip() or "default"
 
         asset_label = (
