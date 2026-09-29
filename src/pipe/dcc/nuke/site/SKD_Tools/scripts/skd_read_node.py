@@ -171,16 +171,9 @@ def _sanitize_for_nuke(name):
     return safe or "seq"
 
 
-def _nearest_hold_expr(first, last, step):
-    """
-    Expression that maps timeline frame -> nearest existing frame in a stepped sequence.
-    Uses floor(x + 0.5) to emulate round() for stability.
-    """
-    if step <= 1:
-        # identity mapping (no missing frames cadence)
-        return f"clamp(frame, {first}, {last})"
-    # nearest multiple of 'step' from 'first', then clamp to [first,last]
-    return f"clamp({first}+{step}*floor((frame-{first})/{step}+0.5), {first}, {last})"
+def _hold_expr(first, last, step):
+    """Expression that holds each frame of a stepped sequence until the next one."""
+    return f"clamp({first}+{step}*floor((frame-{first})/{step}), {first}, {last})"
 
 
 def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
@@ -188,12 +181,16 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
     Make or update one Read per output folder of each layer's newest readable version.
 
     - Nodes are named: <prefix>_<layer>_<output folder> (e.g., EXR_read_xpu_beauty)
-    - A Read of that name that already exists is pointed at the new version, keeping
-      its wiring and the artist's settings.
-    - Project frame range is set to the union [min(first), max(last)] across all sequences.
+    - A Read of that name reading an older version is pointed at the new one, keeping
+      its wiring. One already reading the newest is left untouched, so the range and
+      label the artist gave it survive a re-run.
+    - Reads this tool made under another name are left as they are, and named in a
+      message when they read anything but a newest version.
+    - When a Read changed, the project frame range is set to the union
+      [min(first), max(last)] across all sequences.
     - For sequences detected as rendered on 2s/4s (or any N-s cadence), the Read node's
-      'frame' knob is set to hold the nearest available frame, so they play at the
-      project's fps like any other.
+      'frame' knob holds each frame until the next, so they play at the project's fps
+      like any other.
     """
     script_path = nuke.root()["name"].value()
     # ex: /groups/sandwich/05_production/shot/A_010/comp/A_010.nk
@@ -212,9 +209,7 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
         return []
 
     reads = []
-    global_first = min(s["first"] for s in sequences)
-    global_last = max(s["last"] for s in sequences)
-
+    changed = False
     for s in sequences:
         node_name = f"{node_name_prefix}_{_sanitize_for_nuke(s['name'])}"
         # Every Send makes a new version, so artists re-run this often; a twin Read
@@ -222,67 +217,69 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
         read = nuke.toNode(node_name) or nuke.nodes.Read(
             name=node_name, on_error="black"
         )
+        reads.append(read)
+        if read["file"].value() == s["pattern"]:
+            continue
+        changed = True
         read["file"].setValue(s["pattern"])
         # native sequence range
         read["origfirst"].setValue(s["first"])
         read["origlast"].setValue(s["last"])
         read["first"].setValue(s["first"])
         read["last"].setValue(s["last"])
+        # Frames between those of a sequence on 2s or 4s are missing, and would
+        # show black.
+        hold = _hold_expr(s["first"], s["last"], s["step"]) if s["step"] > 1 else ""
+        read["frame_mode"].setValue("expression")
+        read["frame"].setValue(hold)
+        read["label"].setValue(f"{s['label']}  step:{s['step']}")
 
-        # Time-map to handle sparse cadence (2s/4s/etc.) by holding nearest available frame
-        expr = _nearest_hold_expr(s["first"], s["last"], s["step"])
-        try:
-            read["frame"].setExpression(expr)
-        except Exception:
-            # Fallback: if 'frame' knob is unavailable for some reason, do nothing
-            pass
+    if changed:
+        nuke.root()["first_frame"].setValue(min(s["first"] for s in sequences))
+        nuke.root()["last_frame"].setValue(max(s["last"] for s in sequences))
 
-        # Optional label so it's obvious what's happening
-        try:
-            read["label"].setValue(f"{s['label']}  step:{s['step']}")
-        except Exception:
-            pass
-
-        reads.append(read)
-
-    # Set the project frame range to cover all sequences
-    nuke.root()["first_frame"].setValue(global_first)
-    nuke.root()["last_frame"].setValue(global_last)
+    notes = []
+    if not changed:
+        notes.append("Every Read already reads the newest version, so nothing changed.")
+    if left := _left_behind(node_name_prefix, reads):
+        lines = "\n".join(f"  {n.name()}: {n['file'].value()}" for n in left)
+        notes.append(
+            "These Reads read something other than the newest version, and were "
+            f"left as they are:\n{lines}\nComp wired to them still shows those "
+            "frames. Rewire it to the Reads of the newest version."
+        )
+    if notes:
+        nuke.message("[Auto Read] " + "\n\n".join(notes))
 
     return reads
 
 
-def auto_read_latest_fx_exr():
-    nodes = make_read_nodes("fx/render", node_name_prefix="Bobo_FX_read")
-    if not nodes:
-        return
-    try:
-        viewer = nuke.activeViewer().node()
-        nuke.zoom(1, [viewer["xpos"].value(), viewer["ypos"].value()])
-    except Exception as e:
-        nuke.tprint(f"[Auto Read] Viewer zoom error: {e}")
-
-
-def auto_read_latest_cfx_exr():
-    nodes = make_read_nodes("cfx/render", node_name_prefix="Bobo_CFX_read")
-    if not nodes:
-        return
-    try:
-        viewer = nuke.activeViewer().node()
-        nuke.zoom(1, [viewer["xpos"].value(), viewer["ypos"].value()])
-    except Exception as e:
-        nuke.tprint(f"[Auto Read] Viewer zoom error: {e}")
-
-
-def auto_read_latest_exr():
+def _left_behind(node_name_prefix, reads):
     """
-    Callback: build the Read nodes and zoom the Viewer.
+    Reads this tool made that it no longer updates.
+
+    It once named Reads after the layer alone, and made a numbered twin on every run.
     """
-    nodes = make_read_nodes()
-    if not nodes:
+    names = {read.name() for read in reads}
+    newest = {_folder(read) for read in reads}
+    return [
+        node
+        for node in nuke.allNodes("Read")
+        if node.name().startswith(f"{node_name_prefix}_")
+        and node.name() not in names
+        and _folder(node) not in newest
+    ]
+
+
+def _folder(read):
+    # render/ is a link into /cache, and Reads hold either spelling.
+    return os.path.realpath(os.path.dirname(read["file"].value()))
+
+
+def auto_read(render_subdir="render", node_name_prefix="EXR_read"):
+    """Build the Read nodes and centre the node graph on the Viewer."""
+    if not make_read_nodes(render_subdir, node_name_prefix):
         return
-    try:
-        viewer = nuke.activeViewer().node()
-        nuke.zoom(1, [viewer["xpos"].value(), viewer["ypos"].value()])
-    except Exception as e:
-        nuke.tprint(f"[Auto Read] Viewer zoom error: {e}")
+    if viewer := nuke.activeViewer():
+        node = viewer.node()
+        nuke.zoom(1, [node["xpos"].value(), node["ypos"].value()])

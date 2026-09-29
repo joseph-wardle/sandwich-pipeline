@@ -15,22 +15,19 @@ nuke.pluginAddPath("./scripts")
 def make_skd_read_node():
     import skd_read_node
 
-    # run the normal read now
-    skd_read_node.auto_read_latest_exr()
+    skd_read_node.auto_read()
 
 
 def make_skd_fx_read_node():
     import skd_read_node
 
-    # run the FX read now
-    skd_read_node.auto_read_latest_fx_exr()
+    skd_read_node.auto_read("fx/render", "Bobo_FX_read")
 
 
 def make_skd_cfx_read_node():
     import skd_read_node
 
-    # run the FX read now
-    skd_read_node.auto_read_latest_cfx_exr()
+    skd_read_node.auto_read("cfx/render", "Bobo_CFX_read")
 
 
 def make_bobo_write_node():
