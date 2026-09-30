@@ -12,25 +12,22 @@ nuke.pluginAddPath("./toolsets")
 nuke.pluginAddPath("./scripts")
 
 
-def make_bobo_read_node():
-    import bobo_read_node
+def make_skd_read_node():
+    import skd_read_node
 
-    # run the normal read now
-    bobo_read_node.auto_read_latest_exr()
-
-
-def make_bobo_fx_read_node():
-    import bobo_read_node
-
-    # run the FX read now
-    bobo_read_node.auto_read_latest_fx_exr()
+    skd_read_node.auto_read()
 
 
-def make_bobo_cfx_read_node():
-    import bobo_read_node
+def make_skd_fx_read_node():
+    import skd_read_node
 
-    # run the FX read now
-    bobo_read_node.auto_read_latest_cfx_exr()
+    skd_read_node.auto_read("fx/render", "Bobo_FX_read")
+
+
+def make_skd_cfx_read_node():
+    import skd_read_node
+
+    skd_read_node.auto_read("cfx/render", "Bobo_CFX_read")
 
 
 def make_bobo_write_node():
@@ -129,11 +126,11 @@ print(f"nuke.nodePaste({_TOOLSETS / 'shotTemplate.nk'})")
 m.addCommand("SKD Write Node", "make_bobo_write_node()", icon="MicrowaveIcon.png")
 m.addCommand("SKD Open Shot", "choose_shot()", icon="MicrowaveIcon.png")
 m.addCommand(
-    "SKD Read Node", "make_bobo_read_node()", "ctrl+shift+r", icon="MicrowaveIcon.png"
+    "SKD Read Node", "make_skd_read_node()", "ctrl+shift+r", icon="MicrowaveIcon.png"
 )
 
-m.addCommand("SKD FX Read", "make_bobo_fx_read_node()", icon="MicrowaveIcon.png")
-m.addCommand("SKD CFX Read", "make_bobo_cfx_read_node()", icon="MicrowaveIcon.png")
+m.addCommand("SKD FX Read", "make_skd_fx_read_node()", icon="MicrowaveIcon.png")
+m.addCommand("SKD CFX Read", "make_skd_cfx_read_node()", icon="MicrowaveIcon.png")
 
 m.addCommand("Build LPE Grade", "build_light_comp()", icon="MicrowaveIcon.png")
 m.addCommand("Export Light Grades", "export_lights()", icon="MicrowaveIcon.png")

@@ -118,6 +118,50 @@
         parmtag { "script_callback_language" "python" }
     }
     parm {
+        name    "layer"
+        label   "Layer"
+        type    string
+        default { "$OS" }
+        help    "Names the folder this layer renders into under Render Root."
+        parmtag { "script_callback" "hou.phm().show_next_version(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "render_root"
+        label   "Render Root"
+        type    directory
+        default { [ "hou.phm().default_root(hou.pwd())" python ] }
+        help    "Holds this layer's v### folders. Lighting hips render beside the shot, where Nuke looks; other hips render beside themselves."
+        parmtag { "script_callback" "hou.phm().show_next_version(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "savetodirectory_directory"
+        label   "Output Folder"
+        type    string
+        default { "" }
+        help    "The folder the next Send renders into: the next free v### under Render Root. Send refuses, and refreshes this, if another Send has taken it since."
+        joinnext
+        disablewhen "{ savetodirectory_directory != \"\" } { savetodirectory_directory == \"\" }"
+    }
+    parm {
+        name    "refresh_dirc"
+        label   "Refresh"
+        type    button
+        default { "0" }
+        help    "Look again for the next free version."
+        parmtag { "script_callback" "hou.phm().show_next_version(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "last_job"
+        label   "Last Job"
+        type    string
+        default { "" }
+        help    "The folder and Tractor job id of the last Send."
+        disablewhen "{ last_job != \"\" } { last_job == \"\" }"
+    }
+    parm {
         name    "trange"
         label   "Valid Frame Range"
         type    ordinal
@@ -143,52 +187,14 @@
         parmtag { "script_callback_language" "python" }
     }
     parm {
-        name    "foffset"
-        label   "Preroll/Postroll/Inc"
-        type    float
-        size    3
-        default { "0" "0" "1" }
-        disablewhen "{ trange != stage }"
-        range   { 0 10 }
-        parmtag { "autoscope" "0000000000000000" }
-        parmtag { "script_callback_language" "python" }
-    }
-    parm {
         name    "renderer"
         label   "Render Delegate"
         type    string
-        default { "BRAY_HdKarma" }
+        default { "HdPrmanXpuCpuLoaderRendererPlugin" }
         menu {
             [ "opmenu -l -a usdrender_rop1 renderer" ]
         }
         parmtag { "autoscope" "0000000000000000" }
-        parmtag { "script_callback_language" "python" }
-    }
-    parm {
-        name    "savetodirectory_directory"
-        label   "Render Directory"
-        type    directory
-        default { "" }
-        help    "The job folder. Send writes render.usd here, plus a file for every unsaved layer the scene references, so the farm can read them."
-        menureplace {
-            [ "opmenu -l -a usdrender_rop savetodirectory_directory" ]
-        }
-        parmtag { "autoscope" "0000000000000000" }
-        parmtag { "script_callback_language" "python" }
-    }
-    parm {
-        name    "refresh_dirc"
-        label   "Refresh Directory"
-        type    button
-        default { "0" }
-        parmtag { "script_callback" "hou.phm().refresh_render_dir(kwargs[\"node\"])" }
-        parmtag { "script_callback_language" "python" }
-    }
-    parm {
-        name    "service"
-        label   "Default Service Key"
-        type    string
-        default { "EL9" }
         parmtag { "script_callback_language" "python" }
     }
     group {
@@ -211,7 +217,7 @@
             default { "" }
             disablewhen "{ toggle_rendersettings == 0 }"
             menureplace {
-                [ "opmenu -l -a usdrender_rop rendersettings" ]
+                [ "opmenu -l -a usdrender_rop1 rendersettings" ]
             }
             parmtag { "autoscope" "0000000000000000" }
             parmtag { "sidefx::usdpathtype" "prim" }
@@ -299,7 +305,7 @@
             default { [ "640 480 1" hscript-expr ] }
             hidewhen "{ override_res != specific }"
             menumini {
-                [ "opmenu -l -a usdrender_rop res_userMenu" ]
+                [ "opmenu -l -a usdrender_rop1 res_userMenu" ]
             }
             parmtag { "autoscope" "0000000000000000" }
             parmtag { "script_callback_language" "python" }
@@ -308,488 +314,10 @@
             name    "overscan"
             label   "Overscan %"
             type    float
-            default { "6" }
+            default { "0" }
             range   { 0 50 }
             parmtag { "script_callback_language" "python" }
         }
-    }
-
-    group {
-        name    "_maintabs_1"
-        label   "Frame Settings"
-        tabbreak
-
-        parm {
-            name    "toggle_snapshot"
-            label   "Snapshot"
-            type    toggle
-            nolabel
-            joinnext
-            default { "on" }
-            parmtag { "autoscope" "0000000000000000" }
-            parmtag { "script_callback_language" "python" }
-        }
-        parm {
-            name    "snapshot"
-            label   "Snapshot Interval"
-            type    integer
-            default { "300" }
-            disablewhen "{ toggle_snapshot == off }"
-            range   { 30 1000 }
-            parmtag { "autoscope" "0000000000000000" }
-            parmtag { "script_callback_language" "python" }
-        }
-        parm {
-            name    "toggle_husk_timelimit"
-            label   "Time Limit"
-            type    toggle
-            nolabel
-            joinnext
-            default { "off" }
-            parmtag { "autoscope" "0000000000000000" }
-            parmtag { "script_callback_language" "python" }
-        }
-        parm {
-            name    "husk_timelimit"
-            label   "Time Limit"
-            type    integer
-            default { "300" }
-            disablewhen "{ toggle_husk_timelimit == off }"
-            range   { 30 1000 }
-            parmtag { "autoscope" "0000000000000000" }
-            parmtag { "script_callback_language" "python" }
-        }
-    }
-
-    groupcollapsible {
-        name    "advanced"
-        label   "Advanced"
-
-        group {
-            name    "_tabs"
-            label   "Husk"
-
-            group {
-                name    "_husk_tabs"
-                label   "Rendering"
-
-                parm {
-                    name    "husk_instantshutter"
-                    label   "Instantaneous Shutter"
-                    type    toggle
-                    default { "off" }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "script_callback_language" "python" }
-                }
-                parm {
-                    name    "husk_purpose"
-                    label   "Purpose"
-                    type    string
-                    default { "geometry,render" }
-                    menureplace {
-                        "geometry,render"   "Geometry, Render"
-                        "geometry"          "Geometry"
-                        "guide"             "Guide"
-                        "proxy"             "Proxy"
-                        "render"            "Render"
-                    }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "script_callback_language" "python" }
-                }
-            }
-
-            group {
-                name    "_husk_tabs_1"
-                label   "Python"
-
-                parm {
-                    name    "toggle_husk_prerender"
-                    label   "Husk Pre-Render"
-                    type    toggle
-                    nolabel
-                    joinnext
-                    default { "on" }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "script_callback_language" "python" }
-                }
-                parm {
-                    name    "husk_prerender"
-                    label   "Husk Pre-Render"
-                    type    file
-                    default { "" }
-                    menureplace {
-                        [ "opmenu -l -a usdrender_rop husk_prerender" ]
-                    }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "filechooser_mode" "read" }
-                }
-                parm {
-                    name    "toggle_husk_preframe"
-                    label   "Husk Pre-Frame"
-                    type    toggle
-                    nolabel
-                    joinnext
-                    default { "on" }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "script_callback_language" "python" }
-                }
-                parm {
-                    name    "husk_preframe"
-                    label   "Husk Pre-Frame"
-                    type    file
-                    default { "" }
-                    menureplace {
-                        [ "opmenu -l -a usdrender_rop husk_preframe" ]
-                    }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "filechooser_mode" "read" }
-                }
-                parm {
-                    name    "toggle_husk_postframe"
-                    label   "Husk Post-Frame"
-                    type    toggle
-                    nolabel
-                    joinnext
-                    default { "on" }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "script_callback_language" "python" }
-                }
-                parm {
-                    name    "husk_postframe"
-                    label   "Husk Post-Frame"
-                    type    file
-                    default { "" }
-                    menureplace {
-                        [ "opmenu -l -a usdrender_rop husk_postframe" ]
-                    }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "filechooser_mode" "read" }
-                }
-                parm {
-                    name    "toggle_husk_postrender"
-                    label   "Husk Post-Render"
-                    type    toggle
-                    nolabel
-                    joinnext
-                    default { "on" }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "script_callback_language" "python" }
-                }
-                parm {
-                    name    "husk_postrender"
-                    label   "Husk Post-Render"
-                    type    file
-                    default { "" }
-                    menureplace {
-                        [ "opmenu -l -a usdrender_rop husk_postrender" ]
-                    }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "filechooser_mode" "read" }
-                }
-            }
-
-            group {
-                name    "_husk_tabs_2"
-                label   "Tiles"
-
-                parm {
-                    name    "husk_tile"
-                    label   "Tiled Render"
-                    type    toggle
-                    default { "off" }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "script_callback_language" "python" }
-                }
-                parm {
-                    name    "husk_tilecount"
-                    label   "Count"
-                    type    integer
-                    size    2
-                    default { "4" "4" }
-                    disablewhen "{ husk_tile == off }"
-                    range   { 1! 6 }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "script_callback_language" "python" }
-                }
-                parm {
-                    name    "husk_tilesuffix"
-                    label   "Suffix"
-                    type    string
-                    default { "_tile%02d" }
-                    disablewhen "{ husk_tile == off }"
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "script_callback_language" "python" }
-                }
-            }
-
-            group {
-                name    "_husk_tabs_3"
-                label   "Statistics"
-
-                parm {
-                    name    "verbosity"
-                    label   "Verbosity"
-                    type    string
-                    default { "" }
-                    menu {
-                        ""      "None"
-                        "3"     "Rendering Statistics"
-                        "9"     "Full Verbosity"
-                        "9p"    "Full with VEX Profiling"
-                        "9P"    "Full with VEX Profiling and NAN Checks (Slow)"
-                    }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "script_callback_language" "python" }
-                }
-                parm {
-                    name    "husk_usdtrace"
-                    label   "USD Trace"
-                    type    string
-                    default { "" }
-                    menu {
-                        ""          "None"
-                        "report"    "Report"
-                        "timing"    "Timing"
-                        "chrome"    "Chrome"
-                    }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "script_callback_language" "python" }
-                }
-                parm {
-                    name    "husk_chromefile"
-                    label   "Chrome File"
-                    type    file
-                    default { "" }
-                    hidewhen "{ husk_usdtrace != chrome }"
-                    menureplace {
-                        [ "opmenu -l -a usdrender_rop husk_chromefile" ]
-                    }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "filechooser_mode" "write" }
-                }
-                parm {
-                    name    "husk_log"
-                    label   "Log Output"
-                    type    toggle
-                    default { "off" }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "script_callback_language" "python" }
-                }
-                parm {
-                    name    "husk_logappend"
-                    label   "Append to Log Instead of Overwriting"
-                    type    toggle
-                    default { "off" }
-                    hidewhen "{ husk_log == off }"
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "script_callback_language" "python" }
-                }
-                parm {
-                    name    "husk_stdout"
-                    label   "Output Log"
-                    type    file
-                    default { "" }
-                    hidewhen "{ husk_log == off }"
-                    menureplace {
-                        [ "opmenu -l -a usdrender_rop husk_stdout" ]
-                    }
-                    parmtag { "autoscope" "0000000000000000" }
-                    parmtag { "filechooser_mode" "write" }
-                }
-            }
-
-        }
-
-        group {
-            name    "_tabs_1"
-            label   "Usd"
-
-            parm {
-                name    "savestyle"
-                label   "Save Style"
-                type    string
-                default { "flattenimplicitlayers" }
-                menu {
-                    "flattenimplicitlayers" "Flatten Implicit Layers (Collapse Implicit Sublayers, Preserve References)"
-                    "flattenalllayers"      "Flatten All Layers (Collapse All Sublayers, Preserve References)"
-                    "separate"              "Separate Layers (Preserve All Sublayers and References)"
-                    "flattenstage"          "Flatten Stage (Collapse All Sublayers and References)"
-                }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "script_callback_language" "python" }
-            }
-            parm {
-                name    "striplayerbreaks"
-                label   "Strip Layers Above Layer Breaks"
-                type    toggle
-                default { "off" }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "script_callback_language" "python" }
-            }
-            parm {
-                name    "strippostlayers"
-                label   "Strip Post-Layers"
-                type    toggle
-                default { "off" }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "script_callback_language" "python" }
-            }
-            parm {
-                name    "trackprimexistence"
-                label   "Track Primitive Existence to Set Visibility"
-                type    toggle
-                default { "on" }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "script_callback_language" "python" }
-            }
-        }
-
-        group {
-            name    "_tabs_2"
-            label   "Scripts"
-
-            parm {
-                name    "tprerender"
-                label   "Pre-Render Script"
-                type    toggle
-                nolabel
-                joinnext
-                default { "on" }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "script_callback_language" "python" }
-            }
-            parm {
-                name    "prerender"
-                label   "Pre-Render Script"
-                type    file
-                joinnext
-                default { "" }
-                menureplace {
-                    [ "opmenu -l -a usd_rop1 prerender" ]
-                }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "filechooser_mode" "read" }
-            }
-            parm {
-                name    "lprerender"
-                label   "Pre-Render Script Language"
-                type    string
-                nolabel
-                default { "hscript" }
-                menu {
-                    "hscript"   "Hscript"
-                    "python"    "Python"
-                }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "script_callback_language" "python" }
-            }
-            parm {
-                name    "tpreframe"
-                label   "Pre-Frame Script"
-                type    toggle
-                nolabel
-                joinnext
-                default { "on" }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "script_callback_language" "python" }
-            }
-            parm {
-                name    "preframe"
-                label   "Pre-Frame Script"
-                type    file
-                joinnext
-                default { "" }
-                menureplace {
-                    [ "opmenu -l -a usd_rop1 preframe" ]
-                }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "filechooser_mode" "read" }
-            }
-            parm {
-                name    "lpreframe"
-                label   "Pre-Frame Script Language"
-                type    string
-                nolabel
-                default { "hscript" }
-                menu {
-                    "hscript"   "Hscript"
-                    "python"    "Python"
-                }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "script_callback_language" "python" }
-            }
-            parm {
-                name    "tpostframe"
-                label   "Post-Frame Script"
-                type    toggle
-                nolabel
-                joinnext
-                default { "on" }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "script_callback_language" "python" }
-            }
-            parm {
-                name    "postframe"
-                label   "Post-Frame Script"
-                type    file
-                joinnext
-                default { "" }
-                menureplace {
-                    [ "opmenu -l -a usd_rop1 postframe" ]
-                }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "filechooser_mode" "read" }
-            }
-            parm {
-                name    "lpostframe"
-                label   "Post-Frame Script Language"
-                type    string
-                nolabel
-                default { "hscript" }
-                menu {
-                    "hscript"   "Hscript"
-                    "python"    "Python"
-                }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "script_callback_language" "python" }
-            }
-            parm {
-                name    "tpostrender"
-                label   "Post-Render Script"
-                type    toggle
-                nolabel
-                joinnext
-                default { "on" }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "script_callback_language" "python" }
-            }
-            parm {
-                name    "postrender"
-                label   "Post-Render Script"
-                type    file
-                joinnext
-                default { "" }
-                menureplace {
-                    [ "opmenu -l -a usd_rop1 postrender" ]
-                }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "filechooser_mode" "read" }
-            }
-            parm {
-                name    "lpostrender"
-                label   "Post-Render Script Language"
-                type    string
-                nolabel
-                default { "hscript" }
-                menu {
-                    "hscript"   "Hscript"
-                    "python"    "Python"
-                }
-                parmtag { "autoscope" "0000000000000000" }
-                parmtag { "script_callback_language" "python" }
-            }
-        }
-
     }
 
 }

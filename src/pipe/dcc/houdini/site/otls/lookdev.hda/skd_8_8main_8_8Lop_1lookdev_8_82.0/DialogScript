@@ -113,11 +113,12 @@
         label   "Render"
 
         parm {
-            name    "render_dir"
+            name    "output_folder"
             label   "Output Folder"
-            type    directory
-            default { [ "hou.pwd().hdaModule().next_render_dir()" python ] }
-            help    "Where the next Send renders. Defaults to the next free v### folder under $HIP/render/turnaround."
+            type    string
+            default { "" }
+            help    "The folder the next Send renders into: the next free v### under $HIP/render/turnaround. Send refuses, and refreshes this, if another Send has taken it since."
+            disablewhen "{ output_folder != \"\" } { output_folder == \"\" }"
         }
         parm {
             name    "job_title"
@@ -144,12 +145,12 @@
             parmtag { "script_callback_language" "python" }
         }
         parm {
-            name    "job_dir"
+            name    "last_job"
             label   "Last Job"
             type    string
             default { "" }
-            help    "Folder of the last job sent. Send fills it in."
-            disablewhen "{ render_dir != \"\" } { render_dir == \"\" }"
+            help    "The folder and Tractor job id of the last Send."
+            disablewhen "{ last_job != \"\" } { last_job == \"\" }"
         }
         groupcollapsible {
             name    "render_advanced"
@@ -197,11 +198,19 @@
                 range   { 0.001! 0.5 }
             }
             parm {
-                name    "keep_files"
-                label   "Keep Render Files"
+                name    "remove_frames"
+                label   "Remove Encoded Frames"
                 type    toggle
-                default { "0" }
-                help    "Keep the denoised frames and the USD files the job rendered from. Off deletes them once turnaround.mp4 is written, leaving just the movie."
+                default { "1" }
+                help    "Delete the denoised frames once turnaround.mp4 is written; remaking it then means sending again."
+            }
+            parm {
+                name    "render_dir"
+                label   "Unused"
+                type    string
+                invisible
+                default { "" }
+                help    "Holds nothing. Hips saved before September 2026 keep an expression for this removed parm, which Houdini would otherwise load as a visible spare parameter."
             }
         }
 

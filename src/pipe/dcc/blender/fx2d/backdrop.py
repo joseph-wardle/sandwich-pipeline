@@ -10,6 +10,7 @@ import bpy
 import OpenImageIO as oiio
 from bpy.types import Camera, Context, Event, Operator
 
+from pipe.core import render
 from pipe.dcc.blender.fx2d import util
 
 if TYPE_CHECKING:
@@ -19,25 +20,29 @@ log = logging.getLogger(__name__)
 
 BACKDROP = "backdrop"
 
-# Denoised frames are what comp reads, so they are what the artist should draw over.
-_IMAGE_DIRS = ("images_dn", "images")
+# The render layer names its beauty product this.
+_BEAUTY = "beauty"
+# RenderMan writes the beauty as R, G, B when its product is written as RGBA,
+# and otherwise under its var's name, wherever the var sits among the others.
+_BEAUTY_CHANNELS = (
+    ("R", "G", "B"),
+    ("Ci.r", "Ci.g", "Ci.b"),
+    ("ci.r", "ci.g", "ci.b"),
+)
+_ALPHA_CHANNELS = ("A", "a")
 
 
 def latest_frames(layer_dir: Path) -> list[Path]:
-    """The frames of the newest version that has any, or [] when none does.
+    """The frames of the newest finished version that has any, or [] when none does.
 
     A version folder exists from the moment a render is submitted, so the newest
-    one is often still empty.
+    one is often still empty or half-rendered.
     """
-    versions = sorted(
-        (path for path in layer_dir.glob("v*") if util.VERSION.match(path.name)),
-        key=lambda path: int(path.name[1:]),
-        reverse=True,
-    )
-    for version in versions:
-        for name in _IMAGE_DIRS:
-            frames = sorted((version / name).glob("*.exr"))
-            if frames:
+    for version in render.versions(layer_dir):
+        for folder in render.output_dirs(version):
+            if folder.name not in (_BEAUTY, *render.LEGACY_DIRS):
+                continue
+            if frames := sorted(folder.glob("*.exr")):
                 return frames
     return []
 
@@ -56,19 +61,35 @@ def _render_layers(shot_root: Path) -> dict[str, list[Path]]:
 
 
 def label(frames: list[Path]) -> str:
-    """`env v006` for frames under `env/v006/images_dn/`."""
+    """`env v006` for frames under `env/v006/beauty/`."""
     return f"{frames[0].parents[2].name} {frames[0].parents[1].name}"
 
 
-def _write_proxy(source: Path, target: Path) -> None:
-    reader = oiio.ImageInput.open(str(source))
-    if reader is None:
-        raise OSError(f"Could not read {source}: {oiio.geterror()}")
-    spec = reader.spec()
-    pixels = reader.read_image(0, 0, 0, 4, oiio.HALF)
-    reader.close()
+def _rgba(source: Path, names: tuple[str, ...]) -> tuple[str | float, ...]:
+    """The channels of a render frame that make its picture."""
+    beauty = next((c for c in _BEAUTY_CHANNELS if set(c) <= set(names)), None)
+    if beauty is None:
+        raise OSError(f"{source} has no beauty channels. It holds: {', '.join(names)}.")
+    # A frame without alpha shows opaque.
+    alpha = next((a for a in _ALPHA_CHANNELS if a in names), 1.0)
+    return (*beauty, alpha)
 
-    out_spec = oiio.ImageSpec(spec.width, spec.height, 4, oiio.HALF)
+
+def _write_proxy(source: Path, target: Path) -> None:
+    render = oiio.ImageBuf(str(source))
+    if render.has_error:
+        raise OSError(f"Could not read {source}: {render.geterror()}")
+    image = oiio.ImageBufAlgo.channels(
+        render, _rgba(source, render.spec().channelnames)
+    )
+    if image.has_error:
+        raise OSError(f"Could not read {source}: {image.geterror()}")
+    # Blender fits the whole image to the camera frame, so pixels rendered as
+    # overscan are cut away.
+    frame = image.roi_full
+    pixels = image.get_pixels(oiio.HALF, frame)
+
+    out_spec = oiio.ImageSpec(frame.width, frame.height, 4, oiio.HALF)
     out_spec.channelnames = ("R", "G", "B", "A")
     out_spec.attribute("compression", "dwaa")
     # Written under a hidden name and renamed, so an interrupted run never leaves a
@@ -202,8 +223,8 @@ class SKD_OT_fx2d_set_backdrop(Operator):
             log.exception("Could not build the backdrop proxy for %s.", label(frames))
             self.report(
                 {"ERROR"},
-                f"Could not set the backdrop because its preview frames could not be "
-                f"written under {util.backdrop_root(shot_root)}: {error}",
+                f"Could not set the backdrop to {label(frames)}, so the last "
+                f"backdrop stays. {error}",
             )
             return {"CANCELLED"}
         message = (

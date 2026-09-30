@@ -1,0 +1,27 @@
+= Tractor Encode Video =
+
+"""Makes a movie of the layer's beauty on the farm, looking as it does in the viewer."""
+
+Wire it below Tractor Configure, or below Tractor Denoise to make the movie from the denoised frames. It plays at the hip's frame rate, so the layer must render every frame of its range. It works with RenderMan only.
+
+@parameters
+
+Output File:
+    #id: output_file
+    Empty writes `<layer>.mp4`, or `<layer>.mov` for Edit and Master, into the version folder. A file elsewhere needs a full path, and Remove Encoded Frames off.
+
+Preset:
+    #id: preset
+    *Web* is an H.264 MP4 for review and browsers. *Edit* is a DNxHR SQ MOV for editorial. *Master* is a ProRes 422 HQ 10-bit MOV for finishing.
+
+Display:
+    #id: display
+    The OCIO display the movie is made for. Defaults to the show's display.
+
+View:
+    #id: view
+    The OCIO view the movie is seen through. Defaults to the show look.
+
+Remove Encoded Frames:
+    #id: remove_frames
+    Delete the frames the movie is made from once the layer's other tasks finish. Encode can't then be rerun for this version.

@@ -1,0 +1,59 @@
+= Tractor Configure =
+
+"""Chooses what one render layer renders on the farm, and the folder it renders into."""
+
+Wire it below the layer's render settings, and wire it into Tractor Submit, with Tractor Denoise and then Tractor Encode Video between them if wanted. Each Send renders into a new `v###` folder that no other Send has used.
+
+Send writes the stage to `render.usd` in that folder, and the farm renders that file. The folder holds one folder of frames for each render product and Cryptomatte filter, named after its prim. Once every output is there the job writes a file named `complete` beside them.
+
+@parameters
+
+Layer:
+    #id: layer
+    Names the folder this layer renders into under Render Root, and the layer's tasks in Tractor. It may use letters, digits, underscores and hyphens.
+
+Render Root:
+    #id: render_root
+    Holds this layer's `v###` folders. Lighting hips render beside the shot, where Nuke looks. Other hips render beside themselves. It must be a full path.
+
+Output Folder:
+    #id: savetodirectory_directory
+    The folder the next Send renders into: the next free `v###` under Render Root. Send refuses, and shows the next one here, if another Send has taken it since.
+
+Refresh:
+    #id: refresh_dirc
+    Look again for the next free version.
+
+Last Job:
+    #id: last_job
+    The folder and Tractor job of the last Send.
+
+Valid Frame Range:
+    #id: trange
+    Which frames render: the current frame, the range in Start/End/Inc, or the stage's range.
+
+Start/End/Inc:
+    #id: f
+    The frames to render. Denoise and Encode need every frame of the range, so Inc must be 1 with either.
+
+Render Delegate:
+    #id: renderer
+    The renderer. Denoise and Encode read only RenderMan's frames.
+
+== Overrides ==
+
+Override Render Settings:
+    #id: rendersettings
+    The render settings to render with. Turned off, the farm renders the stage's own, or the only ones it has.
+
+Override Camera:
+    #id: override_camera
+    The camera to render through. Turned off, the farm renders through the render settings' camera.
+
+Override Resolution:
+    #id: override_res
+    Render at the render settings' resolution, at a percentage of it, or at the resolution given here.
+
+Overscan %:
+    #id: overscan
+    Renders extra picture past every edge of the frame, for comp to use. XPU can't render Cryptomatte with overscan.

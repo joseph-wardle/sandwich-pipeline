@@ -1,0 +1,21 @@
+= Tractor Submit =
+
+"""Sends every render layer wired into it to the farm as one Tractor job."""
+
+Wire each layer's last Tractor node into an input: Tractor Configure, or the Tractor Denoise or Tractor Encode Video below it. Save the hip file first.
+
+Send refuses, and says why, when it can tell the job would fail or write nothing. Nothing is sent then, and no version folder is left behind.
+
+@parameters
+
+Send To Tractor:
+    #id: send
+    Send the job. Each layer's Configure then shows the job in Last Job.
+
+Job Title:
+    #id: title
+    The job's name in Tractor. Empty names it after the hip's folders and the layers, such as `A_010 lighting: char, env`.
+
+Priority:
+    #id: priority
+    Tractor starts jobs of higher priority first.

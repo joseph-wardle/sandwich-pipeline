@@ -9,6 +9,7 @@ import bpy
 from bpy.types import Collection, Context, Event, Operator, Scene
 
 from env_sg import DB_Config
+from pipe.core import render
 from pipe.core.shot import blender_fx2d_stream, shot_owner_for
 from pipe.core.shotgrid import ShotGrid
 from pipe.core.versioning import save_version
@@ -29,15 +30,6 @@ def _layers(scene: Scene) -> list[Collection]:
         and not collection.hide_render
         and collection.all_objects
     ]
-
-
-def _next_version(layer_dir: Path) -> str:
-    numbers = [
-        int(match[1])
-        for path in layer_dir.glob("v*")
-        if (match := util.VERSION.match(path.name))
-    ]
-    return f"v{max(numbers, default=0) + 1:03d}"
 
 
 def _uncut(scene: Scene) -> list[str]:
@@ -101,7 +93,9 @@ class SKD_OT_fx2d_deliver(Operator):
             return {"CANCELLED"}
 
         layer_dirs = {layer: util.layer_dir(shot_root, layer) for layer in layers}
-        versions = {layer: _next_version(layer_dirs[layer]) for layer in layers}
+        versions = {
+            layer: render.next_version(layer_dirs[layer]).name for layer in layers
+        }
         delivering = ", ".join(
             f"{layer_dirs[layer].name} {versions[layer]}" for layer in layers
         )

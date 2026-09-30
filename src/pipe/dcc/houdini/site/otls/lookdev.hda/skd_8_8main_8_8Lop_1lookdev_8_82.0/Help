@@ -64,11 +64,11 @@ Rotate Lights:
 
 == Render ==
 
-Send to Tractor renders the turnaround over the hip's frame range, denoises it and encodes `turnaround.mp4` into the job folder, which holds only the movie once the job finishes.
+Send to Tractor renders the turnaround over the hip's frame range, denoises it and encodes `turnaround.mp4` into its own version folder under `$HIP/render/turnaround`.
 
 Output Folder:
-    #id: render_dir
-    Where the next Send renders. It defaults to the next free `v###` folder under `$HIP/render/turnaround`, so every job gets its own folder. Type a path to render somewhere else.
+    #id: output_folder
+    The folder the next Send renders into: the next free `v###` under `$HIP/render/turnaround`. If another Send takes it first, Send refuses and shows the next one.
 
 Job Title:
     #id: job_title
@@ -83,8 +83,8 @@ Send to Tractor:
     Render the turnaround on the farm, then denoise it and encode the movie.
 
 Last Job:
-    #id: job_dir
-    Folder of the last job sent. Send fills it in.
+    #id: last_job
+    The folder and Tractor job id of the last Send.
 
 Renderer:
     #id: renderer
@@ -98,6 +98,6 @@ Pixel Variance:
     #id: pixel_variance
     Noise RenderMan accepts before it stops sampling a pixel. Lower is cleaner and slower. The farm denoises afterwards either way.
 
-Keep Render Files:
-    #id: keep_files
-    Keep the denoised frames and the USD files the job rendered from. Off deletes them once `turnaround.mp4` is written, leaving just the movie.
+Remove Encoded Frames:
+    #id: remove_frames
+    Delete the denoised frames once `turnaround.mp4` is written; remaking it then means sending again. The folder keeps the movie, `render.usd` and `denoise.json`.
