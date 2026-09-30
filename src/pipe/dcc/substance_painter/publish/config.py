@@ -9,7 +9,7 @@ from pathlib import Path
 import substance_painter as sp
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
-from pipe.core.struct.material import DisplacementSource, NormalSource, NormalType
+from pipe.core.struct.material import DisplacementSource, NormalSource
 from pipe.dcc.substance_painter.publish.types import (
     ResolvedExportTarget,
     TexSetExportSettings,
@@ -174,29 +174,12 @@ def _shader_maps(export_settings: TexSetExportSettings) -> list[dict[str, object
             "channels": _document_channels("opacity", "L"),
             "parameters": png(_DATA_EXPORT_COLORSPACE, "8"),
         },
+        {
+            "fileName": "$textureSet_Normal(_$colorSpace)(.$udim)",
+            "channels": _normal_channels(export_settings),
+            "parameters": png(_DATA_EXPORT_COLORSPACE, "16"),
+        },
     ]
-
-    if export_settings.normal_type is NormalType.BUMP_ROUGHNESS:
-        maps.append(
-            {
-                "fileName": "$textureSet_Normal(_$colorSpace)(.$udim).pre-b2r",
-                "channels": _normal_channels(export_settings),
-                "parameters": {
-                    "colorSpace": _DATA_EXPORT_COLORSPACE,
-                    "bitDepth": "16f",
-                    "fileFormat": "exr",
-                    "sizeLog2": size_log2,
-                },
-            }
-        )
-    else:
-        maps.append(
-            {
-                "fileName": "$textureSet_Normal(_$colorSpace)(.$udim)",
-                "channels": _normal_channels(export_settings),
-                "parameters": png(_DATA_EXPORT_COLORSPACE, "16"),
-            }
-        )
 
     if export_settings.displacement_source is not DisplacementSource.NONE:
         maps.append(

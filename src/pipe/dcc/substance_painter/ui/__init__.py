@@ -54,7 +54,7 @@ from pipe.dcc.substance_painter.util.progress import (
     PublishProgressUpdate,
     PublishStage,
 )
-from pipe.core.struct.material import DisplacementSource, NormalSource, NormalType
+from pipe.core.struct.material import DisplacementSource, NormalSource
 from pipe.core.util import checkbox_callback_helper, dict_index
 from pipe.core.util.paths import get_repo_root
 from pipe.core.versioning import backup_if_changed
@@ -395,7 +395,6 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 wgt.extra_channels,
                 wgt.resolution,
                 wgt.displacement_source,
-                wgt.normal_type,
                 wgt.normal_source,
             )
             for ts, wgt in self._tex_set_dict.items()
@@ -785,7 +784,6 @@ class TexSetWidget(QtWidgets.QWidget):
     _help_icon: QIcon
     _parent_window: SubstanceExportWindow
     _normal_source_dropdown: QComboBox
-    _normal_type_dropdown: QComboBox
     _resolution_dropdown: QComboBox
     _settings_container: QtWidgets.QWidget
     _stack: sp.textureset.Stack | None
@@ -801,11 +799,6 @@ class TexSetWidget(QtWidgets.QWidget):
         sp.textureset.ChannelType.Normal,
         sp.textureset.ChannelType.Displacement,
     ]
-
-    _NORM_TYPE_STRS = {
-        NormalType.STANDARD: "Standard (default)",
-        NormalType.BUMP_ROUGHNESS: "Bump Roughness",
-    }
 
     _NORM_SOURCE_STRS = {
         NormalSource.NORMAL_HEIGHT: "Normal + Height (default)",
@@ -936,26 +929,8 @@ class TexSetWidget(QtWidgets.QWidget):
             )
         )
 
-        # Normal map type
-        settings_layout.addWidget(QLabel("Normal Map Type:"), 4, 0)
-        self._normal_type_dropdown = QComboBox()
-        nt_items = self._NORM_TYPE_STRS.values()
-        self._normal_type_dropdown.addItems(nt_items)
-        self._normal_type_dropdown.setCurrentText(self._get_default(nt_items))
-        settings_layout.addWidget(self._normal_type_dropdown)
-        settings_layout.addWidget(
-            self._info_tooltip(
-                "Bump Roughness mapping preserves detail in shiny items with "
-                "variance/breakup in the roughness (i.e. scratches, smudges, "
-                "etc.). \n"
-                "Select Bump Roughness if your texture set is a shiny "
-                "material with variance/breakup in the roughness. Otherwise, "
-                "leave it on Standard."
-            )
-        )
-
         # Displacement map source
-        settings_layout.addWidget(QLabel("Displacement Map Source:"), 5, 0)
+        settings_layout.addWidget(QLabel("Displacement Map Source:"), 4, 0)
         self._displacement_source_dropdown = QComboBox()
         ds_items = list(self._DISP_SOURCE_STRS.values())
         self._displacement_source_dropdown.addItems(ds_items)
@@ -1028,12 +1003,6 @@ class TexSetWidget(QtWidgets.QWidget):
     def resolution(self) -> int:
         """Returns the resolution log 2"""
         return self._resolution_dropdown.currentIndex() + 7
-
-    @property
-    def normal_type(self) -> NormalType:
-        return dict_index(
-            self._NORM_TYPE_STRS, self._normal_type_dropdown.currentText()
-        )
 
     @property
     def normal_source(self) -> NormalSource:

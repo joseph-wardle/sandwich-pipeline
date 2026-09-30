@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import subprocess
 import time
-from math import log2
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -16,7 +14,6 @@ if TYPE_CHECKING:
 
 from pipe.core import telemetry
 from pipe.core.util import silent_startupinfo
-from pipe.core.util.paths import get_repo_root
 from pipe.dcc.substance_painter.util.progress import (
     PublishProgressCallback,
     PublishProgressUpdate,
@@ -140,68 +137,14 @@ class TexConverter:
             ]
             # fmt: on
 
-        @self._debug_out
-        def b2r_cmd(img: str) -> list[str]:
-            # OIIO's `-obump` writes a 6-channel slope texture (first and
-            # second moments of the bump slopes) consumable by
-            # `PxrBumpRoughness`. `bumpformat=height` matches the EXR
-            # height map produced by the `norm2height` pre-pass.
-            # fmt: off
-            return [
-                str(Executables.rman_oiiotool),
-                img,
-                "--planarconfig", "separate",
-                "-obump:bumpformat=height",
-                f"{str(self.tex_path / Path(img).stem)}.b2r",
-            ]
-            # fmt: on
-
-        @self._debug_out
-        def norm2height(img: str) -> list[str]:
-            """Convert normal map to height map
-            This is necessary because if we run b2r conversion directly on a
-            normal map, reversed UV tiles will have incorrect normals.
-            We can't run b2r conversion directly on the height map from
-            Substance because that doesn't include normal painting or
-            stickers. Thus, the remaining option is to convert the Normal map
-            from Substance back into a height map."""
-            img_dims = [str(int(log2(d))) for d in self._img_dims(img)]
-            # fmt: off
-            return [
-                str(Executables.sbsrender),
-                "render",
-                "--engine", "d3d11pc",
-                "--exr-format-compression", "zip",
-                "--output-bit-depth", "16f",
-                "--output-format", "exr",
-                "--input", str(get_repo_root() / "resources/sbs/normal2height.sbsar"),
-                "--set-entry", f"input@{img}",
-                "--set-value", f"$outputsize@{','.join(img_dims)}",
-                "--output-path", str(Path(img).parent),
-                "--output-name", img.replace(".pre-b2r", ""),
-            ]
-            # fmt: on
-
-        pre_cmdlines: list[list[str]] = []
         cmdlines: list[list[str]] = []
         for imgs in self.imgs_by_tex_set:
             log.debug(imgs)
             for img in imgs:
                 log.debug(f"        {img}")
-                if "pre-b2r" in img:
-                    pre_cmdlines.append(norm2height(img))
-                    cmdlines.append(b2r_cmd(img.replace(".pre-b2r", "")))
-                else:
-                    cmdlines.append(
-                        tex_cmd(
-                            img,
-                            is_color=("Color" in img or "Emissive" in img),
-                        )
-                    )
-
-        self._wait_and_check_cmds(
-            pre_cmdlines, batch_size=self.batch_size, skip_check=True
-        )
+                cmdlines.append(
+                    tex_cmd(img, is_color=("Color" in img or "Emissive" in img))
+                )
 
         total_tex = len(cmdlines)
         if total_tex <= 0:
@@ -232,22 +175,6 @@ class TexConverter:
 
         return finished_imgs
 
-    @staticmethod
-    def _img_dims(img: str) -> tuple[int, int]:
-        img_info = subprocess.check_output(
-            [
-                str(Executables.oiiotool),
-                "--info",
-                img,
-            ],
-            startupinfo=silent_startupinfo(),
-        ).decode("utf-8")
-        img_dims = re.search(r"^.* : +(\d+) +x +(\d+), .*$", img_info)
-
-        assert img_dims is not None
-        matches = img_dims.group(1, 2)
-        return (int(matches[0]), int(matches[1]))
-
     def _report_progress(
         self,
         stage: PublishStage,
@@ -271,7 +198,6 @@ class TexConverter:
         self,
         cmds: typing.Sequence[list[str]],
         batch_size: int = 18,
-        skip_check: bool = False,
         stage: PublishStage | None = None,
         message: str | None = None,
     ) -> list[Path]:
@@ -307,9 +233,6 @@ class TexConverter:
                         log.debug(stderr)
 
                 _process_qt_events()
-
-                if skip_check:
-                    continue
 
                 img = Path(cast(str, p.args[-1]))  # type: ignore
 
