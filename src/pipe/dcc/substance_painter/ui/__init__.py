@@ -679,14 +679,25 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         self._send_publish_progress(
             PublishProgressUpdate(
                 stage=PublishStage.RUNNING_HOUDINI,
-                message="Running the Houdini asset publish step.",
+                message=(
+                    "Textures are published. Rebuilding the asset in Houdini; "
+                    "this can take a few minutes."
+                ),
             )
         )
+        # The progress dialog stays window-modal until this returns, which is
+        # what stops the artist closing the project mid-build.
         try:
             result = run_asset_builder(asset, geo_variant=request.geo_var)
         except HoudiniPublishError as exc:
             log.error(f"Headless Houdini publish failed from Substance: {exc}")
             return False, f"Houdini publish failed: {exc}"
+        except Exception:
+            # The textures are already published, so report this step alone.
+            log.exception("Unexpected error in the headless Houdini publish.")
+            return False, (
+                "Houdini publish failed unexpectedly. Check the console for details."
+            )
         return True, summarize_result(result)
 
     def _is_active_publish_context(self, context: _ActivePublishContext) -> bool:

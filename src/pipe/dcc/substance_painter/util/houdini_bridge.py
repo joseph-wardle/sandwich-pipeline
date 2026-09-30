@@ -15,12 +15,13 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from env import Executables
 from pipe.dcc.houdini.launch import HoudiniLauncher
+from Qt import QtCore
 
 from pipe.core.asset import paths_for_asset
 from pipe.core.shotgrid import Asset
@@ -36,6 +37,13 @@ class HoudiniPublishError(RuntimeError):
     """Raised when the headless Houdini publish step fails."""
 
 
+@dataclass(frozen=True)
+class _ProcessResult:
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -44,6 +52,7 @@ class HoudiniPublishError(RuntimeError):
 def run_asset_builder(asset: Asset, *, geo_variant: str) -> dict[str, Any]:
     """Run the Houdini asset builder for the given asset and geometry variant.
 
+    Blocks until hython exits, but keeps the Qt event loop running.
     Returns the structured result dict from hython on success.
     Raises HoudiniPublishError with a descriptive message on failure.
     """
@@ -82,40 +91,21 @@ def run_asset_builder(asset: Asset, *, geo_variant: str) -> dict[str, Any]:
         f"Running headless Houdini publish from Substance for {asset_name} "
         f"(geo={geo_variant})"
     )
-    try:
-        completed = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-    except FileNotFoundError as exc:
-        raise HoudiniPublishError(
-            "Failed to execute hython; verify Houdini is installed."
-        ) from exc
-    except subprocess.CalledProcessError as exc:
-        stdout = exc.stdout or ""
-        payload = _parse_result(stdout)
-        if payload is not None:
-            raise HoudiniPublishError(_summarize_errors(payload)) from exc
-        if stdout:
-            log.error(f"Houdini asset builder stdout:\n{stdout}")
-        if exc.stderr:
-            log.error(f"Houdini asset builder stderr:\n{exc.stderr}")
-        raise HoudiniPublishError(
-            f"Houdini publish failed with exit code {exc.returncode}"
-        ) from exc
+    result = _run_process(command, env)
 
-    payload = _parse_result(completed.stdout or "")
+    payload = _parse_result(result.stdout)
     if payload is None:
-        log.error(f"Houdini asset builder stdout:\n{completed.stdout or ''}")
-        log.error(f"Houdini asset builder stderr:\n{completed.stderr or ''}")
+        log.error(f"Houdini asset builder stdout:\n{result.stdout}")
+        log.error(f"Houdini asset builder stderr:\n{result.stderr}")
+        if result.exit_code != 0:
+            raise HoudiniPublishError(
+                f"Houdini publish failed with exit code {result.exit_code}"
+            )
         raise HoudiniPublishError(
             "Failed to parse structured output from Houdini publish."
         )
 
-    if payload.get("status") != "success":
+    if result.exit_code != 0 or payload.get("status") != "success":
         raise HoudiniPublishError(_summarize_errors(payload))
     return payload
 
@@ -160,6 +150,49 @@ def summarize_result(payload: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _run_process(command: list[str], env: dict[str, str]) -> _ProcessResult:
+    """Run *command* to completion in a nested Qt event loop; capture its output."""
+    environment = QtCore.QProcessEnvironment()
+    for key, value in env.items():
+        environment.insert(key, value)
+    process = QtCore.QProcess()
+    process.setProcessEnvironment(environment)
+    # Anything reading stdin (e.g. a stray breakpoint) gets EOF instead of hanging.
+    process.setStandardInputFile(QtCore.QProcess.nullDevice())
+
+    loop = QtCore.QEventLoop()
+
+    # Unlike finished, this also fires when the process fails to start.
+    def on_state_changed(state: QtCore.QProcess.ProcessState) -> None:
+        if state == QtCore.QProcess.NotRunning:
+            loop.quit()
+
+    process.stateChanged.connect(on_state_changed)
+    process.start(command[0], command[1:])
+    if process.state() != QtCore.QProcess.NotRunning:
+        loop.exec_()
+
+    if process.error() == QtCore.QProcess.FailedToStart:
+        log.error(f"Could not start {command[0]}: {process.errorString()}")
+        raise HoudiniPublishError(
+            "Failed to execute hython; verify Houdini is installed."
+        )
+    if process.state() != QtCore.QProcess.NotRunning:
+        # The event loop was told to exit, e.g. because Painter is quitting.
+        # Only hython is killed; a child it started, such as husk, runs on.
+        process.kill()
+        process.waitForFinished()
+        raise HoudiniPublishError("The Houdini publish was interrupted.")
+
+    stdout = process.readAllStandardOutput().data().decode("utf-8", "replace")
+    stderr = process.readAllStandardError().data().decode("utf-8", "replace")
+    if process.exitStatus() == QtCore.QProcess.CrashExit:
+        log.error(f"Houdini asset builder stdout:\n{stdout}")
+        log.error(f"Houdini asset builder stderr:\n{stderr}")
+        raise HoudiniPublishError("Houdini crashed during the publish.")
+    return _ProcessResult(process.exitCode(), stdout, stderr)
 
 
 def _parse_result(stdout: str) -> dict[str, Any] | None:
