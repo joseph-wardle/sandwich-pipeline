@@ -281,9 +281,8 @@ class CascadingComboBox(QtWidgets.QWidget):
                 continue
             for seq in sequences:
                 print("Importing from:", seq["pattern"])
-                read = nuke.createNode("Read", f"file {{{seq['pattern']}}}")
-                read["first"].setValue(seq["first"])
-                read["last"].setValue(seq["last"])
+                read = nuke.createNode("Read", "on_error black")
+                skd_read_node.read_sequence(read, seq)
                 read["label"].setValue(
                     f"{self.current_layer} {version} {seq['folder']}"
                 )

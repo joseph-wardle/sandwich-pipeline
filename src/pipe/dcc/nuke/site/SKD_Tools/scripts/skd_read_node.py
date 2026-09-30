@@ -142,6 +142,21 @@ def _hold_expr(first, last, step):
     return f"clamp({first}+{step}*floor((frame-{first})/{step}), {first}, {last})"
 
 
+def read_sequence(read, s):
+    """Point a Read at a sequence found by version_sequences."""
+    read["file"].setValue(s["pattern"])
+    # native sequence range
+    read["origfirst"].setValue(s["first"])
+    read["origlast"].setValue(s["last"])
+    read["first"].setValue(s["first"])
+    read["last"].setValue(s["last"])
+    # Frames between those of a sequence on 2s or 4s are missing, and would
+    # show black.
+    hold = _hold_expr(s["first"], s["last"], s["step"]) if s["step"] > 1 else ""
+    read["frame_mode"].setValue("expression")
+    read["frame"].setValue(hold)
+
+
 def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
     """
     Make or update one Read per output folder of each layer's newest readable version.
@@ -184,20 +199,11 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
             name=node_name, on_error="black"
         )
         reads.append(read)
-        if read["file"].value() == s["pattern"]:
+        # render/ is a link into /cache, and Reads hold either spelling.
+        if os.path.realpath(read["file"].value()) == os.path.realpath(s["pattern"]):
             continue
         changed = True
-        read["file"].setValue(s["pattern"])
-        # native sequence range
-        read["origfirst"].setValue(s["first"])
-        read["origlast"].setValue(s["last"])
-        read["first"].setValue(s["first"])
-        read["last"].setValue(s["last"])
-        # Frames between those of a sequence on 2s or 4s are missing, and would
-        # show black.
-        hold = _hold_expr(s["first"], s["last"], s["step"]) if s["step"] > 1 else ""
-        read["frame_mode"].setValue("expression")
-        read["frame"].setValue(hold)
+        read_sequence(read, s)
         read["label"].setValue(f"{s['label']}  step:{s['step']}")
 
     if changed:

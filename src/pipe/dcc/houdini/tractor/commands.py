@@ -62,11 +62,26 @@ class Layer:
 
 
 def render(layer: Layer, frame: int) -> str:
-    # husk makes no output folders, and exits 0 having written nothing.
-    mkdir = shlex.join(["mkdir", "-p", *map(str, layer.render.folders)])
+    """husk exits 0 even when it writes nothing, so the frame's old files are
+    deleted first and checked for after.
+    """
+    q = shlex.quote
+    folders = " ".join(q(str(folder)) for folder in layer.render.folders)
     husk = ["husk", "--frame", str(frame), *layer.render.husk]
     husk.append(str(layer.folder / RENDER_USD))
-    return f"{LICENSE_TRAP} && {mkdir} && {shlex.join(husk)}"
+    return "\n".join(
+        [
+            LICENSE_TRAP,
+            # husk makes no output folders.
+            f"mkdir -p {folders}",
+            f'for d in {folders}; do rm -f "$d/{frame:04}.exr"; done',
+            shlex.join(husk),
+            f"for d in {folders}; do",
+            f'    f="$d/{frame:04}.exr"',
+            '    [ -f "$f" ] || { echo "husk exited without writing $f" >&2; exit 1; }',
+            "done",
+        ]
+    )
 
 
 def denoise_window(frame: int, frames: list[int]) -> list[int]:
@@ -141,8 +156,10 @@ def encode(layer: Layer, spec: Encode) -> str:
             f" --ociodisplay:from=scene_linear {q(spec.display)} {q(spec.view)}"
             f" -d uint16 -o {q(str(scratch))}/$n.png",
             "done",
+            # ffmpeg reads [, ? and * anywhere in the path as its pattern.
+            f"cd {q(str(scratch))}",
             f"ffmpeg -y -framerate {spec.frame_rate:g}"
-            f" -pattern_type glob -i {q(f'{scratch}/*.png')}"
+            " -pattern_type glob -i '*.png'"
             f" {shlex.join(spec.preset.args())}"
             f" -timecode {timecode(frames[0], round(spec.frame_rate))}"
             f" {q(str(video))}",

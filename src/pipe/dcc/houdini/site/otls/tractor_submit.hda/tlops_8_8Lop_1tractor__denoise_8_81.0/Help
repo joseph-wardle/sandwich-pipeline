@@ -8,4 +8,4 @@ It adds the render vars the denoiser reads to the render product that holds the 
 
 The denoiser reads three frames either side of each frame, so the layer must render every frame of its range. It works with RenderMan only.
 
-Render vars of your own go through unchanged. The exceptions are depth, the motion vectors, and vars whose names begin with `albedo`, `diffuse` or `specular`, which are denoised.
+Render vars of your own go through unchanged, with two exceptions. Depth, the motion vectors, and vars named `albedo`, `diffuse` or `specular`, alone or before an underscore, are denoised. Vars whose names end in `mse` or `_var` are left out of the finished frame.

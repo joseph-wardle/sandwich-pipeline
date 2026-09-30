@@ -66,19 +66,15 @@ class Chain:
 
 def send(submit: hou.Node, inputs: list[hou.Node] | None = None) -> None:
     """Send `inputs`, by default every chain wired into `submit`, as one job."""
+    claimed: list[Path] = []
+    built = None
     try:
         chains = [chain(n) for n in (submit.inputs() if inputs is None else inputs)]
         check_layers(chains)
         folders.check_saved()
         check_parms(chains)
         claimed = folders.claim([c.configure for c in chains])
-    except SendRefused as refusal:
-        _refuse(str(refusal))
-        return
-
-    title = _title(submit, chains)
-    built = None
-    try:
+        title = _title(submit, chains)
         built = build(submit, title, chains)
     except SendRefused as refusal:
         _refuse(str(refusal))

@@ -4,7 +4,7 @@
 
 Wire each layer's last Tractor node into an input: Tractor Configure, or the Tractor Denoise or Tractor Encode Video below it. Save the hip file first.
 
-Send refuses, and says why, when it can tell the job would fail or write nothing. Nothing is sent then, and no folder is left behind.
+Send refuses, and says why, when it can tell the job would fail or write nothing. Nothing is sent then, and no version folder is left behind.
 
 @parameters
 
