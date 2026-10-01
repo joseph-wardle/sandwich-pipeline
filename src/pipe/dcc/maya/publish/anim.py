@@ -13,9 +13,11 @@ if TYPE_CHECKING:
 
 import maya.cmds as mc
 
+from pipe.core.announce import announce_publish
 from pipe.core.struct.timeline import Timeline
 from pipe.core.ui import MessageDialog
 from pipe.core.util.paths import get_production_path
+from pipe.core.util.users import resolve_artist_display_name
 
 from .anim_index import AnimStream, entries_to_json, index_key, read_anim_index
 from .anim_lock import confirm_locked_republish
@@ -185,6 +187,20 @@ class AnimPublisher(Publisher):
             )
             message += "\n".join(f"    • {key}" for key in unbound)
         return message
+
+    def _announce(self) -> list[str]:
+        rigs = [namespace_of(cache_set) for cache_set in self._selection.sets_to_export]
+        return announce_publish(
+            self._conn,
+            shot=self._shot,
+            department="anim",
+            artist=resolve_artist_display_name(),
+            path=self._publish_path,
+            detail=(
+                f"{self._selection.stream.value}, {len(rigs)} "
+                f"{'rig' if len(rigs) == 1 else 'rigs'}: {', '.join(rigs)}"
+            ),
+        )
 
 
 @contextmanager

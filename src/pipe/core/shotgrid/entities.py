@@ -377,6 +377,17 @@ class Shot(SGEntity):
         return self.cut_in, self.cut_out
 
 
+def _ref_name(ref: dict[str, Any] | None, _: Any) -> str | None:
+    """The display name carried on a link-ref, e.g. a Task's Step."""
+    return ref.get("name") if ref else None
+
+
+def _users_from_refs(refs: list[dict[str, Any]] | None, _: Any) -> list[User] | None:
+    if refs is None:
+        return None
+    return [User(id=ref["id"], name=ref.get("name")) for ref in refs]
+
+
 def _linked_entity(ref: dict[str, Any] | None, _: Any) -> Shot | Asset | None:
     """A ShotGrid `entity` link may point at a Shot or an Asset; only the ref's
     `type` says which. Guessing wrong hands back a `Shot` holding an Asset's id,
@@ -403,6 +414,18 @@ class Task(SGEntity):
     )
     content: str | None = field(
         default=None, kw_only=True, metadata={_SG_NAME: "content"}
+    )
+    # The pipeline step's display name ("Animation", "CFX"): the department
+    # a task belongs to, and how announcements find who is downstream.
+    step: str | None = field(
+        default=None,
+        kw_only=True,
+        metadata={_SG_NAME: "step", _STRUCT_HOOK: _ref_name},
+    )
+    assignees: list[User] | None = field(
+        default=None,
+        kw_only=True,
+        metadata={_SG_NAME: "task_assignees", _STRUCT_HOOK: _users_from_refs},
     )
 
 

@@ -119,7 +119,14 @@ _SG_FIELDS_SEQUENCE: tuple[str, ...] = (
 )
 _SG_FIELDS_SET: tuple[str, ...] = ("id", "code")
 _SG_FIELDS_USER: tuple[str, ...] = ("id", "name", "login")
-_SG_FIELDS_TASK: tuple[str, ...] = ("id", "content", "entity", "sg_status_list")
+_SG_FIELDS_TASK: tuple[str, ...] = (
+    "id",
+    "content",
+    "entity",
+    "sg_status_list",
+    "step",
+    "task_assignees",
+)
 _SG_FIELDS_VERSION: tuple[str, ...] = (
     "id",
     "code",
@@ -159,6 +166,11 @@ _SG_PUBLISHED_FILE_VERSION = "version_number"
 _SG_PUBLISHED_FILE_CODE = "code"
 _SG_PUBLISHED_FILE_PATH = "path"
 _SG_PUBLISHED_FILE_DESCRIPTION = "description"
+_SG_NOTE_SUBJECT = "subject"
+_SG_NOTE_CONTENT = "content"
+_SG_NOTE_LINKS = "note_links"
+_SG_NOTE_TO = "addressings_to"
+_SG_NOTE_AUTHOR = "user"
 
 # The `sg_asset_type` of an Asset row that is a set.
 SET_ASSET_TYPE = "Set"
@@ -932,6 +944,41 @@ class ShotGrid:
         _write_or_raise(
             lambda: self._sg.create("PublishedFile", payload, ["id"]),
             entity_type="PublishedFile",
+            entity_id=None,
+            field=None,
+        )
+
+    # ---- writes: notes -----------------------------------------------------
+
+    def create_note(
+        self,
+        *,
+        subject: str,
+        content: str,
+        links: list[Shot | Asset],
+        to: list[User],
+        author: User | None = None,
+    ) -> None:
+        """Write a Note addressed to `to`, shown on every entity in `links`.
+
+        Raises:
+            ShotGridWriteError: ShotGrid rejected the create.
+        """
+        payload: dict[str, Any] = {
+            _SG_PROJECT: self._project_ref(),
+            _SG_NOTE_SUBJECT: subject,
+            _SG_NOTE_CONTENT: content,
+            _SG_NOTE_LINKS: [
+                _entity_ref("Shot" if isinstance(e, Shot) else "Asset", e)
+                for e in links
+            ],
+            _SG_NOTE_TO: [_entity_ref("HumanUser", user) for user in to],
+        }
+        if author is not None:
+            payload[_SG_NOTE_AUTHOR] = _entity_ref("HumanUser", author)
+        _write_or_raise(
+            lambda: self._sg.create("Note", payload, ["id"]),
+            entity_type="Note",
             entity_id=None,
             field=None,
         )
