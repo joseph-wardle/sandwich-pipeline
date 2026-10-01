@@ -1,0 +1,66 @@
+set cut_paste_input [stack 0]
+version 17.0 v4
+push $cut_paste_input
+Group {
+ name BrushCard1
+ onCreate "try:\n    import brush_card\nexcept ImportError:\n    pass\nelse:\n    brush_card.on_create()\n"
+ knobChanged "try:\n    import brush_card\nexcept ImportError:\n    pass\nelse:\n    brush_card.on_knob_changed()\n"
+ tile_color 0x6b4f8fff
+ selected true
+ addUserKnob {20 brush_card l BrushCard}
+ addUserKnob {4 stroke t "Stroke image from the library (\$BRUSH_CARD_LIB)." M {god_rays_uv1 god_rays_uv2 god_rays_uv3}}
+ addUserKnob {22 refresh l Refresh t "Rescan the stroke library for new or removed files." -STARTLINE T "import brush_card\nbrush_card.refresh()"}
+ addUserKnob {6 premult l "premultiply stroke" t "Premultiply the stroke before texturing. Leave on for straight-alpha images (e.g. PNG); turn off if the library files are premultiplied." +STARTLINE}
+ premult true
+ addUserKnob {26 transform_divider l transform}
+ addUserKnob {41 translate T Card.translate}
+ addUserKnob {41 rotate T Card.rotate}
+ addUserKnob {41 scaling l scale T Card.scaling}
+ addUserKnob {41 uniform_scale l "uniform scale" T Card.uniform_scale}
+}
+ Read {
+  inputs 0
+  file_type png
+  file /job/sandwich/05_production/lighting/crepuscular_cards/god_rays_uv1.png
+  format "2048 2048 0 0 2048 2048 1 square_2K"
+  origset true
+  name BrushCard1_Read
+  xpos 0
+ }
+ Premult {
+  name BrushCard1_Premult
+  xpos 0
+  ypos 120
+  disable {{!parent.premult}}
+ }
+ Input {
+  inputs 0
+  name scene
+  xpos -150
+  ypos 200
+ }
+ GeoCard {
+  inputs 2
+  prim_path /BrushCards/BrushCard1
+  uniform_scale 100
+  control_points {3 3 3 6 
+
+1 {-0.5 -0.5 0} 1 {0.1666666865 0 0} 1 {0 0 0} 1 {0 0.1666666865 0} 1 {0 0 0} 1 {0 0 0} 
+1 {0 -0.5 0} 1 {0.1666666716 0 0} 1 {-0.1666666716 0 0} 1 {0 0.1666666865 0} 1 {0 0 0} 1 {0.5 0 0} 
+1 {0.5 -0.5 0} 1 {0 0 0} 1 {-0.1666666865 0 0} 1 {0 0.1666666865 0} 1 {0 0 0} 1 {1 0 0} 
+1 {-0.5 0 0} 1 {0.1666666865 0 0} 1 {0 0 0} 1 {0 0.1666666716 0} 1 {0 -0.1666666716 0} 1 {0 0.5 0} 
+1 {0 0 0} 1 {0.1666666716 0 0} 1 {-0.1666666716 0 0} 1 {0 0.1666666716 0} 1 {0 -0.1666666716 0} 1 {0.5 0.5 0} 
+1 {0.5 0 0} 1 {0 0 0} 1 {-0.1666666865 0 0} 1 {0 0.1666666716 0} 1 {0 -0.1666666716 0} 1 {1 0.5 0} 
+1 {-0.5 0.5 0} 1 {0.1666666865 0 0} 1 {0 0 0} 1 {0 0 0} 1 {0 -0.1666666865 0} 1 {0 1 0} 
+1 {0 0.5 0} 1 {0.1666666716 0 0} 1 {-0.1666666716 0 0} 1 {0 0 0} 1 {0 -0.1666666865 0} 1 {0.5 1 0} 
+1 {0.5 0.5 0} 1 {0 0 0} 1 {-0.1666666865 0 0} 1 {0 0 0} 1 {0 -0.1666666865 0} 1 {1 1 0} }
+  name Card
+  xpos 0
+  ypos 200
+ }
+ Output {
+  name Output1
+  xpos 0
+  ypos 300
+ }
+end_group
