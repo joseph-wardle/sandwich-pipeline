@@ -19,6 +19,13 @@ DOWNSTREAM: dict[str, list[str]] = {
     "rig": ["Animation"],
     "anim": ["CFX", "FX", "Lighting"],
     "cam": ["Animation", "Lighting"],
+    "flo": ["CFX", "FX", "Lighting"],
+    "cfx": ["Lighting"],
+    "fx": ["Lighting"],
+    # Not a real department. This row goes when envfx does.
+    "envfx": ["Lighting"],
+    # ShotGrid has no comp Step to tell.
+    "lighting": [],
 }
 
 
@@ -38,10 +45,13 @@ def announce_publish(
     """Tell `department`'s downstream that `artist` published `shot`/`asset`.
 
     `detail` is free text for the message, such as which rigs were published.
+    Returns one line per channel, or none for a department with no downstream.
     """
+    steps = DOWNSTREAM[department]
+    if not steps:
+        return []
     resolved_artist = artist if artist else resolve_artist_display_name()
     resolved_deliverable_name = deliverable_name or deliverable.code
-    steps = DOWNSTREAM[department]
     subject = f"{resolved_deliverable_name} {department} published"
     sentence = f"{subject} by {resolved_artist}"
     if announce_path:
