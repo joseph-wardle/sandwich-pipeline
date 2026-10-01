@@ -9,12 +9,14 @@ Public API
 - run_asset_builder(asset, geo_variant) -> structured result dict
 - summarize_result(payload) -> human-readable summary string
 - HoudiniPublishError — raised when the Houdini step fails
+- HoudiniPublishCancelled — raised when the artist cancels the Houdini step
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,9 +34,15 @@ log = logging.getLogger(__name__)
 _RESULT_START_MARKER = "--BUILD-RESULT--"
 _RESULT_END_MARKER = "--END-BUILD-RESULT--"
 
+_CANCEL_POLL_MS = 200
+
 
 class HoudiniPublishError(RuntimeError):
     """Raised when the headless Houdini publish step fails."""
+
+
+class HoudiniPublishCancelled(HoudiniPublishError):
+    """Raised when the artist cancels before Houdini finishes."""
 
 
 @dataclass(frozen=True)
@@ -49,12 +57,15 @@ class _ProcessResult:
 # ---------------------------------------------------------------------------
 
 
-def run_asset_builder(asset: Asset, *, geo_variant: str) -> dict[str, Any]:
+def run_asset_builder(
+    asset: Asset, *, geo_variant: str, is_cancelled: Callable[[], bool]
+) -> dict[str, Any]:
     """Run the Houdini asset builder for the given asset and geometry variant.
 
     Blocks until hython exits, but keeps the Qt event loop running.
     Returns the structured result dict from hython on success.
-    Raises HoudiniPublishError with a descriptive message on failure.
+    Raises HoudiniPublishError with a descriptive message on failure, and
+    HoudiniPublishCancelled if *is_cancelled* turns true before hython exits.
     """
     if not Executables.hython.exists():
         raise HoudiniPublishError(
@@ -91,7 +102,7 @@ def run_asset_builder(asset: Asset, *, geo_variant: str) -> dict[str, Any]:
         f"Running headless Houdini publish from Substance for {asset_name} "
         f"(geo={geo_variant})"
     )
-    result = _run_process(command, env)
+    result = _run_process(command, env, is_cancelled)
 
     payload = _parse_result(result.stdout)
     if (
@@ -148,7 +159,9 @@ def summarize_result(payload: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _run_process(command: list[str], env: dict[str, str]) -> _ProcessResult:
+def _run_process(
+    command: list[str], env: dict[str, str], is_cancelled: Callable[[], bool]
+) -> _ProcessResult:
     """Run *command* to completion in a nested Qt event loop; capture its output."""
     environment = QtCore.QProcessEnvironment()
     for key, value in env.items():
@@ -165,10 +178,18 @@ def _run_process(command: list[str], env: dict[str, str]) -> _ProcessResult:
         if state == QtCore.QProcess.NotRunning:
             loop.quit()
 
+    def stop_if_cancelled() -> None:
+        if is_cancelled():
+            loop.quit()
+
     process.stateChanged.connect(on_state_changed)
+    cancel_poll = QtCore.QTimer()
+    cancel_poll.timeout.connect(stop_if_cancelled)
+    cancel_poll.start(_CANCEL_POLL_MS)
     process.start(command[0], command[1:])
     if process.state() != QtCore.QProcess.NotRunning:
         loop.exec_()
+    cancel_poll.stop()
 
     if process.error() == QtCore.QProcess.FailedToStart:
         log.error(f"Could not start {command[0]}: {process.errorString()}")
@@ -176,10 +197,13 @@ def _run_process(command: list[str], env: dict[str, str]) -> _ProcessResult:
             "Failed to execute hython; verify Houdini is installed."
         )
     if process.state() != QtCore.QProcess.NotRunning:
-        # The event loop was told to exit, e.g. because Painter is quitting.
+        # The artist cancelled, or the event loop was told to exit, e.g. because
+        # Painter is quitting.
         # Only hython is killed; a child it started, such as husk, runs on.
         process.kill()
         process.waitForFinished()
+        if is_cancelled():
+            raise HoudiniPublishCancelled("Cancelled before Houdini finished.")
         raise HoudiniPublishError("Interrupted before Houdini finished.")
 
     stdout = process.readAllStandardOutput().data().decode("utf-8", "replace")

@@ -228,31 +228,36 @@ class TexConverter:
                 ) from exc
 
             failures: list[str] = []
-            for cmd, proc in zip(batch, procs):
-                stdout, stderr = proc.communicate()
-                _process_qt_events()
+            try:
+                for cmd, proc in zip(batch, procs):
+                    stdout, stderr = proc.communicate()
+                    _process_qt_events()
 
-                img = Path(cmd[-1])
-                if proc.returncode == 0 and img.exists():
-                    log.debug(f"Successfully converted {img}\n{stdout}{stderr}")
-                    finished_imgs.append(img)
-                    self._report_progress(
-                        PublishStage.CONVERTING_TEX,
-                        "Converting source textures to TEX.",
-                        current=len(finished_imgs),
-                        total=len(cmds),
-                    )
-                else:
-                    log.error(
-                        f"TEX conversion of {img} failed with exit code "
-                        f"{proc.returncode}\n{stdout}{stderr}"
-                    )
-                    failures.append(
-                        f"{img.name}: {_failure_reason(proc.returncode, stderr)}"
-                    )
+                    img = Path(cmd[-1])
+                    if proc.returncode == 0 and img.exists():
+                        log.debug(f"Successfully converted {img}\n{stdout}{stderr}")
+                        finished_imgs.append(img)
+                        self._report_progress(
+                            PublishStage.CONVERTING_TEX,
+                            "Converting source textures to TEX.",
+                            current=len(finished_imgs),
+                            total=len(cmds),
+                        )
+                    else:
+                        log.error(
+                            f"TEX conversion of {img} failed with exit code "
+                            f"{proc.returncode}\n{stdout}{stderr}"
+                        )
+                        failures.append(
+                            f"{img.name}: {_failure_reason(proc.returncode, stderr)}"
+                        )
+            finally:
+                # However the batch ends, including a cancel raised by the
+                # progress callback, no converter is left running against the
+                # publish folder.
+                for proc in procs:
+                    proc.communicate()
 
-            # Raised only once the whole batch has exited, so no converter is
-            # left running against the publish folder.
             if failures:
                 raise TexConversionError(_failure_summary(failures))
 

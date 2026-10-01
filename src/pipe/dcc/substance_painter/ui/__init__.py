@@ -28,6 +28,7 @@ from pipe.core.ui.progress import ProgressDialog
 from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.dcc.substance_painter.publish.export import Exporter, TexSetExportSettings
 from pipe.dcc.substance_painter.util.houdini_bridge import (
+    HoudiniPublishCancelled,
     HoudiniPublishError,
     run_asset_builder,
     summarize_result,
@@ -55,6 +56,33 @@ from pipe.core.util.paths import get_repo_root
 from pipe.core.versioning import backup_if_changed
 
 log = logging.getLogger(__name__)
+
+_CANCELLED_BEFORE_EXPORT_MESSAGE = "Publish cancelled. No textures were exported."
+_CANCELLED_DURING_EXPORT_MESSAGE = (
+    "Publish cancelled before it finished.\n\n"
+    "Textures exported before you cancelled are already in the publish folder, "
+    "so it may hold a mix of old and new textures. Publish again to replace "
+    "them all."
+)
+_HOUDINI_CANCELLED_STATUS = (
+    "Houdini publish cancelled before it finished. Publish again to rebuild the asset."
+)
+
+_STAGES_BEFORE_EXPORT = (
+    PublishStage.SAVING_PROJECT,
+    PublishStage.PREPARING_PUBLISH,
+    PublishStage.PLANNING_EXPORT,
+)
+
+
+class _PublishCancelled(Exception):
+    """Raised at a progress update once the artist has pressed Cancel."""
+
+    error_code = "PUBLISH_CANCELLED"
+
+    def __init__(self, stage: PublishStage) -> None:
+        super().__init__(f"Cancelled at: {stage.label}")
+        self.stage = stage
 
 
 @dataclass(frozen=True)
@@ -445,7 +473,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     def _begin_publish(self, request: _PendingPublishRequest) -> None:
         """Set up the progress dialog and kick off the publish.
 
-        Creates the non-closable progress dialog, disables the publish UI,
+        Creates the progress dialog, disables the publish UI,
         then defers to ``_schedule_publish_when_idle`` via a zero-delay
         QTimer so Qt can paint the dialog before Substance Painter begins
         synchronous work.
@@ -454,6 +482,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             self,
             title="Publishing Textures",
             total_steps=len(request.stage_sequence),
+            cancellable=True,
         )
         context = _ActivePublishContext(
             request=request,
@@ -518,13 +547,15 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
         request = context.request
         try:
+            if context.progress_dialog.cancelled:
+                raise _PublishCancelled(request.stage_sequence[0])
             asset = self._register_material_selection(self._curr_asset, request)
             self._curr_asset = asset
 
             if request.save_required and not self._save_before_publish(context):
                 return
 
-            self._send_publish_progress(
+            self._send_progress_or_cancel(
                 PublishProgressUpdate(
                     stage=PublishStage.PREPARING_PUBLISH,
                     message="Preparing the publish configuration and enabled texture sets.",
@@ -536,7 +567,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 request.mat_var,
                 request.geo_var,
                 request.material_layer,
-                progress_callback=self._send_publish_progress,
+                progress_callback=self._send_progress_or_cancel,
             )
             if not export_success:
                 log.error(f"Texture export failed for {request.asset_label}")
@@ -552,8 +583,9 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 )
                 return
 
+            # The textures are published now, so Cancel only skips the Houdini build.
             backup_ok, backup_status = self._backup_project(asset, request)
-            houdini_ok, houdini_status = self._run_houdini_publish(asset, request)
+            houdini_ok, houdini_status = self._run_houdini_publish(asset, context)
             if backup_ok and houdini_ok:
                 sp.logging.info(f"Publish complete for {request.asset_label}")
                 title = "Publish Textures"
@@ -564,6 +596,15 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 context,
                 f"Textures successfully exported!\n{backup_status}\n{houdini_status}",
                 title=title,
+            )
+        except _PublishCancelled as cancelled:
+            log.info(f"Publish cancelled for {request.asset_label}: {cancelled}")
+            self._show_publish_message(
+                context,
+                _CANCELLED_BEFORE_EXPORT_MESSAGE
+                if cancelled.stage in _STAGES_BEFORE_EXPORT
+                else _CANCELLED_DURING_EXPORT_MESSAGE,
+                title="Publish Cancelled",
             )
         except Exception as exc:
             log.exception(
@@ -681,9 +722,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         return True, status
 
     def _run_houdini_publish(
-        self, asset: Asset, request: _PendingPublishRequest
+        self, asset: Asset, context: _ActivePublishContext
     ) -> tuple[bool, str]:
         """Run the headless Houdini asset build; return (succeeded, status line)."""
+        progress_dialog = context.progress_dialog
         self._send_publish_progress(
             PublishProgressUpdate(
                 stage=PublishStage.RUNNING_HOUDINI,
@@ -693,10 +735,19 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 ),
             )
         )
+        if progress_dialog.cancelled:
+            return False, _HOUDINI_CANCELLED_STATUS
         # The progress dialog stays window-modal until this returns, which is
         # what stops the artist closing the project mid-build.
         try:
-            result = run_asset_builder(asset, geo_variant=request.geo_var)
+            result = run_asset_builder(
+                asset,
+                geo_variant=context.request.geo_var,
+                is_cancelled=lambda: progress_dialog.cancelled,
+            )
+        except HoudiniPublishCancelled:
+            log.info("Headless Houdini publish cancelled from Substance.")
+            return False, _HOUDINI_CANCELLED_STATUS
         except HoudiniPublishError as exc:
             log.error(f"Headless Houdini publish failed from Substance: {exc}")
             return False, f"Houdini publish failed: {exc}"
@@ -735,6 +786,13 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             current=update.current,
             total=update.total,
         )
+
+    def _send_progress_or_cancel(self, update: PublishProgressUpdate) -> None:
+        """Show *update*, then stop the publish if the artist has pressed Cancel."""
+        self._send_publish_progress(update)
+        ctx = self._active_publish_context
+        if ctx is not None and ctx.progress_dialog.cancelled:
+            raise _PublishCancelled(update.stage)
 
     def _set_publish_controls_enabled(self, enabled: bool) -> None:
         self._central_widget.setEnabled(enabled)
