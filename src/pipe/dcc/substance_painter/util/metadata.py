@@ -1,23 +1,11 @@
-"""Read and write asset metadata in Substance Painter project files.
+"""Work out which asset and geometry variant a Substance Painter project is for.
 
-Associates Substance Painter projects with pipeline assets by persisting
-asset identity and texture-set mappings in the project's embedded metadata.
-This allows export and versioning tools to know which pipeline asset a
-Substance Painter project belongs to without relying on file paths alone.
-
-Public API
-----------
-- get_asset_selection_metadata()
-- ProjectIdentity
-- resolve_project_identity()
-- identify_open_project()
-- project_version_stream()
-- tag_project()
+The project file's location decides.  A tag saved in the project's metadata
+names the asset and variant for copies and for files outside the asset's folder.
 """
 
 from __future__ import annotations
 
-import datetime
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,16 +23,9 @@ from Qt import QtWidgets
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
 from pipe.core.ui import MessageDialog
-from pipe.core.versioning import DCC_SUBSTANCE, VersionStreamSpec
-from pipe.core.shotgrid import (
-    Asset,
-    ShotGrid,
-    ShotGridError,
-    ShotGridNotFound,
-    build_asset_path,
-)
+from pipe.core.versioning import VersionStreamSpec
+from pipe.core.shotgrid import Asset, ShotGrid, ShotGridError, ShotGridNotFound
 from pipe.dcc.substance_painter.util.project import current_project_path
-from pipe.dcc.substance_painter.util.texture_set import texture_set_name
 
 log = logging.getLogger(__name__)
 
@@ -56,10 +37,13 @@ PIPE_SP_METADATA_CONTEXT = "skd_asset_pipeline"
 """Substance Painter metadata context key for the asset pipeline."""
 
 PIPE_SP_METADATA_KEY = "asset_selection"
-"""Key within the metadata context that stores the asset selection payload."""
+"""Key within the metadata context that stores the tag."""
 
-PIPE_SP_METADATA_SCHEMA_VERSION = 1
-"""Schema version stamped into every metadata payload for future migration."""
+# Keys of the tag.  Projects tagged before the tag was trimmed carry more keys;
+# these three are the only ones read.
+TAG_ASSET_ID = "asset_id"
+TAG_ASSET_PATH = "asset_path"
+TAG_GEO_VARIANT = "geo_variant"
 
 NO_ACTIVE_ASSET_MESSAGE = (
     "Could not tell which asset this project belongs to. "
@@ -135,7 +119,7 @@ def resolve_project_identity(conn: ShotGrid) -> ProjectIdentity | None:
 
     variant = _listed_variant_at(asset, project_path)
     if variant is None and _is_tagged_for(tag, asset):
-        variant = str(tag.get("geo_variant") or "").strip() or None
+        variant = str(tag.get(TAG_GEO_VARIANT) or "").strip() or None
 
     is_working_file = variant is not None and is_same_production_file(
         project_path, paths_for_asset(asset).textures_variant_path(variant)
@@ -166,7 +150,9 @@ def project_version_stream(asset: Asset, variant: str) -> VersionStreamSpec:
 
 
 def _is_tagged_for(tag: dict[str, Any], asset: Asset) -> bool:
-    return tag.get("asset_id") == asset.id or tag.get("asset_path") == asset.asset_path
+    return (
+        tag.get(TAG_ASSET_ID) == asset.id or tag.get(TAG_ASSET_PATH) == asset.asset_path
+    )
 
 
 def _listed_variant_at(asset: Asset, project_path: Path) -> str | None:
@@ -192,103 +178,39 @@ def _asset_at(conn: ShotGrid, folder: Path) -> Asset | None:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Metadata write
-# ---------------------------------------------------------------------------
-
-
-def _utc_now_iso() -> str:
-    """Return the current UTC time as a compact ISO-8601 string."""
-    return (
-        datetime.datetime.now(datetime.timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
-    )
-
-
-def tag_project(asset: Asset, geo_variant: str) -> None:
-    """Record *asset* and *geo_variant* in the open project's metadata."""
-    asset_name = asset.display_name
-    if not sp.project.is_open() or not asset_name:
-        return
-
-    payload: dict[str, Any] = {
-        "schema_version": PIPE_SP_METADATA_SCHEMA_VERSION,
-        "dcc": DCC_SUBSTANCE,
-        "asset_map": {
-            texture_set_name(texset): asset_name
-            for texset in sp.textureset.all_texture_sets()
-        },
-        "last_asset": asset_name,
-        "asset_id": asset.id,
-        "asset_path": asset.asset_path,
-        "geo_variant": geo_variant,
-    }
-    if asset.subdirectory is not None:
-        payload["asset_subdirectory"] = asset.subdirectory
-
-    stored = {k: v for k, v in _safe_get_metadata().items() if k != "updated_at"}
-    if stored == payload:
-        return
-    payload["updated_at"] = _utc_now_iso()
-    _metadata_handle().set(PIPE_SP_METADATA_KEY, payload)
-    log.info(f"Tagged project with asset {asset_name} (variant={geo_variant})")
-
-
-# ---------------------------------------------------------------------------
-# Asset resolution from project metadata
-# ---------------------------------------------------------------------------
-
-
-def _asset_from_tag(conn: ShotGrid, selection: dict[str, Any]) -> Asset | None:
-    """Resolve the asset named by the project's tag, or None.
-
-    Tries several strategies in order: asset ID, asset path, display name,
-    code name.
-    """
-    # Strategy 1: direct ID lookup
-    asset_id = selection.get("asset_id")
+def _asset_from_tag(conn: ShotGrid, tag: dict[str, Any]) -> Asset | None:
+    """Return the asset the tag names, by id and then by path, or None."""
+    asset_id, asset_path = tag.get(TAG_ASSET_ID), tag.get(TAG_ASSET_PATH)
     if asset_id:
         try:
             return conn.get_asset(id=asset_id)
-        except Exception as exc:
-            log.warning(f"Failed to resolve asset by id from metadata: {exc}")
-
-    # Strategy 2: explicit asset path
-    asset_path = selection.get("asset_path")
+        except ShotGridNotFound as exc:
+            log.warning(f"The tag's asset id was not found: {exc}")
     if asset_path:
         try:
             return conn.get_asset(path=asset_path)
-        except Exception as exc:
-            log.warning(f"Failed to resolve asset by path from metadata: {exc}")
-
-    asset_subdirectory = selection.get("asset_subdirectory")
-
-    # Strategy 3: asset name from metadata
-    asset_name = selection.get("last_asset")
-    if not asset_name:
-        asset_map = selection.get("asset_map") or {}
-        unique_assets = {name for name in asset_map.values() if name}
-        if len(unique_assets) == 1:
-            asset_name = next(iter(unique_assets))
-
-    if not asset_name:
-        return None
-
-    if asset_subdirectory is not None:
-        try:
-            return conn.get_asset(path=build_asset_path(asset_name, asset_subdirectory))
-        except Exception:
-            pass
-
-    try:
-        return conn.get_asset(display_name=asset_name)
-    except Exception:
-        pass
-
-    try:
-        return conn.get_asset(name=asset_name)
-    except Exception as exc:
-        log.warning(f"Failed to resolve asset from project metadata: {exc}")
-
+        except ShotGridNotFound as exc:
+            log.warning(f"The tag's asset path was not found: {exc}")
     return None
+
+
+# ---------------------------------------------------------------------------
+# Tag write
+# ---------------------------------------------------------------------------
+
+
+def tag_project(asset: Asset, geo_variant: str) -> None:
+    """Record *asset* and *geo_variant* in the open project's tag."""
+    write_tag(
+        {
+            TAG_ASSET_ID: asset.id,
+            TAG_ASSET_PATH: asset.asset_path,
+            TAG_GEO_VARIANT: geo_variant,
+        }
+    )
+    log.info(f"Tagged project with {asset.asset_path} (variant={geo_variant})")
+
+
+def write_tag(tag: dict[str, Any]) -> None:
+    """Replace the open project's tag, e.g. to put back the one it had."""
+    _metadata_handle().set(PIPE_SP_METADATA_KEY, tag)

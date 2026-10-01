@@ -45,9 +45,11 @@ from pipe.dcc.substance_painter.ui.dialogs import (
 from pipe.dcc.substance_painter.runtime import get_main_qt_window
 from pipe.dcc.substance_painter.util.metadata import (
     ProjectIdentity,
+    get_asset_selection_metadata,
     identify_open_project,
     project_version_stream,
     tag_project,
+    write_tag,
 )
 from pipe.dcc.substance_painter.util.project import (
     check_project_editable,
@@ -250,7 +252,7 @@ def _close_current_project(
 def _open_existing_project_for_asset(
     asset: Asset, project_path: Path, *, geo_variant: str
 ) -> None:
-    """Open an existing Substance Painter project and tag it with asset metadata."""
+    """Open the asset's existing Substance Painter project."""
     parent = get_main_qt_window()
     if not project_path.exists():
         MessageDialog(
@@ -263,9 +265,7 @@ def _open_existing_project_for_asset(
 
     cur = current_project_path()
     if cur is not None and is_same_production_file(cur, project_path):
-        tag_project(asset, geo_variant)
-        if sp.project.needs_saving():
-            _save_current_project_as(project_path, parent)
+        log.info(f"{project_path} is already open.")
         return
 
     if sp.project.is_open():
@@ -278,7 +278,6 @@ def _open_existing_project_for_asset(
 
     if not _open_existing_project(project_path, parent):
         return
-    tag_project(asset, geo_variant)
     asset_label = asset.display_name or asset.name
     log.info(
         f"Opened Substance project for asset {asset_label} (variant={geo_variant})"
@@ -300,21 +299,15 @@ def _save_current_project_as_asset(
         log.warning("Save current project requested with no project open.")
         return
 
-    cur = current_project_path()
-    if cur is not None and is_same_production_file(cur, project_path):
-        tag_project(asset, geo_variant)
-        return
-
     if project_path.exists() and not _confirm_overwrite_project(parent, project_path):
         return
 
     project_path.parent.mkdir(parents=True, exist_ok=True)
-    # Tag only after the project is at its new path, so a failed save cannot
-    # leave the original file carrying the new asset's tag.
-    if not _save_current_project_as(project_path, parent):
-        return
+    previous_tag = get_asset_selection_metadata()
     tag_project(asset, geo_variant)
-    if sp.project.needs_saving() and not _save_current_project_as(project_path, parent):
+    if not _save_current_project_as(project_path, parent):
+        # The project is still the original file, so it keeps the original tag.
+        write_tag(previous_tag)
         return
     log.info(f"Saved Substance project to {project_path} (variant={geo_variant})")
 
@@ -522,7 +515,7 @@ def launch_version_browser_for_current_project() -> None:
         return
 
     if selected_action == VersionBrowserWidget.ACTION_RESTORE:
-        _restore_project_version(parent, selected_record, project_stream, identity)
+        _restore_project_version(parent, selected_record, project_stream)
 
 
 def _has_unversioned_work(project_stream: VersionStreamSpec) -> bool:
@@ -535,7 +528,6 @@ def _restore_project_version(
     parent: QtWidgets.QWidget | None,
     record: VersionRecord,
     project_stream: VersionStreamSpec,
-    identity: ProjectIdentity,
 ) -> None:
     if _has_unversioned_work(project_stream):
         choice = prompt_restore_conflict(parent)
@@ -565,8 +557,6 @@ def _restore_project_version(
 
     if not _open_existing_project(working_path, parent):
         return
-    if identity.variant is not None:
-        tag_project(identity.asset, identity.variant)
     MessageDialog(
         parent,
         restored_message(record),
