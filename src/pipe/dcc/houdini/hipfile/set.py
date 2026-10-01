@@ -14,6 +14,7 @@ from pipe.core.publish import (
     next_version,
 )
 from pipe.core.sets import (
+    PUBLISHED_FILE_NAME,
     SETS_DIRNAME,
     current_layer_path,
     houdini_set_stream,
@@ -264,8 +265,13 @@ class HSetFileManager(HFileManager):
             )
             return
         try:
-            self._conn.create_set_published_file(
-                set, version=version, path=version_path, description=description
+            self._conn.create_published_file(
+                set,
+                name=PUBLISHED_FILE_NAME,
+                code=f"{set.name}_v{version:03d}",
+                version=version,
+                path=version_path,
+                description=description,
             )
         except ShotGridError:
             log.exception("Could not register %s in ShotGrid.", label)

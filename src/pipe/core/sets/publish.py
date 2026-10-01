@@ -12,6 +12,8 @@ from pipe.core.util.paths import get_production_path
 
 SETS_DIRNAME = "set"
 SOURCE_KEY = "source"
+# What every set version's ShotGrid PublishedFile is named.
+PUBLISHED_FILE_NAME = "set"
 
 _NAME = re.compile(r"[a-z][a-z0-9]*(_[a-z0-9]+)*")
 
