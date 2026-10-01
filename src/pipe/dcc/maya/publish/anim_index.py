@@ -11,6 +11,8 @@ import attrs
 import cattrs
 from pxr import Sdf
 
+from pipe.core.publish import current_version, version_layer_path
+
 from .prim_paths import ANIM_CLASS_PATH, RIG_ROOT_PATH, RIG_SCOPE_PATH
 
 if TYPE_CHECKING:
@@ -18,20 +20,23 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+DEPARTMENT = "anim"
+
 
 class AnimStream(Enum):
     """Which of the two parallel anim publishes a run writes.
 
-    Each stream owns a whole set of layers in the publish folder, distinguished
-    by name, so that publishing one never disturbs the other.
+    Each stream has its own current layer and names its own layers in a version,
+    so that publishing one never disturbs the other.
     """
 
     MAIN = "main"
     SPLINE = "spline"
 
     @property
-    def publish_filename(self) -> str:
-        return f"{self.value}.usd"
+    def layer_name(self) -> str:
+        """Names the current layer `anim.usd`, or `anim.spline.usd` on Spline."""
+        return DEPARTMENT if self is AnimStream.MAIN else f"{DEPARTMENT}.{self.value}"
 
     @property
     def anim_layer_suffix(self) -> str:
@@ -72,11 +77,14 @@ class PublishedAnim:
     rig: RigReference | None
 
 
-def read_anim_index(publish_path: Path) -> dict[str, PublishedAnim]:
+def read_anim_index(current: Path) -> dict[str, PublishedAnim]:
     """What the shot's current anim publish holds, keyed by `index_key`."""
-    if not publish_path.is_file():
+    version = current_version(current)
+    if version is None:
         return {}
 
+    # The rigs are indexed in the version. The current layer only sublayers it.
+    publish_path = version_layer_path(current, version)
     layer = _open_layer(publish_path)
     if layer is None:
         return {}

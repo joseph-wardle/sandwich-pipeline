@@ -42,8 +42,10 @@ class AnimPlayblastDialog(MPlayblastDialog):
 
     SETTINGS_KEY = "maya_anim"
 
-    def __init__(self, parent: QWidget | None) -> None:
-        super().__init__(parent, windowTitle="SKD Anim Playblast")
+    def __init__(self, parent: QWidget | None, description: str = "") -> None:
+        super().__init__(
+            parent, windowTitle="SKD Anim Playblast", description=description
+        )
 
     def _build_extra_source_options(self) -> QWidget | None:
         pass_row = QWidget()

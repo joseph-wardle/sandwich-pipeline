@@ -29,6 +29,8 @@ class PublishRows(QtWidgets.QWidget):
     ) -> None:
         super().__init__(parent)
 
+        self._version = QtWidgets.QLabel(version_label)
+
         self._note = QtWidgets.QLineEdit()
         self._note.setPlaceholderText("What changed?")
 
@@ -41,9 +43,13 @@ class PublishRows(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
-        layout.addWidget(QtWidgets.QLabel(version_label))
+        layout.addWidget(self._version)
         layout.addWidget(self._note)
         layout.addWidget(self._playblast)
+
+    def set_version_label(self, version_label: str) -> None:
+        """For a dialog where the artist also picks what is published."""
+        self._version.setText(version_label)
 
     def choice(self) -> PublishChoice:
         return PublishChoice(

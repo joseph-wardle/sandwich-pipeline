@@ -68,6 +68,7 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     _custom_camera: QComboBox
     _custom_in: QSpinBox
     _custom_out: QSpinBox
+    _description: str
     _shot: Shot | None
     _shot_camera_widget: QWidget
     _shot_code_value: QLabel
@@ -88,8 +89,15 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
 
     playblaster = MPlayblaster()
 
-    def __init__(self, parent: QWidget | None, windowTitle: str = "Playblast") -> None:
+    def __init__(
+        self,
+        parent: QWidget | None,
+        windowTitle: str = "Playblast",
+        description: str = "",
+    ) -> None:
+        """`description` is what the ShotGrid Version's description starts as."""
         super().__init__(parent, windowTitle=windowTitle)
+        self._description = description
         self._shot = self._resolve_pipeline_shot_context()
         self._setup_ui()
         self._update_ui_state()
@@ -484,7 +492,9 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         raise NotImplementedError
 
     def _clip_shotgrid(self) -> ShotGridDestination:
-        return ShotGridDestination(entity=self._review_entity())
+        return ShotGridDestination(
+            entity=self._review_entity(), description=self._description
+        )
 
     def _review_entity(self) -> ReviewEntity:
         """What this playblast's ShotGrid Version attaches to."""

@@ -5,7 +5,7 @@ import time
 from collections import Counter
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import attrs
 from Qt import QtCore
@@ -22,10 +22,11 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.core.ui import DialogButtons
-from pipe.core.util.paths import get_production_path
+from pipe.core.publish.target import Target, shot_target
+from pipe.core.ui import DialogButtons, PublishChoice, PublishRows
 
 from .anim_index import (
+    DEPARTMENT,
     AnimStream,
     PublishedAnim,
     index_key,
@@ -35,6 +36,7 @@ from .anim_index import (
 from .namespaces import UnpublishableReason, namespace_of, unpublishable_reason
 
 if TYPE_CHECKING:
+    from pipe.core.shotgrid import Shot
     from pipe.core.struct.timeline import Timeline
 
 log = logging.getLogger(__name__)
@@ -51,7 +53,7 @@ _ROW_FRAME = "rigRow"
 # Only the opening size — the scroll area copes with whatever the fonts and the
 # shot's rig count really come to.
 _WIDTH = 560
-_CHROME_HEIGHT = 180
+_CHROME_HEIGHT = 270
 _ROW_HEIGHT = 32
 _MIN_LIST_HEIGHT = 96
 _MAX_LIST_HEIGHT = 320
@@ -122,17 +124,19 @@ class PublishSelection:
     stream: AnimStream
     sets_to_export: tuple[str, ...] = attrs.field(validator=attrs.validators.min_len(1))
     anims_to_keep: tuple[PublishedAnim, ...]
+    # The version the dialog said this publish becomes.
+    target: Target
+    choice: PublishChoice
 
 
 def select_rigs_to_publish(
     parent: QWidget | None,
     cache_sets: list[str],
-    shot_code: str,
-    publish_dir: Path,
+    shot: Shot,
     timeline: Timeline,
 ) -> PublishSelection | None:
     """Ask which rigs to publish. Opens a dialog; None means do not publish."""
-    dialog = _RigSelectDialog(parent, cache_sets, shot_code, publish_dir, timeline)
+    dialog = _RigSelectDialog(parent, cache_sets, shot, timeline)
     if not dialog.exec_():
         return None
     return dialog.selection()
@@ -145,13 +149,13 @@ class _RigSelectDialog(QDialog, DialogButtons):
         self,
         parent: QWidget | None,
         cache_sets: list[str],
-        shot_code: str,
-        publish_dir: Path,
+        shot: Shot,
         timeline: Timeline,
     ) -> None:
         super().__init__(parent)
+        shot_code = cast(str, shot.code)
         self._cache_sets = cache_sets
-        self._publish_dir = publish_dir
+        self._shot = shot
         self._timeline = timeline
         self._rows: list[tuple[RigRow, QCheckBox]] = []
 
@@ -168,13 +172,7 @@ class _RigSelectDialog(QDialog, DialogButtons):
         )
 
         self._summary = QLabel()
-        self._destination = QLabel()
-        self._destination.setStyleSheet(_DIM_STYLE)
-
-        footer = QHBoxLayout()
-        footer.addWidget(self._summary)
-        footer.addStretch()
-        footer.addWidget(self._destination)
+        self._publish_rows = PublishRows("")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 12)
@@ -182,7 +180,8 @@ class _RigSelectDialog(QDialog, DialogButtons):
         layout.addLayout(self._build_header(shot_code))
         layout.addLayout(self._build_stream_picker())
         layout.addWidget(self._scroll)
-        layout.addLayout(footer)
+        layout.addWidget(self._summary)
+        layout.addWidget(self._publish_rows)
         layout.addWidget(self.buttons)
 
         self._reload()
@@ -252,23 +251,21 @@ class _RigSelectDialog(QDialog, DialogButtons):
             stream=self._stream,
             sets_to_export=tuple(export),
             anims_to_keep=tuple(keep),
+            target=self._target,
+            choice=self._publish_rows.choice(),
         )
 
     @property
     def _stream(self) -> AnimStream:
         return AnimStream.SPLINE if self._spline.isChecked() else AnimStream.MAIN
 
-    @property
-    def _publish_path(self) -> Path:
-        return self._publish_dir / self._stream.publish_filename
-
     def _reload(self) -> None:
         """Re-read the chosen stream's publish and rebuild every row from it."""
         self._stream_note.setText(
             _SPLINE_NOTE if self._stream is AnimStream.SPLINE else ""
         )
-        self._destination.setText(_shorten(self._publish_path))
-        self._destination.setToolTip(str(self._publish_path))
+        self._target = shot_target(self._shot, DEPARTMENT, self._stream.layer_name)
+        self._publish_rows.set_version_label(self._target.label)
         # Setting the widget deletes the old rows, so a stream switch starts from
         # this stream's defaults rather than the boxes ticked against the other.
         self._scroll.setWidget(self._build_rows())
@@ -281,7 +278,7 @@ class _RigSelectDialog(QDialog, DialogButtons):
         layout.setSpacing(0)
         self._rows = []
 
-        rows = survey_rigs(self._cache_sets, self._publish_path, self._timeline)
+        rows = survey_rigs(self._cache_sets, self._target.current, self._timeline)
         for index, row in enumerate(rows):
             frame, box = self._build_row(row, last=index == len(rows) - 1)
             layout.addWidget(frame)
@@ -351,11 +348,11 @@ class _RigSelectDialog(QDialog, DialogButtons):
 
 
 def survey_rigs(
-    cache_sets: list[str], publish_path: Path, timeline: Timeline
+    cache_sets: list[str], current: Path, timeline: Timeline
 ) -> list[RigRow]:
     """One row per rig: the scene's rigs in scene order, then any the shot has
     published that the scene no longer holds."""
-    published = read_anim_index(publish_path)
+    published = read_anim_index(current)
     keys = {cache_set: index_key(namespace_of(cache_set)) for cache_set in cache_sets}
     shared = {key for key, count in Counter(keys.values()).items() if count > 1}
 
@@ -450,14 +447,6 @@ def _absent_row(entry: PublishedAnim) -> RigRow:
 
 def _rig_count(count: int) -> str:
     return f"{count} rig" if count == 1 else f"{count} rigs"
-
-
-def _shorten(publish_path: Path) -> str:
-    """The publish path from the production root down, for a footer that has to fit."""
-    try:
-        return str(publish_path.relative_to(get_production_path()))
-    except ValueError:
-        return str(publish_path)
 
 
 def _range_text(frames: tuple[int, int] | None) -> str:

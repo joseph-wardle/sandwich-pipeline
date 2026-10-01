@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from Qt.QtWidgets import QComboBox, QHBoxLayout, QLabel, QWidget
@@ -11,16 +10,22 @@ if TYPE_CHECKING:
 
 import maya.cmds as mc
 
-from pipe.core.announce import announce_publish
-from pipe.core.shotgrid import SGEntity, Shot
-from pipe.core.ui import FilteredListDialog, MessageDialog, MessageDialogCustomButtons
-from pipe.core.util.paths import get_production_path
-from pipe.core.util.users import resolve_artist_display_name
+from pipe.core.publish.target import Target, shot_target
+from pipe.core.shotgrid import Shot
+from pipe.core.ui import (
+    FilteredListDialog,
+    MessageDialog,
+    MessageDialogCustomButtons,
+    PublishRows,
+)
+from pipe.dcc.maya.playblast import PrevisPlayblastDialog
 
-from .publisher import Publisher
 from .usdchaser import ExportChaser, ExportChaserMode
+from .version import VersionPublisher
 
 log = logging.getLogger(__name__)
+
+DEPARTMENT = "cam"
 
 _MM_PER_INCH = 25.4  # Maya stores film aperture in inches
 
@@ -61,11 +66,13 @@ def _has_shot_aspect(camera: str) -> bool:
 
 class PublishCameraDialog(FilteredListDialog):
     _camera: QComboBox
+    rows: PublishRows
 
-    def __init__(self, parent: QWidget | None, items: Sequence[str]) -> None:
+    def __init__(self, parent: QWidget | None, shots: Sequence[Shot]) -> None:
+        self._shots = {shot.code: shot for shot in shots if shot.code is not None}
         super().__init__(
             parent,
-            items,
+            sorted(self._shots),
             "Publish Camera",
             "Select a shot to publish the camera for",
             accept_button_name="Publish",
@@ -82,7 +89,22 @@ class PublishCameraDialog(FilteredListDialog):
 
         self._layout.insertWidget(0, camera_widget)
 
+        self.rows = PublishRows("")
+        # Above the buttons.
+        self._layout.insertWidget(self._layout.count() - 1, self.rows)
+
+    def target(self) -> Target:
+        """The version the selected shot's camera becomes."""
+        # Publish is enabled only while a shot is selected.
+        code = cast(str, self.get_selected_item())
+        return shot_target(self._shots[code], DEPARTMENT)
+
+    def camera(self) -> str:
+        return self._camera.currentText()
+
     def _on_item_selected(self) -> None:
+        selected = self.get_selected_item() is not None
+        self.rows.set_version_label(self.target().label if selected else "")
         # Break-out names each RLO camera after its shot, so picking the shot picks
         # its camera. Scenes without one keep whatever camera is showing.
         cameras = [self._camera.itemText(i) for i in range(self._camera.count())]
@@ -90,45 +112,37 @@ class PublishCameraDialog(FilteredListDialog):
             self._camera.setCurrentText(shot_camera)
 
 
-class CameraPublisher(Publisher):
+class CameraPublisher(VersionPublisher):
     _PUBLISH_KIND = "camera"
 
-    def __init__(self) -> None:
-        super().__init__(PublishCameraDialog)
-
-    def _prepublish(self) -> bool:
-        if _publishable_cameras():
-            return True
-        MessageDialog(
-            self._window,
-            "There are no cameras in this scene to publish. Open the shot's "
-            "RLO scene, or add a camera, then publish again.",
-            "Cannot Publish: No Camera",
-        ).exec_()
-        return False
-
-    def _get_entity_list(self) -> list[str]:
-        return sorted(s.code for s in self._conn.find_shots() if s.code is not None)
-
-    def _get_entity_from_name(self, display_name: str) -> SGEntity | None:
-        return self._conn.get_shot(code=display_name)
-
-    def _get_save_path(self) -> Path | None:
-        shot = cast(Shot, self._entity)
-        return get_production_path() / shot.shot_path / "cam" / "cam.usd"
-
-    def _presave(self) -> bool:
-        if not _has_shot_aspect(self._camera) and not self._confirm_off_aspect():
+    def _choose(self) -> bool:
+        if not _publishable_cameras():
+            MessageDialog(
+                self._window,
+                "There are no cameras in this scene to publish. Open the shot's "
+                "RLO scene, or add a camera, then publish again.",
+                "Cannot Publish: No Camera",
+            ).exec_()
             return False
-        mc.select(self._camera, replace=True)
+
+        dialog = PublishCameraDialog(self._window, self._conn.find_shots())
+        if not dialog.exec_():
+            return False
+        camera = dialog.camera()
+        if not _has_shot_aspect(camera) and not self._confirm_off_aspect(camera):
+            return False
+
+        self._target = dialog.target()
+        self._choice = dialog.rows.choice()
+        mc.select(camera, replace=True)
         return True
 
-    def _confirm_off_aspect(self) -> bool:
-        width, height = _film_back_mm(self._camera)
+    def _confirm_off_aspect(self, camera: str) -> bool:
+        width, height = _film_back_mm(camera)
         return bool(
             MessageDialogCustomButtons(
                 self._window,
-                f"{self._camera} has a {width:.2f} x {height:.2f} mm film back "
+                f"{camera} has a {width:.2f} x {height:.2f} mm film back "
                 f"({width / height:.2f}:1), not 16:9 (1.78:1).\n\n"
                 "Shot cameras are normally 16:9. Renders crop this camera to 16:9, "
                 "so its viewport frame won't match the final image. "
@@ -141,7 +155,7 @@ class CameraPublisher(Publisher):
         )
 
     def _get_mayausd_kwargs(self) -> dict[str, Any]:
-        shot = cast(Shot, self._entity)
+        shot = cast(Shot, self._target.entity)
         cut_in, cut_out = shot.frame_range
         start = cut_in - 5
         end = cut_out + 5
@@ -152,18 +166,6 @@ class CameraPublisher(Publisher):
             "frameStride": 1.0 / shot.substeps,
         }
 
-    def _get_confirm_message(self) -> str:
-        return f"The camera has been exported to {self._publish_path}"
-
-    def _announce(self) -> list[str]:
-        return announce_publish(
-            self._conn,
-            deliverable=cast(Shot, self._entity),
-            department="cam",
-            artist=resolve_artist_display_name(),
-            path=self._publish_path,
-        )
-
-    @property
-    def _camera(self) -> str:
-        return cast(PublishCameraDialog, self._dialog)._camera.currentText()
+    def _open_playblast(self, description: str) -> None:
+        # The playblast tool for an RLO scene, where cameras are published from.
+        PrevisPlayblastDialog(self._window, description).show()

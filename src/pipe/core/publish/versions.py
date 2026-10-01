@@ -75,7 +75,7 @@ def create_staging(current: Path, version: int) -> Path:
             partway and left its folder behind.
     """
     staging = staging_layer_path(current, version).parent
-    staging.parent.mkdir(exist_ok=True)
+    staging.parent.mkdir(parents=True, exist_ok=True)
     # Never reused: whatever is already in it would be committed with this version.
     staging.mkdir()
     return staging_layer_path(current, version)
