@@ -10,7 +10,9 @@ if TYPE_CHECKING:
     from typing import Any, Sequence
 
 import maya.cmds as mc
+from pipe.core.announce import announce_publish
 from pipe.core.util.paths import get_production_path
+from pipe.core.util.users import resolve_artist_display_name
 
 from pipe.core.ui import FilteredListDialog, MessageDialog, MessageDialogCustomButtons
 from pipe.core.shotgrid import SGEntity, Shot
@@ -152,6 +154,15 @@ class CameraPublisher(Publisher):
 
     def _get_confirm_message(self) -> str:
         return f"The camera has been exported to {self._publish_path}"
+
+    def _announce(self) -> list[str]:
+        return announce_publish(
+            self._conn,
+            shot=cast(Shot, self._entity),
+            department="cam",
+            artist=resolve_artist_display_name(),
+            path=self._publish_path,
+        )
 
     @property
     def _camera(self) -> str:

@@ -110,6 +110,11 @@ class Publisher:
     def _get_confirm_message(self) -> str:
         return f"The selected objects have been exported to {self._publish_path}"
 
+    def _announce(self) -> list[str]:
+        """Tell downstream the publish landed. One dialog line per channel;
+        runs after the export, so it can only ever add to the dialog."""
+        return []
+
     # Subclasses opt in to `publish.usd` telemetry by setting this to a short
     # stable token (e.g. "asset", "anim", "camera"). The value becomes the
     # `kind` payload field on the emitted event, which is what the Grafana
@@ -155,6 +160,7 @@ class Publisher:
           - `get_save_path(self) -> Path`
           - `presave(self)`
           - `get_mayausd_kwargs(self) -> dict[str, Any]`
+          - `announce(self) -> list[str]`
         """
         with maintain_selection():
             if not self._prepublish():
@@ -174,11 +180,8 @@ class Publisher:
 
             self._do_publish_export()
 
-            MessageDialog(
-                self._window,
-                self._get_confirm_message(),
-                "Export Complete",
-            ).exec_()
+            lines = [self._get_confirm_message(), *self._announce()]
+            MessageDialog(self._window, "\n\n".join(lines), "Export Complete").exec_()
 
     def _select_publish_target_or_cancel(self, entity_list: list[str]) -> bool:
         """Run the entity-selection dialog and populate `self._selected_item`/`self._entity`.
