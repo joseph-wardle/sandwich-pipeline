@@ -19,8 +19,19 @@ from pathlib import Path
 
 from pxr import Sdf
 
+PUBLISH_DIRNAME = "publish"
+
 _VERSION = re.compile(r"v([0-9]{3,})")
-_STAGE_INFO_KEYS = ("metersPerUnit", "upAxis")
+# What a stage takes from its root layer alone. The current layer carries them so
+# that opening it gives the same units, frame range and frame rate as the version.
+_STAGE_INFO_KEYS = (
+    "metersPerUnit",
+    "upAxis",
+    "startTimeCode",
+    "endTimeCode",
+    "timeCodesPerSecond",
+    "framesPerSecond",
+)
 
 
 def version_layer_path(current: Path, version: int) -> Path:
@@ -116,7 +127,8 @@ def make_current(current: Path, version: int) -> None:
     # Written beside the current layer and swapped in, so a reader opening it
     # mid-publish gets either the old current layer or the new one, never half.
     temp = current.with_name(f".{current.stem}.tmp{current.suffix}")
-    layer.Export(str(temp))
+    # Text even when named `.usd`, so the version it points at can be read with cat.
+    layer.Export(str(temp), args={"format": "usda"})
     os.replace(temp, current)
 
 

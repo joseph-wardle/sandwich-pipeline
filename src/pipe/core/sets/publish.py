@@ -7,10 +7,10 @@ from pathlib import Path
 
 from pxr import Usd, UsdGeom
 
+from pipe.core.publish import PUBLISH_DIRNAME
 from pipe.core.util.paths import get_production_path
 
 SETS_DIRNAME = "set"
-PUBLISH_DIRNAME = "publish"
 SOURCE_KEY = "source"
 
 _NAME = re.compile(r"[a-z][a-z0-9]*(_[a-z0-9]+)*")
