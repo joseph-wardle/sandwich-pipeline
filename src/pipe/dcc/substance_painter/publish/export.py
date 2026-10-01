@@ -50,6 +50,8 @@ _NOT_OCIO_MESSAGE = (
 
 
 class TextureExportError(Exception):
+    """An export step failed; the message is shown to the artist as is."""
+
     error_code = "TEXTURE_EXPORT_FAILED"
 
 
@@ -76,11 +78,6 @@ class Exporter:
 
     def __init__(self, asset: Asset) -> None:
         self._asset = asset
-        self._last_error_message: str | None = None
-
-    @property
-    def last_error_message(self) -> str | None:
-        return self._last_error_message
 
     def _init_paths(self, mat_var: str, geo_var: str, material_layer: str) -> None:
         paths = paths_for_asset(self._asset)
@@ -126,9 +123,6 @@ class Exporter:
             "texture_set_count": max(0, int(texture_set_count)),
             "udim_set_count": max(0, int(udim_set_count)),
         }
-
-    def _set_error_message(self, message: str) -> None:
-        self._last_error_message = message.strip()
 
     def _src_lock_path(self) -> Path:
         return self._src_path / ".lock"
@@ -288,20 +282,15 @@ class Exporter:
         geo_var: str,
         material_layer: str,
         progress_callback: PublishProgressCallback | None = None,
-    ) -> bool:
+    ) -> None:
         """Export the texture sets, convert them to TEX, then write mat.json."""
-        self._last_error_message = None
-
-        try:
-            all_exported_textures = self._export_substance_textures(
-                exp_setting_arr,
-                mat_var=mat_var,
-                geo_var=geo_var,
-                material_layer=material_layer,
-                progress_callback=progress_callback,
-            )
-        except TextureExportError:
-            return False
+        all_exported_textures = self._export_substance_textures(
+            exp_setting_arr,
+            mat_var=mat_var,
+            geo_var=geo_var,
+            material_layer=material_layer,
+            progress_callback=progress_callback,
+        )
 
         exported_count = _file_count(all_exported_textures)
         sp.logging.info(
@@ -313,11 +302,10 @@ class Exporter:
             render_sources = self._move_previews(all_exported_textures)
         except OSError as exc:
             log.exception("Failed to move preview textures.")
-            self._set_error_message(
+            raise TextureExportError(
                 f"Textures exported, but moving the preview jpegs into "
                 f"{self._preview_path} failed.\nDetails: {exc}"
-            )
-            return False
+            ) from exc
 
         tex_converter = TexConverter(
             self._tex_path,
@@ -336,13 +324,12 @@ class Exporter:
             sp.logging.warning(
                 "TEX conversion failed; source textures exported but .tex files were not generated."
             )
-            self._set_error_message(
+            raise TextureExportError(
                 "Source textures exported, but TEX conversion failed.\n"
                 f"Details: {exc}\n"
                 "If this asset is rendering in Houdini, stop the render and press "
                 '"Reset RenderMan RIS/XPU", then publish again.'
-            )
-            return False
+            ) from exc
 
         # Written last, so mat.json never lists a texture set whose TEX files
         # failed to convert.
@@ -357,13 +344,10 @@ class Exporter:
             write_material_info(self._out_path, exp_setting_arr)
         except (OSError, ValueError) as exc:
             log.exception("Failed to write material info metadata.")
-            self._set_error_message(
+            raise TextureExportError(
                 "Textures exported, but failed to write material metadata.\n"
                 f"Details: {exc}"
-            )
-            return False
-
-        return True
+            ) from exc
 
     def _move_previews(
         self, exported_textures: dict[tuple[str, str], list[str]]
@@ -427,10 +411,7 @@ class Exporter:
                 try:
                     resolved_targets = resolve_export_targets(exp_setting_arr)
                 except ValueError as exc:
-                    self._set_error_message(str(exc))
-                    raise TextureExportError(
-                        self._last_error_message or str(exc)
-                    ) from exc
+                    raise TextureExportError(str(exc)) from exc
 
                 resolved_target_count = len(resolved_targets)
                 udim_target_count = count_udim_sets(
@@ -442,10 +423,7 @@ class Exporter:
                         resolved_targets, progress_callback=progress_callback
                     )
                 except ValueError as exc:
-                    self._set_error_message(str(exc))
-                    raise TextureExportError(
-                        self._last_error_message or str(exc)
-                    ) from exc
+                    raise TextureExportError(str(exc)) from exc
 
                 for target_index, target in enumerate(resolved_targets, start=1):
                     self._cleanup_export_lock(
@@ -464,10 +442,7 @@ class Exporter:
                         log.error(
                             f'Texture export failed while processing texture set "{target.texture_set_name}".'
                         )
-                        self._set_error_message(str(exc))
-                        raise TextureExportError(
-                            self._last_error_message or str(exc)
-                        ) from exc
+                        raise TextureExportError(str(exc)) from exc
 
                     planned_texture_count += _file_count(planned_exports)
                     all_exported_textures.update(exported_textures)

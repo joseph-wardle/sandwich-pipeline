@@ -26,7 +26,11 @@ from pipe.core.asset import DEFAULT_GEO_VARIANT, paths_for_asset
 from pipe.core.ui import ButtonPair, MessageDialog, MessageDialogCustomButtons
 from pipe.core.ui.progress import ProgressDialog
 from pipe.core.shotgrid import Asset, ShotGrid
-from pipe.dcc.substance_painter.publish.export import Exporter, TexSetExportSettings
+from pipe.dcc.substance_painter.publish.export import (
+    Exporter,
+    TexSetExportSettings,
+    TextureExportError,
+)
 from pipe.dcc.substance_painter.util.houdini_bridge import (
     HoudiniPublishCancelled,
     HoudiniPublishError,
@@ -563,26 +567,13 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                     message="Preparing the publish configuration and enabled texture sets.",
                 )
             )
-            exporter = Exporter(asset)
-            export_success = exporter.export(
+            Exporter(asset).export(
                 request.export_settings,
                 request.mat_var,
                 request.geo_var,
                 request.material_layer,
                 progress_callback=self._send_progress_or_cancel,
             )
-            if not export_success:
-                log.error(f"Texture export failed for {request.asset_label}")
-                sp.logging.error(f"Publish failed for {request.asset_label}")
-                error_message = exporter.last_error_message or (
-                    f"An error occurred while exporting textures. {LOG_HINT}"
-                )
-                self._show_publish_message(
-                    context,
-                    error_message,
-                    title="Texture Export Failed",
-                )
-                return
 
             # The textures are published now, so Cancel only skips the Houdini build.
             backup_ok, backup_status = self._backup_project(asset, request)
@@ -607,6 +598,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 else _CANCELLED_DURING_EXPORT_MESSAGE,
                 title="Publish Cancelled",
             )
+        except TextureExportError as exc:
+            log.error(f"Texture export failed for {request.asset_label}")
+            sp.logging.error(f"Publish failed for {request.asset_label}")
+            self._show_publish_message(context, str(exc), title="Texture Export Failed")
         except Exception as exc:
             log.exception(
                 f"Unexpected error while publishing textures for {request.asset_label}"
