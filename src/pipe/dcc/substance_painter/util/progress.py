@@ -10,8 +10,8 @@ class PublishStage(Enum):
     PREPARING_PUBLISH = "Preparing publish"
     PLANNING_EXPORT = "Planning texture export"
     EXPORTING_SOURCE = "Exporting source textures"
-    WRITING_METADATA = "Writing material metadata"
     CONVERTING_TEX = "Converting TEX textures"
+    WRITING_METADATA = "Writing material metadata"
     BACKING_UP_PROJECT = "Backing up project"
     RUNNING_HOUDINI = "Running Houdini publish"
 
@@ -36,8 +36,8 @@ DEFAULT_PUBLISH_STAGE_SEQUENCE: tuple[PublishStage, ...] = (
     PublishStage.PREPARING_PUBLISH,
     PublishStage.PLANNING_EXPORT,
     PublishStage.EXPORTING_SOURCE,
-    PublishStage.WRITING_METADATA,
     PublishStage.CONVERTING_TEX,
+    PublishStage.WRITING_METADATA,
     PublishStage.BACKING_UP_PROJECT,
     PublishStage.RUNNING_HOUDINI,
 )

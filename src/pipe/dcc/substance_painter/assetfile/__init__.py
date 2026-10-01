@@ -43,6 +43,7 @@ from pipe.dcc.substance_painter.ui.dialogs import (
     resolve_default_mesh_paths,
 )
 from pipe.dcc.substance_painter.runtime import get_main_qt_window
+from pipe.dcc.substance_painter.util.docs import LOG_HINT
 from pipe.dcc.substance_painter.util.metadata import (
     ProjectIdentity,
     get_asset_selection_metadata,
@@ -241,7 +242,8 @@ def _open_existing_project_for_asset(
     if not project_path.exists():
         MessageDialog(
             parent,
-            "No Substance Painter project exists yet. Use Save Current As or Create Default.",
+            "This variant has no Substance Painter project yet. Use Create Asset "
+            "Project to make one.",
             "Missing Substance Painter Project",
         ).exec_()
         log.warning(f"Substance project missing at {project_path}")
@@ -542,11 +544,15 @@ def _restore_project_version(
 
     try:
         working_path = restore_version(record, project_stream)
-    except Exception as exc:
+    except Exception:
         log.exception("Failed to restore Substance Painter version.")
         MessageDialog(
             parent,
-            f"Failed to restore version:\n{exc}",
+            "Could not restore that version, so the working file is unchanged. "
+            "Someone else may have it open, or the version's backup may be "
+            "missing.\n\n"
+            "The project was closed for the restore: use Open Asset to open it "
+            f"again. {LOG_HINT}",
             "Restore Version Failed",
         ).exec_()
         return

@@ -50,11 +50,11 @@ log = logging.getLogger(__name__)
 # or exr, so the extension alone separates the two.
 _PREVIEW_SUFFIX = ".jpeg"
 
-_LEGACY_COLOR_MESSAGE = (
-    "This project uses Painter's Legacy color management, which the pipeline "
-    "can't publish.\n\n"
-    "Open Edit → Project Configuration, expand Color management, change Legacy "
-    "to OpenColorIO and press OK. Then publish again."
+_NOT_OCIO_MESSAGE = (
+    "This project uses Painter's Legacy or Adobe ACE color management, which "
+    "the pipeline can't publish.\n\n"
+    "Open Edit → Project Configuration, expand Color management, change it to "
+    "OpenColorIO and press OK. Then publish again."
 )
 
 
@@ -180,7 +180,7 @@ class Exporter:
             ) from exc
 
         if any(_preview_shares_render_name(paths) for paths in all_planned.values()):
-            raise ValueError(_LEGACY_COLOR_MESSAGE)
+            raise ValueError(_NOT_OCIO_MESSAGE)
 
         planned_by_target: dict[str, dict[tuple[str, str], list[str]]] = {}
         for (ts_name, stack_name), paths in all_planned.items():
@@ -325,11 +325,6 @@ class Exporter:
             used_event_fallback=used_event_fallback,
         )
 
-    def write_mat_info(
-        self, export_settings_arr: typing.Iterable[TexSetExportSettings]
-    ) -> None:
-        write_material_info(self._out_path, export_settings_arr)
-
     def export(
         self,
         exp_setting_arr: typing.Sequence[TexSetExportSettings],
@@ -338,7 +333,7 @@ class Exporter:
         material_layer: str,
         progress_callback: PublishProgressCallback | None = None,
     ) -> bool:
-        """Export all requested texture sets, then convert the outputs to TEX."""
+        """Export the texture sets, convert them to TEX, then write mat.json."""
         self._last_error_message = None
 
         try:
@@ -390,6 +385,25 @@ class Exporter:
                 f"Details: {exc}\n"
                 "If this asset is rendering in Houdini, stop the render and press "
                 '"Reset RenderMan RIS/XPU", then publish again.'
+            )
+            return False
+
+        # Written last, so mat.json never lists a texture set whose TEX files
+        # failed to convert.
+        if progress_callback is not None:
+            progress_callback(
+                PublishProgressUpdate(
+                    stage=PublishStage.WRITING_METADATA,
+                    message="Writing material metadata for the published textures.",
+                )
+            )
+        try:
+            write_material_info(self._out_path, exp_setting_arr)
+        except (OSError, ValueError) as exc:
+            log.exception("Failed to write material info metadata.")
+            self._set_error_message(
+                "Textures exported, but failed to write material metadata.\n"
+                f"Details: {exc}"
             )
             return False
 
@@ -517,27 +531,6 @@ class Exporter:
                     )
                     all_exported_textures.update(outcome.exported_textures)
                     QtWidgets.QApplication.processEvents()
-
-                try:
-                    if progress_callback is not None:
-                        progress_callback(
-                            PublishProgressUpdate(
-                                stage=PublishStage.WRITING_METADATA,
-                                message="Writing material metadata for the published textures.",
-                            )
-                        )
-                    self.write_mat_info(
-                        [target.settings for target in resolved_targets]
-                    )
-                except (OSError, ValueError) as exc:
-                    log.exception("Failed to write material info metadata.")
-                    self._set_error_message(
-                        "Textures exported, but failed to write material metadata.\n"
-                        f"Details: {exc}"
-                    )
-                    raise TextureExportError(
-                        self._last_error_message or str(exc)
-                    ) from exc
 
                 return all_exported_textures
             finally:

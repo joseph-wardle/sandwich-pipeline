@@ -46,8 +46,10 @@ TAG_ASSET_PATH = "asset_path"
 TAG_GEO_VARIANT = "geo_variant"
 
 NO_ACTIVE_ASSET_MESSAGE = (
-    "Could not tell which asset this project belongs to. "
-    "Use Open Asset to create or open the asset project first."
+    "Could not tell which asset this project belongs to.\n\n"
+    "To keep working in this project, use Open Asset → Create Asset Project → "
+    "Use Currently Open Project to save it as an asset's project. Otherwise use "
+    "Open Asset to open the asset's own project."
 )
 
 _SHOTGRID_LOOKUP_FAILED_MESSAGE = (
@@ -108,7 +110,10 @@ class ProjectIdentity:
         Version history lists a copy's versions beside the working file's own,
         so the note is what tells them apart.
         """
-        return None if self.is_working_file else f"Saved from {self.project_path}."
+        if self.is_working_file:
+            return None
+        relative = production_relative_path(self.project_path)
+        return f"Saved from {relative or self.project_path}."
 
 
 def resolve_project_identity(conn: ShotGrid) -> ProjectIdentity | None:

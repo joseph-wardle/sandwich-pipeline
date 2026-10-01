@@ -43,7 +43,7 @@ from pipe.dcc.substance_painter.util.project import (
     current_project_path,
     save_project,
 )
-from pipe.dcc.substance_painter.util.docs import docs_link_html
+from pipe.dcc.substance_painter.util.docs import LOG_HINT, docs_link_html
 from pipe.dcc.substance_painter.util.texture_set import texture_set_name
 from pipe.dcc.substance_painter.util.progress import (
     DEFAULT_PUBLISH_STAGE_SEQUENCE,
@@ -273,7 +273,9 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         if identity.variant is None:
             return (
                 "This file isn't linked to a geometry variant. Choose where to "
-                "publish; the project is backed up into that variant's history."
+                "publish; the project is backed up as the next version in that "
+                "variant's history, and restoring that version replaces the "
+                "variant's working file."
             )
         warnings: list[str] = []
         if not identity.is_working_file:
@@ -573,8 +575,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 log.error(f"Texture export failed for {request.asset_label}")
                 sp.logging.error(f"Publish failed for {request.asset_label}")
                 error_message = exporter.last_error_message or (
-                    "An error occurred while exporting textures. Please check the "
-                    "console for more information."
+                    f"An error occurred while exporting textures. {LOG_HINT}"
                 )
                 self._show_publish_message(
                     context,
@@ -614,7 +615,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 context,
                 "An unexpected error occurred while publishing textures.\n"
                 f"Details: {exc}",
-                title="Texture Export Failed",
+                title="Publish Failed",
             )
         finally:
             self._finish_publish_context(context)
@@ -697,8 +698,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 f"Backup of {project_path} to {project_stream.backup_dir} failed."
             )
             return False, (
-                "Backup failed: the project version could not be saved. "
-                "Check the console for details."
+                f"Backup failed: the project version could not be saved. {LOG_HINT}"
             )
 
         if result is None:
@@ -754,9 +754,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         except Exception:
             # The textures are already published, so report this step alone.
             log.exception("Unexpected error in the headless Houdini publish.")
-            return False, (
-                "Houdini publish failed unexpectedly. Check the console for details."
-            )
+            return False, f"Houdini publish failed unexpectedly. {LOG_HINT}"
         return True, summarize_result(result)
 
     def _is_active_publish_context(self, context: _ActivePublishContext) -> bool:

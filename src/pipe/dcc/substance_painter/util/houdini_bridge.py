@@ -18,7 +18,6 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from env import Executables
@@ -27,6 +26,7 @@ from Qt import QtCore
 
 from pipe.core.asset import paths_for_asset
 from pipe.core.shotgrid import Asset
+from pipe.dcc.substance_painter.util.docs import LOG_HINT
 
 log = logging.getLogger(__name__)
 
@@ -110,6 +110,8 @@ def run_asset_builder(
         and result.exit_code == 0
         and payload.get("status") == "success"
     ):
+        for warning in payload.get("warnings", []):
+            log.warning(f"Houdini asset builder warning: {warning}")
         return payload
 
     log.error(f"Houdini asset builder stdout:\n{result.stdout}")
@@ -118,40 +120,23 @@ def run_asset_builder(
 
 
 def summarize_result(payload: dict[str, Any]) -> str:
-    """Turn a successful Houdini build result into a one-line summary."""
-    status = str(payload.get("status", "unknown")).capitalize()
-    parts = [f"Houdini publish: {status}"]
-
+    """Say what a successful Houdini build did, as a status line for the artist."""
     summary = payload.get("summary")
-    if isinstance(summary, dict):
-        if summary.get("builder_created"):
-            parts.append("builder created")
-        else:
-            parts.append("builder reused")
+    if isinstance(summary, dict) and summary.get("builder_created"):
+        line = "Houdini asset builder created and asset exported."
+    else:
+        # The build runs with --respect-existing, so an existing builder's
+        # material graph is exported exactly as the artist left it.
+        line = (
+            "Houdini asset re-exported. New material variants still need adding "
+            "in the asset builder."
+        )
 
-    publish_payload = payload.get("publish")
-    if isinstance(publish_payload, dict):
-        export = publish_payload.get("export")
-        if isinstance(export, dict):
-            export_path = str(export.get("export_path", "")).strip()
-            if export_path:
-                parts.append(f"exported {Path(export_path).name}")
-
-        gallery = publish_payload.get("gallery")
-        if isinstance(gallery, dict):
-            gallery_status = str(gallery.get("status", "")).strip()
-            if gallery_status:
-                parts.append(f"gallery {gallery_status}")
-
-        warnings = publish_payload.get("warnings", [])
-        if isinstance(warnings, list) and warnings:
-            parts.append(f"{len(warnings)} publish warning(s)")
-
+    # The builder copies its publish step's warnings into this top-level list.
     warnings = payload.get("warnings", [])
     if isinstance(warnings, list) and warnings:
-        parts.append(f"{len(warnings)} warning(s)")
-
-    return ", ".join(parts)
+        line += f" Houdini reported {len(warnings)} warning(s). {LOG_HINT}"
+    return line
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +196,7 @@ def _run_process(
     if process.exitStatus() == QtCore.QProcess.CrashExit:
         log.error(f"Houdini asset builder stdout:\n{stdout}")
         log.error(f"Houdini asset builder stderr:\n{stderr}")
-        raise HoudiniPublishError("Houdini crashed. Check the console for details.")
+        raise HoudiniPublishError(f"Houdini crashed. {LOG_HINT}")
     return _ProcessResult(process.exitCode(), stdout, stderr)
 
 
@@ -236,7 +221,7 @@ def _failure_reason(payload: dict[str, Any] | None, exit_code: int) -> str:
     if payload is None:
         return (
             f"Houdini exited with code {exit_code} without reporting a result. "
-            "Check the console for details."
+            f"{LOG_HINT}"
         )
     # The builder copies its publish step's errors into this top-level list.
     errors = payload.get("errors", [])
@@ -251,5 +236,5 @@ def _failure_reason(payload: dict[str, Any] | None, exit_code: int) -> str:
     status = payload.get("status", "unknown")
     return (
         f"Houdini reported no error, but ended with status {status!r} and "
-        f"exit code {exit_code}. Check the console for details."
+        f"exit code {exit_code}. {LOG_HINT}"
     )

@@ -9,6 +9,9 @@ from pipe.core.util.paths import get_documentation_path
 PIPE_SP_DOCS_PAGE = "Asset-Pipeline#substance-painter"
 """Wiki page slug for Substance Painter pipeline documentation."""
 
+LOG_HINT = "Check Painter's Log (Window → Views → Log) for details."
+"""Painter shows the pipeline's warnings and tracebacks there, not in a console."""
+
 
 def docs_link_html() -> str:
     """Return an HTML anchor tag linking to the Substance Painter docs page."""
