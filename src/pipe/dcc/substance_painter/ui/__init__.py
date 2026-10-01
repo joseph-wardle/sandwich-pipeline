@@ -22,12 +22,7 @@ if TYPE_CHECKING:
 import substance_painter as sp
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
-from pipe.core.asset import (
-    DEFAULT_GEO_VARIANT,
-    asset_owner_for,
-    paths_for_asset,
-    substance_project_stream,
-)
+from pipe.core.asset import DEFAULT_GEO_VARIANT, paths_for_asset
 from pipe.core.ui import ButtonPair, MessageDialog, MessageDialogCustomButtons
 from pipe.core.ui.progress import ProgressDialog
 from pipe.core.shotgrid import Asset, ShotGrid
@@ -39,12 +34,12 @@ from pipe.dcc.substance_painter.util.houdini_bridge import (
 )
 from pipe.dcc.substance_painter.runtime import get_main_qt_window
 from pipe.dcc.substance_painter.util.metadata import (
-    current_geo_variant,
+    ProjectIdentity,
+    project_version_stream,
 )
 from pipe.dcc.substance_painter.util.project import (
     check_project_editable,
     current_project_path,
-    is_open_project,
     save_project,
 )
 from pipe.dcc.substance_painter.util.docs import docs_link_html
@@ -84,6 +79,7 @@ class _ActivePublishContext:
 class SubstanceExportWindow(QMainWindow, ButtonPair):
     _active_publish_context: _ActivePublishContext | None
     _curr_asset: Asset
+    _identity: ProjectIdentity
     _central_widget: QtWidgets.QWidget
     _conn: ShotGrid
     _main_layout: QLayout
@@ -95,13 +91,14 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
     _tex_set_dict: dict[sp.textureset.TextureSet, "TexSetWidget"]
 
-    def __init__(self, conn: ShotGrid, asset: Asset) -> None:
+    def __init__(self, conn: ShotGrid, identity: ProjectIdentity) -> None:
         super().__init__(get_main_qt_window())
 
         self._active_publish_context = None
         self._tex_set_dict = {}
         self._conn = conn
-        self._curr_asset = asset
+        self._identity = identity
+        self._curr_asset = identity.asset
         self._setup_publish_ui()
 
     @property
@@ -179,7 +176,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             validator=QRegExpValidator(QRegExp("[a-z][a-z_\\d]*")),
         )
 
-        project_variant = current_geo_variant()
+        project_variant = self._identity.variant
         geo_items = self._variant_items(
             asset.geometry_variants or (), DEFAULT_GEO_VARIANT
         )
@@ -187,14 +184,19 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             label_text="Geometry Variant:",
             tooltip=("Geometry variant to match the published model."),
             items=geo_items,
-            default_value=project_variant,
+            default_value=project_variant or "",
             editable=False,
         )
         if project_variant not in geo_items:
             self._geo_var_dropdown.setCurrentIndex(-1)
             geo_warning = QLabel(
-                f"This project is for geometry variant '{project_variant}', which "
-                "this asset doesn't list. Choose where to publish."
+                (
+                    f"This project is for geometry variant '{project_variant}', "
+                    "which this asset doesn't list."
+                    if project_variant
+                    else "This file isn't linked to a geometry variant."
+                )
+                + " Choose where to publish."
             )
             geo_warning.setWordWrap(True)
             geo_warning.setStyleSheet("color: #d28d42;")
@@ -591,21 +593,16 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             log.warning("Backup skipped: project has no file path.")
             return True, "Backup skipped: project has no file path."
 
-        asset_paths = paths_for_asset(asset)
-        # The backup follows the project's variant; the textures follow the dropdown.
-        project_stream = substance_project_stream(
-            asset_paths,
-            current_geo_variant(),
-            owner=asset_owner_for(asset),
-        )
-        if not is_open_project(project_stream.working_path):
-            log.warning(
-                f"Backup skipped: {project_path} is not {project_stream.working_path}."
-            )
+        identity = self._identity
+        if identity.variant is None or not identity.is_working_file:
+            log.warning(f"Backup skipped: {project_path} is not a working file.")
             return (
                 True,
-                f"Backup skipped: this file isn't the asset's {project_stream.label}.",
+                "Backup skipped: this file isn't one of the asset's working files.",
             )
+        asset_paths = paths_for_asset(asset)
+        # The backup follows the project's variant; the textures follow the dropdown.
+        project_stream = project_version_stream(asset, identity.variant)
 
         self._send_publish_progress(
             PublishProgressUpdate(

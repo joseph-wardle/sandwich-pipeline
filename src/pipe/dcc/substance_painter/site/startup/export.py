@@ -9,7 +9,6 @@ from Qt import QtWidgets
 
 from env_sg import DB_Config
 from pipe.core.shotgrid import ShotGrid
-from pipe.core.ui import MessageDialog
 from pipe.dcc.substance_painter import runtime as sp_runtime
 from pipe.dcc.substance_painter.assetfile import (
     launch_open_asset_textures,
@@ -17,10 +16,7 @@ from pipe.dcc.substance_painter.assetfile import (
     launch_version_browser_for_current_project,
 )
 from pipe.dcc.substance_painter.ui import SubstanceExportWindow
-from pipe.dcc.substance_painter.util.metadata import (
-    NO_ACTIVE_ASSET_MESSAGE,
-    get_active_asset_from_project,
-)
+from pipe.dcc.substance_painter.util.metadata import identify_open_project
 from pipe.dcc.substance_painter.util.project import check_project_editable
 
 plugin_widgets: list[QtWidgets.QWidget | QtWidgets.QAction] = []
@@ -69,17 +65,14 @@ def launch_exporter() -> None:
         return
 
     conn = ShotGrid.connect(DB_Config)
-    asset = get_active_asset_from_project(conn)
-    if asset is None:
-        MessageDialog(
-            sp_runtime.get_main_qt_window(),
-            NO_ACTIVE_ASSET_MESSAGE,
-            "Publish Textures",
-        ).exec_()
+    identity = identify_open_project(
+        conn, sp_runtime.get_main_qt_window(), "Publish Textures"
+    )
+    if identity is None:
         return
 
     _close_publish_window()
-    _publish_window = SubstanceExportWindow(conn, asset)
+    _publish_window = SubstanceExportWindow(conn, identity)
     _publish_window.show()
 
 

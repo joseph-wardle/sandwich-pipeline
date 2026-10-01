@@ -31,17 +31,6 @@ def current_project_path() -> Path | None:
     return path
 
 
-def is_open_project(path: Path | None) -> bool:
-    """Return True if *path* is the open project's file."""
-    project_path = current_project_path()
-    if project_path is None or path is None:
-        return False
-    try:
-        return project_path.samefile(path)
-    except OSError:
-        return False
-
-
 def check_project_editable(parent: QtWidgets.QWidget | None, action_name: str) -> bool:
     """Return True if the project is open, loaded, and idle.
 

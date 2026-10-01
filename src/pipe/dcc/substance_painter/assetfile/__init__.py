@@ -20,9 +20,9 @@ import substance_painter as sp
 from env_sg import DB_Config
 from substance_painter.exception import ProjectError
 from Qt import QtWidgets
-from pipe.core.util.paths import resolve_mapped_path
+from pipe.core.util.paths import is_same_production_file, resolve_mapped_path
 
-from pipe.core.asset import asset_owner_for, paths_for_asset, substance_project_stream
+from pipe.core.asset import paths_for_asset
 from pipe.core.shotgrid import Asset, ShotGrid, group_assets_by_subdirectory
 from pipe.core.ui import (
     RESTORE_CANCEL,
@@ -44,15 +44,14 @@ from pipe.dcc.substance_painter.ui.dialogs import (
 )
 from pipe.dcc.substance_painter.runtime import get_main_qt_window
 from pipe.dcc.substance_painter.util.metadata import (
-    NO_ACTIVE_ASSET_MESSAGE,
-    current_geo_variant,
-    get_active_asset_from_project,
+    ProjectIdentity,
+    identify_open_project,
+    project_version_stream,
     tag_project,
 )
 from pipe.dcc.substance_painter.util.project import (
     check_project_editable,
     current_project_path,
-    is_open_project,
     run_when_project_editable,
     save_project,
 )
@@ -151,26 +150,39 @@ def _ensure_project_saved_for_version_action(
     return project_path
 
 
-def _check_is_working_file(
-    parent: QtWidgets.QWidget | None,
-    project_stream: VersionStreamSpec,
-    action_name: str,
-) -> bool:
-    """Return True if the open file is *project_stream*'s working file.
+def _versioned_project(
+    parent: QtWidgets.QWidget | None, action_name: str
+) -> tuple[ProjectIdentity, VersionStreamSpec] | None:
+    """Return the open project's identity and version stream.
 
-    Otherwise tells the artist how to fix it and returns False.
+    Returns None, after telling the artist how to fix it, when the open file
+    is not an asset's working file.
     """
-    if is_open_project(project_stream.working_path):
-        return True
-    label = project_stream.label
-    MessageDialog(
-        parent,
-        f"The open file isn't this asset's {label}, so it has no version history "
-        f"of its own.\n\nUse Open Asset to open {label}, or Create Asset Project → "
-        "Use Currently Open Project to save this file as it.",
-        action_name,
-    ).exec_()
-    return False
+    identity = identify_open_project(ShotGrid.connect(DB_Config), parent, action_name)
+    if identity is None:
+        return None
+    if identity.variant is None:
+        MessageDialog(
+            parent,
+            "The open file isn't linked to a geometry variant of this asset, so it "
+            "has no version history.\n\nUse Open Asset → Create Asset Project → "
+            "Use Currently Open Project to save it as a variant's project.",
+            action_name,
+        ).exec_()
+        return None
+
+    project_stream = project_version_stream(identity.asset, identity.variant)
+    if not identity.is_working_file:
+        label = project_stream.label
+        MessageDialog(
+            parent,
+            f"The open file isn't this asset's {label}, so it has no version "
+            f"history of its own.\n\nUse Open Asset to open {label}, or Create "
+            "Asset Project → Use Currently Open Project to save this file as it.",
+            action_name,
+        ).exec_()
+        return None
+    return identity, project_stream
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +262,7 @@ def _open_existing_project_for_asset(
         return
 
     cur = current_project_path()
-    if cur and cur.resolve() == project_path.resolve():
+    if cur is not None and is_same_production_file(cur, project_path):
         tag_project(asset, geo_variant)
         if sp.project.needs_saving():
             _save_current_project_as(project_path, parent)
@@ -289,7 +301,7 @@ def _save_current_project_as_asset(
         return
 
     cur = current_project_path()
-    if cur and cur.resolve() == project_path.resolve():
+    if cur is not None and is_same_production_file(cur, project_path):
         tag_project(asset, geo_variant)
         return
 
@@ -481,21 +493,11 @@ def launch_version_browser_for_current_project() -> None:
     if not check_project_editable(parent, "Version History"):
         return
 
-    conn = ShotGrid.connect(DB_Config)
-    asset = get_active_asset_from_project(conn)
-    if not asset:
-        MessageDialog(parent, NO_ACTIVE_ASSET_MESSAGE, "Version History").exec_()
+    versioned = _versioned_project(parent, "Version History")
+    if versioned is None:
         return
-
-    geo_variant = current_geo_variant()
-    asset_paths = paths_for_asset(asset)
-    project_stream = substance_project_stream(
-        asset_paths,
-        geo_variant,
-        owner=asset_owner_for(asset),
-    )
-    if not _check_is_working_file(parent, project_stream, "Version History"):
-        return
+    identity, project_stream = versioned
+    asset = identity.asset
     records = list_version_records(project_stream)
     if not records:
         MessageDialog(
@@ -520,9 +522,7 @@ def launch_version_browser_for_current_project() -> None:
         return
 
     if selected_action == VersionBrowserWidget.ACTION_RESTORE:
-        _restore_project_version(
-            parent, selected_record, project_stream, asset, geo_variant=geo_variant
-        )
+        _restore_project_version(parent, selected_record, project_stream, identity)
 
 
 def _has_unversioned_work(project_stream: VersionStreamSpec) -> bool:
@@ -535,9 +535,7 @@ def _restore_project_version(
     parent: QtWidgets.QWidget | None,
     record: VersionRecord,
     project_stream: VersionStreamSpec,
-    asset: Asset,
-    *,
-    geo_variant: str,
+    identity: ProjectIdentity,
 ) -> None:
     if _has_unversioned_work(project_stream):
         choice = prompt_restore_conflict(parent)
@@ -567,7 +565,8 @@ def _restore_project_version(
 
     if not _open_existing_project(working_path, parent):
         return
-    tag_project(asset, geo_variant)
+    if identity.variant is not None:
+        tag_project(identity.asset, identity.variant)
     MessageDialog(
         parent,
         restored_message(record),
@@ -588,21 +587,10 @@ def launch_save_version() -> None:
     if project_path is None:
         return
 
-    conn = ShotGrid.connect(DB_Config)
-    asset = get_active_asset_from_project(conn)
-    if not asset:
-        MessageDialog(parent, NO_ACTIVE_ASSET_MESSAGE, "Save Version").exec_()
+    versioned = _versioned_project(parent, "Save Version")
+    if versioned is None:
         return
-
-    geo_variant = current_geo_variant()
-    project_stream = substance_project_stream(
-        paths_for_asset(asset),
-        geo_variant,
-        owner=asset_owner_for(asset),
-    )
-    if not _check_is_working_file(parent, project_stream, "Save Version"):
-        return
-    _write_named_version(parent, project_path, project_stream)
+    _write_named_version(parent, project_path, versioned[1])
 
 
 def _save_named_version(

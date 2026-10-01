@@ -8,9 +8,10 @@ Substance Painter project belongs to without relying on file paths alone.
 Public API
 ----------
 - get_asset_selection_metadata()
-- get_active_asset_from_project()
-- NO_ACTIVE_ASSET_MESSAGE
-- current_geo_variant()
+- ProjectIdentity
+- resolve_project_identity()
+- identify_open_project()
+- project_version_stream()
 - tag_project()
 """
 
@@ -18,15 +19,30 @@ from __future__ import annotations
 
 import datetime
 import logging
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import substance_painter as sp
-from pipe.core.asset import DEFAULT_GEO_VARIANT, textures_variant_from_filename
-from pipe.core.util.paths import get_production_path
+from pipe.core.asset import (
+    DEFAULT_GEO_VARIANT,
+    asset_owner_for,
+    paths_for_asset,
+    substance_project_stream,
+)
+from pipe.core.util.paths import is_same_production_file, production_relative_path
+from Qt import QtWidgets
 from substance_painter.exception import ProjectError, ServiceNotFoundError
 
-from pipe.core.versioning import DCC_SUBSTANCE
-from pipe.core.shotgrid import Asset, ShotGrid, build_asset_path
+from pipe.core.ui import MessageDialog
+from pipe.core.versioning import DCC_SUBSTANCE, VersionStreamSpec
+from pipe.core.shotgrid import (
+    Asset,
+    ShotGrid,
+    ShotGridError,
+    ShotGridNotFound,
+    build_asset_path,
+)
 from pipe.dcc.substance_painter.util.project import current_project_path
 from pipe.dcc.substance_painter.util.texture_set import texture_set_name
 
@@ -48,6 +64,11 @@ PIPE_SP_METADATA_SCHEMA_VERSION = 1
 NO_ACTIVE_ASSET_MESSAGE = (
     "Could not tell which asset this project belongs to. "
     "Use Open Asset to create or open the asset project first."
+)
+
+_SHOTGRID_LOOKUP_FAILED_MESSAGE = (
+    "Could not look up this project's asset in ShotGrid. "
+    "Check your network connection and try again."
 )
 
 
@@ -80,21 +101,95 @@ def get_asset_selection_metadata() -> dict[str, Any]:
     return _safe_get_metadata()
 
 
-def current_geo_variant() -> str:
-    """Return the open project's geometry variant.
+# ---------------------------------------------------------------------------
+# Project identity
+# ---------------------------------------------------------------------------
 
-    Uses the project's tag, then its ``textures.<variant>.spp`` filename, then
-    ``DEFAULT_GEO_VARIANT``.
+
+@dataclass(frozen=True)
+class ProjectIdentity:
+    """The asset and geometry variant the open project file belongs to."""
+
+    asset: Asset
+    project_path: Path
+    variant: str | None
+    """None when the file is no listed variant's project and its tag names none."""
+    is_working_file: bool
+    """False for a copy of the variant's project saved under another name."""
+
+
+def resolve_project_identity(conn: ShotGrid) -> ProjectIdentity | None:
+    """Return the open project's asset and variant, or None if it has no asset.
+
+    The file's location decides.  The tag only speaks for copies and for files
+    outside the asset's folder, so a stale tag cannot redirect a working file.
     """
-    tagged = str(get_asset_selection_metadata().get("geo_variant") or "").strip()
-    if tagged:
-        return tagged
     project_path = current_project_path()
-    if project_path is not None:
-        from_filename = textures_variant_from_filename(project_path.name)
-        if from_filename:
-            return from_filename
-    return DEFAULT_GEO_VARIANT
+    if project_path is None:
+        return None
+
+    tag = get_asset_selection_metadata()
+    asset = _asset_at(conn, project_path.parent) or _asset_from_tag(conn, tag)
+    if asset is None:
+        return None
+
+    variant = _listed_variant_at(asset, project_path)
+    if variant is None and _is_tagged_for(tag, asset):
+        variant = str(tag.get("geo_variant") or "").strip() or None
+
+    is_working_file = variant is not None and is_same_production_file(
+        project_path, paths_for_asset(asset).textures_variant_path(variant)
+    )
+    return ProjectIdentity(asset, project_path, variant, is_working_file)
+
+
+def identify_open_project(
+    conn: ShotGrid, parent: QtWidgets.QWidget | None, action_name: str
+) -> ProjectIdentity | None:
+    """Return the open project's identity, or tell the artist why it has none."""
+    try:
+        identity = resolve_project_identity(conn)
+    except ShotGridError:
+        log.exception("Could not look up the open project's asset in ShotGrid.")
+        MessageDialog(parent, _SHOTGRID_LOOKUP_FAILED_MESSAGE, action_name).exec_()
+        return None
+    if identity is None:
+        MessageDialog(parent, NO_ACTIVE_ASSET_MESSAGE, action_name).exec_()
+    return identity
+
+
+def project_version_stream(asset: Asset, variant: str) -> VersionStreamSpec:
+    """Return the version stream of *asset*'s project for *variant*."""
+    return substance_project_stream(
+        paths_for_asset(asset), variant, owner=asset_owner_for(asset)
+    )
+
+
+def _is_tagged_for(tag: dict[str, Any], asset: Asset) -> bool:
+    return tag.get("asset_id") == asset.id or tag.get("asset_path") == asset.asset_path
+
+
+def _listed_variant_at(asset: Asset, project_path: Path) -> str | None:
+    """Return the variant *asset* lists whose project file is *project_path*."""
+    paths = paths_for_asset(asset)
+    # Compared as paths, not names: a variant listed as "Main" owns
+    # textures.main.spp on Windows, where Open Asset opens that same file.
+    for variant in sorted(asset.geometry_variants or {DEFAULT_GEO_VARIANT}):
+        if is_same_production_file(project_path, paths.textures_variant_path(variant)):
+            return variant
+    return None
+
+
+def _asset_at(conn: ShotGrid, folder: Path) -> Asset | None:
+    """Return the asset whose folder is *folder*, or None."""
+    relative = production_relative_path(folder)
+    if relative is None:
+        return None
+    try:
+        return conn.get_asset(path=relative.as_posix())
+    except ShotGridNotFound:
+        # Any other ShotGrid failure must not fall through to the tag.
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -145,20 +240,12 @@ def tag_project(asset: Asset, geo_variant: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def get_active_asset_from_project(conn: ShotGrid) -> Asset | None:
-    """Resolve the pipeline asset associated with the current project.
+def _asset_from_tag(conn: ShotGrid, selection: dict[str, Any]) -> Asset | None:
+    """Resolve the asset named by the project's tag, or None.
 
     Tries several strategies in order: asset ID, asset path, display name,
-    code name.  Falls back to inferring the asset from the project file path.
-    Returns None when no project is open or resolution fails entirely.
+    code name.
     """
-    if not sp.project.is_open():
-        return None
-
-    selection = get_asset_selection_metadata()
-    if not selection:
-        return _asset_from_project_path(conn)
-
     # Strategy 1: direct ID lookup
     asset_id = selection.get("asset_id")
     if asset_id:
@@ -186,7 +273,7 @@ def get_active_asset_from_project(conn: ShotGrid) -> Asset | None:
             asset_name = next(iter(unique_assets))
 
     if not asset_name:
-        return _asset_from_project_path(conn)
+        return None
 
     if asset_subdirectory is not None:
         try:
@@ -204,28 +291,4 @@ def get_active_asset_from_project(conn: ShotGrid) -> Asset | None:
     except Exception as exc:
         log.warning(f"Failed to resolve asset from project metadata: {exc}")
 
-    return _asset_from_project_path(conn)
-
-
-def _asset_from_project_path(conn: ShotGrid) -> Asset | None:
-    """Last-resort: infer the asset from the project's location on disk."""
-    project_path = current_project_path()
-    if not project_path:
-        return None
-
-    try:
-        prod_root = get_production_path().resolve()
-        project_path = project_path.resolve()
-        if prod_root not in project_path.parents and project_path != prod_root:
-            return None
-        asset_root = project_path.parent
-        rel_asset_path = asset_root.relative_to(prod_root)
-    except (ValueError, OSError):
-        return None
-
-    rel_path_str = rel_asset_path.as_posix()
-    try:
-        return conn.get_asset(path=rel_path_str)
-    except Exception as exc:
-        log.warning(f"Failed to resolve asset from project path: {exc}")
-        return None
+    return None

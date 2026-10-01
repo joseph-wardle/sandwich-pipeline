@@ -206,14 +206,6 @@ def paths_for_asset(asset: Asset, production_root: Path | None = None) -> AssetP
     return AssetPaths(asset_root(asset, production_root=production_root))
 
 
-def textures_variant_from_filename(filename: str) -> str | None:
-    """Return the variant in a ``textures.<variant>.spp`` filename, or None."""
-    prefix, suffix = TEXTURES_VARIANT_TEMPLATE.split("{variant}")
-    if not (filename.startswith(prefix) and filename.endswith(suffix)):
-        return None
-    return filename[len(prefix) : -len(suffix)] or None
-
-
 __all__ = [
     "AssetPaths",
     "DEFAULT_GEOMETRY_VARIANT",
@@ -241,5 +233,4 @@ __all__ = [
     "asset_root",
     "asset_root_from_path",
     "paths_for_asset",
-    "textures_variant_from_filename",
 ]
