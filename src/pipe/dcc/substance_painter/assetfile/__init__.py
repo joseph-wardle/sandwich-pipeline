@@ -52,6 +52,7 @@ from pipe.dcc.substance_painter.util.metadata import (
     write_tag,
 )
 from pipe.dcc.substance_painter.util.project import (
+    check_not_busy,
     check_project_editable,
     current_project_path,
     save_project,
@@ -405,15 +406,14 @@ def launch_open_asset_textures() -> None:
     2. Open existing project, or choose a creation method
     3. (If creating) Pick a mesh source and create the project
     """
-    if sp.project.is_busy():
-        sp.project.execute_when_not_busy(launch_open_asset_textures)
+    parent = get_main_qt_window()
+    if not check_not_busy(parent, "Open Asset"):
         return
 
     conn = ShotGrid.connect(DB_Config)
     # Keyed on `name`, not `display_name`: the dialog resolves its pick with
     # `get_asset(name=...)`.
     assets = group_assets_by_subdirectory(conn.find_assets(), key=lambda a: a.name)
-    parent = get_main_qt_window()
 
     select_dialog = SubstanceAssetSelectDialog(parent, assets, conn)
     if not select_dialog.exec_():
@@ -464,9 +464,6 @@ def launch_open_asset_textures() -> None:
 
 def launch_version_browser_for_current_project() -> None:
     """Show version history for the currently open asset project."""
-    if sp.project.is_busy():
-        sp.project.execute_when_not_busy(launch_version_browser_for_current_project)
-        return
 
     parent = get_main_qt_window()
     if not check_project_editable(parent, "Version History"):
@@ -565,9 +562,6 @@ def _restore_project_version(
 
 def launch_save_version() -> None:
     """Save the open asset project as a new named version."""
-    if sp.project.is_busy():
-        sp.project.execute_when_not_busy(launch_save_version)
-        return
 
     parent = get_main_qt_window()
     if not check_project_editable(parent, "Save Version"):

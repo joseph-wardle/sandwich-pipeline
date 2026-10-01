@@ -31,6 +31,18 @@ def current_project_path() -> Path | None:
     return path
 
 
+def check_not_busy(parent: QtWidgets.QWidget | None, action_name: str) -> bool:
+    """Return True if Painter is idle; otherwise tell the artist to wait."""
+    if not sp.project.is_busy():
+        return True
+    MessageDialog(
+        parent,
+        "Substance Painter is busy. Wait for the current operation to finish.",
+        action_name,
+    ).exec_()
+    return False
+
+
 def check_project_editable(parent: QtWidgets.QWidget | None, action_name: str) -> bool:
     """Return True if the project is open, loaded, and idle.
 
@@ -45,12 +57,7 @@ def check_project_editable(parent: QtWidgets.QWidget | None, action_name: str) -
         ).exec_()
         return False
 
-    if sp.project.is_busy():
-        MessageDialog(
-            parent,
-            "Substance Painter is busy. Wait for the current operation to finish.",
-            action_name,
-        ).exec_()
+    if not check_not_busy(parent, action_name):
         return False
 
     try:
