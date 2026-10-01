@@ -174,7 +174,8 @@ def make_current(current: Path, version: int) -> None:
 
     layer = Sdf.Layer.CreateAnonymous(".usda")
     layer.subLayerPaths.append(_sublayer(current, version))
-    layer.defaultPrim = version_layer.defaultPrim
+    if version_layer.defaultPrim:
+        layer.defaultPrim = version_layer.defaultPrim
     for key in _STAGE_INFO_KEYS:
         if version_layer.pseudoRoot.HasInfo(key):
             layer.pseudoRoot.SetInfo(key, version_layer.pseudoRoot.GetInfo(key))

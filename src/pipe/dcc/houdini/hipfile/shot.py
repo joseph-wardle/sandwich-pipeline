@@ -461,11 +461,11 @@ class HShotFileManager(HFileManager):
     def _get_muted_departments(self) -> list[str]:
         department = self._department_value()
         if department == self.DEPARTMENT.CFX.value:
-            return ["cfx", "fx", "envfx", "lighting", "render"]
+            return ["cfx", "fx", "envfx", "lighting"]
         if department == self.DEPARTMENT.FX.value:
             return ["fx"]
         if department == self.DEPARTMENT.FLO.value:
-            return ["cfx", "fx", "envfx", "lighting", "flo", "render"]
+            return ["cfx", "fx", "envfx", "lighting", "flo"]
         if department == self.DEPARTMENT.ENVFX.value:
             return ["envfx"]
         if department == self.DEPARTMENT.LIGHTING.value:
