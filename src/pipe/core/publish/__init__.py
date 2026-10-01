@@ -3,19 +3,23 @@
 from .versions import (
     commit_version,
     create_staging,
+    current_version,
     discard_staged,
     make_current,
     next_version,
     staging_layer_path,
     version_layer_path,
+    versions,
 )
 
 __all__ = [
     "commit_version",
     "create_staging",
+    "current_version",
     "discard_staged",
     "make_current",
     "next_version",
     "staging_layer_path",
     "version_layer_path",
+    "versions",
 ]

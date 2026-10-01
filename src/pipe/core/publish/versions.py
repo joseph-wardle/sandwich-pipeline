@@ -52,14 +52,36 @@ def create_staging(current: Path, version: int) -> Path:
 
 
 def next_version(current: Path) -> int:
-    if not current.parent.is_dir():
-        return 1
-    versions = [
-        int(match.group(1))
-        for entry in current.parent.iterdir()
-        if entry.is_dir() and (match := _VERSION.fullmatch(entry.name))
+    return max(_numbered(current), default=0) + 1
+
+
+def versions(current: Path) -> list[int]:
+    """The versions of this layer in its publish folder, newest first."""
+    published = [
+        version
+        for version in _numbered(current)
+        if version_layer_path(current, version).is_file()
     ]
-    return max(versions, default=0) + 1
+    return sorted(published, reverse=True)
+
+
+def current_version(current: Path) -> int | None:
+    """The version `current` points at, or None if it isn't a current layer.
+
+    Read from disk: USD's layer cache keeps whatever the session opened earlier,
+    which is the previous version once someone has published.
+    """
+    layer = Sdf.Layer.OpenAsAnonymous(str(current), metadataOnly=True)
+    if layer is None:
+        return None
+    if len(layer.subLayerPaths) != 1:
+        return None
+    sublayer = str(layer.subLayerPaths[0])
+    match = _VERSION.fullmatch(Path(sublayer).parent.name)
+    if match is None:
+        return None
+    version = int(match.group(1))
+    return version if sublayer == _sublayer(current, version) else None
 
 
 def discard_staged(current: Path, version: int) -> None:
@@ -85,7 +107,7 @@ def make_current(current: Path, version: int) -> None:
         raise FileNotFoundError(f"There is no version {version}: {version_path}")
 
     layer = Sdf.Layer.CreateAnonymous(".usda")
-    layer.subLayerPaths.append(f"./{_version_dirname(version)}/{version_path.name}")
+    layer.subLayerPaths.append(_sublayer(current, version))
     layer.defaultPrim = version_layer.defaultPrim
     for key in _STAGE_INFO_KEYS:
         if version_layer.pseudoRoot.HasInfo(key):
@@ -96,6 +118,21 @@ def make_current(current: Path, version: int) -> None:
     temp = current.with_name(f".{current.stem}.tmp{current.suffix}")
     layer.Export(str(temp))
     os.replace(temp, current)
+
+
+def _numbered(current: Path) -> list[int]:
+    """Every `v###` folder's number, whichever layer it holds."""
+    if not current.parent.is_dir():
+        return []
+    return [
+        int(match.group(1))
+        for entry in current.parent.iterdir()
+        if entry.is_dir() and (match := _VERSION.fullmatch(entry.name))
+    ]
+
+
+def _sublayer(current: Path, version: int) -> str:
+    return f"./{_version_dirname(version)}/{current.stem}.usd"
 
 
 def _version_dirname(version: int) -> str:
