@@ -50,9 +50,24 @@ log = logging.getLogger(__name__)
 # or exr, so the extension alone separates the two.
 _PREVIEW_SUFFIX = ".jpeg"
 
+_LEGACY_COLOR_MESSAGE = (
+    "This project uses Painter's Legacy color management, which the pipeline "
+    "can't publish.\n\n"
+    "Open Edit → Project Configuration, expand Color management, change Legacy "
+    "to OpenColorIO and press OK. Then publish again."
+)
+
 
 class TextureExportError(Exception):
     error_code = "TEXTURE_EXPORT_FAILED"
+
+
+def _preview_shares_render_name(planned: list[str]) -> bool:
+    """Whether a preview jpeg is planned under the same name as a render map."""
+    paths = [Path(path) for path in planned]
+    previews = {path.stem for path in paths if path.suffix.lower() == _PREVIEW_SUFFIX}
+    renders = {path.stem for path in paths if path.suffix.lower() != _PREVIEW_SUFFIX}
+    return not previews.isdisjoint(renders)
 
 
 class Exporter:
@@ -163,6 +178,9 @@ class Exporter:
                 "Check enabled texture sets and channel settings, then try again.\n"
                 f"Details: {exc}"
             ) from exc
+
+        if any(_preview_shares_render_name(paths) for paths in all_planned.values()):
+            raise ValueError(_LEGACY_COLOR_MESSAGE)
 
         planned_by_target: dict[str, dict[tuple[str, str], list[str]]] = {}
         for (ts_name, stack_name), paths in all_planned.items():
