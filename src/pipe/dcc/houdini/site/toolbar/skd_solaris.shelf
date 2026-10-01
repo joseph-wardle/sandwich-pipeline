@@ -16,7 +16,7 @@
     <memberTool name="open_set"/>
     <memberTool name="save_set_version"/>
     <memberTool name="set_version_history"/>
-    <memberTool name="publish_set"/>
+    <memberTool name="skd_publish"/>
     <memberTool name="skd_playblast"/>
   </toolshelf>
 
@@ -24,6 +24,7 @@
     <memberTool name="open_shot"/>
     <memberTool name="save_shot_version"/>
     <memberTool name="shot_version_history"/>
+    <memberTool name="skd_publish"/>
     <memberTool name="skd_playblast"/>
   </toolshelf>
 
@@ -74,11 +75,6 @@ fm = HSetFileManager()
 fm.open_version_browser()]]></script>
   </tool>
 
-  <tool name="publish_set" label="Publish Set" icon="BUTTONS_upload">
-    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HSetFileManager
-HSetFileManager().publish()]]></script>
-  </tool>
-
   <tool name="open_shot" label="Open Shot" icon="NETWORKS_scene">
     <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HShotFileManager
 HShotFileManager().open_file()]]></script>
@@ -94,6 +90,11 @@ fm.save_version()]]></script>
     <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HShotFileManager
 fm = HShotFileManager(prompt_for_department=False)
 fm.open_version_browser()]]></script>
+  </tool>
+
+  <tool name="skd_publish" label="Publish" icon="BUTTONS_upload">
+    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.publish import version
+version.publish()]]></script>
   </tool>
 
   <tool name="skd_playblast" label="Playblast" icon="TOOLS_view">

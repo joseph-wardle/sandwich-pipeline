@@ -10,7 +10,11 @@ import hou
 
 from pipe.dcc.houdini import runtime as houdini_runtime
 from pipe.core.ui import FilteredListDialog, MessageDialog
-from pipe.dcc.houdini.hipfile.departments import DEPARTMENT_OPTIONS, Department
+from pipe.dcc.houdini.hipfile.departments import (
+    DEPARTMENT_OPTIONS,
+    PUBLISHING_DEPARTMENTS,
+    Department,
+)
 from pipe.dcc.houdini.hipfile.paths import department_from_hip_path
 from pipe.core.sets import current_layer_path
 from pipe.core.shot import houdini_department_stream, shot_owner_for
@@ -206,13 +210,11 @@ class HShotFileManager(HFileManager):
             end_dep = stage.createNode("null")
             end_dep.setName(f"END_{department_name}")
 
-            publish = stage.createNode("usd_rop")
-            publish.setName("PUBLISH")
-            publish.parm("lopoutput").set("$HIP/usd/main.usd")  # type: ignore
-
             begin_dep.setInput(0, layer_break)
             end_dep.setInput(0, begin_dep)
-            publish.setInput(0, end_dep)
+            if self._department in PUBLISHING_DEPARTMENTS:
+                publish = stage.createNode(nodetypes.PUBLISH, "PUBLISH")
+                publish.setInput(0, end_dep)
 
             end_dep.setPosition((0, 1))
             begin_dep.setPosition((0, 4))

@@ -92,9 +92,9 @@ def _publish(window: QtWidgets.QWidget | None) -> list[str]:
     hip_path = current_hip_path()
     if hip_path is None:
         raise _Refused(_NOT_A_PUBLISHING_HIP)
-    node = _publish_node()
     conn = ShotGrid.connect(DB_Config)
     target = _target(conn, hip_path)
+    node = _publish_node()
 
     choice = prompt_publish(window, target.label)
     if choice is None:
