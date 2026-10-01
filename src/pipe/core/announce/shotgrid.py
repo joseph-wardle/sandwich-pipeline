@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from pipe.core.shotgrid import (
+    Asset,
     Shot,
     ShotGrid,
     ShotGridAmbiguous,
@@ -18,7 +19,7 @@ log = logging.getLogger(__name__)
 def send_note(
     conn: ShotGrid,
     *,
-    shot: Shot,
+    deliverable: Shot | Asset,
     steps: list[str],
     subject: str,
     body: str,
@@ -29,7 +30,11 @@ def send_note(
     Raises:
         ShotGridError: the task lookup or the Note write failed.
     """
-    tasks = conn.find_tasks(shot=shot)
+
+    tasks = conn.find_tasks(
+        shot=deliverable if isinstance(deliverable, Shot) else None,
+        asset=deliverable if isinstance(deliverable, Asset) else None,
+    )
     assignees = {
         step: [
             user for task in tasks if task.step == step for user in task.assignees or []
@@ -42,7 +47,7 @@ def send_note(
     conn.create_note(
         subject=subject,
         content=body,
-        links=[shot],
+        links=[deliverable],
         to=to,
         author=_author(conn, author_name),
     )

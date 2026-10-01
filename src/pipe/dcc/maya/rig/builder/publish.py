@@ -6,8 +6,10 @@ from typing import Callable, Iterable
 from env_sg import DB_Config
 from maya import cmds
 
+from pipe.core.announce import announce_publish
 from pipe.core.asset import paths_for_asset
 from pipe.core.shotgrid import ShotGrid
+from pipe.core.util.paths import get_production_path
 from pipe.core.versioning import next_version, versioned_filename
 from pipe.dcc.maya.util.selection import maintain_selection
 
@@ -95,17 +97,19 @@ class RigPublisher:
             f"PUBLISH: {rig.name} rig model USD published to {rig_model_publish_path}"
         )
 
-    def _publish_rig(self, rig: RigDefinition) -> bool:
+    def _publish_rig(
+        self, rig: RigDefinition, publish_message: str | None = None
+    ) -> bool:
         publish_asset = self._conn.get_asset(name=rig.name)
         publish_asset_paths = paths_for_asset(publish_asset)
         rig_publish_path = publish_asset_paths.rig_path
         rig_versions_path = publish_asset_paths.rig_versions_path
 
-        next_version_number = next_version(
+        version_number = next_version(
             publish_asset_paths.rig_versions_path, stem=rig.name, ext="mb"
         )
         rig_version_filepath = rig_versions_path / versioned_filename(
-            stem=rig.name, ext="mb", version=next_version_number
+            stem=rig.name, ext="mb", version=version_number
         )
 
         cmds.select("rig")
@@ -138,10 +142,22 @@ class RigPublisher:
         )
         rig_publish_filepath.symlink_to(symlink_relative_path)
         log.info(f"PUBLISH: {rig.name} rig symlink updated to {rig_version_filepath}")
+        announce_publish(
+            self._conn,
+            deliverable=publish_asset,
+            deliverable_name=f"{rig.name} v{version_number}",
+            department="rig",
+            path=rig_publish_filepath.relative_to(get_production_path()),
+            announce_path=True,
+            detail=publish_message or "",
+            shotgrid=False,
+        )
         self.publish_progress.finish_step()
         return True
 
-    def build_test_and_publish(self, rig: RigDefinition):
+    def build_test_and_publish(
+        self, rig: RigDefinition, publish_message: str | None = None
+    ):
         build_complete = self._build_rig(rig)
         if not build_complete:
             log.error(f"{rig.name} failed to build properly and wasn't published!")
@@ -153,5 +169,5 @@ class RigPublisher:
             )
             return
         else:
-            self._publish_rig(rig)
+            self._publish_rig(rig, publish_message)
             self._publish_rig_model(rig)

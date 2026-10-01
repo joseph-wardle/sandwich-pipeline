@@ -3,9 +3,9 @@ from __future__ import annotations
 import Qt
 from maya.app.general.mayaMixin import MayaQWidgetDockableMixin  # type: ignore
 from Qt.QtWidgets import (
-    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSplitter,
     QVBoxLayout,
@@ -112,11 +112,9 @@ class RigBuilderWindowUI(MayaQWidgetDockableMixin, QWidget):
         self.publish_horizontal_layout.setContentsMargins(0, 0, 0, 0)
         self.mid_layout.addLayout(self.publish_horizontal_layout)
 
-        self.rig_version_spinbox = QDoubleSpinBox()
-        self.rig_version_spinbox.setPrefix("v")
-        self.rig_version_spinbox.setValue(1)
-        self.rig_version_spinbox.setSingleStep(0.01)
-        self.publish_horizontal_layout.addWidget(self.rig_version_spinbox, 1)
+        self.rig_publish_message = QLineEdit()
+        self.rig_publish_message.setPlaceholderText("Publish message:")
+        self.publish_horizontal_layout.addWidget(self.rig_publish_message, 1)
 
         self.rig_publish_button = QPushButton()
         self.rig_publish_button.setText("Build Test and Publish")
