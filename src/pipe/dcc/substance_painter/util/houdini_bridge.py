@@ -94,20 +94,16 @@ def run_asset_builder(asset: Asset, *, geo_variant: str) -> dict[str, Any]:
     result = _run_process(command, env)
 
     payload = _parse_result(result.stdout)
-    if payload is None:
-        log.error(f"Houdini asset builder stdout:\n{result.stdout}")
-        log.error(f"Houdini asset builder stderr:\n{result.stderr}")
-        if result.exit_code != 0:
-            raise HoudiniPublishError(
-                f"Houdini publish failed with exit code {result.exit_code}"
-            )
-        raise HoudiniPublishError(
-            "Failed to parse structured output from Houdini publish."
-        )
+    if (
+        payload is not None
+        and result.exit_code == 0
+        and payload.get("status") == "success"
+    ):
+        return payload
 
-    if result.exit_code != 0 or payload.get("status") != "success":
-        raise HoudiniPublishError(_summarize_errors(payload))
-    return payload
+    log.error(f"Houdini asset builder stdout:\n{result.stdout}")
+    log.error(f"Houdini asset builder stderr:\n{result.stderr}")
+    raise HoudiniPublishError(_failure_reason(payload, result.exit_code))
 
 
 def summarize_result(payload: dict[str, Any]) -> str:
@@ -184,14 +180,14 @@ def _run_process(command: list[str], env: dict[str, str]) -> _ProcessResult:
         # Only hython is killed; a child it started, such as husk, runs on.
         process.kill()
         process.waitForFinished()
-        raise HoudiniPublishError("The Houdini publish was interrupted.")
+        raise HoudiniPublishError("Interrupted before Houdini finished.")
 
     stdout = process.readAllStandardOutput().data().decode("utf-8", "replace")
     stderr = process.readAllStandardError().data().decode("utf-8", "replace")
     if process.exitStatus() == QtCore.QProcess.CrashExit:
         log.error(f"Houdini asset builder stdout:\n{stdout}")
         log.error(f"Houdini asset builder stderr:\n{stderr}")
-        raise HoudiniPublishError("Houdini crashed during the publish.")
+        raise HoudiniPublishError("Houdini crashed. Check the console for details.")
     return _ProcessResult(process.exitCode(), stdout, stderr)
 
 
@@ -211,8 +207,14 @@ def _parse_result(stdout: str) -> dict[str, Any] | None:
     return payload
 
 
-def _summarize_errors(payload: dict[str, Any]) -> str:
-    """Extract error messages from a failed Houdini build result."""
+def _failure_reason(payload: dict[str, Any] | None, exit_code: int) -> str:
+    """Why the build failed, worded to follow 'Houdini publish failed: '."""
+    if payload is None:
+        return (
+            f"Houdini exited with code {exit_code} without reporting a result. "
+            "Check the console for details."
+        )
+    # The builder copies its publish step's errors into this top-level list.
     errors = payload.get("errors", [])
     if isinstance(errors, list):
         messages = [
@@ -222,15 +224,8 @@ def _summarize_errors(payload: dict[str, Any]) -> str:
         ]
         if messages:
             return "; ".join(messages)
-    publish_payload = payload.get("publish")
-    if isinstance(publish_payload, dict):
-        publish_errors = publish_payload.get("errors", [])
-        if isinstance(publish_errors, list):
-            messages = [
-                str(entry.get("message", ""))
-                for entry in publish_errors
-                if isinstance(entry, dict) and entry.get("message")
-            ]
-            if messages:
-                return "; ".join(messages)
-    return "Unknown Houdini publish error."
+    status = payload.get("status", "unknown")
+    return (
+        f"Houdini reported no error, but ended with status {status!r} and "
+        f"exit code {exit_code}. Check the console for details."
+    )

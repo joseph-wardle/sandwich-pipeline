@@ -245,7 +245,7 @@ def _format_timestamp(timestamp: str | None) -> str:
         parsed = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
     except Exception:
         return text
-    return parsed.strftime("%b %d %H:%M")
+    return parsed.astimezone().strftime("%b %d %H:%M")
 
 
 def _current_version(records: list[VersionRecord]) -> int | None:

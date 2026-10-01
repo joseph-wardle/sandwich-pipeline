@@ -397,6 +397,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             MessageDialog(
                 get_main_qt_window(),
                 "No texture sets are enabled for export.",
+                "Publish Textures",
             ).exec_()
             return
         log.info(f"Exporting {len(export_settings)} texture sets")
@@ -827,6 +828,7 @@ class TexSetWidget(QtWidgets.QWidget):
                     "layering. This publish tool currently supports non-layered "
                     "texture sets only."
                 ),
+                "Publish Textures",
             ).exec_()
             self._setup_unsupported_layout()
             return

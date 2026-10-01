@@ -9,6 +9,7 @@ Public API
 ----------
 - get_asset_selection_metadata()
 - get_active_asset_from_project()
+- NO_ACTIVE_ASSET_MESSAGE
 - current_geo_variant()
 - tag_project()
 """
@@ -43,6 +44,11 @@ PIPE_SP_METADATA_KEY = "asset_selection"
 
 PIPE_SP_METADATA_SCHEMA_VERSION = 1
 """Schema version stamped into every metadata payload for future migration."""
+
+NO_ACTIVE_ASSET_MESSAGE = (
+    "Could not tell which asset this project belongs to. "
+    "Use Open Asset to create or open the asset project first."
+)
 
 
 # ---------------------------------------------------------------------------

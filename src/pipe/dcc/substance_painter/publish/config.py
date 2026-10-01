@@ -50,6 +50,16 @@ def resolve_export_targets(
                 )
             ) from exc
 
+        for channel in export_settings.extra_channels:
+            if not stack.has_channel(channel.type()):
+                raise ValueError(
+                    f'Texture Set "{ts_name}" no longer has the '
+                    f'"{channel_export_name(channel)}" channel that was ticked '
+                    "under Extra Maps.\n"
+                    "Reopen Publish Textures to refresh the channel list, then "
+                    "publish again."
+                )
+
         targets.append(
             ResolvedExportTarget(
                 settings=export_settings,

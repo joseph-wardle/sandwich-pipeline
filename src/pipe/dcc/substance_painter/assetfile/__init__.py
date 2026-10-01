@@ -44,6 +44,7 @@ from pipe.dcc.substance_painter.ui.dialogs import (
 )
 from pipe.dcc.substance_painter.runtime import get_main_qt_window
 from pipe.dcc.substance_painter.util.metadata import (
+    NO_ACTIVE_ASSET_MESSAGE,
     current_geo_variant,
     get_active_asset_from_project,
     tag_project,
@@ -125,7 +126,7 @@ def _ensure_project_saved_for_version_action(
     if sp.project.needs_saving():
         dialog = MessageDialogCustomButtons(
             parent,
-            f"The project has unsaved changes. Save before {action_name.lower()}?",
+            "The project has unsaved changes. Save them before creating the version?",
             "Save Required",
             has_cancel_button=True,
             ok_name="Save",
@@ -483,11 +484,7 @@ def launch_version_browser_for_current_project() -> None:
     conn = ShotGrid.connect(DB_Config)
     asset = get_active_asset_from_project(conn)
     if not asset:
-        MessageDialog(
-            parent,
-            "Could not resolve the current asset from project metadata.",
-            "Version History",
-        ).exec_()
+        MessageDialog(parent, NO_ACTIVE_ASSET_MESSAGE, "Version History").exec_()
         return
 
     geo_variant = current_geo_variant()
@@ -594,11 +591,7 @@ def launch_save_version() -> None:
     conn = ShotGrid.connect(DB_Config)
     asset = get_active_asset_from_project(conn)
     if not asset:
-        MessageDialog(
-            parent,
-            "Could not resolve the current asset from project metadata.",
-            "Save Version",
-        ).exec_()
+        MessageDialog(parent, NO_ACTIVE_ASSET_MESSAGE, "Save Version").exec_()
         return
 
     geo_variant = current_geo_variant()
