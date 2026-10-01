@@ -2,6 +2,7 @@ from __future__ import annotations
 
 IMPORT_CAMERA = "skd::main::import_camera::1.0"
 LOAD_LAYERS = "skd::main::load_layers::1.0"
+PUBLISH = "skd::main::publish::1.0"
 RIG_MATERIAL_CONFIG = "skd::main::rig_material_config::1.0"
 
 RENAMED_FROM: dict[str, str] = {
