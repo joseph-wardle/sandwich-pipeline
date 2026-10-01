@@ -7,7 +7,8 @@ from pathlib import Path
 
 from env import discord_publish_webhook, discord_role_ids
 
-from pipe.core.shotgrid import Shot, ShotGrid, User
+from pipe.core.shotgrid import Asset, Shot, ShotGrid, User
+from pipe.core.util.users import resolve_artist_display_name
 
 from .discord import post_message
 from .shotgrid import send_note
@@ -15,6 +16,7 @@ from .shotgrid import send_note
 log = logging.getLogger(__name__)
 
 DOWNSTREAM: dict[str, list[str]] = {
+    "rig": ["Animation"],
     "anim": ["CFX", "FX", "Lighting"],
     "cam": ["Animation", "Lighting"],
 }
@@ -23,27 +25,44 @@ DOWNSTREAM: dict[str, list[str]] = {
 def announce_publish(
     conn: ShotGrid,
     *,
-    shot: Shot,
+    deliverable: Shot | Asset,
+    deliverable_name: str | None = None,
     department: str,
-    artist: str,
+    artist: str | None = None,
     path: Path,
+    announce_path: bool = False,
     detail: str = "",
+    discord: bool = True,
+    shotgrid: bool = True,
 ) -> list[str]:
-    """Tell `department`'s downstream that `artist` published `shot`.
+    """Tell `department`'s downstream that `artist` published `shot`/`asset`.
 
     `detail` is free text for the message, such as which rigs were published.
     """
+    resolved_artist = artist if artist else resolve_artist_display_name()
+    resolved_deliverable_name = deliverable_name or deliverable.code
     steps = DOWNSTREAM[department]
-    subject = f"{shot.code} {department} published"
-    sentence = f"{subject} by {artist}"
+    subject = f"{resolved_deliverable_name} {department} published"
+    sentence = f"{subject} by {resolved_artist}"
+    if announce_path:
+        sentence += f" to `{path}`"
     if detail:
         sentence += f" ({detail})"
-    return [
-        _announce_on_discord(sentence, steps),
-        _announce_on_shotgrid(
-            conn, shot, steps, subject, f"{sentence}\n{path}", artist
-        ),
-    ]
+    results: list[str] = []
+    if discord:
+        results.append(_announce_on_discord(sentence, steps))
+    if shotgrid:
+        results.append(
+            _announce_on_shotgrid(
+                conn,
+                deliverable,
+                steps,
+                subject,
+                f"{sentence}\n{path}",
+                resolved_artist,
+            )
+        )
+    return results
 
 
 def _announce_on_discord(sentence: str, steps: list[str]) -> str:
@@ -75,7 +94,7 @@ def _announce_on_discord(sentence: str, steps: list[str]) -> str:
 
 def _announce_on_shotgrid(
     conn: ShotGrid,
-    shot: Shot,
+    deliverable: Shot | Asset,
     steps: list[str],
     subject: str,
     body: str,
@@ -83,7 +102,12 @@ def _announce_on_shotgrid(
 ) -> str:
     try:
         assignees = send_note(
-            conn, shot=shot, steps=steps, subject=subject, body=body, author_name=artist
+            conn,
+            deliverable=deliverable,
+            steps=steps,
+            subject=subject,
+            body=body,
+            author_name=artist,
         )
     except Exception as exc:
         log.exception("ShotGrid announcement failed")
@@ -97,7 +121,7 @@ def _announce_on_shotgrid(
     line = f"ShotGrid: noted {_and(told)}." if told else "ShotGrid: note written."
     if unassigned := [step for step, users in assignees.items() if not users]:
         line += (
-            f" No one is assigned to {_and(unassigned)} on {shot.code}, "
+            f" No one is assigned to {_and(unassigned)} on {deliverable.code}, "
             "so nobody was told for it."
         )
     return line

@@ -314,4 +314,7 @@ class RigBuilderWindow(RigBuilderWindowUI):
         rig_publisher.connect_progress(self.rig_build_progress_bar.update_progress)
         rig_publisher.connect_test_view(self.test_list.on_test_finished)
 
-        rig_publisher.build_test_and_publish(rig_to_build)
+        publish_message = self.rig_publish_message.text()
+        rig_publisher.build_test_and_publish(
+            rig_to_build, publish_message=publish_message if publish_message else ""
+        )

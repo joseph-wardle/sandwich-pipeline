@@ -21,8 +21,8 @@ from pipe.core.util.users import resolve_artist_display_name
 
 from .anim_index import AnimStream, entries_to_json, index_key, read_anim_index
 from .anim_lock import confirm_locked_republish
-from .publisher import Publisher
 from .namespaces import namespace_of
+from .publisher import Publisher
 from .rig_selection import PublishSelection, select_rigs_to_publish
 from .usdchaser import ExportChaser, ExportChaserMode
 
@@ -192,7 +192,7 @@ class AnimPublisher(Publisher):
         rigs = [namespace_of(cache_set) for cache_set in self._selection.sets_to_export]
         return announce_publish(
             self._conn,
-            shot=self._shot,
+            deliverable=self._shot,
             department="anim",
             artist=resolve_artist_display_name(),
             path=self._publish_path,
