@@ -6,19 +6,12 @@ from typing import TYPE_CHECKING, Iterator, cast
 
 import hou
 
-from pipe.core.hud import (
-    ARTIST,
-    HudContent,
-    TITLE,
-    labeled_line,
-    line_date,
-    line_shot,
-)
+from pipe.core.hud import ARTIST, HudContent, labeled_line, line_date, line_shot
 from pipe.core.playblast import Playblaster, PreviewClip
-from pipe.core.shot import houdini_department_stream, shot_owner_for
+from pipe.core.publish import scene_version
+from pipe.core.shot import current_layer_path, shot_root_path
 from pipe.core.util.users import resolve_artist_display_name
-from pipe.core.versioning import current_version_label
-from pipe.dcc.houdini.hipfile.paths import current_hip_path, department_from_hip_path
+from pipe.dcc.houdini.hipfile.paths import current_hip_path
 
 if TYPE_CHECKING:
     from pipe.core.shotgrid import Shot
@@ -74,35 +67,30 @@ class HPlayblaster(Playblaster):
         return self
 
     def _hud_content(self, shot: Shot, start_frame: int) -> HudContent:
-        version_label, title = self._resolve_current_version(shot)
-
-        left_lines: list[str] = [labeled_line(ARTIST, resolve_artist_display_name())]
-        if title:
-            left_lines.append(labeled_line(TITLE, title))
-        left_lines.append(
+        left_lines = (
+            labeled_line(ARTIST, resolve_artist_display_name()),
             line_shot(
                 shot.code or "",
-                version=version_label,
+                version=self._published_version(shot),
                 unsaved=hou.hipFile.hasUnsavedChanges(),
-            )
+            ),
         )
 
         return HudContent(
-            left_lines=tuple(left_lines),
+            left_lines=left_lines,
             right_lines=(line_date(),),
             frame_start=start_frame,
         )
 
     @staticmethod
-    def _resolve_current_version(shot: Shot) -> tuple[str | None, str | None]:
+    def _published_version(shot: Shot) -> str | None:
+        """The publish version this hip made, if it is in the shot's department folder."""
         hip_path = current_hip_path()
         if hip_path is None:
-            return None, None
-        department = department_from_hip_path(hip_path)
-        if department is None:
-            return None, None
-        stream = houdini_department_stream(shot, department, owner=shot_owner_for(shot))
-        return current_version_label(stream, hip_path)
+            return None
+        current = current_layer_path(shot_root_path(shot), hip_path.parent.name)
+        version = scene_version(current, hip_path)
+        return None if version is None else f"v{version:03d}"
 
     def _write_images(self, shot: Shot, path: str) -> None:
         cut_in, cut_out = shot.frame_range

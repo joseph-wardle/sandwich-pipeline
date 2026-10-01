@@ -15,17 +15,13 @@ from pipe.dcc.houdini.hipfile.departments import (
     PUBLISHING_DEPARTMENTS,
     Department,
 )
-from pipe.dcc.houdini.hipfile.paths import department_from_hip_path
 from pipe.core.sets import current_layer_path
-from pipe.core.shot import houdini_department_stream, shot_owner_for
 from pipe.core.shotgrid import (
     Set,
     SGEntity,
     Shot,
     ShotGridNotFound,
-    validate_shot_code_token,
 )
-from pipe.core.versioning import VersionStreamSpec, path_matches_stream
 from pipe.dcc.houdini.util import nodetypes
 
 from .filemanager import HFileManager
@@ -41,9 +37,6 @@ class HShotFileManager(HFileManager):
     # the class alias is kept so call sites that reference `HShotFileManager.DEPARTMENT`
     # continue to work without touching every site.
     DEPARTMENT = Department
-
-    def _entity_label(self) -> str:
-        return "shot"
 
     @classmethod
     def _department_options(cls) -> list[str]:
@@ -113,79 +106,6 @@ class HShotFileManager(HFileManager):
     def _department_value(self) -> str:
         normalized = str(self._department or "").strip()
         return normalized or "unknown"
-
-    def _resolve_shot_for_hip(self, hip_path: Path) -> Shot | None:
-        try:
-            shot_context = str(hou.contextOption("SHOT")).strip()
-        except Exception:
-            shot_context = ""
-
-        shot_code = ""
-        if shot_context:
-            try:
-                shot_code = validate_shot_code_token(Path(shot_context).name)
-            except ValueError:
-                shot_code = ""
-
-        if not shot_code:
-            try:
-                shot_index = hip_path.parts.index("shot")
-                if shot_index + 1 < len(hip_path.parts):
-                    shot_code = validate_shot_code_token(hip_path.parts[shot_index + 1])
-            except (ValueError, IndexError):
-                shot_code = ""
-
-        if not shot_code:
-            return None
-        return self._conn.get_shot(code=shot_code)
-
-    def _resolve_current_shot_stream(
-        self,
-        hip_path: Path,
-    ) -> tuple[Shot, str, VersionStreamSpec] | None:
-        shot = self._resolve_shot_for_hip(hip_path)
-        if shot is None:
-            return None
-
-        department = department_from_hip_path(hip_path)
-        if department is None:
-            return None
-
-        self._department = department
-        stream = houdini_department_stream(
-            shot,
-            department,
-            owner=shot_owner_for(shot),
-        )
-        if not path_matches_stream(hip_path, stream):
-            return None
-        return shot, department, stream
-
-    def _resolve_current_stream(
-        self, hip_path: Path
-    ) -> tuple[VersionStreamSpec, str, SGEntity] | None:
-        resolved = self._resolve_current_shot_stream(hip_path)
-        if resolved is None:
-            return None
-        shot, department, stream = resolved
-        return stream, f"{shot.code} ({department})", shot
-
-    def save_version(self) -> None:
-        hip_path = self._ensure_hip_saved()
-        if hip_path is None:
-            return
-
-        resolved = self._resolve_current_stream(hip_path)
-        if resolved is None:
-            MessageDialog(
-                self._main_window,
-                "Could not resolve the current HIP to a valid shot department file.",
-                "Shot Not Resolved",
-            ).exec_()
-            return
-
-        stream, _, _ = resolved
-        self._write_named_version(hip_path, stream)
 
     def _setup_file(self, path: Path, entity: SGEntity) -> None:
         shot = cast(Shot, entity)

@@ -14,6 +14,7 @@ and the version layers in it.
 
 from __future__ import annotations
 
+import filecmp
 import os
 import re
 import shutil
@@ -128,8 +129,23 @@ def version_info(current: Path, version: int) -> VersionInfo:
         author=data.get(AUTHOR_KEY, ""),
         date=date,
         note=data.get(NOTE_KEY, ""),
-        source=next((path.parent / SOURCE_DIRNAME).glob("*"), None),
+        source=_source(current, version),
     )
+
+
+def scene_version(current: Path, scene: Path) -> int | None:
+    """The newest version in this publish folder that `scene`, as it is on disk, made.
+
+    Whichever layer it published: a folder's layers number their versions together.
+    """
+    if not scene.is_file():
+        return None
+    for version in sorted(_numbered(current), reverse=True):
+        source = _source(current, version)
+        # Equal sizes and dates settle it without reading either file.
+        if source is not None and filecmp.cmp(scene, source):
+            return version
+    return None
 
 
 def copy_source(current: Path, version: int, source: Path) -> Path:
@@ -216,6 +232,11 @@ def _numbered(current: Path) -> list[int]:
         for entry in current.parent.iterdir()
         if entry.is_dir() and (match := _VERSION.fullmatch(entry.name))
     ]
+
+
+def _source(current: Path, version: int) -> Path | None:
+    folder = current.parent / _version_dirname(version) / SOURCE_DIRNAME
+    return next(folder.glob("*"), None)
 
 
 def _sublayer(current: Path, version: int) -> str:

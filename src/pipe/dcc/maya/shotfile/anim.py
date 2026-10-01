@@ -7,16 +7,14 @@ from pxr import Sdf, Usd, UsdGeom
 
 from pipe.dcc.maya.util.camera import apply_gate_mask
 from pipe.dcc.maya.rig.utils import get_rig_filepath_from_asset
-from pipe.core.shot import current_layer_path, maya_anim_stream, shot_owner_for
+from pipe.core.shot import current_layer_path
 from pipe.core.shotgrid import (
     SGEntity,
-    Shot,
     build_shot_path,
     is_previs_shot_code,
 )
 from pipe.core.ui import MessageDialog
 from pipe.dcc.maya.runtime import get_main_qt_window
-from pipe.core.versioning import VersionStreamSpec, path_matches_stream
 
 from .shotfile_manager import MShotFileManager
 from .sets import sync_shot_sets
@@ -170,28 +168,3 @@ class MAnimShotFileManager(MShotFileManager):
     def _setup_file(self, path: Path, entity) -> None:
         mc.file(newFile=True, force=True)
         super()._setup_file(path, entity)
-
-    def _resolve_current_anim_stream(
-        self,
-        scene_path: Path,
-    ) -> tuple[Shot, VersionStreamSpec] | None:
-        shot = self._resolve_shot_for_scene(scene_path)
-        if shot is None:
-            return None
-
-        stream = maya_anim_stream(shot, owner=shot_owner_for(shot))
-        if not path_matches_stream(scene_path, stream):
-            return None
-        return shot, stream
-
-    def _entity_label(self) -> str:
-        return "animation"
-
-    def _resolve_current_stream(
-        self, scene_path: Path
-    ) -> tuple[VersionStreamSpec, str, Shot] | None:
-        result = self._resolve_current_anim_stream(scene_path)
-        if result is None:
-            return None
-        shot, stream = result
-        return stream, shot.code or "", shot

@@ -23,8 +23,9 @@ from pipe.core.playblast import (
     custom_folder_destination,
 )
 from pipe.core.playblast.naming import build_edit_output_directory
-from pipe.core.shot import maya_anim_stream, shot_owner_for
-from pipe.core.versioning import current_version_label
+from pipe.core.publish import scene_version
+from pipe.core.shot import current_layer_path, shot_root_path
+from pipe.core.shotgrid import Shot
 from pipe.dcc.maya.playblast.shot.config import (
     MPlayblastConfig,
     MShotPlayblastConfig,
@@ -32,6 +33,8 @@ from pipe.dcc.maya.playblast.shot.config import (
 from pipe.dcc.maya.playblast.shot.dialog import MPlayblastDialog
 
 log = logging.getLogger(__name__)
+
+DEPARTMENT = "anim"
 
 
 class AnimPlayblastDialog(MPlayblastDialog):
@@ -105,7 +108,7 @@ class AnimPlayblastDialog(MPlayblastDialog):
             DiskDestination(
                 id=EDIT_FOLDER_ID,
                 name=EDIT_FOLDER_NAME,
-                directory=build_edit_output_directory("anim"),
+                directory=build_edit_output_directory(DEPARTMENT),
                 preset=FFmpegPreset.EDIT_SQ,
                 default_on=False,
             ),
@@ -122,13 +125,11 @@ class AnimPlayblastDialog(MPlayblastDialog):
         if self._shot is None:
             raise ValueError("No pipeline shot context is available.")
 
-        version_label, version_title = _resolve_anim_version(self._shot)
         return MShotPlayblastConfig(
             camera=self._get_shot_camera_path(),
             shot=self._shot,
             tails=(5, 5),
-            version_label=version_label,
-            version_title=version_title,
+            version_label=_published_version(self._shot),
         )
 
     def _generate_config(self) -> MPlayblastConfig:
@@ -143,10 +144,9 @@ class AnimPlayblastDialog(MPlayblastDialog):
         return MPlayblastConfig(quality=self.quality, shots=[shot_config])
 
 
-def _resolve_anim_version(shot) -> tuple[str | None, str | None]:
-    scene_raw = mc.file(query=True, sceneName=True)
-    if not isinstance(scene_raw, str) or not scene_raw:
-        return None, None
-    scene_path = Path(scene_raw).expanduser().resolve()
-    stream = maya_anim_stream(shot, owner=shot_owner_for(shot))
-    return current_version_label(stream, scene_path)
+def _published_version(shot: Shot) -> str | None:
+    """The anim publish version the open scene made, on either stream."""
+    scene = Path(str(mc.file(query=True, sceneName=True)))
+    current = current_layer_path(shot_root_path(shot), DEPARTMENT)
+    version = scene_version(current, scene)
+    return None if version is None else f"v{version:03d}"

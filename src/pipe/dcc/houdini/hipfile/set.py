@@ -8,7 +8,6 @@ import hou
 
 from pipe.core.sets import (
     SETS_DIRNAME,
-    houdini_set_stream,
     set_dir,
     valid_set_name,
 )
@@ -16,12 +15,9 @@ from pipe.core.shotgrid import (
     Set,
     SGEntity,
     ShotGridError,
-    ShotGridNotFound,
     normalize_display_name,
 )
 from pipe.core.ui import MessageDialog
-from pipe.core.util.paths import get_production_path
-from pipe.core.versioning import VersionStreamSpec, path_matches_stream
 from pipe.dcc.houdini.util import nodetypes
 
 from .filemanager import HFileManager
@@ -34,9 +30,6 @@ class HSetFileManager(HFileManager):
 
     def __init__(self) -> None:
         super().__init__(Set)
-
-    def _entity_label(self) -> str:
-        return "set"
 
     def _generate_filename_ext(self, entity: SGEntity) -> tuple[str, str]:
         return cast(Set, entity).name, "hipnc"
@@ -97,49 +90,6 @@ class HSetFileManager(HFileManager):
                 "New Set",
             )
         return None
-
-    def _set_for_hip(self, hip_path: Path) -> Set | None:
-        """The set whose folder holds `hip_path`, or None if it's not in a set folder.
-
-        Raises:
-            ShotGridError: ShotGrid could not be reached.
-        """
-        sets_root = (get_production_path() / SETS_DIRNAME).resolve()
-        try:
-            relative = hip_path.resolve().relative_to(sets_root)
-        except ValueError:
-            return None
-        try:
-            return self._conn.get_set(name=relative.parts[0])
-        except ShotGridNotFound:
-            return None
-
-    def _resolve_current_stream(
-        self, hip_path: Path
-    ) -> tuple[VersionStreamSpec, str, SGEntity] | None:
-        set = self._set_for_hip(hip_path)
-        if set is None:
-            return None
-        stream = houdini_set_stream(set)
-        if not path_matches_stream(hip_path, stream):
-            return None
-        return stream, set.name, set
-
-    def save_version(self) -> None:
-        hip_path = self._ensure_hip_saved()
-        if hip_path is None:
-            return
-
-        resolved = self._resolve_current_stream(hip_path)
-        if resolved is None:
-            self._message(
-                "Could not resolve the current HIP to a valid set file.",
-                "Set Not Resolved",
-            )
-            return
-
-        stream, _, _ = resolved
-        self._write_named_version(hip_path, stream)
 
     def _message(self, text: str, title: str) -> None:
         MessageDialog(self._main_window, text, title).exec_()
