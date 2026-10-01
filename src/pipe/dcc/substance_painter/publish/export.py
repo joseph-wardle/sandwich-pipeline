@@ -362,15 +362,16 @@ class Exporter:
 
         try:
             tex_converter.convert_all()
-        except TexConversionError:
+        except TexConversionError as exc:
             log.exception("Texture conversion failed.")
             sp.logging.warning(
                 "TEX conversion failed; source textures exported but .tex files were not generated."
             )
             self._set_error_message(
                 "Source textures exported, but TEX conversion failed.\n"
-                "Stop rendering this asset in Houdini and press "
-                '"Reset RenderMan RIS/XPU", then try again.'
+                f"Details: {exc}\n"
+                "If this asset is rendering in Houdini, stop the render and press "
+                '"Reset RenderMan RIS/XPU", then publish again.'
             )
             return False
 

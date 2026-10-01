@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
-import time
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import typing
-
-    RT = typing.TypeVar("RT")  # return type
 
 from pipe.core import telemetry
 from pipe.core.util import silent_startupinfo
@@ -24,7 +22,10 @@ from env import Executables
 log = logging.getLogger(__name__)
 
 _COLOR_SOURCE_COLORSPACE = "sRGB - Texture"
+_DATA_COLORSPACE = "Raw"
 _RENDERING_COLORSPACE = "ACEScg"
+_UDIM_SUFFIX = re.compile(r"\.\d{4}$")
+_MAX_REPORTED_FAILURES = 3
 
 
 def _process_qt_events() -> None:
@@ -46,6 +47,30 @@ class TexConversionError(ChildProcessError):
     """Raised when one of the tex conversion subprocesses fails."""
 
     error_code = "TEXTURE_CONVERSION_FAILED"
+
+
+def _failure_reason(returncode: int, stderr: str) -> str:
+    """oiiotool's own error line, or its exit code when it printed nothing."""
+    if returncode == 0:
+        return "the converter reported success but wrote no file"
+    return stderr.strip().partition("\n")[0] or f"exit code {returncode}"
+
+
+def _failure_summary(failures: list[str]) -> str:
+    shown = failures[:_MAX_REPORTED_FAILURES]
+    lines = [f"{len(failures)} texture(s) could not be converted to TEX:", *shown]
+    if len(failures) > len(shown):
+        lines.append(f"... and {len(failures) - len(shown)} more, listed in the log.")
+    return "\n".join(lines)
+
+
+def _is_color_map(img: str) -> bool:
+    """Whether a Painter export needs colour conversion, judged by its map name."""
+    name = _UDIM_SUFFIX.sub("", Path(img).stem)
+    if name.endswith(f"_{_DATA_COLORSPACE}"):
+        return False
+    map_name = name.removesuffix(f"_{_COLOR_SOURCE_COLORSPACE}").rpartition("_")[2]
+    return "Color" in map_name or "Emissive" in map_name
 
 
 class TexConverter:
@@ -110,14 +135,11 @@ class TexConverter:
     def convert_tex(self) -> list[Path]:
         """Convert all .png textures in the most recent export to .tex"""
 
-        assert self.tex_path is not None
-
         # Remove any corrupted tex files from a previous export
         for file in self.tex_path.iterdir():
             if file.name.endswith(".temp.tex"):
                 file.unlink()
 
-        @self._debug_out
         def tex_cmd(img: str, is_color: bool) -> list[str]:
             # fmt: off
             return [
@@ -142,9 +164,9 @@ class TexConverter:
             log.debug(imgs)
             for img in imgs:
                 log.debug(f"        {img}")
-                cmdlines.append(
-                    tex_cmd(img, is_color=("Color" in img or "Emissive" in img))
-                )
+                cmd = tex_cmd(img, is_color=_is_color_map(img))
+                log.debug(cmd)
+                cmdlines.append(cmd)
 
         total_tex = len(cmdlines)
         if total_tex <= 0:
@@ -163,17 +185,7 @@ class TexConverter:
             total=total_tex,
         )
 
-        finished_imgs = self._wait_and_check_cmds(
-            cmdlines,
-            batch_size=self.batch_size,
-            stage=PublishStage.CONVERTING_TEX,
-            message="Converting source textures to TEX.",
-        )
-
-        if len(finished_imgs) != len(cmdlines):
-            raise TexConversionError("Not all png textures were converted")
-
-        return finished_imgs
+        return self._wait_and_check_cmds(cmdlines)
 
     def _report_progress(
         self,
@@ -194,68 +206,57 @@ class TexConverter:
             )
         )
 
-    def _wait_and_check_cmds(
-        self,
-        cmds: typing.Sequence[list[str]],
-        batch_size: int = 18,
-        stage: PublishStage | None = None,
-        message: str | None = None,
-    ) -> list[Path]:
-        """Wait for list of processes to finish and print them to the debug log"""
-
-        batched_cmds = (
-            cmds[i : i + batch_size] for i in range(0, len(cmds), batch_size)
-        )
-
+    def _wait_and_check_cmds(self, cmds: typing.Sequence[list[str]]) -> list[Path]:
+        """Run the conversions in batches; raise unless every one writes its `.tex`."""
         finished_imgs: list[Path] = []
-        total_cmds = len(cmds)
 
-        while batch := next(batched_cmds, None):
-            start_time = time.time()
+        for batch_start in range(0, len(cmds), self.batch_size):
+            batch = cmds[batch_start : batch_start + self.batch_size]
+            try:
+                procs = [
+                    subprocess.Popen(
+                        cmd,
+                        env=os.environ,
+                        startupinfo=silent_startupinfo(),
+                        stderr=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                    for cmd in batch
+                ]
+            except OSError as exc:
+                raise TexConversionError(
+                    f"Could not start {Executables.rman_oiiotool}: {exc}"
+                ) from exc
 
-            procs = [
-                subprocess.Popen(
-                    cmd,
-                    env=os.environ,
-                    startupinfo=silent_startupinfo(),
-                    stderr=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                )
-                for cmd in batch
-            ]
-
-            for p in procs:
-                p.wait()
-                if log.isEnabledFor(logging.DEBUG):
-                    if p.stdout and (stdout := p.stdout.read().decode("utf-8")):
-                        log.debug(stdout)
-                    if p.stderr and (stderr := p.stderr.read().decode("utf-8")):
-                        log.debug(stderr)
-
+            failures: list[str] = []
+            for cmd, proc in zip(batch, procs):
+                stdout, stderr = proc.communicate()
                 _process_qt_events()
 
-                img = Path(cast(str, p.args[-1]))  # type: ignore
-
-                # check file has been touched recently
-                if start_time < img.stat().st_mtime:
-                    log.debug(f"Successfully converted {img}")
+                img = Path(cmd[-1])
+                if proc.returncode == 0 and img.exists():
+                    log.debug(f"Successfully converted {img}\n{stdout}{stderr}")
                     finished_imgs.append(img)
-                    if stage is not None and message is not None:
-                        self._report_progress(
-                            stage,
-                            message,
-                            current=len(finished_imgs),
-                            total=total_cmds,
-                        )
+                    self._report_progress(
+                        PublishStage.CONVERTING_TEX,
+                        "Converting source textures to TEX.",
+                        current=len(finished_imgs),
+                        total=len(cmds),
+                    )
+                else:
+                    log.error(
+                        f"TEX conversion of {img} failed with exit code "
+                        f"{proc.returncode}\n{stdout}{stderr}"
+                    )
+                    failures.append(
+                        f"{img.name}: {_failure_reason(proc.returncode, stderr)}"
+                    )
+
+            # Raised only once the whole batch has exited, so no converter is
+            # left running against the publish folder.
+            if failures:
+                raise TexConversionError(_failure_summary(failures))
 
         return finished_imgs
-
-    def _debug_out(self, func: typing.Callable[..., RT]) -> typing.Callable[..., RT]:
-        """Decorator to debug print the output of the function"""
-
-        def inner(self: TexConverter, *args, **kwargs) -> RT:
-            ret = func(self, *args, **kwargs)
-            log.debug(ret)
-            return ret
-
-        return inner
