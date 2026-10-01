@@ -38,7 +38,7 @@ SHOTS_DIRNAME = "shot"
 # The USD ROP inside the publish node.
 ROP_NAME = "rop"
 
-_NOT_A_PUBLISHING_HIP = (
+NOT_A_PUBLISHING_HIP = (
     "This hip isn't in a shot department's folder or a set's folder, so there is "
     "nothing for it to publish. Open it with Open Shot or Open Set."
 )
@@ -72,9 +72,9 @@ def _publish(window: QtWidgets.QWidget | None) -> _Published | None:
     """None if the artist backed out."""
     hip_path = current_hip_path()
     if hip_path is None:
-        raise Refused(_NOT_A_PUBLISHING_HIP)
+        raise Refused(NOT_A_PUBLISHING_HIP)
     conn = ShotGrid.connect(DB_Config)
-    target = _target(conn, hip_path)
+    target = hip_target(conn, hip_path)
     frame_range = _frame_range(target.entity)
     node = _publish_node()
 
@@ -109,7 +109,8 @@ def _publish_node() -> hou.LopNode:
     return cast(hou.LopNode, nodes[0])
 
 
-def _target(conn: ShotGrid, hip_path: Path) -> Target:
+def hip_target(conn: ShotGrid, hip_path: Path) -> Target:
+    """What the hip at `hip_path` publishes, which is decided by its folder."""
     try:
         parts = hip_path.relative_to(get_production_path().resolve()).parts
     except ValueError:
@@ -124,16 +125,15 @@ def _target(conn: ShotGrid, hip_path: Path) -> Target:
             return shot_target(conn.get_shot(code=parts[1]), department)
     except ShotGridNotFound:
         raise Refused(
-            f"ShotGrid has no {parts[0]} named {parts[1]}, so nothing was published. "
-            "Ask production to add it, or a TD if it is there."
+            f"ShotGrid has no {parts[0]} named {parts[1]}. Ask production to add "
+            "it, or a TD if it is there."
         ) from None
     except ShotGridError as exc:
         log.exception("Could not look up what %s publishes.", hip_path)
         raise Refused(
-            "ShotGrid couldn't say what this hip publishes, so nothing was "
-            f"published.\n{exc}"
+            f"ShotGrid couldn't say what this hip publishes.\n{exc}"
         ) from None
-    raise Refused(_NOT_A_PUBLISHING_HIP)
+    raise Refused(NOT_A_PUBLISHING_HIP)
 
 
 def _set_target(set: Set) -> Target:
@@ -141,7 +141,7 @@ def _set_target(set: Set) -> Target:
     version = next_version(current)
     return Target(
         entity=set,
-        label=f"{set.display_name} v{version:03d}",
+        name=set.display_name,
         current=current,
         version=version,
         file_name=PUBLISHED_FILE_NAME,

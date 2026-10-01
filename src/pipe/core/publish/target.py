@@ -29,8 +29,8 @@ class Refused(Exception):
 @dataclass(frozen=True)
 class Target:
     entity: Shot | Set
-    # How the dialogs name this version, such as `A_210 cfx v005`.
-    label: str
+    # How the dialogs name what is published, such as `A_210 cfx`.
+    name: str
     current: Path
     version: int
     # The ShotGrid PublishedFile's name, the same on every version, and its code.
@@ -38,6 +38,11 @@ class Target:
     file_code: str
     # Whose downstream is told. None tells no one.
     department: str | None
+
+    @property
+    def label(self) -> str:
+        """How the dialogs name this version, such as `A_210 cfx v005`."""
+        return f"{self.name} v{self.version:03d}"
 
 
 def shot_target(shot: Shot, department: str, name: str | None = None) -> Target:
@@ -52,7 +57,7 @@ def shot_target(shot: Shot, department: str, name: str | None = None) -> Target:
     version = next_version(current)
     return Target(
         entity=shot,
-        label=f"{code} {name} v{version:03d}",
+        name=f"{code} {name}",
         current=current,
         version=version,
         file_name=name,

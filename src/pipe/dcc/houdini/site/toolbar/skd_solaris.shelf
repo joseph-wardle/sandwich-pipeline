@@ -70,9 +70,8 @@ fm.save_version()]]></script>
   </tool>
 
   <tool name="set_version_history" label="Set Version History" icon="BUTTONS_history">
-    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HSetFileManager
-fm = HSetFileManager()
-fm.open_version_browser()]]></script>
+    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.publish import history
+history.show()]]></script>
   </tool>
 
   <tool name="open_shot" label="Open Shot" icon="NETWORKS_scene">
@@ -87,9 +86,8 @@ fm.save_version()]]></script>
   </tool>
 
   <tool name="shot_version_history" label="Shot Version History" icon="BUTTONS_history">
-    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HShotFileManager
-fm = HShotFileManager(prompt_for_department=False)
-fm.open_version_browser()]]></script>
+    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.publish import history
+history.show()]]></script>
   </tool>
 
   <tool name="skd_publish" label="Publish" icon="BUTTONS_upload">

@@ -38,13 +38,16 @@ def announce_publish(
     artist: str | None = None,
     path: Path,
     announce_path: bool = False,
+    action: str = "published",
     detail: str = "",
     discord: bool = True,
     shotgrid: bool = True,
 ) -> list[str]:
     """Tell `department`'s downstream that `artist` published `shot`/`asset`.
 
-    `detail` is free text for the message, such as which rigs were published.
+    `action` is what the artist did when it wasn't a publish, as Make Current's
+    `moved to v003` is. `detail` is free text for the message, such as which rigs
+    were published.
     Returns one line per channel, or none for a department with no downstream.
     """
     steps = DOWNSTREAM[department]
@@ -52,7 +55,7 @@ def announce_publish(
         return []
     resolved_artist = artist if artist else resolve_artist_display_name()
     resolved_deliverable_name = deliverable_name or deliverable.code
-    subject = f"{resolved_deliverable_name} {department} published"
+    subject = f"{resolved_deliverable_name} {department} {action}"
     sentence = f"{subject} by {resolved_artist}"
     if announce_path:
         sentence += f" to `{path}`"

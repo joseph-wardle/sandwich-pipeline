@@ -8,6 +8,7 @@ from .dialogs import (
     MessageDialogCustomButtons,
     set_tab_available,
 )
+from .history_dialog import HistoryAction, prompt_history
 from .progress import ProgressDialog, ProgressScope, progress_scope
 from .publish_dialog import PublishChoice, PublishRows, prompt_publish
 from .restore_conflict_dialog import (
@@ -34,6 +35,7 @@ __all__ = [
     "DialogButtons",
     "DialogFilteredList",
     "FilteredListDialog",
+    "HistoryAction",
     "ItemSource",
     "MessageDialog",
     "MessageDialogCustomButtons",
@@ -44,6 +46,7 @@ __all__ = [
     "SaveVersionDialog",
     "VersionBrowserWidget",
     "progress_scope",
+    "prompt_history",
     "prompt_publish",
     "prompt_restore_conflict",
     "set_tab_available",

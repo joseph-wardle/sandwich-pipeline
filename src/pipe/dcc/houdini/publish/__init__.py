@@ -6,8 +6,9 @@ keep `from pipe.dcc.houdini.publish import PublishOptions, publish_component` an
 the equivalent legacy `pipe.dcc.houdini.publish.main` shim path working.
 
 `version.py` is the shot and set publish: what a hip's publish node declares,
-written as the next publish version. `load_layers.py` is the reading end: which
-publish version each row of a shot hip's load layers node reads.
+written as the next publish version. `history.py` lists those versions, to open
+the hip that made one or to make one current. `load_layers.py` is the reading
+end: which publish version each row of a shot hip's load layers node reads.
 """
 
 from __future__ import annotations
