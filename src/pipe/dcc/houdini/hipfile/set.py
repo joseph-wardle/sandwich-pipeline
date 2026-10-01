@@ -6,14 +6,17 @@ from typing import cast
 
 import hou
 
-from pipe.core.sets import (
-    SETS_DIRNAME,
+from pipe.core.publish import (
     commit_version,
     create_staging,
     discard_staged,
-    houdini_set_stream,
     make_current,
     next_version,
+)
+from pipe.core.sets import (
+    SETS_DIRNAME,
+    current_layer_path,
+    houdini_set_stream,
     prepare_layer,
     set_dir,
     valid_set_name,
@@ -188,10 +191,11 @@ class HSetFileManager(HFileManager):
         if choice != 0:
             return
 
-        version = next_version(set.name)
+        current = current_layer_path(set.name)
+        version = next_version(current)
         label = f"{set.display_name} v{version:03d}"
         try:
-            staged = create_staging(set.name, version)
+            staged = create_staging(current, version)
         except FileExistsError as exc:
             self._message(
                 f"Nothing was published: {exc.filename} already exists. Someone may "
@@ -216,7 +220,7 @@ class HSetFileManager(HFileManager):
             log.exception("%s failed to write %s.", rop.path(), staged)
             written = False
         if not written:
-            discard_staged(set.name, version)
+            discard_staged(current, version)
             self._message(
                 f"{rop.path()} failed to write the set, so nothing was published. "
                 "Check the node's errors.",
@@ -227,7 +231,7 @@ class HSetFileManager(HFileManager):
         try:
             stray = prepare_layer(staged, set.name, hip_path)
         except ValueError:
-            discard_staged(set.name, version)
+            discard_staged(current, version)
             self._message(
                 f"Nothing was published: the stage has no /{set.name} prim. Put "
                 f"everything the set needs under /{set.name} and publish again.",
@@ -235,11 +239,11 @@ class HSetFileManager(HFileManager):
             )
             return
         if stray and not self._publish_anyway(set.name, stray):
-            discard_staged(set.name, version)
+            discard_staged(current, version)
             return
 
         try:
-            version_path = commit_version(set.name, version)
+            version_path = commit_version(current, version)
         except OSError:
             log.exception("Could not rename %s into place.", staged.parent)
             self._message(
@@ -249,12 +253,13 @@ class HSetFileManager(HFileManager):
             )
             return
         try:
-            make_current(set.name, version)
+            make_current(current, version)
         except OSError:
             log.exception("Could not make %s current.", label)
             self._message(
                 f"{label} is published, but shots still read the previous version. "
-                f"A TD can run make_current({set.name!r}, {version}).",
+                f"A TD can run pipe.core.publish.make_current on {current} with "
+                f"version {version}.",
                 "Publish Set",
             )
             return
