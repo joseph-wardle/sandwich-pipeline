@@ -27,10 +27,6 @@ class PublishProgressUpdate:
     current: int | None = None
     total: int | None = None
 
-    @property
-    def is_determinate(self) -> bool:
-        return self.current is not None and self.total is not None and self.total > 0
-
 
 PublishProgressCallback = Callable[[PublishProgressUpdate], None]
 

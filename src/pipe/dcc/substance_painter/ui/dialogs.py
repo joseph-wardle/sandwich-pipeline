@@ -9,9 +9,6 @@ Dialog flow
 1. SubstanceAssetSelectDialog — pick an asset and variant, then open or create
 2. SubstanceAssetCreateModeDialog — choose "Create Default" vs "Use Current"
 3. SubstanceAssetDefaultProjectDialog — pick a mesh source for the default project
-
-SubstanceAssetDialog is a simpler variant used when only asset selection
-(without the create/open split) is needed.
 """
 
 from __future__ import annotations
@@ -24,7 +21,7 @@ from pipe.core.util.paths import get_production_path, resolve_mapped_path
 from substance_painter.project import NormalMapFormat, ProjectWorkflow, TangentSpace
 
 from pipe.core.asset import DEFAULT_GEO_VARIANT, AssetPaths, paths_for_asset
-from pipe.core.ui import DialogFilteredList, FilteredListDialog, ItemSource
+from pipe.core.ui import DialogFilteredList, ItemSource
 from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.dcc.substance_painter.util.docs import docs_link_html
 
@@ -112,58 +109,6 @@ def _geo_variants_for_asset(asset: Asset) -> list[str]:
 # ---------------------------------------------------------------------------
 # Dialogs
 # ---------------------------------------------------------------------------
-
-
-class SubstanceAssetDialog(FilteredListDialog):
-    """Simple asset picker that shows the canonical textures path on selection."""
-
-    _conn: ShotGrid
-    _info_label: QtWidgets.QLabel
-
-    def __init__(
-        self,
-        parent: QtWidgets.QWidget | None,
-        items: ItemSource,
-        conn: ShotGrid,
-    ) -> None:
-        super().__init__(
-            parent,
-            items,
-            "Open Asset Textures",
-            "Select the asset to open its Substance Painter project.",
-            accept_button_name="Open",
-        )
-        self._conn = conn
-
-        info_widget = QtWidgets.QWidget(self)
-        info_layout = QtWidgets.QVBoxLayout(info_widget)
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.setSpacing(6)
-
-        self._info_label = QtWidgets.QLabel("Select an asset to see details.")
-        self._info_label.setWordWrap(True)
-        self._info_label.setTextFormat(QtCore.Qt.PlainText)
-        info_layout.addWidget(self._info_label)
-
-        self._layout.insertWidget(1, info_widget)
-
-    def _on_item_selected(self) -> None:
-        selected = self.get_selected_item()
-        if not selected:
-            self._info_label.setText("Select an asset to see details.")
-            return
-
-        asset = self._conn.get_asset(name=selected)
-        if not asset:
-            self._info_label.setText("Could not resolve the selected asset.")
-            return
-
-        paths = paths_for_asset(asset)
-        path = project_path_for_variant(paths, DEFAULT_GEO_VARIANT)
-        status = "exists" if path.exists() else "missing"
-        self._info_label.setText(
-            f"Substance Painter project ({DEFAULT_GEO_VARIANT}): {path} ({status})"
-        )
 
 
 class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
@@ -441,7 +386,6 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
     _paths: AssetPaths
     _geo_variant: str
     _mesh_status_label: QtWidgets.QLabel
-    _resolved_mesh_path: Path | None
 
     def __init__(
         self,
@@ -454,7 +398,6 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         self._asset = asset
         self._paths = paths
         self._geo_variant = geo_variant.strip() or DEFAULT_GEO_VARIANT
-        self._resolved_mesh_path = None
 
         self.setParent(parent)
         self.setWindowTitle("Create Default Project")
@@ -543,17 +486,11 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
     def use_custom_mesh(self) -> bool:
         return self._custom_mesh_radio.isChecked()
 
-    def get_selected_variant(self) -> str:
-        return self._geo_variant
-
     def get_custom_mesh_path(self) -> Path | None:
         text = self._custom_mesh_field.text().strip()
         if not text:
             return None
         return Path(text).expanduser()
-
-    def get_resolved_mesh_path(self) -> Path | None:
-        return self._resolved_mesh_path
 
     # -- Internal --
 
@@ -576,8 +513,6 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
             self._custom_mesh_field.setText(str(resolved))
 
     def _update_mesh_status(self) -> None:
-        self._resolved_mesh_path = None
-
         use_custom = self._custom_mesh_radio.isChecked()
         custom_mesh = self.get_custom_mesh_path()
 
@@ -587,8 +522,6 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
             custom_mesh_path=custom_mesh,
             variant=self._geo_variant,
         )
-
-        self._resolved_mesh_path = resolved
 
         if not resolved:
             self._mesh_status_label.setText("Mesh source: --")

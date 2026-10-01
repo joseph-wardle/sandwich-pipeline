@@ -16,8 +16,6 @@ from pipe.dcc.substance_painter.publish.types import (
 )
 from pipe.dcc.substance_painter.util.texture_set import texture_set_name
 
-_COLOR_EXPORT_COLORSPACE = "sRGB - Texture"
-_DATA_EXPORT_COLORSPACE = "Raw"
 _PREVIEW_SIZE_LOG2 = 10
 
 
@@ -96,7 +94,6 @@ def generate_export_config(
                                 ch.type().name.lower(), colors
                             ),
                             "parameters": {
-                                "colorSpace": _DATA_EXPORT_COLORSPACE,
                                 "bitDepth": bit_depth.lower(),
                                 "fileFormat": "png",
                                 "sizeLog2": target.settings.resolution,
@@ -135,9 +132,8 @@ def generate_export_config(
 def _shader_maps(export_settings: TexSetExportSettings) -> list[dict[str, object]]:
     size_log2 = export_settings.resolution
 
-    def png(colorspace: str, bit_depth: str) -> dict[str, object]:
+    def png(bit_depth: str) -> dict[str, object]:
         return {
-            "colorSpace": colorspace,
             "bitDepth": bit_depth,
             "fileFormat": "png",
             "sizeLog2": size_log2,
@@ -147,37 +143,37 @@ def _shader_maps(export_settings: TexSetExportSettings) -> list[dict[str, object
         {
             "fileName": "$textureSet_BaseColor(_$colorSpace)(.$udim)",
             "channels": _document_channels("baseColor", "RGB"),
-            "parameters": png(_COLOR_EXPORT_COLORSPACE, "16"),
+            "parameters": png("16"),
         },
         {
             "fileName": "$textureSet_Metallic(_$colorSpace)(.$udim)",
             "channels": _document_channels("metallic", "L"),
-            "parameters": png(_DATA_EXPORT_COLORSPACE, "8"),
+            "parameters": png("8"),
         },
         {
             "fileName": "$textureSet_IOR(_$colorSpace)(.$udim)",
             "channels": _document_channels("specular", "L"),
-            "parameters": png(_DATA_EXPORT_COLORSPACE, "8"),
+            "parameters": png("8"),
         },
         {
             "fileName": "$textureSet_SpecularRoughness(_$colorSpace)(.$udim)",
             "channels": _document_channels("roughness", "L"),
-            "parameters": png(_DATA_EXPORT_COLORSPACE, "8"),
+            "parameters": png("8"),
         },
         {
             "fileName": "$textureSet_Emissive(_$colorSpace)(.$udim)",
             "channels": _document_channels("emissive", "RGB"),
-            "parameters": png(_COLOR_EXPORT_COLORSPACE, "16"),
+            "parameters": png("16"),
         },
         {
             "fileName": "$textureSet_Presence(_$colorSpace)(.$udim)",
             "channels": _document_channels("opacity", "L"),
-            "parameters": png(_DATA_EXPORT_COLORSPACE, "8"),
+            "parameters": png("8"),
         },
         {
             "fileName": "$textureSet_Normal(_$colorSpace)(.$udim)",
             "channels": _normal_channels(export_settings),
-            "parameters": png(_DATA_EXPORT_COLORSPACE, "16"),
+            "parameters": png("16"),
         },
     ]
 
@@ -191,7 +187,7 @@ def _shader_maps(export_settings: TexSetExportSettings) -> list[dict[str, object
                     else "displacement",
                     "L",
                 ),
-                "parameters": png(_DATA_EXPORT_COLORSPACE, "16"),
+                "parameters": png("16"),
             }
         )
 
@@ -206,9 +202,8 @@ def _preview_maps(export_settings: TexSetExportSettings) -> list[dict[str, objec
     """
     size_log2 = min(export_settings.resolution, _PREVIEW_SIZE_LOG2)
 
-    def jpeg(colorspace: str, *, dithering: bool = False) -> dict[str, object]:
+    def jpeg(*, dithering: bool = False) -> dict[str, object]:
         return {
-            "colorSpace": colorspace,
             "bitDepth": "8",
             "dithering": dithering,
             "fileFormat": "jpeg",
@@ -219,22 +214,22 @@ def _preview_maps(export_settings: TexSetExportSettings) -> list[dict[str, objec
         {
             "fileName": "$textureSet_BaseColor(.$udim)",
             "channels": _document_channels("baseColor", "RGB"),
-            "parameters": jpeg(_COLOR_EXPORT_COLORSPACE, dithering=True),
+            "parameters": jpeg(dithering=True),
         },
         {
             "fileName": "$textureSet_Metallic(.$udim)",
             "channels": _document_channels("metallic", "L"),
-            "parameters": jpeg(_DATA_EXPORT_COLORSPACE),
+            "parameters": jpeg(),
         },
         {
             "fileName": "$textureSet_SpecularRoughness(.$udim)",
             "channels": _document_channels("roughness", "L"),
-            "parameters": jpeg(_DATA_EXPORT_COLORSPACE),
+            "parameters": jpeg(),
         },
         {
             "fileName": "$textureSet_Normal(.$udim)",
             "channels": _normal_channels(export_settings),
-            "parameters": jpeg(_DATA_EXPORT_COLORSPACE),
+            "parameters": jpeg(),
         },
     ]
 

@@ -10,8 +10,7 @@ from typing import TYPE_CHECKING
 from .dataclass_helpers import dict_index, dotdict
 
 if TYPE_CHECKING:
-    from types import ModuleType
-    from typing import Any, Callable, Sequence
+    from typing import Any, Callable
 
     # Qt is only used in type annotations below (which are deferred by
     # `from __future__ import annotations`). Keeping the import under
@@ -48,20 +47,15 @@ def log_errors(fun):
     return wrap
 
 
-def reload_pipeline(extra_modules: Sequence[ModuleType] | None = None) -> None:
+def reload_pipeline() -> None:
     """Reload all pipeline python modules"""
-    if extra_modules is None:
-        extra_modules = []
-    else:
-        extra_modules = list(extra_modules)
-
     pipeline_modules = [
         module
         for name, module in sys.modules.items()
         if (name.startswith(("pipe")))
         and ("shotgun_api3" not in name)
         or (name == "env")
-    ] + extra_modules
+    ]
 
     for module in pipeline_modules:
         if (name := module.__name__) in sys.modules:

@@ -318,11 +318,6 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             return items
         return [default_value]
 
-    def _preflight(self) -> bool:
-        """Check for asset metadata and correct channel types before running
-        the export"""
-        return True
-
     @property
     def mat_var(self) -> str:
         return self._mat_var_dropdown.currentText()
@@ -347,13 +342,11 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     def do_export(self, isBatch: bool = False) -> None:
         """Validate inputs and start the texture publish pipeline.
 
-        Runs pre-flight checks, gathers export settings from the UI, then
-        hands off to ``_begin_publish`` which manages the async progress
-        dialog and scheduling.
+        Gathers export settings from the UI, then hands off to
+        ``_begin_publish`` which manages the async progress dialog and
+        scheduling.
         """
         if self.is_publishing:
-            return
-        if not self._preflight():
             return
 
         version_title = self.version_title
@@ -782,10 +775,8 @@ class TexSetWidget(QtWidgets.QWidget):
     _enabled_checkbox: QtWidgets.QCheckBox
     _extra_channels_layout: QLayout
     _help_icon: QIcon
-    _parent_window: SubstanceExportWindow
     _normal_source_dropdown: QComboBox
     _resolution_dropdown: QComboBox
-    _settings_container: QtWidgets.QWidget
     _stack: sp.textureset.Stack | None
     _tex_set: sp.textureset.TextureSet
 
@@ -819,7 +810,6 @@ class TexSetWidget(QtWidgets.QWidget):
     ) -> None:
         super().__init__(parent)
         self.setParent(parent)
-        self._parent_window = parent
         self._tex_set = tex_set
         self.extra_channels = set()
         self._help_icon = QIcon(
