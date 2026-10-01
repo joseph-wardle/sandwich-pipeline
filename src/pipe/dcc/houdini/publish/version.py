@@ -39,6 +39,7 @@ from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.houdini import runtime
 from pipe.dcc.houdini.hipfile.departments import PUBLISHING_DEPARTMENTS
 from pipe.dcc.houdini.hipfile.paths import current_hip_path
+from pipe.dcc.houdini.playblast import launch_playblast
 from pipe.dcc.houdini.util import nodetypes
 
 log = logging.getLogger(__name__)
@@ -75,20 +76,32 @@ class _Target:
     department: str | None
 
 
+@dataclass(frozen=True)
+class _Published:
+    # What the result box says, one line each.
+    lines: list[str]
+    # The description a playblast of this version starts with. None when the
+    # artist didn't ask for a playblast.
+    playblast: str | None
+
+
 def publish() -> None:
     """Publish the next version of what this hip's publish node declares."""
     window = runtime.get_main_qt_window()
     try:
-        lines = _publish(window)
+        published = _publish(window)
     except _Refused as refusal:
         MessageDialog(window, str(refusal), TITLE).exec_()
         return
-    if lines:
-        MessageDialog(window, "\n".join(lines), TITLE).exec_()
+    if published is None:
+        return
+    MessageDialog(window, "\n".join(published.lines), TITLE).exec_()
+    if published.playblast is not None:
+        launch_playblast(published.playblast)
 
 
-def _publish(window: QtWidgets.QWidget | None) -> list[str]:
-    """Returns the lines of the result, or none if the artist backed out."""
+def _publish(window: QtWidgets.QWidget | None) -> _Published | None:
+    """None if the artist backed out."""
     hip_path = current_hip_path()
     if hip_path is None:
         raise _Refused(_NOT_A_PUBLISHING_HIP)
@@ -98,10 +111,10 @@ def _publish(window: QtWidgets.QWidget | None) -> list[str]:
 
     choice = prompt_publish(window, target.label)
     if choice is None:
-        return []
+        return None
     author = resolve_artist_display_name()
     if not _write_staged(node, target, hip_path, choice, author):
-        return []
+        return None
 
     staging = staging_layer_path(target.current, target.version).parent
     try:
@@ -145,7 +158,8 @@ def _publish(window: QtWidgets.QWidget | None) -> list[str]:
             path=version_path,
             detail=f"{version_name}: {choice.note}" if choice.note else version_name,
         )
-    return lines
+    description = f"{target.label}: {choice.note}" if choice.note else target.label
+    return _Published(lines, description if choice.playblast else None)
 
 
 def _publish_node() -> hou.LopNode:
