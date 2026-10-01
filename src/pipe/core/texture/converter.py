@@ -21,7 +21,6 @@ from env import Executables
 
 log = logging.getLogger(__name__)
 
-_COLOR_SOURCE_COLORSPACE = "sRGB - Texture"
 _DATA_COLORSPACE = "Raw"
 _RENDERING_COLORSPACE = "ACEScg"
 _UDIM_SUFFIX = re.compile(r"\.\d{4}$")
@@ -64,13 +63,9 @@ def _failure_summary(failures: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _is_color_map(img: str) -> bool:
-    """Whether a Painter export needs colour conversion, judged by its map name."""
-    name = _UDIM_SUFFIX.sub("", Path(img).stem)
-    if name.endswith(f"_{_DATA_COLORSPACE}"):
-        return False
-    map_name = name.removesuffix(f"_{_COLOR_SOURCE_COLORSPACE}").rpartition("_")[2]
-    return "Color" in map_name or "Emissive" in map_name
+def _source_colorspace(img: str) -> str:
+    """The colour space Painter wrote at the end of an export's name."""
+    return _UDIM_SUFFIX.sub("", Path(img).stem).rpartition("_")[2]
 
 
 class TexConverter:
@@ -140,7 +135,9 @@ class TexConverter:
             if file.name.endswith(".temp.tex"):
                 file.unlink()
 
-        def tex_cmd(img: str, is_color: bool) -> list[str]:
+        def tex_cmd(img: str) -> list[str]:
+            colorspace = _source_colorspace(img)
+            is_color = colorspace != _DATA_COLORSPACE
             # fmt: off
             return [
                 str(Executables.rman_oiiotool),
@@ -148,7 +145,7 @@ class TexConverter:
                 *(
                     [
                         "--colorconvert",
-                        _COLOR_SOURCE_COLORSPACE, _RENDERING_COLORSPACE,
+                        colorspace, _RENDERING_COLORSPACE,
                         "-d", "half",
                     ] if is_color else []
                 ),
@@ -164,7 +161,7 @@ class TexConverter:
             log.debug(imgs)
             for img in imgs:
                 log.debug(f"        {img}")
-                cmd = tex_cmd(img, is_color=_is_color_map(img))
+                cmd = tex_cmd(img)
                 log.debug(cmd)
                 cmdlines.append(cmd)
 

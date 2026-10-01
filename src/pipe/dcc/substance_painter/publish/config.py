@@ -161,11 +161,6 @@ def _shader_maps(export_settings: TexSetExportSettings) -> list[dict[str, object
             "parameters": png("8"),
         },
         {
-            "fileName": "$textureSet_IOR(_$colorSpace)(.$udim)",
-            "channels": _document_channels("specular", "L"),
-            "parameters": png("8"),
-        },
-        {
             "fileName": "$textureSet_SpecularRoughness(_$colorSpace)(.$udim)",
             "channels": _document_channels("roughness", "L"),
             "parameters": png("8"),
