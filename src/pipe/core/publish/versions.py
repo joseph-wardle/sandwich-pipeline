@@ -2,8 +2,10 @@
 
 publish/
 ├── <name>.usda         current: sublayers ./v002/<name>.usd
-├── v001/<name>.usd
-├── v002/<name>.usd
+├── v001/
+├── v002/
+│   ├── <name>.usd      holds who published it, when and why
+│   └── _src/           the scene file that made it
 └── .v003.tmp/          a version being written
 
 Every function takes the current layer's path, which names the folder and the
@@ -15,11 +17,17 @@ from __future__ import annotations
 import os
 import re
 import shutil
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from pxr import Sdf
 
 PUBLISH_DIRNAME = "publish"
+SOURCE_DIRNAME = "_src"
+AUTHOR_KEY = "author"
+DATE_KEY = "date"
+NOTE_KEY = "note"
 
 _VERSION = re.compile(r"v([0-9]{3,})")
 # What a stage takes from its root layer alone. The current layer carries them so
@@ -32,6 +40,16 @@ _STAGE_INFO_KEYS = (
     "timeCodesPerSecond",
     "framesPerSecond",
 )
+
+
+@dataclass(frozen=True)
+class VersionInfo:
+    version: int
+    author: str
+    date: datetime
+    note: str
+    # The scene file in `_src/`; None for a version from before scenes were kept.
+    source: Path | None
 
 
 def version_layer_path(current: Path, version: int) -> Path:
@@ -93,6 +111,43 @@ def current_version(current: Path) -> int | None:
         return None
     version = int(match.group(1))
     return version if sublayer == _sublayer(current, version) else None
+
+
+def version_info(current: Path, version: int) -> VersionInfo:
+    path = version_layer_path(current, version)
+    layer = Sdf.Layer.OpenAsAnonymous(str(path), metadataOnly=True)
+    data = layer.customLayerData
+    if DATE_KEY in data:
+        date = datetime.fromisoformat(data[DATE_KEY])
+    else:
+        # A version from before publishes were stamped has only its file's date.
+        date = datetime.fromtimestamp(path.stat().st_mtime).astimezone()
+    return VersionInfo(
+        version=version,
+        author=data.get(AUTHOR_KEY, ""),
+        date=date,
+        note=data.get(NOTE_KEY, ""),
+        source=next((path.parent / SOURCE_DIRNAME).glob("*"), None),
+    )
+
+
+def copy_source(current: Path, version: int, source: Path) -> Path:
+    """Copy the scene that made a staged version into its `_src/`."""
+    folder = staging_layer_path(current, version).parent / SOURCE_DIRNAME
+    folder.mkdir()
+    return Path(shutil.copy2(source, folder / source.name))
+
+
+def stamp(current: Path, version: int, *, author: str, note: str) -> None:
+    """Record on a staged version's layer who published it, when and why."""
+    layer = Sdf.Layer.FindOrOpen(str(staging_layer_path(current, version)))
+    layer.customLayerData = {
+        **layer.customLayerData,
+        AUTHOR_KEY: author,
+        DATE_KEY: datetime.now().astimezone().isoformat(timespec="seconds"),
+        NOTE_KEY: note,
+    }
+    layer.Save()
 
 
 def discard_staged(current: Path, version: int) -> None:
