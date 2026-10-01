@@ -1,3 +1,3 @@
-"""Substance Painter texture export — config, types, results, runners."""
+"""Substance Painter texture export — config, types, runners."""
 
 from __future__ import annotations

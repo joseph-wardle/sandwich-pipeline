@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,16 +23,8 @@ from pipe.dcc.substance_painter.publish.config import (
     resolve_export_targets,
 )
 from pipe.dcc.substance_painter.publish.material_info import write_material_info
-from pipe.dcc.substance_painter.publish.results import (
-    capture_export_events,
-    existing_source_file_count,
-    normalize_texture_export_map,
-    planned_export_count,
-    resolve_exported_files,
-)
 from pipe.dcc.substance_painter.publish.types import (
     ResolvedExportTarget,
-    TargetExportOutcome,
     TexSetExportSettings,
 )
 from pipe.dcc.substance_painter.util.progress import (
@@ -68,6 +59,10 @@ def _preview_shares_render_name(planned: list[str]) -> bool:
     previews = {path.stem for path in paths if path.suffix.lower() == _PREVIEW_SUFFIX}
     renders = {path.stem for path in paths if path.suffix.lower() != _PREVIEW_SUFFIX}
     return not previews.isdisjoint(renders)
+
+
+def _file_count(files_by_stack: dict[tuple[str, str], list[str]]) -> int:
+    return sum(len(paths) for paths in files_by_stack.values())
 
 
 class Exporter:
@@ -205,10 +200,10 @@ class Exporter:
         target_index: int,
         target_count: int,
         progress_callback: PublishProgressCallback | None = None,
-    ) -> TargetExportOutcome:
-        """Export a single texture set and resolve the output file list."""
+    ) -> dict[tuple[str, str], list[str]]:
+        """Export a single texture set and return the files Painter wrote."""
         config = generate_export_config(self._src_path, [target])
-        target_planned_count = planned_export_count(planned_exports)
+        target_planned_count = _file_count(planned_exports)
 
         if progress_callback is not None:
             progress_callback(
@@ -225,12 +220,9 @@ class Exporter:
                 )
             )
 
-        export_started_at_unix = time.time()
-        event_snapshot, disconnect_export_events = capture_export_events()
         try:
             export_result = sp.export.export_project_textures(config)
         except (ProjectError, ValueError) as exc:
-            disconnect_export_events()
             self._cleanup_export_lock(
                 context=f'after export exception for "{target.texture_set_name}"'
             )
@@ -240,7 +232,6 @@ class Exporter:
                 f"Details: {exc}"
             ) from exc
 
-        disconnect_export_events()
         self._cleanup_export_lock(
             context=f'after export for "{target.texture_set_name}"'
         )
@@ -264,43 +255,15 @@ class Exporter:
                 + (f"\nSubstance message: {result_message}" if result_message else "")
             )
 
-        try:
-            exported_textures = resolve_exported_files(
-                export_result,
-                planned_exports,
-                event_snapshot,
-                started_at_unix=export_started_at_unix,
-                src_path=self._src_path,
-                logger=log,
-            )
-        except RuntimeError as exc:
+        exported_textures = {
+            stack_key: paths
+            for stack_key, paths in export_result.textures.items()
+            if paths
+        }
+        if not exported_textures:
             raise RuntimeError(
-                "Texture export produced no usable file list for texture set "
-                f'"{target.texture_set_name}".\n{exc}'
-            ) from exc
-
-        returned_textures = normalize_texture_export_map(export_result.textures)
-        returned_texture_count = planned_export_count(returned_textures)
-        event_texture_count = planned_export_count(event_snapshot.ended_textures or {})
-        event_planned_texture_count = planned_export_count(
-            event_snapshot.about_to_start_textures or {}
-        )
-        used_event_fallback = not any(returned_textures.values()) and bool(
-            event_snapshot.ended_textures
-        )
-
-        if target_planned_count != event_planned_texture_count:
-            log.warning(
-                "Substance planned export count mismatch for "
-                f'"{target.texture_set_name}": '
-                f"list_project_textures={target_planned_count}, "
-                f"ExportTexturesAboutToStart={event_planned_texture_count}"
-            )
-        if returned_texture_count != event_texture_count:
-            log.warning(
-                f'Substance export count mismatch for "{target.texture_set_name}": '
-                f"return={returned_texture_count}, "
-                f"ExportTexturesEnded={event_texture_count}"
+                "Substance Painter reported no exported files for texture set "
+                f'"{target.texture_set_name}". Try publishing again.'
             )
 
         if progress_callback is not None:
@@ -316,14 +279,7 @@ class Exporter:
                 )
             )
 
-        return TargetExportOutcome(
-            planned_exports=planned_exports,
-            exported_textures=exported_textures,
-            returned_texture_count=returned_texture_count,
-            event_texture_count=event_texture_count,
-            event_planned_texture_count=event_planned_texture_count,
-            used_event_fallback=used_event_fallback,
-        )
+        return exported_textures
 
     def export(
         self,
@@ -347,7 +303,7 @@ class Exporter:
         except TextureExportError:
             return False
 
-        exported_count = planned_export_count(all_exported_textures)
+        exported_count = _file_count(all_exported_textures)
         sp.logging.info(
             f"Exported {exported_count} texture(s) for "
             f"{self._texture_export_asset_name()} to {self._out_path}"
@@ -454,12 +410,7 @@ class Exporter:
         # occurred.
         resolved_target_count = len(exp_setting_arr)
         udim_target_count = count_udim_sets(exp_setting_arr)
-        preexisting_src_count = 0
         planned_texture_count = 0
-        returned_texture_count = 0
-        event_texture_count = 0
-        event_planned_texture_count = 0
-        used_event_fallback = False
         all_exported_textures: dict[tuple[str, str], list[str]] = {}
 
         with telemetry.record(
@@ -472,7 +423,6 @@ class Exporter:
                 log.info(f"Exporting textures to {self._out_path}")
 
                 self._cleanup_export_lock(context="before export")
-                preexisting_src_count = existing_source_file_count(self._src_path)
 
                 try:
                     resolved_targets = resolve_export_targets(exp_setting_arr)
@@ -501,12 +451,11 @@ class Exporter:
                     self._cleanup_export_lock(
                         context=f'before export for "{target.texture_set_name}"'
                     )
+                    planned_exports = planned_by_target.get(target.texture_set_name, {})
                     try:
-                        outcome = self._export_target(
+                        exported_textures = self._export_target(
                             target,
-                            planned_exports=planned_by_target.get(
-                                target.texture_set_name, {}
-                            ),
+                            planned_exports=planned_exports,
                             target_index=target_index,
                             target_count=len(resolved_targets),
                             progress_callback=progress_callback,
@@ -520,16 +469,8 @@ class Exporter:
                             self._last_error_message or str(exc)
                         ) from exc
 
-                    planned_texture_count += planned_export_count(
-                        outcome.planned_exports
-                    )
-                    returned_texture_count += outcome.returned_texture_count
-                    event_texture_count += outcome.event_texture_count
-                    event_planned_texture_count += outcome.event_planned_texture_count
-                    used_event_fallback = (
-                        used_event_fallback or outcome.used_event_fallback
-                    )
-                    all_exported_textures.update(outcome.exported_textures)
+                    planned_texture_count += _file_count(planned_exports)
+                    all_exported_textures.update(exported_textures)
                     QtWidgets.QApplication.processEvents()
 
                 return all_exported_textures
@@ -537,11 +478,6 @@ class Exporter:
                 telemetry_event.update(
                     texture_set_count=resolved_target_count,
                     udim_set_count=udim_target_count,
-                    preexisting_source_file_count=preexisting_src_count,
                     planned_texture_count=planned_texture_count,
-                    exported_texture_count=planned_export_count(all_exported_textures),
-                    returned_texture_count=returned_texture_count,
-                    event_texture_count=event_texture_count,
-                    event_planned_texture_count=event_planned_texture_count,
-                    used_event_fallback=used_event_fallback,
+                    exported_texture_count=_file_count(all_exported_textures),
                 )

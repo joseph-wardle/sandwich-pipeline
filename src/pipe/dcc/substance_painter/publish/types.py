@@ -23,21 +23,3 @@ class ResolvedExportTarget:
     settings: TexSetExportSettings
     stack: sp.textureset.Stack
     texture_set_name: str
-
-
-@dataclass
-class ExportEventSnapshot:
-    about_to_start_textures: dict[tuple[str, str], list[str]] | None = None
-    ended_status: sp.export.ExportStatus | None = None
-    ended_message: str | None = None
-    ended_textures: dict[tuple[str, str], list[str]] | None = None
-
-
-@dataclass(frozen=True)
-class TargetExportOutcome:
-    planned_exports: dict[tuple[str, str], list[str]]
-    exported_textures: dict[tuple[str, str], list[str]]
-    returned_texture_count: int
-    event_texture_count: int
-    event_planned_texture_count: int
-    used_event_fallback: bool
