@@ -16,7 +16,7 @@ from .restore_conflict_dialog import (
     prompt_restore_conflict,
 )
 from .save_version_dialog import SaveVersionDialog
-from .style import FAIL, FAIL_STYLE, OK, OK_STYLE
+from .style import FAIL, FAIL_STYLE, OK, OK_STYLE, WARN, WARN_STYLE
 from .version_browser import VersionBrowserWidget
 
 __all__ = [
@@ -24,6 +24,8 @@ __all__ = [
     "FAIL_STYLE",
     "OK",
     "OK_STYLE",
+    "WARN",
+    "WARN_STYLE",
     "RESTORE_CANCEL",
     "RESTORE_DISCARD",
     "RESTORE_SAVE_FIRST",

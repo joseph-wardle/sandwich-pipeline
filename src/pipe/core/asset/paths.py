@@ -40,6 +40,7 @@ PUBLISH_TEXTURES_SOURCE_DIRNAME = "_src"
 PUBLISH_TEXTURES_PREVIEW_DIRNAME = "_preview"
 RIG_DIRNAME = "rig"
 RIG_VERSIONS_DIRNAME = ".versions"
+DEFAULT_GEOMETRY_VARIANT = "main"
 
 # Publish filenames
 PUBLISH_SOURCE_MODEL_FILENAME = "model.usd"
@@ -204,6 +205,7 @@ def paths_for_asset(asset: Asset, production_root: Path | None = None) -> AssetP
 
 __all__ = [
     "AssetPaths",
+    "DEFAULT_GEOMETRY_VARIANT",
     "DCC_MAYA",
     "DCC_HOUDINI",
     "DCC_SUBSTANCE",

@@ -372,6 +372,8 @@ class FilteredListDialog(QtWidgets.QDialog, DialogButtons, DialogFilteredList):
     list_label: QtWidgets.QLabel
     list_widget: QtWidgets.QTreeWidget
     _layout: QtWidgets.QBoxLayout
+    # True once the artist pressed New… instead of picking a row.
+    wants_new: bool = False
 
     def __init__(
         self,
@@ -407,6 +409,15 @@ class FilteredListDialog(QtWidgets.QDialog, DialogButtons, DialogFilteredList):
 
         if include_filter_field:
             self._filter_field.setFocus()
+
+    def add_new_button(self) -> None:
+        """Offer New…, which accepts the dialog with `wants_new` set."""
+        button = self.buttons.addButton("New…", QtWidgets.QDialogButtonBox.ActionRole)
+        button.clicked.connect(self._accept_new)
+
+    def _accept_new(self) -> None:
+        self.wants_new = True
+        self.accept()
 
     def _can_accept(self) -> bool:
         """Whether the accept button should be live."""

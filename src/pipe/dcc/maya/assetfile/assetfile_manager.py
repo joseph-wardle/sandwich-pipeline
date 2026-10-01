@@ -14,6 +14,7 @@ from pipe.dcc.maya.command import maya_command
 from pipe.core.util.paths import get_production_path
 
 from pipe.core.asset import asset_owner_for, maya_model_stream, paths_for_asset
+from pipe.core.asset.create import new_asset
 from pipe.core.asset.paths import BACKUP_DIRNAME
 from pipe.core.ui import (
     RESTORE_CANCEL,
@@ -238,6 +239,7 @@ class AssetOpenDialog(FilteredListDialog):
             ok_text="Open the selected asset model file.",
             cancel_text="Close without opening a file.",
         )
+        self.add_new_button()
 
     def _on_item_selected(self) -> None:
         selected = self.get_selected_item()
@@ -318,6 +320,9 @@ class MAssetFileManager(FileManager):
         if asset:
             write_asset_metadata(asset)
 
+    def _new_entity(self) -> Asset | None:
+        return new_asset(self._conn, self._main_window)
+
     def _ensure_scene_asset_metadata(self, scene_path: Path | None = None) -> None:
         meta = read_asset_metadata(self._conn)
         if meta.asset:
@@ -353,6 +358,8 @@ class MAssetFileManager(FileManager):
         dialog = AssetOpenDialog(self._main_window, assets, self._conn)
         if not dialog.exec_():
             return None
+        if dialog.wants_new:
+            return self._new_entity()
 
         selection = dialog.get_selected_item()
         if not selection:

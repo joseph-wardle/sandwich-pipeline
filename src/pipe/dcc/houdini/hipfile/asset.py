@@ -12,6 +12,7 @@ from pipe.core.asset import (
     houdini_asset_builder_stream,
     paths_for_asset,
 )
+from pipe.core.asset.create import new_asset
 from pipe.core.asset.paths import BACKUP_DIRNAME
 from pipe.core.ui import FilteredListDialog, MessageDialog
 from pipe.core.shotgrid import Asset, SGEntity, group_assets_by_subdirectory
@@ -26,11 +27,16 @@ TURNAROUND_FRAMES = (1, 120)
 
 
 class HAssetFileManager(HFileManager):
+    _can_create = True
+
     def __init__(self) -> None:
         super().__init__(Asset)
 
     def _entity_label(self) -> str:
         return "asset"
+
+    def _new_entity(self) -> Asset | None:
+        return new_asset(self._conn, self._main_window)
 
     def _generate_filename_ext(self, entity) -> tuple[str, str]:
         return "asset_builder", "hipnc"
