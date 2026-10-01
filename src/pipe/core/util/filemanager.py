@@ -67,7 +67,6 @@ log = logging.getLogger(__name__)
 
 class OpenFileDialog(FilteredListDialog):
     _version_cb: QtWidgets.QCheckBox | None
-    wants_new: bool
 
     def __init__(
         self,
@@ -92,16 +91,8 @@ class OpenFileDialog(FilteredListDialog):
         else:
             self._version_cb = None
 
-        self.wants_new = False
         if can_create:
-            new_button = self.buttons.addButton(
-                "New…", QtWidgets.QDialogButtonBox.ActionRole
-            )
-            new_button.clicked.connect(self._accept_new)
-
-    def _accept_new(self) -> None:
-        self.wants_new = True
-        self.accept()
+            self.add_new_button()
 
     @property
     def open_old_file(self) -> bool:

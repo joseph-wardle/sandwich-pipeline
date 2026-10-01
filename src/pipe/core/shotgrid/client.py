@@ -26,7 +26,7 @@ import ssl
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast, overload, TypeVar
@@ -139,9 +139,14 @@ _SG_FIELDS_VERSION: tuple[str, ...] = (
 )
 _SG_FIELDS_PLAYLIST: tuple[str, ...] = ("id", "code")
 
-# The fields the Shot/Version/Playlist writes below name. Reads project the
+# The fields the Asset/Shot/Version/Playlist writes below name. Reads project the
 # `_SG_FIELDS_*` tuples above.
 _SG_PROJECT = "project"
+_SG_ASSET_CODE = "code"
+_SG_ASSET_TYPE = "sg_asset_type"
+_SG_ASSET_SUBDIRECTORY = "sg_subdirectory"
+_SG_ASSET_TAGS = "tags"
+_SG_ASSET_TASK_TEMPLATE = "task_template"
 _SG_SHOT_CODE = "code"
 _SG_SHOT_DESCRIPTION = "description"
 _SG_SHOT_SEQUENCE = "sg_sequence"
@@ -158,8 +163,6 @@ _SG_VERSION_DESCRIPTION = "description"
 _SG_VERSION_UPLOADED_MOVIE = "sg_uploaded_movie"
 _SG_VERSION_PATH_TO_FRAMES = "sg_path_to_frames"
 _SG_PLAYLIST_VERSIONS = "versions"
-_SG_ASSET_CODE = "code"
-_SG_ASSET_TYPE = "sg_asset_type"
 _SG_PUBLISHED_FILE_ENTITY = "entity"
 _SG_PUBLISHED_FILE_NAME = "name"
 _SG_PUBLISHED_FILE_VERSION = "version_number"
@@ -178,8 +181,11 @@ SET_ASSET_TYPE = "Set"
 # names a product.
 SET_PUBLISHED_FILE_NAME = "set"
 
-# ShotGrid seeds a new Shot's task list from a template of this entity type.
+# ShotGrid seeds a new record's task list from a template of this entity type.
 _SG_TASK_TEMPLATE_TYPE = "TaskTemplate"
+
+_SG_TAG_TYPE = "Tag"
+_SG_TAG_NAME = "name"
 
 # The project's Shot task template. Named here so a schema rename is one edit.
 SHOT_TASK_TEMPLATE = "SKD_shot"
@@ -712,6 +718,81 @@ class ShotGrid:
 
     # ---- writes: assets ----------------------------------------------------
 
+    def create_asset(
+        self,
+        *,
+        code: str,
+        asset_type: str,
+        subdirectory: str | None,
+        task_template: str | None,
+        tags: Collection[str] = (),
+    ) -> Asset:
+        """Create an Asset with its task list already in place.
+
+        Raises:
+            ValueError: An asset already has `code`'s derived name, or no Tag has
+                one of the names in `tags`.
+            ShotGridWriteError: ShotGrid rejected the create.
+        """
+        self._require_unused_asset_name(code)
+        payload: dict[str, Any] = {
+            _SG_ASSET_CODE: code,
+            _SG_PROJECT: self._project_ref(),
+            _SG_ASSET_TYPE: asset_type,
+        }
+        if subdirectory:
+            payload[_SG_ASSET_SUBDIRECTORY] = subdirectory
+        if tags:
+            payload[_SG_ASSET_TAGS] = self._tag_refs(tags)
+        template = (
+            self._task_template_ref(task_template, "Asset") if task_template else None
+        )
+        if template is not None:
+            payload[_SG_ASSET_TASK_TEMPLATE] = template
+        row = _write_or_raise(
+            lambda: self._sg.create("Asset", payload, list(_SG_FIELDS_ASSET)),
+            entity_type="Asset",
+            entity_id=None,
+            field=None,
+        )
+        invalidate(self)
+        return self._created(row, Asset)
+
+    def _require_unused_asset_name(self, code: str) -> None:
+        """Refuse a code whose derived name some asset already holds."""
+        name = normalize_display_name(code)
+        rows = _read_or_raise(
+            lambda: self._sg.find(
+                "Asset", self._asset_scope_filters(), [_SG_ASSET_CODE]
+            ),
+            entity_type="Asset",
+            selector="name",
+            value=name,
+        )
+        holders = [
+            r for r in rows if normalize_display_name(r.get(_SG_ASSET_CODE)) == name
+        ]
+        if holders:
+            raise ValueError(
+                f"An asset named {name} already exists in ShotGrid "
+                f"(id {holders[0]['id']})."
+            )
+
+    def _tag_refs(self, names: Collection[str]) -> list[dict[str, Any]]:
+        """Link-refs for the Tags named `names`; refuses a name no Tag has."""
+        rows = _read_or_raise(
+            lambda: self._sg.find(
+                _SG_TAG_TYPE, [(_SG_TAG_NAME, "in", list(names))], [_SG_TAG_NAME]
+            ),
+            entity_type=_SG_TAG_TYPE,
+            selector="name",
+            value=sorted(names),
+        )
+        missing = set(names) - {row[_SG_TAG_NAME] for row in rows}
+        if missing:
+            raise ValueError(f"No ShotGrid tag is named {', '.join(sorted(missing))}.")
+        return [{"type": _SG_TAG_TYPE, "id": row["id"]} for row in rows]
+
     def add_material_variant(self, asset: Asset, name: str) -> Asset:
         """Register `name` as a material variant on `asset`.
 
@@ -870,7 +951,9 @@ class ShotGrid:
             payload[_SG_SHOT_DESCRIPTION] = description
         if sets:
             payload[_SG_SHOT_SETS] = [_entity_ref("Asset", set) for set in sets]
-        template = self._task_template_ref(task_template) if task_template else None
+        template = (
+            self._task_template_ref(task_template, "Shot") if task_template else None
+        )
         if template is not None:
             payload[_SG_SHOT_TASK_TEMPLATE] = template
         row = _write_or_raise(
@@ -999,12 +1082,12 @@ class ShotGrid:
                 f"(id {rows[0]['id']})."
             )
 
-    def _task_template_ref(self, name: str) -> dict[str, Any] | None:
-        """The link-ref for the Shot task template `name`, or `None` if absent."""
+    def _task_template_ref(self, name: str, entity_type: str) -> dict[str, Any] | None:
+        """The link-ref for the `entity_type` task template `name`, or `None`."""
         rows = _read_or_raise(
             lambda: self._sg.find(
                 _SG_TASK_TEMPLATE_TYPE,
-                [("code", "is", name), ("entity_type", "is", "Shot")],
+                [("code", "is", name), ("entity_type", "is", entity_type)],
                 ["id"],
             ),
             entity_type=_SG_TASK_TEMPLATE_TYPE,
@@ -1012,11 +1095,13 @@ class ShotGrid:
             value=name,
         )
         if not rows:
-            log.warning(f"No Shot task template named {name!r}; creating no tasks.")
+            log.warning(
+                f"No {entity_type} task template named {name!r}; creating no tasks."
+            )
             return None
         if len(rows) > 1:
             log.warning(
-                f"Multiple Shot task templates named {name!r}; using the first."
+                f"Multiple {entity_type} task templates named {name!r}; using the first."
             )
         return {"type": _SG_TASK_TEMPLATE_TYPE, "id": rows[0]["id"]}
 
