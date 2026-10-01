@@ -16,6 +16,9 @@ Asset:
 Lights:
     Optional lights that replace the built-in rig. They are grafted under `/lookdev/lights`, turn with the turnaround, and are not scaled.
 
+Camera:
+    Optional camera that replaces the built-in one. The first camera on the input becomes `/lookdev/cam` and keeps its position, lens and animation. Place it while viewing this node: the asset stands on the floor, centered on the origin. The backdrop, lights and references still fit the asset as they do for the built-in camera.
+
 @parameters
 
 Framing:
@@ -26,13 +29,17 @@ Padding:
     #id: padding
     Frame width as a multiple of the circle the asset sweeps as it turns, or of its height for tall assets. The frame widens further when the references need room.
 
+    Below 1 the camera moves in past the fit to show detail. The backdrop, lights and references stay fitted to the asset, so the references slide out of frame.
+
 Frame Width:
     #id: frame_width
     Width of the view at the asset, in meters.
 
 Camera Angle:
     #id: camera_angle
-    Degrees the camera looks down at the asset, from 0 (level) to 90 (straight down). Raise it for flat assets such as rugs, decals or maps. The frame follows the angle, and the color checker leans back to face the camera.
+    Degrees the built-in camera looks down at the asset, from 0 (level) to 90 (straight down). Raise it for flat assets such as rugs, decals or maps. The frame follows the angle, and the color checker leans back to face the camera.
+
+    A camera on the Camera input is not moved; match this to its tilt to lean the color checker toward it.
 
 Lighting Rig:
     #id: rig
@@ -53,6 +60,10 @@ Show References:
 == Turnaround ==
 
 The turnaround plays over the hip's frame range.
+
+Start Angle:
+    #id: start_angle
+    Degrees the asset stands turned before the turnaround starts, and while the lights turn. Square assets often read better corner-on, at 45.
 
 Rotate Asset:
     #id: rotate_asset
