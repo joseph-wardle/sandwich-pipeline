@@ -8,8 +8,8 @@ publish/
 │   └── _src/           the scene file that made it
 └── .v003.tmp/          a version being written
 
-Every function takes the current layer's path, which names the folder and the
-version layers in it.
+Every function but `pin` takes the current layer's path, which names the folder
+and the version layers in it.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from pxr import Sdf
+from pxr import Sdf, UsdUtils
 
 PUBLISH_DIRNAME = "publish"
 SOURCE_DIRNAME = "_src"
@@ -30,6 +30,7 @@ DATE_KEY = "date"
 NOTE_KEY = "note"
 
 _VERSION = re.compile(r"v([0-9]{3,})")
+_USD_SUFFIXES = (".usd", ".usda", ".usdc")
 # What a stage takes from its root layer alone. The current layer carries them so
 # that opening it gives the same units, frame range and frame rate as the version.
 _STAGE_INFO_KEYS = (
@@ -186,6 +187,24 @@ def make_current(current: Path, version: int) -> None:
     # Text even when named `.usd`, so the version it points at can be read with cat.
     layer.Export(str(temp), args={"format": "usda"})
     os.replace(temp, current)
+
+
+def pin(layer: Sdf.Layer) -> None:
+    """Point every path in `layer` that names a current layer at the version behind it."""
+
+    def pinned(path: str) -> str:
+        current = Path(layer.ComputeAbsolutePath(path))
+        # Only a USD file in a publish folder can be a current layer. Most paths
+        # are textures and caches, which can't be opened to find out.
+        in_publish_folder = current.parent.name == PUBLISH_DIRNAME
+        if not in_publish_folder or current.suffix not in _USD_SUFFIXES:
+            return path
+        version = current_version(current)
+        if version is None:
+            return path
+        return str(version_layer_path(current, version))
+
+    UsdUtils.ModifyAssetPaths(layer, pinned)
 
 
 def _numbered(current: Path) -> list[int]:
