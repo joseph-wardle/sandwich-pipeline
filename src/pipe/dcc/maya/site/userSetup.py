@@ -19,6 +19,10 @@ def main():
     mc.colorManagementPrefs(edit=True, cmEnabled=True)
     mc.colorManagementPrefs(edit=True, viewTransformName=f"{DEFAULT_VIEW} ({DISPLAY})")
 
+    from pipe.dcc.maya.util.camera import install_startup_camera_clip
+
+    install_startup_camera_clip()
+
     from pipe.core.util.paths import get_production_path
 
     # set workspace
