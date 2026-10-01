@@ -54,7 +54,6 @@ from pipe.dcc.substance_painter.util.metadata import (
 from pipe.dcc.substance_painter.util.project import (
     check_project_editable,
     current_project_path,
-    run_when_project_editable,
     save_project,
 )
 from pipe.core.versioning import (
@@ -378,16 +377,19 @@ def _create_default_project_for_asset(
         ).exec_()
         return
 
-    resolved_project_path = resolve_mapped_path(project_path)
-
-    def _finalize_save() -> None:
+    def _tag_and_save() -> None:
         tag_project(asset, variant)
-        _save_current_project_as(resolved_project_path, parent)
+        if not _save_current_project_as(project_path, parent):
+            return
+        asset_label = asset.display_name or asset.name
+        log.info(f"Created Substance project at {project_path}")
+        sp.logging.info(
+            f"Created default project for {asset_label} (variant={variant})"
+        )
 
-    run_when_project_editable(_finalize_save)
-    asset_label = asset.display_name or asset.name
-    log.info(f"Created Substance project at {project_path}")
-    sp.logging.info(f"Created default project for {asset_label} (variant={variant})")
+    # A heavy mesh keeps Painter busy after create() returns, and Painter
+    # refuses to save while busy.  It drops the callback if the project closes.
+    sp.project.execute_when_not_busy(_tag_and_save)
 
 
 # ---------------------------------------------------------------------------
