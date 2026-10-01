@@ -14,6 +14,9 @@ from pathlib import Path
 production_path: Path  # absolute path to the production folder (ie /job/project/05_production)
 cache_path: Path       # the show's folder on the cache mount (ie /cache/project)
 
+discord_publish_webhook: str | None
+discord_role_ids: dict[str, str]
+
 @dataclass
 class Executables:
     hfs: Path                 # absolute path to the Houdini HFS folder (ie /opt/hfs19.5.640)
