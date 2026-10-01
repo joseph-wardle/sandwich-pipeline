@@ -10,6 +10,7 @@
 
     inputlabel	1	"Asset"
     inputlabel	2	"Lights"
+    inputlabel	3	"Camera"
 
     parm {
         name    "framing"
@@ -27,9 +28,9 @@
         label   "Padding"
         type    float
         default { "1.25" }
-        help    "Frame width as a multiple of the circle the asset sweeps as it turns, or of its height for tall assets. The frame widens further when the references need room."
+        help    "Frame width as a multiple of the circle the asset sweeps as it turns, or of its height for tall assets. The frame widens further when the references need room. Below 1 the camera moves in past the fit."
         hidewhen "{ framing == manual }"
-        range   { 1 3 }
+        range   { 0.1! 3 }
     }
     parm {
         name    "frame_width"
@@ -46,7 +47,7 @@
         label   "Camera Angle"
         type    float
         default { "10" }
-        help    "Degrees the camera looks down at the asset. Raise it for flat assets such as rugs, decals or maps."
+        help    "Degrees the built-in camera looks down at the asset. Raise it for flat assets such as rugs, decals or maps."
         range   { 0! 90! }
     }
     parm {
@@ -92,6 +93,14 @@
         name    "turnaround"
         label   "Turnaround"
 
+        parm {
+            name    "start_angle"
+            label   "Start Angle"
+            type    float
+            default { "0" }
+            help    "Degrees the asset stands turned before the turnaround starts. 45 shows a square asset corner-on."
+            range   { -180 180 }
+        }
         parm {
             name    "rotate_asset"
             label   "Rotate Asset"
