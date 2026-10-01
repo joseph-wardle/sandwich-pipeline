@@ -133,7 +133,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         asset_label = QLabel(f"Asset: {asset_display_name}")
         asset_label.setStyleSheet("font-size: 12px; font-weight: bold;")
         asset_label.setToolTip(
-            "Resolved from project metadata saved by the Open Asset tool."
+            "Worked out from the folder the project file is saved in."
         )
         self._main_layout.addWidget(asset_label)
 
@@ -189,18 +189,12 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         )
         if project_variant not in geo_items:
             self._geo_var_dropdown.setCurrentIndex(-1)
-            geo_warning = QLabel(
-                (
-                    f"This project is for geometry variant '{project_variant}', "
-                    "which this asset doesn't list."
-                    if project_variant
-                    else "This file isn't linked to a geometry variant."
-                )
-                + " Choose where to publish."
-            )
-            geo_warning.setWordWrap(True)
-            geo_warning.setStyleSheet("color: #d28d42;")
-            self._main_layout.addWidget(geo_warning)
+        project_warning = self._project_warning(geo_items)
+        if project_warning:
+            warning_label = QLabel(project_warning)
+            warning_label.setWordWrap(True)
+            warning_label.setStyleSheet("color: #d28d42;")
+            self._main_layout.addWidget(warning_label)
 
         material_layer_items = self._variant_items(
             asset.material_layers or (), "default"
@@ -234,8 +228,8 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         self._update_export_button_state()
 
         footer = QLabel(
-            "Tip: Make sure your project was opened via Open Asset so the asset "
-            "metadata is stored in the project. For more information, see "
+            "Tip: Open your project with Open Asset so it publishes to the right "
+            "asset and variant. For more information, see "
             f"{docs_link_html()}."
         )
         footer.setWordWrap(True)
@@ -244,6 +238,33 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         footer.setOpenExternalLinks(True)
         footer.setStyleSheet("color: #8a8a8a;")
         self._main_layout.addWidget(footer)
+
+    def _project_warning(self, geo_items: list[str]) -> str | None:
+        """Return what the artist should know about the open file, if anything."""
+        identity = self._identity
+        if identity.variant is None:
+            return (
+                "This file isn't linked to a geometry variant. Choose where to "
+                "publish; the project is backed up into that variant's history."
+            )
+        warnings: list[str] = []
+        if not identity.is_working_file:
+            working_name = (
+                paths_for_asset(identity.asset)
+                .textures_variant_path(identity.variant)
+                .name
+            )
+            warnings.append(
+                f"This file is a copy, not the asset's working file ({working_name}). "
+                f"Publishing backs it up as the next version in {working_name}'s "
+                f"history; restoring that version replaces {working_name}."
+            )
+        if identity.variant not in geo_items:
+            warnings.append(
+                f"This project is for geometry variant '{identity.variant}', which "
+                "this asset doesn't list. Choose where to publish."
+            )
+        return " ".join(warnings) or None
 
     def _build_variant_dropdown(
         self,
@@ -588,21 +609,14 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         self, asset: Asset, request: _PendingPublishRequest
     ) -> tuple[bool, str]:
         """Back up the open project if it changed; return (succeeded, status line)."""
-        project_path = current_project_path()
-        if project_path is None:
-            log.warning("Backup skipped: project has no file path.")
-            return True, "Backup skipped: project has no file path."
-
         identity = self._identity
-        if identity.variant is None or not identity.is_working_file:
-            log.warning(f"Backup skipped: {project_path} is not a working file.")
-            return (
-                True,
-                "Backup skipped: this file isn't one of the asset's working files.",
-            )
+        project_path = identity.project_path
         asset_paths = paths_for_asset(asset)
-        # The backup follows the project's variant; the textures follow the dropdown.
-        project_stream = project_version_stream(asset, identity.variant)
+        # The backup follows the project's variant; the textures follow the
+        # dropdown.  A file with no variant of its own joins the published one's.
+        project_stream = project_version_stream(
+            asset, identity.variant or request.geo_var
+        )
 
         self._send_publish_progress(
             PublishProgressUpdate(
@@ -628,7 +642,8 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                     request.material_layer,
                 ),
                 context="publish",
-                note=request.version_note,
+                note="\n".join(filter(None, (identity.copy_note, request.version_note)))
+                or None,
                 extra={
                     "geo": request.geo_var,
                     "material": request.mat_var,
@@ -660,7 +675,10 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             if result.version is not None
             else result.backup_path.name
         )
-        return True, f'Backup created: {version_label} "{request.version_title}"'
+        status = f'Backup created: {version_label} "{request.version_title}"'
+        if not identity.is_working_file:
+            status += f" in {project_stream.label}'s history, from {project_path.name}"
+        return True, status
 
     def _run_houdini_publish(
         self, asset: Asset, request: _PendingPublishRequest
@@ -737,18 +755,19 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         ).exec_()
 
     def _check_can_publish(self) -> bool:
-        """Check that the project is open, idle, loaded, and saved to disk.
+        """Check that the project is editable and still the file this window is for.
 
         Shows a message dialog and returns False if any precondition fails.
         """
         if not check_project_editable(get_main_qt_window(), "Publish Textures"):
             return False
 
-        if current_project_path() is None:
+        if current_project_path() != self._identity.project_path:
             MessageDialog(
                 get_main_qt_window(),
-                "This project has no file path yet. Use Save As before publishing.",
-                "Save Required",
+                "The project was saved under another name after this window "
+                "opened. Close this window and open Publish Textures again.",
+                "Publish Textures",
             ).exec_()
             return False
 
