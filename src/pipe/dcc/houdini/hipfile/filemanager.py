@@ -30,6 +30,8 @@ from pipe.core.versioning import (
     saved_message,
 )
 
+from .upgrade import upgrade
+
 log = logging.getLogger(__name__)
 
 
@@ -101,14 +103,17 @@ class HFileManager(FileManager):
         return f"{fallback} ({type(exc).__name__})"
 
     def _load_hip_file(self, path: Path) -> str | None:
+        warning = None
         try:
             hou.hipFile.load(str(path), suppress_save_prompt=True)
         except hou.LoadWarning as exc:
-            return self._describe_exception(
+            warning = self._describe_exception(
                 exc,
                 fallback="Houdini reported load warnings while opening the HIP file",
             )
-        return None
+        # For hips saved before publish versions. Delete with the module (ADR-0028).
+        upgrade(self._main_window)
+        return warning
 
     def _show_hip_load_warning(
         self,
