@@ -100,65 +100,60 @@ def _confirm_overwrite_project(parent: QtWidgets.QWidget | None, path: Path) -> 
     return bool(dialog.exec_())
 
 
+def _confirm_version_from_copy(
+    parent: QtWidgets.QWidget | None,
+    identity: ProjectIdentity,
+    project_stream: VersionStreamSpec,
+) -> bool:
+    label = project_stream.label
+    asset_label = identity.asset.display_name or identity.asset.name
+    dialog = MessageDialogCustomButtons(
+        parent,
+        f"The open file, {identity.project_path.name}, isn't {asset_label}'s "
+        f"working file ({label}).\n\n"
+        f"If you continue, this file is saved as the next version in {label}'s\n"
+        f"history. Restoring that version later replaces {label} with this file.\n\n"
+        "To make this file the working file instead, use Open Asset →\n"
+        "Create Asset Project → Use Currently Open Project.",
+        "Save Version",
+        has_cancel_button=True,
+        ok_name="Continue",
+        cancel_name="Cancel",
+    )
+    return bool(dialog.exec_())
+
+
 # ---------------------------------------------------------------------------
 # Project state helpers
 # ---------------------------------------------------------------------------
 
 
-def _ensure_project_saved_for_version_action(
-    parent: QtWidgets.QWidget | None, *, action_name: str
-) -> Path | None:
-    """Ensure the project is ready and saved; return the project path or None.
-
-    Prompts the user to save if there are unsaved changes.
-    """
-    if not check_project_editable(parent, action_name):
-        return None
-
-    project_path = current_project_path()
-    if project_path is None:
-        MessageDialog(
-            parent,
-            "This project has no file path yet. Use Save As first.",
-            "Save Required",
-        ).exec_()
-        return None
-
-    if sp.project.needs_saving():
-        dialog = MessageDialogCustomButtons(
-            parent,
-            "The project has unsaved changes. Save them before creating the version?",
-            "Save Required",
-            has_cancel_button=True,
-            ok_name="Save",
-            cancel_name="Cancel",
-        )
-        if not dialog.exec_():
-            return None
-        if not save_project(
-            lambda message, title: MessageDialog(parent, message, title).exec_()
-        ):
-            return None
-
-        project_path = current_project_path()
-        if project_path is None:
-            MessageDialog(
-                parent,
-                "Could not resolve the project path after saving.",
-                "Save Failed",
-            ).exec_()
-            return None
-
-    return project_path
+def _save_unsaved_changes(parent: QtWidgets.QWidget | None) -> bool:
+    """Offer to save unsaved changes; False if the artist declines or it fails."""
+    if not sp.project.needs_saving():
+        return True
+    dialog = MessageDialogCustomButtons(
+        parent,
+        "The project has unsaved changes. Save them before creating the version?",
+        "Save Required",
+        has_cancel_button=True,
+        ok_name="Save",
+        cancel_name="Cancel",
+    )
+    if not dialog.exec_():
+        return False
+    return save_project(
+        lambda message, title: MessageDialog(parent, message, title).exec_()
+    )
 
 
 def _versioned_project(
     parent: QtWidgets.QWidget | None, action_name: str
 ) -> tuple[ProjectIdentity, VersionStreamSpec] | None:
-    """Return the open project's identity and version stream.
+    """Return the open project's identity and its variant's version stream.
 
-    Returns None, after telling the artist how to fix it, when the open file
-    is not an asset's working file.
+    Returns None, after telling the artist why, when the open file has no
+    asset or variant.  The file may be a copy of the working file.
     """
     identity = identify_open_project(ShotGrid.connect(DB_Config), parent, action_name)
     if identity is None:
@@ -173,18 +168,7 @@ def _versioned_project(
         ).exec_()
         return None
 
-    project_stream = project_version_stream(identity.asset, identity.variant)
-    if not identity.is_working_file:
-        label = project_stream.label
-        MessageDialog(
-            parent,
-            f"The open file isn't this asset's {label}, so it has no version "
-            f"history of its own.\n\nUse Open Asset to open {label}, or Create "
-            "Asset Project → Use Currently Open Project to save this file as it.",
-            action_name,
-        ).exec_()
-        return None
-    return identity, project_stream
+    return identity, project_version_stream(identity.asset, identity.variant)
 
 
 # ---------------------------------------------------------------------------
@@ -490,6 +474,18 @@ def launch_version_browser_for_current_project() -> None:
     if versioned is None:
         return
     identity, project_stream = versioned
+    if not identity.is_working_file:
+        # Restoring replaces the working file, so its history opens only from it.
+        label = project_stream.label
+        MessageDialog(
+            parent,
+            f"The open file isn't this asset's {label}, so it has no version "
+            f"history of its own.\n\nUse Open Asset to open {label}, or Create "
+            "Asset Project → Use Currently Open Project to save this file as it.",
+            "Version History",
+        ).exec_()
+        return
+
     asset = identity.asset
     records = list_version_records(project_stream)
     if not records:
@@ -515,7 +511,7 @@ def launch_version_browser_for_current_project() -> None:
         return
 
     if selected_action == VersionBrowserWidget.ACTION_RESTORE:
-        _restore_project_version(parent, selected_record, project_stream)
+        _restore_project_version(parent, selected_record, identity, project_stream)
 
 
 def _has_unversioned_work(project_stream: VersionStreamSpec) -> bool:
@@ -527,6 +523,7 @@ def _has_unversioned_work(project_stream: VersionStreamSpec) -> bool:
 def _restore_project_version(
     parent: QtWidgets.QWidget | None,
     record: VersionRecord,
+    identity: ProjectIdentity,
     project_stream: VersionStreamSpec,
 ) -> None:
     if _has_unversioned_work(project_stream):
@@ -534,7 +531,7 @@ def _restore_project_version(
         if choice == RESTORE_CANCEL:
             return
         if choice == RESTORE_SAVE_FIRST and not _save_named_version(
-            parent, project_stream
+            parent, identity, project_stream
         ):
             return
 
@@ -565,50 +562,46 @@ def _restore_project_version(
 
 
 def launch_save_version() -> None:
-    """Create a manual version for the currently open asset project."""
+    """Save the open asset project as a new named version."""
     if sp.project.is_busy():
         sp.project.execute_when_not_busy(launch_save_version)
         return
 
     parent = get_main_qt_window()
-    project_path = _ensure_project_saved_for_version_action(
-        parent, action_name="Save Version"
-    )
-    if project_path is None:
+    if not check_project_editable(parent, "Save Version"):
         return
-
     versioned = _versioned_project(parent, "Save Version")
     if versioned is None:
         return
-    _write_named_version(parent, project_path, versioned[1])
+    identity, project_stream = versioned
+    if not identity.is_working_file and not _confirm_version_from_copy(
+        parent, identity, project_stream
+    ):
+        return
+    _save_named_version(parent, identity, project_stream)
 
 
 def _save_named_version(
-    parent: QtWidgets.QWidget | None, project_stream: VersionStreamSpec
-) -> bool:
-    """Save the current project as a named version; return True on success."""
-    project_path = _ensure_project_saved_for_version_action(
-        parent, action_name="Save Version"
-    )
-    if project_path is None:
-        return False
-    return _write_named_version(parent, project_path, project_stream)
-
-
-def _write_named_version(
     parent: QtWidgets.QWidget | None,
-    project_path: Path,
+    identity: ProjectIdentity,
     project_stream: VersionStreamSpec,
 ) -> bool:
+    """Save the open project, then store it as a named version in *project_stream*.
+
+    Returns True on success.
+    """
+    if not _save_unsaved_changes(parent):
+        return False
     dialog = SaveVersionDialog(parent)
     if not dialog.exec_():
         return False
     try:
         record = save_version(
-            project_path,
+            identity.project_path,
             project_stream,
             title=dialog.get_title(),
-            note=dialog.get_note(),
+            note="\n".join(filter(None, (identity.copy_note, dialog.get_note())))
+            or None,
         )
     except Exception as exc:
         log.exception("Failed to save Substance Painter version.")

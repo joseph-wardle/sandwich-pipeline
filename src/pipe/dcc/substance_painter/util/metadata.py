@@ -101,6 +101,15 @@ class ProjectIdentity:
     is_working_file: bool
     """False for a copy of the variant's project saved under another name."""
 
+    @property
+    def copy_note(self) -> str | None:
+        """A version-note line naming this file when it is a copy, else None.
+
+        Version history lists a copy's versions beside the working file's own,
+        so the note is what tells them apart.
+        """
+        return None if self.is_working_file else f"Saved from {self.project_path}."
+
 
 def resolve_project_identity(conn: ShotGrid) -> ProjectIdentity | None:
     """Return the open project's asset and variant, or None if it has no asset.
