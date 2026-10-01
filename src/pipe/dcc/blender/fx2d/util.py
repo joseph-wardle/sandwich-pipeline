@@ -10,6 +10,7 @@ from bpy.types import Collection, Operator, Scene, ViewLayer
 from pxr import Sdf, Tf
 
 from pipe.core.cache import RENDER_DIRNAME, link_to_cache
+from pipe.core.shot import current_layer_path
 
 DEPARTMENT = "fx2d"
 FILE_NAME = "fx2d.blend"
@@ -43,15 +44,15 @@ def poll_fx2d_file(operator: type[Operator]) -> bool:
 
 
 def camera_usd(shot_root: Path) -> Path:
-    return shot_root / "cam" / "cam.usd"
+    return current_layer_path(shot_root, "cam")
 
 
 def anim_usd(shot_root: Path) -> Path:
-    return shot_root / "anim" / "usd" / "main.usd"
+    return current_layer_path(shot_root, "anim")
 
 
 def cfx_usd(shot_root: Path) -> Path:
-    return shot_root / "cfx" / "usd" / "main.usd"
+    return current_layer_path(shot_root, "cfx")
 
 
 def holdout_usd(shot_root: Path, source: str) -> Path:

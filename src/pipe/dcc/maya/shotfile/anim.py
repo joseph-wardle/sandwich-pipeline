@@ -7,7 +7,7 @@ from pxr import Sdf, Usd, UsdGeom
 
 from pipe.dcc.maya.util.camera import apply_gate_mask
 from pipe.dcc.maya.rig.utils import get_rig_filepath_from_asset
-from pipe.core.shot import maya_anim_stream, shot_owner_for
+from pipe.core.shot import current_layer_path, maya_anim_stream, shot_owner_for
 from pipe.core.shotgrid import (
     SGEntity,
     Shot,
@@ -21,6 +21,7 @@ from pipe.core.versioning import VersionStreamSpec, path_matches_stream
 from .shotfile_manager import MShotFileManager
 from .sets import sync_shot_sets
 from .stage import add_sublayer, get_stage, get_stage_shape
+from .upgrade import upgrade
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +44,9 @@ def _find_camera_prim(stage: Usd.Stage) -> Usd.Prim | None:
 def _sublayer_camera(stage: Usd.Stage, shot_path: str) -> bool:
     """Sublayer the shot's published camera into `stage`. False if none is published."""
     # Production-root-relative, resolved by `PXR_AR_DEFAULT_SEARCH_PATH`.
-    cam_layer = Sdf.Layer.FindOrOpen("/".join((shot_path, "cam", "cam.usd")))
+    cam_layer = Sdf.Layer.FindOrOpen(
+        current_layer_path(Path(shot_path), "cam").as_posix()
+    )
     if not cam_layer:
         return False
     add_sublayer(stage.GetRootLayer(), cam_layer)
@@ -103,6 +106,7 @@ class MAnimShotFileManager(MShotFileManager):
         super().run_on_open()
 
         stage = get_stage()
+        upgrade(stage.GetRootLayer())
         camera_prim = _find_camera_prim(stage)
         if camera_prim is None:
             shot_code = cls._shot_code_from_file_info()

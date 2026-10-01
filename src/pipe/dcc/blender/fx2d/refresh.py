@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from bpy.types import (
@@ -19,16 +20,17 @@ if TYPE_CHECKING:
     from bpy.stub_internal.rna_enums import OperatorReturnItems
 
 
-def _reread_camera_move(context_collection: Collection) -> None:
+def _reread_camera_move(context_collection: Collection, camera_usd: Path) -> None:
     for obj in context_collection.objects:
         for constraint in obj.constraints:
             if (
                 isinstance(constraint, TransformCacheConstraint)
                 and constraint.cache_file is not None
             ):
-                # The camera move is read live from cam.usd, but only when the
-                # file is opened. Assigning the path makes Blender read it again.
-                constraint.cache_file.filepath = constraint.cache_file.filepath
+                # The camera move is read live from the published camera, but
+                # only when the file is opened. Assigning the path makes Blender
+                # read it again.
+                constraint.cache_file.filepath = str(camera_usd)
 
 
 def _rekey_lens(scene: Scene, camera: Camera, stage: Usd.Stage) -> None:
@@ -88,7 +90,7 @@ class SKD_OT_fx2d_refresh(Operator):
 
         stage = Usd.Stage.Open(str(camera_usd))
         stage.Reload()
-        _reread_camera_move(context_collection)
+        _reread_camera_move(context_collection, camera_usd)
         scene.frame_start = int(stage.GetStartTimeCode())
         scene.frame_end = int(stage.GetEndTimeCode())
         camera = next(
