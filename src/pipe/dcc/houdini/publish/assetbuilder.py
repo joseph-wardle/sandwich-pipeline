@@ -17,7 +17,6 @@ import hou
 
 from pipe.core import telemetry
 from pipe.core.asset.paths import ASSET_BUILDER_FILENAME
-from pipe.core.util.paths import resolve_mapped_path
 
 from . import nodelayouts
 from .main import PublishOptions, publish_component
@@ -89,11 +88,9 @@ def run_headless_publish(
     """
 
     normalized_variant = (variant or "").strip() or "main"
-    # Keep the drive letter: hou.hipFile.load mangles Windows UNC paths.
-    root = resolve_mapped_path(asset_root.expanduser())
     result: HeadlessPublishResult = {
         "status": "failed",
-        "asset_root": str(root),
+        "asset_root": str(asset_root.expanduser().resolve()),
         "asset_name": "",
         "variant": normalized_variant,
         "ensure_builder": bool(ensure_builder),
@@ -113,6 +110,7 @@ def run_headless_publish(
         )
         return _finalize(result)
 
+    root = asset_root.expanduser().resolve()
     hip_path = root / ASSET_BUILDER_FILENAME
     resolved_asset_name = (asset_name or root.name).strip() or "asset"
     result["asset_name"] = resolved_asset_name

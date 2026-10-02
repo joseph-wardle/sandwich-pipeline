@@ -1,3 +1,3 @@
-"""Substance Painter texture publish: export, project backup, Houdini rebuild."""
+"""Substance Painter texture export — config, types, results, runners."""
 
 from __future__ import annotations

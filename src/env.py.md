@@ -30,6 +30,7 @@ class Executables:
     nuke: Path                # absolute path to the Nuke executable
     nuke_python: Path         # absolute path to the Nuke python executable
     oiiotool: Path            # absolute path to the oiiotool executable (such as the one bundled with Houdini)
+    sbsrender: Path           # absolute path to the sbsrender executable (bundled with Substance Designer)
     substance_designer: Path  # absolute path to the Substance Designer executable
     substance_painter: Path   # absolute path to the Substance Painter executable
 

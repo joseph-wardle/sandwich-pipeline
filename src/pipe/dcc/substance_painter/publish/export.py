@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,11 +24,19 @@ from pipe.dcc.substance_painter.publish.config import (
     resolve_export_targets,
 )
 from pipe.dcc.substance_painter.publish.material_info import write_material_info
+from pipe.dcc.substance_painter.publish.results import (
+    capture_export_events,
+    existing_source_file_count,
+    normalize_texture_export_map,
+    planned_export_count,
+    resolve_exported_files,
+)
 from pipe.dcc.substance_painter.publish.types import (
     ResolvedExportTarget,
+    TargetExportOutcome,
     TexSetExportSettings,
 )
-from pipe.dcc.substance_painter.publish.progress import (
+from pipe.dcc.substance_painter.util.progress import (
     PublishProgressCallback,
     PublishProgressUpdate,
     PublishStage,
@@ -41,51 +50,9 @@ log = logging.getLogger(__name__)
 # or exr, so the extension alone separates the two.
 _PREVIEW_SUFFIX = ".jpeg"
 
-_NOT_OCIO_MESSAGE = (
-    "This project uses Painter's Legacy or Adobe ACE color management, which "
-    "the pipeline can't publish.\n\n"
-    "Open Edit → Project Configuration, expand Color management, change it to "
-    "OpenColorIO and press OK. Then publish again."
-)
-
 
 class TextureExportError(Exception):
-    """An export step failed; the message is shown to the artist as is."""
-
     error_code = "TEXTURE_EXPORT_FAILED"
-
-
-def _preview_shares_render_name(planned: list[str]) -> bool:
-    """Whether a preview jpeg is planned under the same name as a render map."""
-    paths = [Path(path) for path in planned]
-    previews = {path.stem for path in paths if path.suffix.lower() == _PREVIEW_SUFFIX}
-    renders = {path.stem for path in paths if path.suffix.lower() != _PREVIEW_SUFFIX}
-    return not previews.isdisjoint(renders)
-
-
-def _file_count(files_by_stack: dict[tuple[str, str], list[str]]) -> int:
-    return sum(len(paths) for paths in files_by_stack.values())
-
-
-def _conversion_update(converted: int, total: int) -> PublishProgressUpdate:
-    """The progress dialog's update for *converted* of *total* TEX files."""
-    if total == 0:
-        return PublishProgressUpdate(
-            stage=PublishStage.CONVERTING_TEX,
-            message="No TEX conversions were required for this publish.",
-            current=1,
-            total=1,
-        )
-    return PublishProgressUpdate(
-        stage=PublishStage.CONVERTING_TEX,
-        message=(
-            f"Converting source textures to TEX ({total} file(s))."
-            if converted == 0
-            else "Converting source textures to TEX."
-        ),
-        current=converted,
-        total=total,
-    )
 
 
 class Exporter:
@@ -95,9 +62,15 @@ class Exporter:
     _out_path: Path
     _preview_path: Path
     _src_path: Path
+    _tex_path: Path
 
     def __init__(self, asset: Asset) -> None:
         self._asset = asset
+        self._last_error_message: str | None = None
+
+    @property
+    def last_error_message(self) -> str | None:
+        return self._last_error_message
 
     def _init_paths(self, mat_var: str, geo_var: str, material_layer: str) -> None:
         paths = paths_for_asset(self._asset)
@@ -112,6 +85,7 @@ class Exporter:
         self._preview_path = resolve_mapped_path(
             paths.publish_textures_preview_dir(geo_var, mat_var, material_layer)
         )
+        self._tex_path = self._out_path
 
         self._out_path.mkdir(parents=True, exist_ok=True)
         self._src_path.mkdir(parents=True, exist_ok=True)
@@ -125,6 +99,26 @@ class Exporter:
         if asset_path:
             return Path(str(asset_path)).name
         return "unknown_asset"
+
+    def _texture_export_payload(
+        self,
+        *,
+        geo_variant: str,
+        material_variant: str,
+        renderman_variant: str,
+        texture_set_count: int,
+        udim_set_count: int,
+    ) -> dict[str, object]:
+        return {
+            "geo_variant": str(geo_variant or "main"),
+            "material_variant": str(material_variant or "main"),
+            "renderman_variant": str(renderman_variant or "main"),
+            "texture_set_count": max(0, int(texture_set_count)),
+            "udim_set_count": max(0, int(udim_set_count)),
+        }
+
+    def _set_error_message(self, message: str) -> None:
+        self._last_error_message = message.strip()
 
     def _src_lock_path(self) -> Path:
         return self._src_path / ".lock"
@@ -170,9 +164,6 @@ class Exporter:
                 f"Details: {exc}"
             ) from exc
 
-        if any(_preview_shares_render_name(paths) for paths in all_planned.values()):
-            raise ValueError(_NOT_OCIO_MESSAGE)
-
         planned_by_target: dict[str, dict[tuple[str, str], list[str]]] = {}
         for (ts_name, stack_name), paths in all_planned.items():
             target_planned = planned_by_target.setdefault(ts_name, {})
@@ -196,10 +187,10 @@ class Exporter:
         target_index: int,
         target_count: int,
         progress_callback: PublishProgressCallback | None = None,
-    ) -> dict[tuple[str, str], list[str]]:
-        """Export a single texture set and return the files Painter wrote."""
+    ) -> TargetExportOutcome:
+        """Export a single texture set and resolve the output file list."""
         config = generate_export_config(self._src_path, [target])
-        target_planned_count = _file_count(planned_exports)
+        target_planned_count = planned_export_count(planned_exports)
 
         if progress_callback is not None:
             progress_callback(
@@ -216,9 +207,12 @@ class Exporter:
                 )
             )
 
+        export_started_at_unix = time.time()
+        event_snapshot, disconnect_export_events = capture_export_events()
         try:
             export_result = sp.export.export_project_textures(config)
         except (ProjectError, ValueError) as exc:
+            disconnect_export_events()
             self._cleanup_export_lock(
                 context=f'after export exception for "{target.texture_set_name}"'
             )
@@ -228,6 +222,7 @@ class Exporter:
                 f"Details: {exc}"
             ) from exc
 
+        disconnect_export_events()
         self._cleanup_export_lock(
             context=f'after export for "{target.texture_set_name}"'
         )
@@ -251,15 +246,43 @@ class Exporter:
                 + (f"\nSubstance message: {result_message}" if result_message else "")
             )
 
-        exported_textures = {
-            stack_key: paths
-            for stack_key, paths in export_result.textures.items()
-            if paths
-        }
-        if not exported_textures:
+        try:
+            exported_textures = resolve_exported_files(
+                export_result,
+                planned_exports,
+                event_snapshot,
+                started_at_unix=export_started_at_unix,
+                src_path=self._src_path,
+                logger=log,
+            )
+        except RuntimeError as exc:
             raise RuntimeError(
-                "Substance Painter reported no exported files for texture set "
-                f'"{target.texture_set_name}". Try publishing again.'
+                "Texture export produced no usable file list for texture set "
+                f'"{target.texture_set_name}".\n{exc}'
+            ) from exc
+
+        returned_textures = normalize_texture_export_map(export_result.textures)
+        returned_texture_count = planned_export_count(returned_textures)
+        event_texture_count = planned_export_count(event_snapshot.ended_textures or {})
+        event_planned_texture_count = planned_export_count(
+            event_snapshot.about_to_start_textures or {}
+        )
+        used_event_fallback = not any(returned_textures.values()) and bool(
+            event_snapshot.ended_textures
+        )
+
+        if target_planned_count != event_planned_texture_count:
+            log.warning(
+                "Substance planned export count mismatch for "
+                f'"{target.texture_set_name}": '
+                f"list_project_textures={target_planned_count}, "
+                f"ExportTexturesAboutToStart={event_planned_texture_count}"
+            )
+        if returned_texture_count != event_texture_count:
+            log.warning(
+                f'Substance export count mismatch for "{target.texture_set_name}": '
+                f"return={returned_texture_count}, "
+                f"ExportTexturesEnded={event_texture_count}"
             )
 
         if progress_callback is not None:
@@ -275,7 +298,19 @@ class Exporter:
                 )
             )
 
-        return exported_textures
+        return TargetExportOutcome(
+            planned_exports=planned_exports,
+            exported_textures=exported_textures,
+            returned_texture_count=returned_texture_count,
+            event_texture_count=event_texture_count,
+            event_planned_texture_count=event_planned_texture_count,
+            used_event_fallback=used_event_fallback,
+        )
+
+    def write_mat_info(
+        self, export_settings_arr: typing.Iterable[TexSetExportSettings]
+    ) -> None:
+        write_material_info(self._out_path, export_settings_arr)
 
     def export(
         self,
@@ -284,17 +319,22 @@ class Exporter:
         geo_var: str,
         material_layer: str,
         progress_callback: PublishProgressCallback | None = None,
-    ) -> None:
-        """Export the texture sets, convert them to TEX, then write mat.json."""
-        all_exported_textures = self._export_substance_textures(
-            exp_setting_arr,
-            mat_var=mat_var,
-            geo_var=geo_var,
-            material_layer=material_layer,
-            progress_callback=progress_callback,
-        )
+    ) -> bool:
+        """Export all requested texture sets, then convert the outputs to TEX."""
+        self._last_error_message = None
 
-        exported_count = _file_count(all_exported_textures)
+        try:
+            all_exported_textures = self._export_substance_textures(
+                exp_setting_arr,
+                mat_var=mat_var,
+                geo_var=geo_var,
+                material_layer=material_layer,
+                progress_callback=progress_callback,
+            )
+        except TextureExportError:
+            return False
+
+        exported_count = planned_export_count(all_exported_textures)
         sp.logging.info(
             f"Exported {exported_count} texture(s) for "
             f"{self._texture_export_asset_name()} to {self._out_path}"
@@ -304,56 +344,37 @@ class Exporter:
             render_sources = self._move_previews(all_exported_textures)
         except OSError as exc:
             log.exception("Failed to move preview textures.")
-            raise TextureExportError(
+            self._set_error_message(
                 f"Textures exported, but moving the preview jpegs into "
                 f"{self._preview_path} failed.\nDetails: {exc}"
-            ) from exc
-
-        def report_conversion(converted: int, total: int) -> None:
-            if progress_callback is not None:
-                progress_callback(_conversion_update(converted, total))
+            )
+            return False
 
         tex_converter = TexConverter(
-            self._out_path,
+            self._tex_path,
             render_sources,
             asset_name=self._texture_export_asset_name(),
             geo_variant=geo_var,
             material_variant=mat_var,
             renderman_variant=material_layer,
-            progress_callback=report_conversion,
+            progress_callback=progress_callback,
         )
 
         try:
             tex_converter.convert_all()
-        except TexConversionError as exc:
+        except TexConversionError:
             log.exception("Texture conversion failed.")
             sp.logging.warning(
                 "TEX conversion failed; source textures exported but .tex files were not generated."
             )
-            raise TextureExportError(
+            self._set_error_message(
                 "Source textures exported, but TEX conversion failed.\n"
-                f"Details: {exc}\n"
-                "If this asset is rendering in Houdini, stop the render and press "
-                '"Reset RenderMan RIS/XPU", then publish again.'
-            ) from exc
-
-        # Written last, so mat.json never lists a texture set whose TEX files
-        # failed to convert.
-        if progress_callback is not None:
-            progress_callback(
-                PublishProgressUpdate(
-                    stage=PublishStage.WRITING_METADATA,
-                    message="Writing material metadata for the published textures.",
-                )
+                "Stop rendering this asset in Houdini and press "
+                '"Reset RenderMan RIS/XPU", then try again.'
             )
-        try:
-            write_material_info(self._out_path, exp_setting_arr)
-        except (OSError, ValueError) as exc:
-            log.exception("Failed to write material info metadata.")
-            raise TextureExportError(
-                "Textures exported, but failed to write material metadata.\n"
-                f"Details: {exc}"
-            ) from exc
+            return False
+
+        return True
 
     def _move_previews(
         self, exported_textures: dict[tuple[str, str], list[str]]
@@ -385,13 +406,13 @@ class Exporter:
         Raises `TextureExportError` on any failure so the surrounding
         `record()` block records the right error code and message.
         """
-        initial_payload = {
-            "geo_variant": geo_var,
-            "material_variant": mat_var,
-            "renderman_variant": material_layer,
-            "texture_set_count": len(exp_setting_arr),
-            "udim_set_count": count_udim_sets(exp_setting_arr),
-        }
+        initial_payload = self._texture_export_payload(
+            geo_variant=geo_var,
+            material_variant=mat_var,
+            renderman_variant=material_layer,
+            texture_set_count=len(exp_setting_arr),
+            udim_set_count=count_udim_sets(exp_setting_arr),
+        )
 
         # Counts populated as work proceeds. The finally block at the bottom
         # emits one update() with whatever has been reached when the block
@@ -400,7 +421,12 @@ class Exporter:
         # occurred.
         resolved_target_count = len(exp_setting_arr)
         udim_target_count = count_udim_sets(exp_setting_arr)
+        preexisting_src_count = 0
         planned_texture_count = 0
+        returned_texture_count = 0
+        event_texture_count = 0
+        event_planned_texture_count = 0
+        used_event_fallback = False
         all_exported_textures: dict[tuple[str, str], list[str]] = {}
 
         with telemetry.record(
@@ -413,11 +439,15 @@ class Exporter:
                 log.info(f"Exporting textures to {self._out_path}")
 
                 self._cleanup_export_lock(context="before export")
+                preexisting_src_count = existing_source_file_count(self._src_path)
 
                 try:
                     resolved_targets = resolve_export_targets(exp_setting_arr)
                 except ValueError as exc:
-                    raise TextureExportError(str(exc)) from exc
+                    self._set_error_message(str(exc))
+                    raise TextureExportError(
+                        self._last_error_message or str(exc)
+                    ) from exc
 
                 resolved_target_count = len(resolved_targets)
                 udim_target_count = count_udim_sets(
@@ -429,17 +459,21 @@ class Exporter:
                         resolved_targets, progress_callback=progress_callback
                     )
                 except ValueError as exc:
-                    raise TextureExportError(str(exc)) from exc
+                    self._set_error_message(str(exc))
+                    raise TextureExportError(
+                        self._last_error_message or str(exc)
+                    ) from exc
 
                 for target_index, target in enumerate(resolved_targets, start=1):
                     self._cleanup_export_lock(
                         context=f'before export for "{target.texture_set_name}"'
                     )
-                    planned_exports = planned_by_target.get(target.texture_set_name, {})
                     try:
-                        exported_textures = self._export_target(
+                        outcome = self._export_target(
                             target,
-                            planned_exports=planned_exports,
+                            planned_exports=planned_by_target.get(
+                                target.texture_set_name, {}
+                            ),
                             target_index=target_index,
                             target_count=len(resolved_targets),
                             progress_callback=progress_callback,
@@ -448,17 +482,54 @@ class Exporter:
                         log.error(
                             f'Texture export failed while processing texture set "{target.texture_set_name}".'
                         )
-                        raise TextureExportError(str(exc)) from exc
+                        self._set_error_message(str(exc))
+                        raise TextureExportError(
+                            self._last_error_message or str(exc)
+                        ) from exc
 
-                    planned_texture_count += _file_count(planned_exports)
-                    all_exported_textures.update(exported_textures)
+                    planned_texture_count += planned_export_count(
+                        outcome.planned_exports
+                    )
+                    returned_texture_count += outcome.returned_texture_count
+                    event_texture_count += outcome.event_texture_count
+                    event_planned_texture_count += outcome.event_planned_texture_count
+                    used_event_fallback = (
+                        used_event_fallback or outcome.used_event_fallback
+                    )
+                    all_exported_textures.update(outcome.exported_textures)
                     QtWidgets.QApplication.processEvents()
+
+                try:
+                    if progress_callback is not None:
+                        progress_callback(
+                            PublishProgressUpdate(
+                                stage=PublishStage.WRITING_METADATA,
+                                message="Writing material metadata for the published textures.",
+                            )
+                        )
+                    self.write_mat_info(
+                        [target.settings for target in resolved_targets]
+                    )
+                except (OSError, ValueError) as exc:
+                    log.exception("Failed to write material info metadata.")
+                    self._set_error_message(
+                        "Textures exported, but failed to write material metadata.\n"
+                        f"Details: {exc}"
+                    )
+                    raise TextureExportError(
+                        self._last_error_message or str(exc)
+                    ) from exc
 
                 return all_exported_textures
             finally:
                 telemetry_event.update(
                     texture_set_count=resolved_target_count,
                     udim_set_count=udim_target_count,
+                    preexisting_source_file_count=preexisting_src_count,
                     planned_texture_count=planned_texture_count,
-                    exported_texture_count=_file_count(all_exported_textures),
+                    exported_texture_count=planned_export_count(all_exported_textures),
+                    returned_texture_count=returned_texture_count,
+                    event_texture_count=event_texture_count,
+                    event_planned_texture_count=event_planned_texture_count,
+                    used_event_fallback=used_event_fallback,
                 )

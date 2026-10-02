@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hdefereval
 import hou
 
 from pipe.core.color import DEFAULT_VIEW, DISPLAY
@@ -14,8 +15,4 @@ def _apply_ocio_defaults() -> None:
             tab.setOCIODisplayView(DISPLAY, DEFAULT_VIEW)
 
 
-# hdefereval exists only in graphical sessions, not hython.
-if hou.isUIAvailable():
-    import hdefereval
-
-    hdefereval.executeDeferred(_apply_ocio_defaults)
+hdefereval.executeDeferred(_apply_ocio_defaults)
