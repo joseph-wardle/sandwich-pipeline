@@ -146,7 +146,6 @@ _SG_SHOT_DESCRIPTION = "description"
 _SG_SHOT_SEQUENCE = "sg_sequence"
 _SG_SHOT_CUT_IN = "sg_cut_in"
 _SG_SHOT_CUT_OUT = "sg_cut_out"
-_SG_SHOT_CUT_DURATION = "sg_cut_duration"
 _SG_SHOT_TASK_TEMPLATE = "task_template"
 _SG_SHOT_SETS = "sg_sets"
 _SG_VERSION_CODE = "code"
@@ -1023,9 +1022,7 @@ class ShotGrid:
         """Stamp `cut_in`/`cut_out` onto `shot`.
 
         Used by the previs break-out, which fixes a shot's frame range at bake
-        time. ShotGrid's Cut Duration column is written alongside as
-        `cut_out - cut_in + 1` so the Shots page stays consistent; the pipeline
-        never reads it back.
+        time.
 
         Raises:
             ValueError: `cut_out` precedes `cut_in`.
@@ -1454,14 +1451,9 @@ def _selected(**selectors: object) -> tuple[str, object]:
 
 
 def _cut_range_payload(cut_in: int, cut_out: int) -> dict[str, int]:
-    """The three cut fields ShotGrid must always see together."""
     if cut_out < cut_in:
         raise ValueError(f"cut_out ({cut_out}) precedes cut_in ({cut_in}).")
-    return {
-        _SG_SHOT_CUT_IN: cut_in,
-        _SG_SHOT_CUT_OUT: cut_out,
-        _SG_SHOT_CUT_DURATION: cut_out - cut_in + 1,
-    }
+    return {_SG_SHOT_CUT_IN: cut_in, _SG_SHOT_CUT_OUT: cut_out}
 
 
 def _entity_ref(sg_type: str, entity: SGEntity | None) -> dict[str, Any] | None:
