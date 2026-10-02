@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import hou
 
@@ -15,6 +16,10 @@ CAMERA = "cam"
 _ENABLE = "{}_enable"
 _VERSION = "{}_version"
 _VERSION_SUFFIX = _VERSION.format("")
+_MISSING_PIN = (
+    "{label} is pinned to {version}, which isn't published for this shot. "
+    "Choose another version in its menu, or untick {label}."
+)
 
 
 def layer_path(node: hou.Node, row: str) -> str:
@@ -45,9 +50,22 @@ def show_pins(node: hou.Node) -> None:
 
 
 def camera_missing(node: hou.Node) -> bool:
-    """Whether the camera row is on and reads a layer that isn't there."""
+    """Whether the camera row is on, reads the current layer and has none to read."""
     enabled = bool(node.evalParm(_ENABLE.format(CAMERA)))
-    return enabled and not Path(layer_path(node, CAMERA)).is_file()
+    reads_current = _text(node, _VERSION.format(CAMERA)) == CURRENT
+    return enabled and reads_current and not _current(node, CAMERA).is_file()
+
+
+def missing_pins(node: hou.Node) -> str:
+    """What to tell the artist about each row pinned to a version that isn't there.
+
+    Empty when every pinned row has its version.
+    """
+    return "\n".join(
+        _MISSING_PIN.format(label=_label(node, row), version=pin)
+        for row in _rows(node)
+        if (pin := _pin(node, row)) and not Path(layer_path(node, row)).is_file()
+    )
 
 
 def _current(node: hou.Node, row: str) -> Path:
@@ -68,6 +86,11 @@ def _pin(node: hou.Node, row: str) -> str | None:
     if version == CURRENT or not node.evalParm(_ENABLE.format(row)):
         return None
     return version
+
+
+def _label(node: hou.Node, row: str) -> str:
+    # A row is found by its version parm, so the parm is there.
+    return cast(hou.Parm, node.parm(_VERSION.format(row))).description()
 
 
 def _text(node: hou.Node, name: str) -> str:
