@@ -7,7 +7,6 @@ from typing import cast
 
 import maya.cmds as mc
 from env_sg import DB_Config
-from timeline_marker.ui import TimelineMarker  # type: ignore[import-not-found]
 
 from pipe.core.ui import (
     RESTORE_CANCEL,
@@ -41,7 +40,7 @@ from pipe.core.versioning import (
 
 from .sets import sync_shot_sets
 from .stage import build_shot_stage
-from .timeline import shot_timeline_generator
+from .timeline import sync_shot_timeline
 
 log = logging.getLogger(__name__)
 
@@ -128,18 +127,7 @@ class MShotFileManager(FileManager):
             if not mc.about(batch=True):
                 sync_shot_sets(shot)
 
-            # Import Timeline
-            frames, colors, comments = shot_timeline_generator(
-                shot.cut_duration or 0, shot.cut_in or 1001
-            )
-            TimelineMarker.clear()
-            TimelineMarker.set(frames, colors, comments)
-            mc.playbackOptions(
-                animationStartTime=frames[0],
-                animationEndTime=frames[-1],
-                minTime=frames[0],
-                maxTime=frames[-1],
-            )
+            sync_shot_timeline(shot)
         except Exception:
             # Workflow boundary: many things can fail during file-open setup
             # (ShotGrid lookup, set sync, timeline marker). Log + warn
