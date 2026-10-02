@@ -7,17 +7,8 @@ from pipe.dcc.maya.playblast.viewport import ViewportQuality
 
 
 def dummy_shot(code: str, cut_in: int, cut_out: int) -> Shot:
-    """Generate a generic `Shot` object to hold cut info that doesn't
-    correspond to a ShotGrid shot"""
-    return Shot(
-        code=code,
-        id=0,
-        assets=[],
-        cut_in=cut_in,
-        cut_out=cut_out,
-        sequence=None,
-        sets=[],
-    )
+    """A `Shot` for a frame range ShotGrid holds no shot for."""
+    return Shot(id=0, code=code, cut_in=cut_in, cut_out=cut_out)
 
 
 @dataclass

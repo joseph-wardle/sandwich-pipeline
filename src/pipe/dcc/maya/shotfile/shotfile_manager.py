@@ -45,6 +45,13 @@ from .timeline import sync_shot_timeline
 log = logging.getLogger(__name__)
 
 
+def _set_hd_render_resolution() -> None:
+    mc.setAttr("defaultResolution.width", 1920)  # type: ignore
+    mc.setAttr("defaultResolution.height", 1080)  # type: ignore
+    mc.setAttr("defaultResolution.pixelAspect", 1.0)  # type: ignore
+    mc.setAttr("defaultResolution.deviceAspectRatio", 1920 / 1080)  # type: ignore
+
+
 class MShotFileManager(FileManager):
     shot: Shot
 
@@ -101,32 +108,26 @@ class MShotFileManager(FileManager):
     @classmethod
     @log_errors
     def run_on_open(cls) -> None:
-        """Function to run on file open via script node"""
-        # change default render resolution
-        mc.setAttr("defaultResolution.width", 1920)  # type: ignore
-        mc.setAttr("defaultResolution.height", 1080)  # type: ignore
-        mc.setAttr("defaultResolution.pixelAspect", 1.0)  # type: ignore
-        mc.setAttr("defaultResolution.deviceAspectRatio", 1920 / 1080)  # type: ignore
+        """Called by the scene's `skdOnOpen` script node on every open."""
+        _set_hd_render_resolution()
+        if mc.about(batch=True):
+            return
 
         try:
             shot_code = cls._shot_code_from_file_info()
             if not shot_code:
-                scene_path = mc.file(query=True, sceneName=True)
-                scene_path_str = scene_path if isinstance(scene_path, str) else ""
-                shot_code = cls._shot_code_from_scene_path(scene_path_str)
-                if shot_code:
-                    mc.fileInfo("code", shot_code)
-                else:
+                shot_code = cls._shot_code_from_scene_path(
+                    str(mc.file(query=True, sceneName=True))
+                )
+                if not shot_code:
                     mc.warning(
                         "Could not determine shot code; sets and timeline not set"
                     )
                     return
+                mc.fileInfo("code", shot_code)
 
-            conn = ShotGrid.connect(DB_Config)
-            shot = conn.get_shot(code=shot_code)
-            if not mc.about(batch=True):
-                sync_shot_sets(shot)
-
+            shot = ShotGrid.connect(DB_Config).get_shot(code=shot_code)
+            sync_shot_sets(shot)
             sync_shot_timeline(shot)
         except Exception:
             # Workflow boundary: many things can fail during file-open setup

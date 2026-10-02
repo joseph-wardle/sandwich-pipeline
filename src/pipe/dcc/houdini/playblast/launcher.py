@@ -85,15 +85,7 @@ def _resolve_source_shot(dialog: HPlayblastDialog) -> Shot:
         cut_in, cut_out = dialog.custom_frame_range
         if cut_out < cut_in:
             cut_out = cut_in
-        return Shot(
-            code=dialog.custom_shot_code,
-            id=0,
-            assets=[],
-            cut_in=cut_in,
-            cut_out=cut_out,
-            sequence=None,
-            sets=[],
-        )
+        return Shot(id=0, code=dialog.custom_shot_code, cut_in=cut_in, cut_out=cut_out)
 
     shot = dialog.shot
     if shot is None:
