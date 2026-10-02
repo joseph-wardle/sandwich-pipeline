@@ -59,6 +59,9 @@ def prepare_layer(layer_path: Path, name: str, source: Path) -> list[str]:
     stage = Usd.Stage.Open(str(layer_path), load=Usd.Stage.LoadNone)
     root = stage.GetPrimAtPath(f"/{name}")
     if not root.IsValid():
+        # Closed first: the caller deletes the layer, which NFS refuses while it
+        # is open, and the raised error would otherwise keep it open.
+        del root, stage
         raise ValueError(f"{layer_path} has no /{name} prim.")
 
     stage.SetDefaultPrim(root)

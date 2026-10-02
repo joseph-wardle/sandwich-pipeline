@@ -68,6 +68,7 @@ def _has_shot_aspect(camera: str) -> bool:
 class PublishCameraDialog(FilteredListDialog):
     _camera: QComboBox
     rows: PublishRows
+    _target: Target | None = None
 
     def __init__(self, parent: QWidget | None, shots: Sequence[Shot]) -> None:
         self._shots = {shot.code: shot for shot in shots if shot.code is not None}
@@ -95,17 +96,19 @@ class PublishCameraDialog(FilteredListDialog):
         self._layout.insertWidget(self._layout.count() - 1, self.rows)
 
     def target(self) -> Target:
-        """The version the selected shot's camera becomes."""
+        """The version the selected shot's camera becomes, as the dialog showed it."""
         # Publish is enabled only while a shot is selected.
-        code = cast(str, self.get_selected_item())
-        return shot_target(self._shots[code], DEPARTMENT)
+        return cast(Target, self._target)
 
     def camera(self) -> str:
         return self._camera.currentText()
 
     def _on_item_selected(self) -> None:
-        selected = self.get_selected_item() is not None
-        self.rows.set_version_label(self.target().label if selected else "")
+        code = self.get_selected_item()
+        self._target = (
+            shot_target(self._shots[code], DEPARTMENT) if code is not None else None
+        )
+        self.rows.set_version_label(self._target.label if self._target else "")
         # Break-out names each RLO camera after its shot, so picking the shot picks
         # its camera. Scenes without one keep whatever camera is showing.
         cameras = [self._camera.itemText(i) for i in range(self._camera.count())]

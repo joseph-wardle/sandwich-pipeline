@@ -8,16 +8,7 @@ from typing import cast
 import maya.cmds as mc
 
 from pipe.core import telemetry
-from pipe.core.publish import (
-    Refused,
-    Target,
-    copy_source,
-    discard_staged,
-    release,
-    stage,
-    stamp,
-    version_layer_path,
-)
+from pipe.core.publish import Refused, Target, publish_version, version_layer_path
 from pipe.core.ui import MessageDialog, PublishChoice
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.maya.util.selection import maintain_selection
@@ -56,33 +47,29 @@ class VersionPublisher(Publisher):
         """What the result box says, or None if the artist backed out."""
         if not self._choose():
             return None
-        target, note = self._target, self._choice.note
-        scene = _save_scene()
-        author = resolve_artist_display_name()
-
-        self._publish_path = stage(target)
-        try:
-            with telemetry.record(
-                telemetry.EVENT_PUBLISH_USD,
-                payload={
-                    "kind": self._PUBLISH_KIND,
-                    "publish_path": str(
-                        version_layer_path(target.current, target.version)
-                    ),
-                },
-                shot=target.entity,
-            ):
-                self._mayausd_export_and_finalize()
-            copy_source(target.current, target.version, scene)
-            stamp(target.current, target.version, author=author, note=note)
-        except BaseException:
-            discard_staged(target.current, target.version)
-            raise
-
-        lines = release(
-            self._conn, target, author=author, note=note, detail=self._detail()
+        lines = publish_version(
+            self._conn,
+            self._target,
+            scene=_save_scene(),
+            author=resolve_artist_display_name(),
+            note=self._choice.note,
+            write=self._write,
+            detail=self._detail(),
         )
         return "\n\n".join(["\n".join(lines), *self._warnings()])
+
+    def _write(self, staged: Path) -> None:
+        target = self._target
+        self._publish_path = staged
+        with telemetry.record(
+            telemetry.EVENT_PUBLISH_USD,
+            payload={
+                "kind": self._PUBLISH_KIND,
+                "publish_path": str(version_layer_path(target.current, target.version)),
+            },
+            shot=target.entity,
+        ):
+            self._mayausd_export_and_finalize()
 
     def _choose(self) -> bool:
         """Ask what to publish, select it, and set `_target` and `_choice`.

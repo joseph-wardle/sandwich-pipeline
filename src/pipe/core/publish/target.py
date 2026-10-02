@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -12,9 +13,13 @@ from pipe.core.shotgrid import Set, Shot, ShotGrid, ShotGridError
 
 from .versions import (
     commit_version,
+    copy_source,
     create_staging,
+    discard_staged,
     make_current,
+    next_version,
     staging_layer_path,
+    stamp,
 )
 
 log = logging.getLogger(__name__)
@@ -43,10 +48,38 @@ class Target:
         return f"{self.name} v{self.version:03d}"
 
 
-def stage(target: Target) -> Path:
+def publish_version(
+    conn: ShotGrid,
+    target: Target,
+    *,
+    scene: Path,
+    author: str,
+    note: str,
+    write: Callable[[Path], None],
+    detail: str = "",
+) -> list[str]:
+    """Publish `target` from `scene`, which the caller has just saved.
+
+    `write` exports the layer to the path it is given. Whatever it raises stops
+    the publish with nothing published. `detail` is what the announcement says
+    besides the version and the note, such as which rigs were published.
+    Returns the result box's lines.
+    """
+    staged = _stage(target)
+    try:
+        write(staged)
+        copy_source(target.current, target.version, scene)
+        stamp(target.current, target.version, author=author, note=note)
+    except BaseException:
+        _discard(target)
+        raise
+    return _release(conn, target, author=author, note=note, detail=detail)
+
+
+def _stage(target: Target) -> Path:
     """Create the folder the version is written into; return its layer's path."""
     try:
-        return create_staging(target.current, target.version)
+        staged = create_staging(target.current, target.version)
     except FileExistsError as exc:
         raise Refused(
             f"Nothing was published: {exc.filename} already exists. Someone may be "
@@ -59,16 +92,32 @@ def stage(target: Target) -> Path:
             f"Couldn't create a folder for {target.label}, so nothing was "
             f"published. Ask a TD to check the permissions on {target.current.parent}."
         ) from None
+    # Asked once the folder is held, so no one can publish this number in between.
+    if next_version(target.current) != target.version:
+        _discard(target)
+        raise Refused(
+            f"Nothing was published: v{target.version:03d} was published while "
+            "this dialog was open. Publish again to make the next version."
+        )
+    return staged
 
 
-def release(
-    conn: ShotGrid, target: Target, *, author: str, note: str, detail: str = ""
-) -> list[str]:
-    """Make the staged version current, register it in ShotGrid and tell downstream.
+def _discard(target: Target) -> None:
+    """Delete what was staged.
 
-    `detail` is what the announcement says besides the version and the note, such
-    as which rigs were published. Returns the result box's lines.
+    A failure is only logged, so it can't hide why the publish stopped.
     """
+    try:
+        discard_staged(target.current, target.version)
+    except OSError:
+        staging = staging_layer_path(target.current, target.version).parent
+        log.exception("Could not delete %s.", staging)
+
+
+def _release(
+    conn: ShotGrid, target: Target, *, author: str, note: str, detail: str
+) -> list[str]:
+    """Make the staged version current, register it in ShotGrid and tell downstream."""
     staging = staging_layer_path(target.current, target.version).parent
     try:
         version_path = commit_version(target.current, target.version)

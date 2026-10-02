@@ -1,7 +1,7 @@
 """Publish versions: immutable `v###` folders behind a current layer."""
 
 from .history import Entry, history, move_current, replace_scene
-from .target import Refused, Target, release, stage
+from .target import Refused, Target, publish_version
 from .versions import (
     PUBLISH_DIRNAME,
     VersionInfo,
@@ -37,10 +37,9 @@ __all__ = [
     "move_current",
     "next_version",
     "pin",
-    "release",
+    "publish_version",
     "replace_scene",
     "scene_version",
-    "stage",
     "staging_layer_path",
     "stamp",
     "version_info",

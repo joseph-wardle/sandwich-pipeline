@@ -16,20 +16,12 @@ import hou
 from env_sg import DB_Config
 from Qt import QtWidgets
 
-from pipe.core.publish import (
-    Refused,
-    Target,
-    copy_source,
-    discard_staged,
-    release,
-    stage,
-    stamp,
-)
+from pipe.core.publish import Refused, Target, publish_version
 from pipe.core.sets import SETS_DIRNAME, prepare_layer, set_target
 from pipe.core.shot import shot_target
 from pipe.core.shotgrid import Set, Shot, ShotGrid, ShotGridError, ShotGridNotFound
 from pipe.core.struct.timeline import Timeline
-from pipe.core.ui import MessageDialog, PublishChoice, prompt_publish
+from pipe.core.ui import MessageDialog, prompt_publish
 from pipe.core.util.paths import get_production_path
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.houdini import runtime
@@ -49,6 +41,10 @@ NOT_A_PUBLISHING_HIP = (
     "This hip isn't in a shot department's folder or a set's folder, so there is "
     "nothing for it to publish. Open it with Open Shot or Open Set."
 )
+
+
+class _BackedOut(Exception):
+    """The artist cancelled once the write had begun. Nothing is published."""
 
 
 @dataclass(frozen=True)
@@ -88,11 +84,24 @@ def _publish(window: QtWidgets.QWidget | None) -> _Published | None:
     choice = prompt_publish(window, target.label)
     if choice is None:
         return None
-    author = resolve_artist_display_name()
-    if not _write_staged(node, target, frame_range, hip_path, choice, author):
-        return None
+    _save_hip()
 
-    lines = release(conn, target, author=author, note=choice.note)
+    def write(staged: Path) -> None:
+        _render(node, staged, frame_range)
+        if isinstance(target.entity, Set):
+            _prepare_set(staged, target.entity, hip_path)
+
+    try:
+        lines = publish_version(
+            conn,
+            target,
+            scene=hip_path,
+            author=resolve_artist_display_name(),
+            note=choice.note,
+            write=write,
+        )
+    except _BackedOut:
+        return None
     description = f"{target.label}: {choice.note}" if choice.note else target.label
     return _Published(lines, description if choice.playblast else None)
 
@@ -157,15 +166,7 @@ def _frame_range(entity: Shot | Set) -> tuple[int, int]:
     return timeline.start, timeline.end
 
 
-def _write_staged(
-    node: hou.LopNode,
-    target: Target,
-    frame_range: tuple[int, int],
-    hip_path: Path,
-    choice: PublishChoice,
-    author: str,
-) -> bool:
-    """Write the version into its staging folder. False if the artist backed out."""
+def _save_hip() -> None:
     try:
         # Saved first, so the scene kept with the version is the one that made it.
         hou.hipFile.save()
@@ -174,20 +175,6 @@ def _write_staged(
             f"The hip couldn't be saved, so nothing was published.\n"
             f"{exc.instanceMessage()}"
         ) from None
-    staged = stage(target)
-    try:
-        _render(node, staged, frame_range)
-        if isinstance(target.entity, Set) and not _prepare_set(
-            staged, target.entity, hip_path
-        ):
-            discard_staged(target.current, target.version)
-            return False
-        copy_source(target.current, target.version, hip_path)
-        stamp(target.current, target.version, author=author, note=choice.note)
-    except BaseException:
-        discard_staged(target.current, target.version)
-        raise
-    return True
 
 
 def _render(node: hou.LopNode, staged: Path, frame_range: tuple[int, int]) -> None:
@@ -206,8 +193,12 @@ def _render(node: hou.LopNode, staged: Path, frame_range: tuple[int, int]) -> No
         )
 
 
-def _prepare_set(staged: Path, set: Set, hip_path: Path) -> bool:
-    """Author the set contract on the staged layer. False if the artist backed out."""
+def _prepare_set(staged: Path, set: Set, hip_path: Path) -> None:
+    """Author the set contract on the staged layer.
+
+    Raises:
+        _BackedOut: The artist chose not to publish prims that shots won't see.
+    """
     try:
         stray = prepare_layer(staged, set.name, hip_path)
     except ValueError:
@@ -216,7 +207,7 @@ def _prepare_set(staged: Path, set: Set, hip_path: Path) -> bool:
             f"everything the set needs under /{set.name} and publish again."
         ) from None
     if not stray:
-        return True
+        return
     listed = "\n".join(f"  /{prim}" for prim in stray)
     choice = hou.ui.displayMessage(
         f"These prims are outside /{set.name} and won't reach shots:\n{listed}\n\n"
@@ -227,4 +218,5 @@ def _prepare_set(staged: Path, set: Set, hip_path: Path) -> bool:
         close_choice=1,
         title=TITLE,
     )
-    return choice == 0
+    if choice != 0:
+        raise _BackedOut

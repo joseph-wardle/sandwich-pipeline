@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from pxr import Sdf, UsdUtils
+from pxr import Sdf, Tf, UsdUtils
 
 PUBLISH_DIRNAME = "publish"
 SOURCE_DIRNAME = "_src"
@@ -183,6 +183,7 @@ def make_current(current: Path, version: int) -> None:
 
     Raises:
         FileNotFoundError: `version` was never published.
+        OSError: The current layer couldn't be written.
     """
     version_path = version_layer_path(current, version)
     version_layer = Sdf.Layer.FindOrOpen(str(version_path))
@@ -201,7 +202,11 @@ def make_current(current: Path, version: int) -> None:
     # mid-publish gets either the old current layer or the new one, never half.
     temp = current.with_name(f".{current.stem}.tmp{current.suffix}")
     # Text even when named `.usd`, so the version it points at can be read with cat.
-    layer.Export(str(temp), args={"format": "usda"})
+    try:
+        layer.Export(str(temp), args={"format": "usda"})
+    except Tf.ErrorException as exc:
+        # USD has its own error for a file it can't write.
+        raise OSError(f"USD couldn't write {temp}.") from exc
     os.replace(temp, current)
 
 
