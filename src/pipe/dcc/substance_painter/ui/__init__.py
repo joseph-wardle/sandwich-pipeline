@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from math import log2
 from re import findall
 from typing import TYPE_CHECKING
@@ -27,37 +26,31 @@ from pipe.core.ui import ButtonPair, MessageDialog, MessageDialogCustomButtons
 from pipe.core.ui.progress import ProgressDialog
 from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.dcc.substance_painter.publish.export import (
-    Exporter,
     TexSetExportSettings,
     TextureExportError,
 )
-from pipe.dcc.substance_painter.util.houdini_bridge import (
-    HoudiniPublishCancelled,
-    HoudiniPublishError,
-    run_asset_builder,
-    summarize_result,
+from pipe.dcc.substance_painter.publish.progress import (
+    PublishProgressUpdate,
+    PublishStage,
+)
+from pipe.dcc.substance_painter.publish.sequence import (
+    PublishCancelled,
+    PublishRequest,
+    publish_textures,
+    register_material_selection,
 )
 from pipe.dcc.substance_painter.runtime import get_main_qt_window
-from pipe.dcc.substance_painter.util.metadata import (
-    ProjectIdentity,
-    note_with_source,
-    project_version_stream,
-)
+from pipe.dcc.substance_painter.util.metadata import ProjectIdentity
 from pipe.dcc.substance_painter.util.project import (
     check_project_editable,
     current_project_path,
     save_project,
 )
-from pipe.dcc.substance_painter.util.docs import LOG_HINT, docs_footer, docs_link_html
+from pipe.dcc.substance_painter.util.docs import docs_footer, docs_link_html
 from pipe.dcc.substance_painter.util.texture_set import texture_set_name
-from pipe.dcc.substance_painter.util.progress import (
-    PublishProgressUpdate,
-    PublishStage,
-)
 from pipe.core.struct.material import DisplacementSource, NormalSource
 from pipe.core.util import checkbox_callback_helper, dict_index
 from pipe.core.util.paths import get_repo_root
-from pipe.core.versioning import backup_if_changed
 
 log = logging.getLogger(__name__)
 
@@ -68,37 +61,11 @@ _CANCELLED_DURING_EXPORT_MESSAGE = (
     "so it may hold a mix of old and new textures. Publish again to replace "
     "them all."
 )
-_HOUDINI_CANCELLED_STATUS = (
-    "Houdini publish cancelled before it finished. Publish again to rebuild the asset."
-)
-
 _STAGES_BEFORE_EXPORT = (
     PublishStage.SAVING_PROJECT,
     PublishStage.PREPARING_PUBLISH,
     PublishStage.PLANNING_EXPORT,
 )
-
-
-class _PublishCancelled(Exception):
-    """Raised at a progress update once the artist has pressed Cancel."""
-
-    error_code = "PUBLISH_CANCELLED"
-
-    def __init__(self, stage: PublishStage) -> None:
-        super().__init__(f"Cancelled at: {stage.value}")
-        self.stage = stage
-
-
-@dataclass(frozen=True)
-class _PendingPublishRequest:
-    asset_label: str
-    export_settings: tuple[TexSetExportSettings, ...]
-    geo_var: str
-    mat_var: str
-    material_layer: str
-    save_required: bool
-    version_title: str
-    version_note: str | None
 
 
 class SubstanceExportWindow(QMainWindow, ButtonPair):
@@ -438,7 +405,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             return
         log.info(f"Exporting {len(export_settings)} texture sets")
 
-        request = _PendingPublishRequest(
+        request = PublishRequest(
             asset_label=asset_label,
             export_settings=tuple(export_settings),
             geo_var=geo_var,
@@ -450,7 +417,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         )
         self._begin_publish(request)
 
-    def _begin_publish(self, request: _PendingPublishRequest) -> None:
+    def _begin_publish(self, request: PublishRequest) -> None:
         """Show the progress dialog, then publish once Painter is idle."""
         self._publish_stages = tuple(
             stage
@@ -485,45 +452,33 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 title="Publish Startup Failed",
             )
 
-    def _run_publish_request(self, request: _PendingPublishRequest) -> None:
-        """Save, export, back up, and run Houdini; then report and clean up."""
+    def _run_publish_request(self, request: PublishRequest) -> None:
+        """Save and publish; then report the outcome and clean up."""
         try:
             if self._publish_cancelled:
-                raise _PublishCancelled(self._publish_stages[0])
-            asset = self._register_material_selection(self._curr_asset, request)
-            self._curr_asset = asset
+                raise PublishCancelled(self._publish_stages[0])
+            self._curr_asset = register_material_selection(
+                self._conn, self._curr_asset, request
+            )
 
             if request.save_required and not self._save_before_publish():
                 return
 
-            self._send_progress_or_cancel(
-                PublishProgressUpdate(
-                    stage=PublishStage.PREPARING_PUBLISH,
-                    message="Preparing the publish configuration and enabled texture sets.",
-                )
+            complete, summary = publish_textures(
+                self._curr_asset,
+                self._identity,
+                request,
+                report=self._send_publish_progress,
+                is_cancelled=lambda: self._publish_cancelled,
             )
-            Exporter(asset).export(
-                request.export_settings,
-                request.mat_var,
-                request.geo_var,
-                request.material_layer,
-                progress_callback=self._send_progress_or_cancel,
-            )
-
-            # The textures are published now, so Cancel only skips the Houdini build.
-            backup_ok, backup_status = self._backup_project(asset, request)
-            houdini_ok, houdini_status = self._run_houdini_publish(asset, request)
-            if backup_ok and houdini_ok:
+            if complete:
                 sp.logging.info(f"Publish complete for {request.asset_label}")
                 title = "Publish Textures"
             else:
                 sp.logging.warning(f"Publish incomplete for {request.asset_label}")
                 title = "Publish Incomplete"
-            self._show_publish_message(
-                f"Textures successfully exported!\n{backup_status}\n{houdini_status}",
-                title=title,
-            )
-        except _PublishCancelled as cancelled:
+            self._show_publish_message(summary, title=title)
+        except PublishCancelled as cancelled:
             log.info(f"Publish cancelled for {request.asset_label}: {cancelled}")
             self._show_publish_message(
                 _CANCELLED_BEFORE_EXPORT_MESSAGE
@@ -547,20 +502,6 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         finally:
             self._finish_publish()
 
-    def _register_material_selection(
-        self, asset: Asset, request: _PendingPublishRequest
-    ) -> Asset:
-        """Add the request's material variant and layer to ShotGrid if new."""
-        if request.mat_var not in (asset.material_variants or set()):
-            log.info(f"Updating new material variant: {request.mat_var}")
-            asset = self._conn.add_material_variant(asset, request.mat_var)
-
-        if request.material_layer not in (asset.material_layers or set()):
-            log.info(f"Updating new material layer: {request.material_layer}")
-            asset = self._conn.add_material_layer(asset, request.material_layer)
-
-        return asset
-
     def _save_before_publish(self) -> bool:
         self._send_publish_progress(
             PublishProgressUpdate(
@@ -571,114 +512,6 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         return save_project(
             lambda message, title: self._show_publish_message(message, title=title)
         )
-
-    def _backup_project(
-        self, asset: Asset, request: _PendingPublishRequest
-    ) -> tuple[bool, str]:
-        """Back up the open project if it changed; return (succeeded, status line)."""
-        identity = self._identity
-        project_path = identity.project_path
-        asset_paths = paths_for_asset(asset)
-        # The backup follows the project's variant; the textures follow the
-        # dropdown.  A file with no variant of its own joins the published one's.
-        project_stream = project_version_stream(
-            asset, identity.variant or request.geo_var
-        )
-
-        self._send_publish_progress(
-            PublishProgressUpdate(
-                stage=PublishStage.BACKING_UP_PROJECT,
-                message="Saving a versioned backup of the Substance Painter project.",
-            )
-        )
-        try:
-            result = backup_if_changed(
-                source_path=project_path,
-                backup_dir=project_stream.backup_dir,
-                manifest_path=project_stream.manifest_path,
-                dcc=project_stream.dcc,
-                stream_key=project_stream.stream_key,
-                stem=project_stream.stem,
-                ext=project_stream.ext,
-                stream_label=project_stream.label,
-                working_path=project_stream.working_path,
-                title=request.version_title,
-                publish_path=asset_paths.publish_textures_layer_dir(
-                    request.geo_var,
-                    request.mat_var,
-                    request.material_layer,
-                ),
-                context="publish",
-                note=note_with_source(identity, request.version_note),
-                extra={
-                    "geo": request.geo_var,
-                    "material": request.mat_var,
-                    "material_layer": request.material_layer,
-                },
-                owner=project_stream.owner,
-            )
-        except (OSError, ValueError):
-            log.exception(
-                f"Backup of {project_path} to {project_stream.backup_dir} failed."
-            )
-            return False, (
-                f"Backup failed: the project version could not be saved. {LOG_HINT}"
-            )
-
-        if result is None:
-            log.warning("Backup skipped: source file missing.")
-            return True, "Backup skipped: source file missing."
-        if not result.changed:
-            log.info("Backup skipped: no changes detected.")
-            return True, "Backup skipped: no changes detected."
-        if not result.backup_path:
-            log.info(f"Backup created for {project_path}")
-            return True, "Backup created."
-        log.info(f"Backup created at {result.backup_path}")
-        version_label = (
-            f"v{int(result.version):03d}"
-            if result.version is not None
-            else result.backup_path.name
-        )
-        status = f'Backup created: {version_label} "{request.version_title}"'
-        if not identity.is_working_file:
-            status += f" in {project_stream.label}'s history, from {project_path.name}"
-        return True, status
-
-    def _run_houdini_publish(
-        self, asset: Asset, request: _PendingPublishRequest
-    ) -> tuple[bool, str]:
-        """Run the headless Houdini asset build; return (succeeded, status line)."""
-        self._send_publish_progress(
-            PublishProgressUpdate(
-                stage=PublishStage.RUNNING_HOUDINI,
-                message=(
-                    "Textures are published. Rebuilding the asset in Houdini; "
-                    "this can take a few minutes."
-                ),
-            )
-        )
-        if self._publish_cancelled:
-            return False, _HOUDINI_CANCELLED_STATUS
-        # The progress dialog stays window-modal until this returns, which is
-        # what stops the artist closing the project mid-build.
-        try:
-            result = run_asset_builder(
-                asset,
-                geo_variant=request.geo_var,
-                is_cancelled=lambda: self._publish_cancelled,
-            )
-        except HoudiniPublishCancelled:
-            log.info("Headless Houdini publish cancelled from Substance.")
-            return False, _HOUDINI_CANCELLED_STATUS
-        except HoudiniPublishError as exc:
-            log.error(f"Headless Houdini publish failed from Substance: {exc}")
-            return False, f"Houdini publish failed: {exc}"
-        except Exception:
-            # The textures are already published, so report this step alone.
-            log.exception("Unexpected error in the headless Houdini publish.")
-            return False, f"Houdini publish failed unexpectedly. {LOG_HINT}"
-        return True, summarize_result(result)
 
     def _finish_publish(self) -> None:
         dialog = self._progress_dialog
@@ -704,12 +537,6 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             current=update.current,
             total=update.total,
         )
-
-    def _send_progress_or_cancel(self, update: PublishProgressUpdate) -> None:
-        """Show *update*, then stop the publish if the artist has pressed Cancel."""
-        self._send_publish_progress(update)
-        if self._publish_cancelled:
-            raise _PublishCancelled(update.stage)
 
     def _set_publish_controls_enabled(self, enabled: bool) -> None:
         self._central_widget.setEnabled(enabled)

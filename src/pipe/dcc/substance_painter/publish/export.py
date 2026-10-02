@@ -27,7 +27,7 @@ from pipe.dcc.substance_painter.publish.types import (
     ResolvedExportTarget,
     TexSetExportSettings,
 )
-from pipe.dcc.substance_painter.util.progress import (
+from pipe.dcc.substance_painter.publish.progress import (
     PublishProgressCallback,
     PublishProgressUpdate,
     PublishStage,
