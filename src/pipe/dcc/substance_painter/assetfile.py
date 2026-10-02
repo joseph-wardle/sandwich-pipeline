@@ -414,7 +414,7 @@ def launch_open_asset_textures() -> None:
         )
 
 
-def launch_version_browser_for_current_project() -> None:
+def launch_version_history() -> None:
     """Show version history for the currently open asset project."""
 
     parent = get_main_qt_window()

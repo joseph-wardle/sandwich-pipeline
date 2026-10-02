@@ -9,7 +9,7 @@ def reload_pipe() -> None:
     """Reload the pipeline modules and restart the SKD menu plugin."""
     # Looked up by name, not in `spp.plugins`, so a reload that failed on broken
     # code can be run again once the code is fixed.
-    export = importlib.import_module("export")
-    spp.close_plugin(export)
+    skd_menu = importlib.import_module("skd_menu")
+    spp.close_plugin(skd_menu)
     reload_pipeline()
-    spp.start_plugin(importlib.reload(export))
+    spp.start_plugin(importlib.reload(skd_menu))

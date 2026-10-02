@@ -13,22 +13,22 @@ from pipe.dcc.substance_painter import runtime as sp_runtime
 from pipe.dcc.substance_painter.assetfile import (
     launch_open_asset_textures,
     launch_save_version,
-    launch_version_browser_for_current_project,
+    launch_version_history,
 )
-from pipe.dcc.substance_painter.ui import SubstanceExportWindow
+from pipe.dcc.substance_painter.ui.publish_window import SubstancePublishWindow
 from pipe.dcc.substance_painter.util.metadata import identify_open_project
 from pipe.dcc.substance_painter.util.project import check_project_editable
 
 plugin_widgets: list[QtWidgets.QWidget | QtWidgets.QAction] = []
-_publish_window: SubstanceExportWindow | None = None
+_publish_window: SubstancePublishWindow | None = None
 
 
 def start_plugin() -> None:
     menu_entries: list[tuple[str, Callable[[], None]]] = [
         ("SKD — Open Asset", launch_open_asset_textures),
         ("SKD — Save Version", launch_save_version),
-        ("SKD — Version History", launch_version_browser_for_current_project),
-        ("SKD — Publish Textures", launch_exporter),
+        ("SKD — Version History", launch_version_history),
+        ("SKD — Publish Textures", launch_publish_textures),
     ]
     for label, launch in menu_entries:
         action = QtWidgets.QAction(label)
@@ -53,7 +53,7 @@ def close_plugin() -> None:
     plugin_widgets.clear()
 
 
-def launch_exporter() -> None:
+def launch_publish_textures() -> None:
     """Open a fresh Publish window, or raise the one that is publishing."""
     global _publish_window
     if _publish_window is not None and _publish_window.is_publishing:
@@ -72,7 +72,7 @@ def launch_exporter() -> None:
         return
 
     _close_publish_window()
-    _publish_window = SubstanceExportWindow(conn, identity)
+    _publish_window = SubstancePublishWindow(conn, identity)
     _publish_window.show()
 
 
