@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from Qt import QtCore, QtWidgets
 from Qt.QtCore import QRegExp
-from Qt.QtGui import QIcon, QPixmap, QRegExpValidator
+from Qt.QtGui import QCloseEvent, QIcon, QPixmap, QRegExpValidator
 from Qt.QtWidgets import (
     QComboBox,
     QLabel,
@@ -97,19 +97,13 @@ class _PendingPublishRequest:
     mat_var: str
     material_layer: str
     save_required: bool
-    stage_sequence: tuple[PublishStage, ...]
     version_title: str
     version_note: str | None
 
 
-@dataclass
-class _ActivePublishContext:
-    request: _PendingPublishRequest
-    progress_dialog: ProgressDialog
-
-
 class SubstanceExportWindow(QMainWindow, ButtonPair):
-    _active_publish_context: _ActivePublishContext | None
+    _progress_dialog: ProgressDialog | None
+    _publish_stages: tuple[PublishStage, ...]
     _curr_asset: Asset
     _identity: ProjectIdentity
     _central_widget: QtWidgets.QWidget
@@ -126,7 +120,8 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     def __init__(self, conn: ShotGrid, identity: ProjectIdentity) -> None:
         super().__init__(get_main_qt_window())
 
-        self._active_publish_context = None
+        self._progress_dialog = None
+        self._publish_stages = ()
         self._tex_set_dict = {}
         self._conn = conn
         self._identity = identity
@@ -135,13 +130,18 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
     @property
     def is_publishing(self) -> bool:
-        return self._active_publish_context is not None
+        return self._progress_dialog is not None
 
-    def event(self, event: QtCore.QEvent) -> bool:
-        if self.is_publishing and event.type() == QtCore.QEvent.Close:
+    @property
+    def _publish_cancelled(self) -> bool:
+        dialog = self._progress_dialog
+        return dialog is not None and dialog.cancelled
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self.is_publishing:
             event.ignore()
-            return True
-        return super().event(event)
+            return
+        super().closeEvent(event)
 
     def _setup_publish_ui(self) -> None:
         asset = self._curr_asset
@@ -466,68 +466,28 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             mat_var=mat_var,
             material_layer=material_layer,
             save_required=save_required,
-            stage_sequence=tuple(
-                stage
-                for stage in DEFAULT_PUBLISH_STAGE_SEQUENCE
-                if save_required or stage is not PublishStage.SAVING_PROJECT
-            ),
             version_title=version_title,
             version_note=self.version_note,
         )
         self._begin_publish(request)
 
     def _begin_publish(self, request: _PendingPublishRequest) -> None:
-        """Set up the progress dialog and kick off the publish.
-
-        Creates the progress dialog, disables the publish UI,
-        then defers to ``_schedule_publish_when_idle`` via a zero-delay
-        QTimer so Qt can paint the dialog before Substance Painter begins
-        synchronous work.
-        """
-        progress_dialog = ProgressDialog(
+        """Show the progress dialog, then publish once Painter is idle."""
+        self._publish_stages = tuple(
+            stage
+            for stage in DEFAULT_PUBLISH_STAGE_SEQUENCE
+            if request.save_required or stage is not PublishStage.SAVING_PROJECT
+        )
+        self._progress_dialog = ProgressDialog(
             self,
             title="Publishing Textures",
-            total_steps=len(request.stage_sequence),
+            total_steps=len(self._publish_stages),
             cancellable=True,
         )
-        context = _ActivePublishContext(
-            request=request,
-            progress_dialog=progress_dialog,
-        )
-        self._active_publish_context = context
         self._set_publish_controls_enabled(False)
-
         self._send_publish_progress(
             PublishProgressUpdate(
-                stage=request.stage_sequence[0],
-                message=(
-                    "Preparing to save the Substance Painter project and start publish."
-                    if request.save_required
-                    else "Preparing to start publish."
-                ),
-            )
-        )
-
-        # Let Qt paint the progress dialog before Painter begins synchronous work.
-        QtCore.QTimer.singleShot(
-            0,
-            lambda: self._schedule_publish_when_idle(context),
-        )
-
-    def _schedule_publish_when_idle(self, context: _ActivePublishContext) -> None:
-        """Wait for Substance Painter to finish any background work, then publish.
-
-        Uses ``sp.project.execute_when_not_busy`` to defer
-        ``_run_publish_request`` until Painter is idle.  This is necessary
-        because export API calls will fail while Painter is processing.
-        """
-        if not self._is_active_publish_context(context):
-            return
-
-        request = context.request
-        self._send_publish_progress(
-            PublishProgressUpdate(
-                stage=request.stage_sequence[0],
+                stage=self._publish_stages[0],
                 message=(
                     "Waiting for Substance Painter to become idle before saving and publishing."
                     if request.save_required
@@ -537,28 +497,24 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         )
 
         try:
-            sp.project.execute_when_not_busy(lambda: self._run_publish_request(context))
+            # Painter runs this at once when it is already idle.
+            sp.project.execute_when_not_busy(lambda: self._run_publish_request(request))
         except (ProjectError, ServiceNotFoundError):
             log.exception("Failed to schedule publish when Substance Painter is idle.")
             self._show_publish_message(
-                context,
                 "Failed to start the publish in Substance Painter. Try again after the project finishes loading.",
                 title="Publish Startup Failed",
             )
 
-    def _run_publish_request(self, context: _ActivePublishContext) -> None:
+    def _run_publish_request(self, request: _PendingPublishRequest) -> None:
         """Save, export, back up, and run Houdini; then report and clean up."""
-        if not self._is_active_publish_context(context):
-            return
-
-        request = context.request
         try:
-            if context.progress_dialog.cancelled:
-                raise _PublishCancelled(request.stage_sequence[0])
+            if self._publish_cancelled:
+                raise _PublishCancelled(self._publish_stages[0])
             asset = self._register_material_selection(self._curr_asset, request)
             self._curr_asset = asset
 
-            if request.save_required and not self._save_before_publish(context):
+            if request.save_required and not self._save_before_publish():
                 return
 
             self._send_progress_or_cancel(
@@ -577,7 +533,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
             # The textures are published now, so Cancel only skips the Houdini build.
             backup_ok, backup_status = self._backup_project(asset, request)
-            houdini_ok, houdini_status = self._run_houdini_publish(asset, context)
+            houdini_ok, houdini_status = self._run_houdini_publish(asset, request)
             if backup_ok and houdini_ok:
                 sp.logging.info(f"Publish complete for {request.asset_label}")
                 title = "Publish Textures"
@@ -585,14 +541,12 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 sp.logging.warning(f"Publish incomplete for {request.asset_label}")
                 title = "Publish Incomplete"
             self._show_publish_message(
-                context,
                 f"Textures successfully exported!\n{backup_status}\n{houdini_status}",
                 title=title,
             )
         except _PublishCancelled as cancelled:
             log.info(f"Publish cancelled for {request.asset_label}: {cancelled}")
             self._show_publish_message(
-                context,
                 _CANCELLED_BEFORE_EXPORT_MESSAGE
                 if cancelled.stage in _STAGES_BEFORE_EXPORT
                 else _CANCELLED_DURING_EXPORT_MESSAGE,
@@ -601,19 +555,18 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         except TextureExportError as exc:
             log.error(f"Texture export failed for {request.asset_label}")
             sp.logging.error(f"Publish failed for {request.asset_label}")
-            self._show_publish_message(context, str(exc), title="Texture Export Failed")
+            self._show_publish_message(str(exc), title="Texture Export Failed")
         except Exception as exc:
             log.exception(
                 f"Unexpected error while publishing textures for {request.asset_label}"
             )
             self._show_publish_message(
-                context,
                 "An unexpected error occurred while publishing textures.\n"
                 f"Details: {exc}",
                 title="Publish Failed",
             )
         finally:
-            self._finish_publish_context(context)
+            self._finish_publish()
 
     def _register_material_selection(
         self, asset: Asset, request: _PendingPublishRequest
@@ -629,7 +582,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
         return asset
 
-    def _save_before_publish(self, context: _ActivePublishContext) -> bool:
+    def _save_before_publish(self) -> bool:
         self._send_publish_progress(
             PublishProgressUpdate(
                 stage=PublishStage.SAVING_PROJECT,
@@ -637,9 +590,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             )
         )
         return save_project(
-            lambda message, title: self._show_publish_message(
-                context, message, title=title
-            )
+            lambda message, title: self._show_publish_message(message, title=title)
         )
 
     def _backup_project(
@@ -717,10 +668,9 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         return True, status
 
     def _run_houdini_publish(
-        self, asset: Asset, context: _ActivePublishContext
+        self, asset: Asset, request: _PendingPublishRequest
     ) -> tuple[bool, str]:
         """Run the headless Houdini asset build; return (succeeded, status line)."""
-        progress_dialog = context.progress_dialog
         self._send_publish_progress(
             PublishProgressUpdate(
                 stage=PublishStage.RUNNING_HOUDINI,
@@ -730,15 +680,15 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                 ),
             )
         )
-        if progress_dialog.cancelled:
+        if self._publish_cancelled:
             return False, _HOUDINI_CANCELLED_STATUS
         # The progress dialog stays window-modal until this returns, which is
         # what stops the artist closing the project mid-build.
         try:
             result = run_asset_builder(
                 asset,
-                geo_variant=context.request.geo_var,
-                is_cancelled=lambda: progress_dialog.cancelled,
+                geo_variant=request.geo_var,
+                is_cancelled=lambda: self._publish_cancelled,
             )
         except HoudiniPublishCancelled:
             log.info("Headless Houdini publish cancelled from Substance.")
@@ -752,27 +702,24 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             return False, f"Houdini publish failed unexpectedly. {LOG_HINT}"
         return True, summarize_result(result)
 
-    def _is_active_publish_context(self, context: _ActivePublishContext) -> bool:
-        return self._active_publish_context is context
-
-    def _finish_publish_context(self, context: _ActivePublishContext) -> None:
-        if self._active_publish_context is not context:
+    def _finish_publish(self) -> None:
+        dialog = self._progress_dialog
+        if dialog is None:
             return
-        self._active_publish_context = None
-        context.progress_dialog.finish()
+        self._progress_dialog = None
+        dialog.finish()
         self._set_publish_controls_enabled(True)
 
     def _send_publish_progress(self, update: PublishProgressUpdate) -> None:
         """Adapt a ``PublishProgressUpdate`` to the shared ``ProgressDialog``."""
-        ctx = self._active_publish_context
-        if ctx is None:
+        dialog = self._progress_dialog
+        if dialog is None:
             return
-        stage_sequence = ctx.request.stage_sequence
         try:
-            step = list(stage_sequence).index(update.stage) + 1
+            step = self._publish_stages.index(update.stage) + 1
         except ValueError:
-            step = len(stage_sequence)
-        ctx.progress_dialog.set_progress(
+            step = len(self._publish_stages)
+        dialog.set_progress(
             step=step,
             stage=update.stage.label,
             detail=update.message,
@@ -783,8 +730,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
     def _send_progress_or_cancel(self, update: PublishProgressUpdate) -> None:
         """Show *update*, then stop the publish if the artist has pressed Cancel."""
         self._send_publish_progress(update)
-        ctx = self._active_publish_context
-        if ctx is not None and ctx.progress_dialog.cancelled:
+        if self._publish_cancelled:
             raise _PublishCancelled(update.stage)
 
     def _set_publish_controls_enabled(self, enabled: bool) -> None:
@@ -793,12 +739,11 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
 
     def _show_publish_message(
         self,
-        context: _ActivePublishContext,
         message: str,
         *,
         title: str | None = None,
     ) -> None:
-        self._finish_publish_context(context)
+        self._finish_publish()
         MessageDialog(
             get_main_qt_window(),
             message,
