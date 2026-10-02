@@ -322,9 +322,6 @@ class Shot(SGEntity):
     cut_out: int | None = field(
         default=None, kw_only=True, metadata={_SG_NAME: "sg_cut_out"}
     )
-    cut_duration: int | None = field(
-        default=None, kw_only=True, metadata={_SG_NAME: "sg_cut_duration"}
-    )
     sequence: Sequence | None = field(
         default=None,
         kw_only=True,

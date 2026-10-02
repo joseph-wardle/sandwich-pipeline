@@ -107,7 +107,6 @@ _SG_FIELDS_SHOT: tuple[str, ...] = (
     "assets",
     "sg_cut_in",
     "sg_cut_out",
-    "sg_cut_duration",
     "sg_sequence",
     "sg_sets",
     "sg_substeps",
@@ -1021,11 +1020,12 @@ class ShotGrid:
         return {"type": _SG_TASK_TEMPLATE_TYPE, "id": rows[0]["id"]}
 
     def set_shot_cut_range(self, shot: Shot, *, cut_in: int, cut_out: int) -> Shot:
-        """Stamp `cut_in`/`cut_out` and the derived `cut_duration` onto `shot`.
+        """Stamp `cut_in`/`cut_out` onto `shot`.
 
         Used by the previs break-out, which fixes a shot's frame range at bake
-        time. `cut_duration` is always `cut_out - cut_in + 1`; it is written
-        alongside so ShotGrid stays internally consistent.
+        time. ShotGrid's Cut Duration column is written alongside as
+        `cut_out - cut_in + 1` so the Shots page stays consistent; the pipeline
+        never reads it back.
 
         Raises:
             ValueError: `cut_out` precedes `cut_in`.

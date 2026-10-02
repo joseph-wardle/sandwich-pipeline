@@ -91,7 +91,6 @@ def _resolve_source_shot(dialog: HPlayblastDialog) -> Shot:
             assets=[],
             cut_in=cut_in,
             cut_out=cut_out,
-            cut_duration=max(0, cut_out - cut_in),
             sequence=None,
             sets=[],
         )

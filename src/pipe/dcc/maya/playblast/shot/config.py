@@ -6,7 +6,7 @@ from pipe.core.shotgrid import Shot
 from pipe.dcc.maya.playblast.viewport import ViewportQuality
 
 
-def dummy_shot(code: str, cut_in: int, cut_out: int, cut_duration: int) -> Shot:
+def dummy_shot(code: str, cut_in: int, cut_out: int) -> Shot:
     """Generate a generic `Shot` object to hold cut info that doesn't
     correspond to a ShotGrid shot"""
     return Shot(
@@ -15,7 +15,6 @@ def dummy_shot(code: str, cut_in: int, cut_out: int, cut_duration: int) -> Shot:
         assets=[],
         cut_in=cut_in,
         cut_out=cut_out,
-        cut_duration=cut_duration,
         sequence=None,
         sets=[],
     )

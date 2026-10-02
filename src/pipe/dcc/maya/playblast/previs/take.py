@@ -67,7 +67,6 @@ class MTakePlayblaster(Playblaster):
                 code=self._config.code,
                 cut_in=source_in,
                 cut_out=source_out,
-                cut_duration=max(0, source_out - source_in + 1),
             )
             return [super()._do_playblast(virtual_shot, tails=(0, 0))]
 

@@ -470,7 +470,6 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
                 code=self._scene_stem(),
                 cut_in=custom_in,
                 cut_out=custom_out,
-                cut_duration=max(0, custom_out - custom_in),
             ),
         )
 
