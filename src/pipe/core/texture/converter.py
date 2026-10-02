@@ -12,11 +12,6 @@ if TYPE_CHECKING:
 
 from pipe.core import telemetry
 from pipe.core.util import silent_startupinfo
-from pipe.dcc.substance_painter.util.progress import (
-    PublishProgressCallback,
-    PublishProgressUpdate,
-    PublishStage,
-)
 from env import Executables
 
 log = logging.getLogger(__name__)
@@ -76,6 +71,8 @@ class TexConverter:
     material_variant: str | None
     renderman_variant: str | None
     batch_size: int
+    progress_callback: typing.Callable[[int, int], None] | None
+    """Called with (converted, total) before the first conversion and after each."""
 
     def __init__(
         self,
@@ -87,7 +84,7 @@ class TexConverter:
         material_variant: str | None = None,
         renderman_variant: str | None = None,
         batch_size: int = 18,
-        progress_callback: PublishProgressCallback | None = None,
+        progress_callback: typing.Callable[[int, int], None] | None = None,
     ) -> None:
         self.tex_path = tex_path
         self.imgs_by_tex_set = [list(imgs) for imgs in imgs_by_tex_set]
@@ -165,43 +162,12 @@ class TexConverter:
                 log.debug(cmd)
                 cmdlines.append(cmd)
 
-        total_tex = len(cmdlines)
-        if total_tex <= 0:
-            self._report_progress(
-                PublishStage.CONVERTING_TEX,
-                "No TEX conversions were required for this publish.",
-                current=1,
-                total=1,
-            )
-            return []
-
-        self._report_progress(
-            PublishStage.CONVERTING_TEX,
-            f"Converting source textures to TEX ({total_tex} file(s)).",
-            current=0,
-            total=total_tex,
-        )
-
+        self._report_progress(0, len(cmdlines))
         return self._wait_and_check_cmds(cmdlines)
 
-    def _report_progress(
-        self,
-        stage: PublishStage,
-        message: str,
-        *,
-        current: int | None = None,
-        total: int | None = None,
-    ) -> None:
-        if self.progress_callback is None:
-            return
-        self.progress_callback(
-            PublishProgressUpdate(
-                stage=stage,
-                message=message,
-                current=current,
-                total=total,
-            )
-        )
+    def _report_progress(self, converted: int, total: int) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback(converted, total)
 
     def _wait_and_check_cmds(self, cmds: typing.Sequence[list[str]]) -> list[Path]:
         """Run the conversions in batches; raise unless every one writes its `.tex`."""
@@ -237,12 +203,7 @@ class TexConverter:
                     if proc.returncode == 0 and img.exists():
                         log.debug(f"Successfully converted {img}\n{stdout}{stderr}")
                         finished_imgs.append(img)
-                        self._report_progress(
-                            PublishStage.CONVERTING_TEX,
-                            "Converting source textures to TEX.",
-                            current=len(finished_imgs),
-                            total=len(cmds),
-                        )
+                        self._report_progress(len(finished_imgs), len(cmds))
                     else:
                         log.error(
                             f"TEX conversion of {img} failed with exit code "

@@ -67,6 +67,27 @@ def _file_count(files_by_stack: dict[tuple[str, str], list[str]]) -> int:
     return sum(len(paths) for paths in files_by_stack.values())
 
 
+def _conversion_update(converted: int, total: int) -> PublishProgressUpdate:
+    """The progress dialog's update for *converted* of *total* TEX files."""
+    if total == 0:
+        return PublishProgressUpdate(
+            stage=PublishStage.CONVERTING_TEX,
+            message="No TEX conversions were required for this publish.",
+            current=1,
+            total=1,
+        )
+    return PublishProgressUpdate(
+        stage=PublishStage.CONVERTING_TEX,
+        message=(
+            f"Converting source textures to TEX ({total} file(s))."
+            if converted == 0
+            else "Converting source textures to TEX."
+        ),
+        current=converted,
+        total=total,
+    )
+
+
 class Exporter:
     """Export Painter textures, write publish metadata, and build TEX files."""
 
@@ -288,6 +309,10 @@ class Exporter:
                 f"{self._preview_path} failed.\nDetails: {exc}"
             ) from exc
 
+        def report_conversion(converted: int, total: int) -> None:
+            if progress_callback is not None:
+                progress_callback(_conversion_update(converted, total))
+
         tex_converter = TexConverter(
             self._out_path,
             render_sources,
@@ -295,7 +320,7 @@ class Exporter:
             geo_variant=geo_var,
             material_variant=mat_var,
             renderman_variant=material_layer,
-            progress_callback=progress_callback,
+            progress_callback=report_conversion,
         )
 
         try:
