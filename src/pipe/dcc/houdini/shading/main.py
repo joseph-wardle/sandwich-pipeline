@@ -43,6 +43,7 @@ _MIXER_SLOTS = 4
 
 _MATERIAL_Y_STEP = 3.5
 _LAYER_Y_STEP = 8.0
+_UV_PRIMVAR = "st"
 # RenderMan colour-config aliases. Published `.tex` colour maps are already
 # ACEScg, so they are tagged "rendering" rather than converted on read.
 _COLOR_SPACE = "rendering"
@@ -329,6 +330,12 @@ class MaterialGraphBuilder:
         surface = self._create(
             builder, "usdpreviewsurface", f"{suffix}_UsdPreviewSurface", (11.0, row_y)
         )
+        uv_reader = self._create(
+            builder, "usdprimvarreader", f"{suffix}_PreviewUv", (3.0, row_y)
+        )
+        _parm(uv_reader, "signature").set("float2")
+        _parm(uv_reader, "varname").set(_UV_PRIMVAR)
+
         for preview in _PREVIEW_INPUTS:
             path = material.preview_maps.get(preview.map_name)
             if path is None:
@@ -343,6 +350,7 @@ class MaterialGraphBuilder:
             _parm(texture, "sourceColorSpace").set(preview.source_colorspace)
             _parm_tuple(texture, "scale").set(preview.scale)
             _parm_tuple(texture, "bias").set(preview.bias)
+            texture.setNamedInput("st", uv_reader, "result")
             surface.setNamedInput(
                 preview.surface_input, texture, preview.texture_output
             )
