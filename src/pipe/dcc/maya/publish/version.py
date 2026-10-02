@@ -8,7 +8,13 @@ from typing import cast
 import maya.cmds as mc
 
 from pipe.core import telemetry
-from pipe.core.publish import Refused, Target, publish_version, version_layer_path
+from pipe.core.publish import (
+    SOURCE_DIRNAME,
+    Refused,
+    Target,
+    publish_version,
+    version_layer_path,
+)
 from pipe.core.ui import MessageDialog, PublishChoice
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.maya.util.selection import maintain_selection
@@ -45,12 +51,14 @@ class VersionPublisher(Publisher):
 
     def _publish(self) -> str | None:
         """What the result box says, or None if the artist backed out."""
+        scene = _working_scene()
         if not self._choose():
             return None
+        _save_scene()
         lines = publish_version(
             self._conn,
             self._target,
-            scene=_save_scene(),
+            scene=scene,
             author=resolve_artist_display_name(),
             note=self._choice.note,
             write=self._write,
@@ -69,7 +77,12 @@ class VersionPublisher(Publisher):
             },
             shot=target.entity,
         ):
-            self._mayausd_export_and_finalize()
+            try:
+                self._mayausd_export_and_finalize()
+            finally:
+                # The export marks the scene modified and leaves it as it was
+                # saved, so Maya would ask to save a scene that hasn't changed.
+                mc.file(modified=False)
 
     def _choose(self) -> bool:
         """Ask what to publish, select it, and set `_target` and `_choice`.
@@ -91,12 +104,25 @@ class VersionPublisher(Publisher):
         raise NotImplementedError
 
 
-def _save_scene() -> Path:
-    scene = cast(str, mc.file(query=True, sceneName=True))
-    if not scene:
+def _working_scene() -> Path:
+    """The open scene, which a publish saves and keeps a copy of."""
+    name = cast(str, mc.file(query=True, sceneName=True))
+    if not name:
         raise Refused(
             "Save the scene first. A publish keeps a copy of the scene that made it."
         )
+    scene = Path(name)
+    if scene.parent.name == SOURCE_DIRNAME:
+        version = scene.parent.parent.name
+        raise Refused(
+            f"This scene is the copy kept with {version}, and publishing would save "
+            "over it, so nothing was published. Use File > Save Scene As to save "
+            "it as the shot's own scene, then publish again."
+        )
+    return scene
+
+
+def _save_scene() -> None:
     try:
         # Saved first, so the scene kept with the version is the one that made it.
         mc.file(save=True, force=True)
@@ -104,4 +130,3 @@ def _save_scene() -> Path:
         raise Refused(
             f"The scene couldn't be saved, so nothing was published.\n{exc}"
         ) from None
-    return Path(scene)

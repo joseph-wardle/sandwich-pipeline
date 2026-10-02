@@ -51,13 +51,7 @@ _DIM_STYLE = f"color: {_DIM};"
 
 _ROW_FRAME = "rigRow"
 
-# Only the opening size — the scroll area copes with whatever the fonts and the
-# shot's rig count really come to.
 _WIDTH = 560
-_CHROME_HEIGHT = 270
-_ROW_HEIGHT = 32
-_MIN_LIST_HEIGHT = 96
-_MAX_LIST_HEIGHT = 320
 
 
 class RigState(Enum):
@@ -186,7 +180,9 @@ class _RigSelectDialog(QDialog, DialogButtons):
         layout.addWidget(self.buttons)
 
         self._reload()
-        self.resize(_WIDTH, _CHROME_HEIGHT + self._list_height())
+        # As tall as the layout asks at this width, which shows every rig until a
+        # shot has more than a scroll area asks room for.
+        self.resize(_WIDTH, self.heightForWidth(_WIDTH))
         # Otherwise the stream radio holds focus, where an arrow key silently
         # republishes against the other stream.
         self._publish.setFocus()
@@ -316,10 +312,6 @@ class _RigSelectDialog(QDialog, DialogButtons):
         column.setContentsMargins(10, 6, 10, 6)
         column.addLayout(line)
         return frame, box
-
-    def _list_height(self) -> int:
-        listed = _ROW_HEIGHT * len(self._rows)
-        return min(max(listed, _MIN_LIST_HEIGHT), _MAX_LIST_HEIGHT)
 
     def _update_ready(self) -> None:
         publishing = sum(1 for _, box in self._rows if box.isChecked())

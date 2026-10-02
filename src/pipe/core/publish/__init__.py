@@ -4,6 +4,7 @@ from .history import Entry, history, move_current, replace_scene
 from .target import Refused, Target, publish_version
 from .versions import (
     PUBLISH_DIRNAME,
+    SOURCE_DIRNAME,
     VersionInfo,
     commit_version,
     copy_source,
@@ -24,6 +25,7 @@ from .versions import (
 
 __all__ = [
     "PUBLISH_DIRNAME",
+    "SOURCE_DIRNAME",
     "Entry",
     "Refused",
     "Target",
