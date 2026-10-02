@@ -302,15 +302,6 @@ def _create_default_project_for_asset(
         MessageDialog(parent, message, "Missing Mesh Source").exec_()
         return
 
-    if sp.project.is_open():
-        if sp.project.needs_saving() and not _confirm_discard_unsaved(parent):
-            return
-        if not _close_current_project(parent):
-            return
-
-    if project_path.exists() and not _confirm_overwrite_project(parent, project_path):
-        return
-
     template = project_template_path()
     if not template.exists():
         MessageDialog(
@@ -320,6 +311,20 @@ def _create_default_project_for_asset(
             "Contact production to restore the template.",
             "Missing Template",
         ).exec_()
+        return
+
+    # Every check and question comes before the close, so backing out keeps
+    # the open project open.
+    project_open = sp.project.is_open()
+    if (
+        project_open
+        and sp.project.needs_saving()
+        and not _confirm_discard_unsaved(parent)
+    ):
+        return
+    if project_path.exists() and not _confirm_overwrite_project(parent, project_path):
+        return
+    if project_open and not _close_current_project(parent):
         return
 
     project_path.parent.mkdir(parents=True, exist_ok=True)
