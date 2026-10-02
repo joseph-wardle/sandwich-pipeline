@@ -7,7 +7,7 @@ import platform
 import re
 import socket
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -125,6 +125,29 @@ def get_previs_path() -> Path:
 
 def get_production_path() -> Path:
     return _prp
+
+
+def production_relative_path(path: str | Path) -> PurePosixPath | None:
+    """Return *path* below the production folder, or None if it is outside it.
+
+    Matches the folder by name without touching the disk, so a drive letter, a
+    UNC path and a Linux mount of the same file all give the same answer.
+    """
+    parts = str(path).replace("\\", "/").split("/")
+    production_name = get_production_path().name.casefold()
+    for index, part in enumerate(parts):
+        if part.casefold() == production_name:
+            return PurePosixPath(*parts[index + 1 :])
+    return None
+
+
+def is_same_production_file(a: str | Path, b: str | Path) -> bool:
+    """Return True if *a* and *b* name the same file under the production folder."""
+    relative_a = production_relative_path(a)
+    relative_b = production_relative_path(b)
+    if relative_a is None or relative_b is None:
+        return False
+    return os.path.normcase(relative_a) == os.path.normcase(relative_b)
 
 
 def get_legacy_previs_path() -> Path:

@@ -1,6 +1,12 @@
 """Shared asset pipeline helpers."""
 
-from .paths import AssetPaths, asset_root, asset_root_from_path, paths_for_asset
+from .paths import (
+    DEFAULT_GEO_VARIANT,
+    AssetPaths,
+    asset_root,
+    asset_root_from_path,
+    paths_for_asset,
+)
 from .version_adapter import (
     asset_owner_for,
     asset_owner_from_metadata,
@@ -11,6 +17,7 @@ from .version_adapter import (
 )
 
 __all__ = [
+    "DEFAULT_GEO_VARIANT",
     "AssetPaths",
     "asset_root",
     "asset_root_from_path",
