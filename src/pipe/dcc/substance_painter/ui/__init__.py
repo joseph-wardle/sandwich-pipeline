@@ -381,12 +381,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         return note or None
 
     def do_export(self) -> None:
-        """Validate inputs and start the texture publish pipeline.
-
-        Gathers export settings from the UI, then hands off to
-        ``_begin_publish`` which manages the async progress dialog and
-        scheduling.
-        """
+        """Validate inputs and start the texture publish pipeline."""
         if self.is_publishing:
             return
 
@@ -862,7 +857,6 @@ class TexSetWidget(QtWidgets.QWidget):
         layout.setSpacing(0)
         layout.setAlignment(QtCore.Qt.AlignTop)
 
-        # Enable/disable checkbox and set up layouts
         self._enabled_checkbox = QtWidgets.QCheckBox()
         self._enabled_checkbox.setChecked(True)
         self._enabled_checkbox.setStyleSheet("padding-top: 10px;")
@@ -876,19 +870,16 @@ class TexSetWidget(QtWidgets.QWidget):
         settings_layout.setSpacing(2)
         layout.addWidget(settings_container, 90)
 
-        # Texture set title
         self.label = QLabel(texture_set_name(self._tex_set))
         self.label.setStyleSheet("font-size: 11px; font-weight: bold;")
         settings_layout.addWidget(self.label, 0, 0, 1, 3)
 
-        # Extra channels
         extra_channels = QtWidgets.QWidget()
         self._extra_channels_layout = QtWidgets.QHBoxLayout(extra_channels)
         if self._setup_extra_channel_layout():
             settings_layout.addWidget(QLabel("Extra Maps:"), 1, 0)
             settings_layout.addWidget(extra_channels)
 
-        # Resolution selection
         settings_layout.addWidget(QLabel("Resolution:"), 2, 0)
         self._resolution_dropdown = QComboBox()
         self._resolution_dropdown.addItems(
@@ -898,7 +889,6 @@ class TexSetWidget(QtWidgets.QWidget):
         self._resolution_dropdown.setCurrentIndex(current_res_log2 - 7)
         settings_layout.addWidget(self._resolution_dropdown)
 
-        # Normal map source
         settings_layout.addWidget(QLabel("Normal Map Source:"), 3, 0)
         self._normal_source_dropdown = QComboBox()
         ns_items = self._NORM_SOURCE_STRS.values()
@@ -914,7 +904,6 @@ class TexSetWidget(QtWidgets.QWidget):
             )
         )
 
-        # Displacement map source
         settings_layout.addWidget(QLabel("Displacement Map Source:"), 4, 0)
         self._displacement_source_dropdown = QComboBox()
         ds_items = list(self._DISP_SOURCE_STRS.values())

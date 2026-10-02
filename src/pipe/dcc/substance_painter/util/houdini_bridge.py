@@ -1,16 +1,4 @@
-"""Headless Houdini asset builder integration for Substance Painter.
-
-After textures are exported and converted, the publish workflow runs hython
-as a subprocess to rebuild the USD asset (materials, galleries, etc.).
-This module encapsulates that subprocess call and its result parsing.
-
-Public API
-----------
-- run_asset_builder(asset, geo_variant) -> structured result dict
-- summarize_result(payload) -> human-readable summary string
-- HoudiniPublishError — raised when the Houdini step fails
-- HoudiniPublishCancelled — raised when the artist cancels the Houdini step
-"""
+"""Run hython to rebuild an asset's USD after a texture publish, and read its result."""
 
 from __future__ import annotations
 
@@ -50,11 +38,6 @@ class _ProcessResult:
     exit_code: int
     stdout: str
     stderr: str
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 
 def run_asset_builder(
@@ -137,11 +120,6 @@ def summarize_result(payload: dict[str, Any]) -> str:
     if isinstance(warnings, list) and warnings:
         line += f" Houdini reported {len(warnings)} warning(s). {LOG_HINT}"
     return line
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 
 def _run_process(

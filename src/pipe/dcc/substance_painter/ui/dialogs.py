@@ -1,15 +1,4 @@
-"""Asset selection and project creation dialogs for Substance Painter.
-
-Provides the dialog workflow for choosing a pipeline asset, picking a
-geometry variant, and configuring how a new Substance Painter project
-should be created (from a template + mesh, or by saving the current project).
-
-Dialog flow
------------
-1. SubstanceAssetSelectDialog — pick an asset and variant, then open or create
-2. SubstanceAssetCreateModeDialog — choose "Create Default" vs "Use Current"
-3. SubstanceAssetDefaultProjectDialog — pick a mesh source for the default project
-"""
+"""The Open Asset dialogs: pick an asset and variant, a way to create, then a mesh."""
 
 from __future__ import annotations
 
@@ -25,16 +14,8 @@ from pipe.core.ui import DialogFilteredList, ItemSource
 from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.dcc.substance_painter.util.docs import docs_footer, docs_link_html
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 PIPE_SP_PROJECT_TEMPLATE_NAME = "sandwich_default.spt"
 PIPE_SP_PROJECT_TEMPLATE_DIR = Path("painter_assets") / "templates"
-
-# ---------------------------------------------------------------------------
-# Helpers used by dialogs and other sp modules
-# ---------------------------------------------------------------------------
 
 
 def resolve_default_mesh_paths(
@@ -84,11 +65,6 @@ def project_template_path() -> Path:
     )
 
 
-# ---------------------------------------------------------------------------
-# Dialogs
-# ---------------------------------------------------------------------------
-
-
 class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
     """Pick an asset + geometry variant, then choose to open or create a project."""
 
@@ -128,7 +104,6 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         layout = QtWidgets.QVBoxLayout(self)
         layout.addLayout(self.filtered_list)
 
-        # --- Asset info ---
         info_widget = QtWidgets.QWidget(self)
         info_layout = QtWidgets.QVBoxLayout(info_widget)
         info_layout.setContentsMargins(0, 0, 0, 0)
@@ -140,7 +115,6 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         info_layout.addWidget(self._info_label)
         layout.addWidget(info_widget)
 
-        # --- Geometry variant selector ---
         variant_widget = QtWidgets.QWidget(self)
         variant_layout = QtWidgets.QHBoxLayout(variant_widget)
         variant_layout.setContentsMargins(0, 0, 0, 0)
@@ -157,7 +131,6 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         variant_layout.addWidget(self._geo_variant_dropdown, 70)
         layout.addWidget(variant_widget)
 
-        # --- Action buttons ---
         buttons_layout = QtWidgets.QHBoxLayout()
         self._open_existing_btn = QtWidgets.QPushButton("Open Asset Project")
         self._create_project_btn = QtWidgets.QPushButton("Create Asset Project")
@@ -172,7 +145,6 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         buttons_layout.addStretch(1)
         layout.addLayout(buttons_layout)
 
-        # --- Footer ---
         footer = docs_footer(
             "Tip: Select an asset and geometry variant. "
             "Each variant opens its own Substance Painter project file.<br>"
@@ -180,7 +152,6 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         )
         layout.addWidget(footer)
 
-        # --- Signals ---
         self._list_widget.itemSelectionChanged.connect(self._on_item_selected)
         self._geo_variant_dropdown.currentTextChanged.connect(self._on_variant_changed)
         self._open_existing_btn.clicked.connect(
@@ -191,8 +162,6 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         )
         self._update_button_state()
 
-    # -- Public interface --
-
     def get_selected_action(self) -> str | None:
         return self._action
 
@@ -201,8 +170,6 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
 
     def get_selected_variant(self) -> str:
         return self._geo_variant_dropdown.currentText().strip() or DEFAULT_GEO_VARIANT
-
-    # -- Internal --
 
     def _set_action_and_accept(self, action: str) -> None:
         self._action = action
@@ -270,12 +237,7 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
 
 
 class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
-    """Choose how to create the Substance Painter project for an asset.
-
-    Options:
-    - **Create Default Project**: use a template + published mesh
-    - **Use Currently Open Project**: save the current project to this asset
-    """
+    """Choose how to create the Substance Painter project for an asset."""
 
     ACTION_CREATE_DEFAULT = "create_default"
     ACTION_USE_CURRENT = "use_current"
@@ -306,7 +268,6 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
 
         layout.addStretch(1)
 
-        # --- Action buttons ---
         buttons_layout = QtWidgets.QHBoxLayout()
         self._create_default_btn = QtWidgets.QPushButton("Create Default Project")
         self._use_current_btn = QtWidgets.QPushButton("Use Currently Open Project")
@@ -321,7 +282,6 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
         buttons_layout.addStretch(1)
         layout.addLayout(buttons_layout)
 
-        # --- Footer ---
         footer = docs_footer(
             'Tip: use "Create Default Project" unless you have talked with your team lead. '
             "The project will be saved to the selected geometry variant file.<br>"
@@ -329,7 +289,6 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
         )
         layout.addWidget(footer)
 
-        # --- Signals ---
         self._create_default_btn.clicked.connect(
             lambda: self._set_action_and_accept(self.ACTION_CREATE_DEFAULT)
         )
@@ -380,7 +339,6 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         info_label.setTextFormat(QtCore.Qt.PlainText)
         layout.addWidget(info_label)
 
-        # --- Published variant option ---
         variant_row = QtWidgets.QHBoxLayout()
         self._geo_variant_radio = QtWidgets.QRadioButton("Published Variant Mesh")
         self._geo_variant_radio.setChecked(True)
@@ -394,7 +352,6 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         variant_row.addWidget(variant_value, 70)
         layout.addLayout(variant_row)
 
-        # --- Custom mesh option ---
         custom_row = QtWidgets.QHBoxLayout()
         self._custom_mesh_radio = QtWidgets.QRadioButton("Custom Mesh")
         self._custom_mesh_field = QtWidgets.QLineEdit()
@@ -410,14 +367,12 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         custom_row.addWidget(self._custom_mesh_browse, 15)
         layout.addLayout(custom_row)
 
-        # --- Mesh status ---
         self._mesh_status_label = QtWidgets.QLabel("Mesh source: --")
         self._mesh_status_label.setWordWrap(True)
         self._mesh_status_label.setTextFormat(QtCore.Qt.PlainText)
         self._mesh_status_label.setStyleSheet("color: #8a8a8a;")
         layout.addWidget(self._mesh_status_label)
 
-        # --- Create button ---
         buttons_layout = QtWidgets.QHBoxLayout()
         self._create_default_btn = QtWidgets.QPushButton("Create Default Project")
         self._create_default_btn.setToolTip(
@@ -427,7 +382,6 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         buttons_layout.addStretch(1)
         layout.addLayout(buttons_layout)
 
-        # --- Footer ---
         footer = docs_footer(
             "Tip: The selected geometry variant is locked for this project file. "
             "Use Custom Mesh to browse for any file.<br>"
@@ -435,15 +389,12 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         )
         layout.addWidget(footer)
 
-        # --- Signals ---
         self._custom_mesh_field.textChanged.connect(self._update_mesh_status)
         self._geo_variant_radio.toggled.connect(self._on_mesh_source_toggled)
         self._custom_mesh_radio.toggled.connect(self._on_mesh_source_toggled)
         self._custom_mesh_browse.clicked.connect(self._browse_custom_mesh)
         self._create_default_btn.clicked.connect(self.accept)
         self._on_mesh_source_toggled()
-
-    # -- Public interface --
 
     def use_custom_mesh(self) -> bool:
         return self._custom_mesh_radio.isChecked()
@@ -453,8 +404,6 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         if not text:
             return None
         return Path(text).expanduser()
-
-    # -- Internal --
 
     def _on_mesh_source_toggled(self) -> None:
         use_variant = self._geo_variant_radio.isChecked()

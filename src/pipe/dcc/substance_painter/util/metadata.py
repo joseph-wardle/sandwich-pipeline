@@ -29,10 +29,6 @@ from pipe.dcc.substance_painter.util.project import current_project_path
 
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 PIPE_SP_METADATA_CONTEXT = "skd_asset_pipeline"
 """Substance Painter metadata context key for the asset pipeline."""
 
@@ -56,11 +52,6 @@ _SHOTGRID_LOOKUP_FAILED_MESSAGE = (
     "Could not look up this project's asset in ShotGrid. "
     "Check your network connection and try again."
 )
-
-
-# ---------------------------------------------------------------------------
-# Project identity
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -178,11 +169,6 @@ def _asset_from_tag(conn: ShotGrid, tag: dict[str, Any]) -> Asset | None:
         except ShotGridNotFound as exc:
             log.warning(f"The tag's asset path was not found: {exc}")
     return None
-
-
-# ---------------------------------------------------------------------------
-# Tag read and write
-# ---------------------------------------------------------------------------
 
 
 def read_tag() -> dict[str, Any]:

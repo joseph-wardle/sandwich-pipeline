@@ -1,15 +1,4 @@
-"""Asset project workflows for Substance Painter.
-
-Entry points for opening, creating, and versioning Substance Painter
-projects associated with pipeline assets.  These are the functions wired
-to Substance Painter's shelf/menu buttons.
-
-Entry points
-------------
-- launch_open_asset_textures()
-- launch_version_browser_for_current_project()
-- launch_save_version()
-"""
+"""The SKD menu's asset project actions: Open Asset, Save Version, Version History."""
 
 from __future__ import annotations
 
@@ -72,11 +61,6 @@ from pipe.core.versioning import (
 log = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Confirmation dialogs (thin wrappers around MessageDialogCustomButtons)
-# ---------------------------------------------------------------------------
-
-
 def _confirm_discard_unsaved(parent: QtWidgets.QWidget | None) -> bool:
     dialog = MessageDialogCustomButtons(
         parent,
@@ -124,11 +108,6 @@ def _confirm_version_from_copy(
     return bool(dialog.exec_())
 
 
-# ---------------------------------------------------------------------------
-# Project state helpers
-# ---------------------------------------------------------------------------
-
-
 def _save_unsaved_changes(parent: QtWidgets.QWidget | None) -> bool:
     """Offer to save unsaved changes; False if the artist declines or it fails."""
     if not sp.project.needs_saving():
@@ -170,11 +149,6 @@ def _versioned_project(
         return None
 
     return identity, project_version_stream(identity.asset, identity.variant)
-
-
-# ---------------------------------------------------------------------------
-# Low-level project operations
-# ---------------------------------------------------------------------------
 
 
 def _open_existing_project(path: Path, parent: QtWidgets.QWidget | None) -> bool:
@@ -223,11 +197,6 @@ def _close_current_project(parent: QtWidgets.QWidget | None) -> bool:
         ).exec_()
         return False
     return True
-
-
-# ---------------------------------------------------------------------------
-# Asset-project workflows (composed from the pieces above)
-# ---------------------------------------------------------------------------
 
 
 def _open_existing_project_for_asset(
@@ -387,19 +356,8 @@ def _create_default_project_for_asset(
     sp.project.execute_when_not_busy(_tag_and_save)
 
 
-# ---------------------------------------------------------------------------
-# Public entry points (wired to Substance Painter shelf/menu)
-# ---------------------------------------------------------------------------
-
-
 def launch_open_asset_textures() -> None:
-    """Open or create the Substance Painter project for a selected asset.
-
-    Presents a sequence of dialogs:
-    1. Select an asset and geometry variant
-    2. Open existing project, or choose a creation method
-    3. (If creating) Pick a mesh source and create the project
-    """
+    """Open or create the Substance Painter project for a selected asset."""
     parent = get_main_qt_window()
     if not check_not_busy(parent, "Open Asset"):
         return
