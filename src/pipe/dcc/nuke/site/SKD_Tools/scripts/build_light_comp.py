@@ -2,7 +2,6 @@ import os
 import nuke
 
 
-LIGHTS_PREFIX = "/lights/"
 USD_RELATIVE = os.path.join("..", "lighting", "usd", "main.usd")
 
 BRANCH_SPACING = 120
@@ -11,25 +10,19 @@ GRADE_Y_OFFSET = 50
 MERGE_Y_OFFSET = 80
 
 
-def _light_layer_name(prim_path):
-    s = str(prim_path)
-    if s.startswith(LIGHTS_PREFIX):
-        s = s[len(LIGHTS_PREFIX) :]
-    else:
-        s = s.lstrip("/")
-    return s.replace("/", "__")
-
-
 def _collect_light_layer_names(usd_path):
     from pxr import Usd, UsdLux
 
     stage = Usd.Stage.Open(usd_path)
     if stage is None:
         raise RuntimeError("Could not open USD: %s" % usd_path)
+    lights_prim = stage.GetPrimAtPath("/lights")
+    if not lights_prim:
+        return []
     names = []
-    for prim in stage.Traverse():
-        if prim.HasAPI(UsdLux.LightAPI):  # type: ignore
-            names.append(_light_layer_name(prim.GetPath()))
+    for branch in lights_prim.GetChildren():
+        if any(p.HasAPI(UsdLux.LightAPI) for p in Usd.PrimRange(branch)):  # type: ignore
+            names.append(branch.GetName())
     return names
 
 
@@ -59,7 +52,7 @@ def run():
         return
 
     try:
-        layer_names = sorted(_collect_light_layer_names(usd_path))
+        layer_names = _collect_light_layer_names(usd_path)
     except Exception as e:
         nuke.message("USD parse failed:\n%s" % e)
         return
