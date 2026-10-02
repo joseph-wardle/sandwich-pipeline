@@ -24,9 +24,6 @@ from pipe.core.versioning import (
 log = logging.getLogger(__name__)
 
 DEFAULT_GEO_VARIANT = "main"
-"""Geometry variant assumed when an asset or project does not name one."""
-
-# Asset root-level filenames
 MODEL_FILENAME = "model.mb"
 BLENDER_MODEL_FILENAME = "model.blend"
 TEXTURES_FILENAME = "textures.spp"

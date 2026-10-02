@@ -128,11 +128,7 @@ def get_production_path() -> Path:
 
 
 def production_relative_path(path: str | Path) -> PurePosixPath | None:
-    """Return *path* below the production folder, or None if it is outside it.
-
-    Matches the folder by name without touching the disk, so a drive letter, a
-    UNC path and a Linux mount of the same file all give the same answer.
-    """
+    """Return *path* below the production folder, or None if it is outside it."""
     parts = str(path).replace("\\", "/").split("/")
     production_name = get_production_path().name.casefold()
     for index, part in enumerate(parts):
