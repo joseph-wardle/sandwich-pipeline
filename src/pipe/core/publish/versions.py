@@ -18,6 +18,7 @@ import filecmp
 import os
 import re
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -103,16 +104,16 @@ def current_version(current: Path) -> int | None:
     which is the previous version once someone has published.
     """
     layer = Sdf.Layer.OpenAsAnonymous(str(current), metadataOnly=True)
-    if layer is None:
-        return None
-    if len(layer.subLayerPaths) != 1:
-        return None
-    sublayer = str(layer.subLayerPaths[0])
-    match = _VERSION.fullmatch(Path(sublayer).parent.name)
-    if match is None:
-        return None
-    version = int(match.group(1))
-    return version if sublayer == _sublayer(current, version) else None
+    return None if layer is None else _points_at(layer, current)
+
+
+def loaded_version(current: Path) -> int | None:
+    """The version this session's copy of `current` points at, which its stages show.
+
+    None if the session hasn't opened `current`, or it isn't a current layer.
+    """
+    layer = Sdf.Layer.Find(str(current))
+    return None if layer is None else _points_at(layer, current)
 
 
 def version_info(current: Path, version: int) -> VersionInfo:
@@ -210,8 +211,15 @@ def make_current(current: Path, version: int) -> None:
     os.replace(temp, current)
 
 
-def pin(layer: Sdf.Layer) -> None:
-    """Point every path in `layer` that names a current layer at the version behind it."""
+def pin(
+    layer: Sdf.Layer, version_of: Callable[[Path], int | None] = current_version
+) -> None:
+    """Point every path in `layer` that names a current layer at the version behind it.
+
+    `version_of` says which version that is. A caller pinning several layers
+    passes one that remembers its answers, so a publish that lands between two
+    of them can't give them different versions.
+    """
 
     def pinned(path: str) -> str:
         current = Path(layer.ComputeAbsolutePath(path))
@@ -220,7 +228,7 @@ def pin(layer: Sdf.Layer) -> None:
         in_publish_folder = current.parent.name == PUBLISH_DIRNAME
         if not in_publish_folder or current.suffix not in _USD_SUFFIXES:
             return path
-        version = current_version(current)
+        version = version_of(current)
         if version is None:
             return path
         return str(version_layer_path(current, version))
@@ -237,6 +245,18 @@ def _numbered(current: Path) -> list[int]:
         for entry in current.parent.iterdir()
         if entry.is_dir() and (match := _VERSION.fullmatch(entry.name))
     ]
+
+
+def _points_at(layer: Sdf.Layer, current: Path) -> int | None:
+    """The version `layer`, a copy of `current`, sublayers; None if it isn't a current layer."""
+    if len(layer.subLayerPaths) != 1:
+        return None
+    sublayer = str(layer.subLayerPaths[0])
+    match = _VERSION.fullmatch(Path(sublayer).parent.name)
+    if match is None:
+        return None
+    version = int(match.group(1))
+    return version if sublayer == _sublayer(current, version) else None
 
 
 def _source(current: Path, version: int) -> Path | None:
