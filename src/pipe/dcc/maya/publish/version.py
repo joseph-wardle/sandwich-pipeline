@@ -8,8 +8,16 @@ from typing import cast
 import maya.cmds as mc
 
 from pipe.core import telemetry
-from pipe.core.publish import copy_source, discard_staged, stamp, version_layer_path
-from pipe.core.publish.target import Refused, Target, release, stage
+from pipe.core.publish import (
+    Refused,
+    Target,
+    copy_source,
+    discard_staged,
+    release,
+    stage,
+    stamp,
+    version_layer_path,
+)
 from pipe.core.ui import MessageDialog, PublishChoice
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.maya.util.selection import maintain_selection

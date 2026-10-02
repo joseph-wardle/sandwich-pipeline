@@ -1,4 +1,4 @@
-"""Where a set's current layer lives on disk, and what a published set layer must hold."""
+"""A set's current layer on disk, what its next publish writes and what it must hold."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ from pathlib import Path
 
 from pxr import Usd, UsdGeom
 
-from pipe.core.publish import PUBLISH_DIRNAME
+from pipe.core.publish import PUBLISH_DIRNAME, Target, next_version
+from pipe.core.shotgrid import Set
 from pipe.core.util.paths import get_production_path
 
 SETS_DIRNAME = "set"
@@ -30,6 +31,21 @@ def set_dir(name: str) -> Path:
 def current_layer_path(name: str) -> Path:
     """The layer shots read. `pipe.core.publish` versions the folder it sits in."""
     return set_dir(name) / PUBLISH_DIRNAME / f"{name}.usda"
+
+
+def set_target(set: Set) -> Target:
+    """The next version of a set's layer."""
+    current = current_layer_path(set.name)
+    version = next_version(current)
+    return Target(
+        entity=set,
+        name=set.display_name,
+        current=current,
+        version=version,
+        file_name=PUBLISHED_FILE_NAME,
+        file_code=f"{set.name}_v{version:03d}",
+        department=None,
+    )
 
 
 def prepare_layer(layer_path: Path, name: str, source: Path) -> list[str]:

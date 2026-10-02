@@ -16,10 +16,17 @@ import hou
 from env_sg import DB_Config
 from Qt import QtWidgets
 
-from pipe.core.publish import copy_source, discard_staged, next_version, stamp
-from pipe.core.publish.target import Refused, Target, release, shot_target, stage
-from pipe.core.sets import PUBLISHED_FILE_NAME, SETS_DIRNAME, prepare_layer
-from pipe.core.sets import current_layer_path as set_layer_path
+from pipe.core.publish import (
+    Refused,
+    Target,
+    copy_source,
+    discard_staged,
+    release,
+    stage,
+    stamp,
+)
+from pipe.core.sets import SETS_DIRNAME, prepare_layer, set_target
+from pipe.core.shot import shot_target
 from pipe.core.shotgrid import Set, Shot, ShotGrid, ShotGridError, ShotGridNotFound
 from pipe.core.struct.timeline import Timeline
 from pipe.core.ui import MessageDialog, PublishChoice, prompt_publish
@@ -117,7 +124,7 @@ def hip_target(conn: ShotGrid, hip_path: Path) -> Target:
         parts = ()
     try:
         if len(parts) == 3 and parts[0] == SETS_DIRNAME:
-            return _set_target(conn.get_set(name=parts[1]))
+            return set_target(conn.get_set(name=parts[1]))
         if len(parts) == 4 and parts[0] == SHOTS_DIRNAME:
             department = parts[2]
             if department not in PUBLISHING_DEPARTMENTS:
@@ -134,20 +141,6 @@ def hip_target(conn: ShotGrid, hip_path: Path) -> Target:
             f"ShotGrid couldn't say what this hip publishes.\n{exc}"
         ) from None
     raise Refused(NOT_A_PUBLISHING_HIP)
-
-
-def _set_target(set: Set) -> Target:
-    current = set_layer_path(set.name)
-    version = next_version(current)
-    return Target(
-        entity=set,
-        name=set.display_name,
-        current=current,
-        version=version,
-        file_name=PUBLISHED_FILE_NAME,
-        file_code=f"{set.name}_v{version:03d}",
-        department=None,
-    )
 
 
 def _frame_range(entity: Shot | Set) -> tuple[int, int]:

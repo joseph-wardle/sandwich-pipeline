@@ -12,8 +12,8 @@ import maya.cmds as mc
 from env_sg import DB_Config
 from Qt import QtWidgets
 
-from pipe.core.publish.history import history, move_current, replace_scene
-from pipe.core.publish.target import Refused, shot_target
+from pipe.core.publish import Refused, history, move_current, replace_scene
+from pipe.core.shot import shot_target
 from pipe.core.shotgrid import ShotGrid
 from pipe.core.ui import HistoryAction, MessageDialog, prompt_history
 from pipe.core.ui.history_dialog import TITLE

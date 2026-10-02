@@ -1,4 +1,4 @@
-"""Sets: where their current layer lives on disk."""
+"""Sets: their current layer on disk and what a publish writes to it."""
 
 from .publish import (
     PUBLISHED_FILE_NAME,
@@ -6,6 +6,7 @@ from .publish import (
     current_layer_path,
     prepare_layer,
     set_dir,
+    set_target,
     valid_set_name,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "current_layer_path",
     "prepare_layer",
     "set_dir",
+    "set_target",
     "valid_set_name",
 ]

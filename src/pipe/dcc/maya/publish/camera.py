@@ -10,7 +10,8 @@ if TYPE_CHECKING:
 
 import maya.cmds as mc
 
-from pipe.core.publish.target import Target, shot_target
+from pipe.core.publish import Target
+from pipe.core.shot import shot_target
 from pipe.core.shotgrid import Shot
 from pipe.core.ui import (
     FilteredListDialog,

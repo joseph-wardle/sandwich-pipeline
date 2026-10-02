@@ -12,9 +12,9 @@ from .dialogs import MessageDialogCustomButtons
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    # Only for the type checker: that module needs USD, and Substance Painter,
-    # which imports this package, has none.
-    from pipe.core.publish.history import Entry
+    # Only for the type checker: that package needs USD, and Substance Painter,
+    # which imports this one, has none.
+    from pipe.core.publish import Entry
 
 TITLE = "Version History"
 

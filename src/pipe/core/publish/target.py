@@ -8,14 +8,12 @@ from pathlib import Path
 from typing import cast
 
 from pipe.core.announce import announce_publish
-from pipe.core.shot import current_layer_path, published_file_code, shot_root_path
 from pipe.core.shotgrid import Set, Shot, ShotGrid, ShotGridError
 
 from .versions import (
     commit_version,
     create_staging,
     make_current,
-    next_version,
     staging_layer_path,
 )
 
@@ -43,27 +41,6 @@ class Target:
     def label(self) -> str:
         """How the dialogs name this version, such as `A_210 cfx v005`."""
         return f"{self.name} v{self.version:03d}"
-
-
-def shot_target(shot: Shot, department: str, name: str | None = None) -> Target:
-    """The next version of a shot department's layer.
-
-    `name` is the layer's name when it isn't the department's, as `anim.spline` is
-    for anim's second stream.
-    """
-    code = cast(str, shot.code)
-    name = name or department
-    current = current_layer_path(shot_root_path(shot), department, name)
-    version = next_version(current)
-    return Target(
-        entity=shot,
-        name=f"{code} {name}",
-        current=current,
-        version=version,
-        file_name=name,
-        file_code=published_file_code(code, name, version),
-        department=department,
-    )
 
 
 def stage(target: Target) -> Path:

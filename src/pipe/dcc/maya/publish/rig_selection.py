@@ -22,7 +22,8 @@ from Qt.QtWidgets import (
     QWidget,
 )
 
-from pipe.core.publish.target import Target, shot_target
+from pipe.core.publish import Target
+from pipe.core.shot import shot_target
 from pipe.core.ui import DialogButtons, PublishChoice, PublishRows
 
 from .anim_index import (

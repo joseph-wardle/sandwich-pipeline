@@ -9,8 +9,7 @@ from __future__ import annotations
 from env_sg import DB_Config
 from Qt import QtWidgets
 
-from pipe.core.publish.history import history, move_current, replace_scene
-from pipe.core.publish.target import Refused, Target
+from pipe.core.publish import Refused, Target, history, move_current, replace_scene
 from pipe.core.shotgrid import Set, ShotGrid
 from pipe.core.ui import HistoryAction, MessageDialog, prompt_history
 from pipe.core.ui.history_dialog import TITLE
