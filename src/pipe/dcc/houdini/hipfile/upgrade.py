@@ -34,6 +34,7 @@ _CAMERA_TOGGLE = "cam_enable"
 _READERS = (
     (hou.sopNodeTypeCategory(), "usdimport"),
     (hou.lopNodeTypeCategory(), "sublayer"),
+    (hou.lopNodeTypeCategory(), nodetypes.IMPORT_CAMERA),
 )
 _FILE_PARM = "filepath"
 _DEPARTMENTS = "|".join(("anim", *PUBLISHING_DEPARTMENTS))
