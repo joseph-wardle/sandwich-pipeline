@@ -44,7 +44,6 @@ class TexConversionError(ChildProcessError):
 
 
 def _failure_reason(returncode: int, stderr: str) -> str:
-    """oiiotool's own error line, or its exit code when it printed nothing."""
     if returncode == 0:
         return "the converter reported success but wrote no file"
     return stderr.strip().partition("\n")[0] or f"exit code {returncode}"
@@ -59,7 +58,7 @@ def _failure_summary(failures: list[str]) -> str:
 
 
 def _source_colorspace(img: str) -> str:
-    """The colour space Painter wrote at the end of an export's name."""
+    """Painter writes the color space at the end of an export's name."""
     return _UDIM_SUFFIX.sub("", Path(img).stem).rpartition("_")[2]
 
 
@@ -72,7 +71,6 @@ class TexConverter:
     renderman_variant: str | None
     batch_size: int
     progress_callback: typing.Callable[[int, int], None] | None
-    """Called with (converted, total) before the first conversion and after each."""
 
     def __init__(
         self,

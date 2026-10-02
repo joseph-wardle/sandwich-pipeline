@@ -1,8 +1,4 @@
-"""Work out which asset and geometry variant a Substance Painter project is for.
-
-The project file's location decides.  A tag saved in the project's metadata
-names the asset and variant for copies and for files outside the asset's folder.
-"""
+"""Work out which asset and geometry variant a Substance Painter project is for."""
 
 from __future__ import annotations
 
@@ -135,8 +131,6 @@ def _is_tagged_for(tag: dict[str, Any], asset: Asset) -> bool:
 def _listed_variant_at(asset: Asset, project_path: Path) -> str | None:
     """Return the variant *asset* lists whose project file is *project_path*."""
     paths = paths_for_asset(asset)
-    # Compared as paths, not names: a variant listed as "Main" owns
-    # textures.main.spp on Windows, where Open Asset opens that same file.
     for variant in sorted(asset.geometry_variants or {DEFAULT_GEO_VARIANT}):
         if is_same_production_file(project_path, paths.textures_variant_path(variant)):
             return variant
