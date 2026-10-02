@@ -12,6 +12,10 @@ _SETTINGS_ORG = "sandwich-pipeline"
 _SETTINGS_APP = "publish"
 _PLAYBLAST_KEY = "playblast_after_publishing"
 
+_NOTE_LABEL = "What changed?"
+_NOTE_PLACEHOLDER = "Shown in the version history."
+_NOTE_LINES = 3
+
 _WIDTH = 380
 
 
@@ -30,9 +34,20 @@ class PublishRows(QtWidgets.QWidget):
         super().__init__(parent)
 
         self._version = QtWidgets.QLabel(version_label)
+        heading = self._version.font()
+        heading.setBold(True)
+        self._version.setFont(heading)
 
-        self._note = QtWidgets.QLineEdit()
-        self._note.setPlaceholderText("What changed?")
+        # A box with a question over it and the cursor in it reads as something
+        # to fill in. A publish with no note still goes through.
+        self._note = QtWidgets.QPlainTextEdit()
+        self._note.setPlaceholderText(_NOTE_PLACEHOLDER)
+        self._note.setTabChangesFocus(True)
+        self._note.setFixedHeight(_height_of_lines(self._note, _NOTE_LINES))
+        note_label = QtWidgets.QLabel(_NOTE_LABEL)
+        note_label.setBuddy(self._note)
+        # The dialog that holds these rows opens with the cursor in the note.
+        self.setFocusProxy(self._note)
 
         self._playblast = QtWidgets.QCheckBox("Playblast after publishing")
         self._playblast.setChecked(_load_playblast())
@@ -44,8 +59,11 @@ class PublishRows(QtWidgets.QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         layout.addWidget(self._version)
+        layout.addWidget(note_label)
         layout.addWidget(self._note)
         layout.addWidget(self._playblast)
+        # A dialog taller than it needs gives the room to what is above the rows.
+        self.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
 
     def set_version_label(self, version_label: str) -> None:
         """For a dialog where the artist also picks what is published."""
@@ -53,7 +71,8 @@ class PublishRows(QtWidgets.QWidget):
 
     def choice(self) -> PublishChoice:
         return PublishChoice(
-            note=self._note.text().strip(),
+            # One line, as the version history and the announcement show it.
+            note=" ".join(self._note.toPlainText().split()),
             playblast=self._playblast.isChecked(),
         )
 
@@ -83,6 +102,13 @@ class _PublishDialog(QtWidgets.QDialog, DialogButtons):
         layout.setSpacing(8)
         layout.addWidget(self.rows)
         layout.addWidget(self.buttons)
+
+        self.rows.setFocus()
+
+
+def _height_of_lines(box: QtWidgets.QPlainTextEdit, lines: int) -> int:
+    margins = 2 * (box.frameWidth() + int(box.document().documentMargin()))
+    return box.fontMetrics().lineSpacing() * lines + margins
 
 
 def _load_playblast() -> bool:

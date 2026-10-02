@@ -36,23 +36,13 @@ class Entry:
         return f"{self.target.name} v{self.info.version:03d}"
 
 
-def history(targets: list[Target]) -> list[Entry]:
-    """Every version published to the targets, newest first.
-
-    More than one target is for layers that share a publish folder, as anim's two
-    streams do.
-    """
-    entries = []
-    for target in targets:
-        published = versions(target.current)
-        if not published:
-            continue
-        now = current_version(target.current)
-        entries += [
-            Entry(target, version_info(target.current, version), version == now)
-            for version in published
-        ]
-    return sorted(entries, key=lambda entry: entry.info.version, reverse=True)
+def history(target: Target) -> list[Entry]:
+    """Every version published to the target, newest first."""
+    now = current_version(target.current)
+    return [
+        Entry(target, version_info(target.current, version), version == now)
+        for version in versions(target.current)
+    ]
 
 
 def replace_scene(entry: Entry, scene: Path) -> None:

@@ -88,7 +88,7 @@ def next_version(current: Path) -> int:
 
 
 def versions(current: Path) -> list[int]:
-    """The versions of this layer in its publish folder, newest first."""
+    """The published versions, newest first."""
     published = [
         version
         for version in _numbered(current)
@@ -135,13 +135,10 @@ def version_info(current: Path, version: int) -> VersionInfo:
 
 
 def scene_version(current: Path, scene: Path) -> int | None:
-    """The newest version in this publish folder that `scene`, as it is on disk, made.
-
-    Whichever layer it published: a folder's layers number their versions together.
-    """
+    """The newest version that `scene`, as it is on disk, made."""
     if not scene.is_file():
         return None
-    for version in sorted(_numbered(current), reverse=True):
+    for version in versions(current):
         source = _source(current, version)
         # Equal sizes and dates settle it without reading either file.
         if source is not None and filecmp.cmp(scene, source):
@@ -237,7 +234,7 @@ def pin(
 
 
 def _numbered(current: Path) -> list[int]:
-    """Every `v###` folder's number, whichever layer it holds."""
+    """Every `v###` folder's number. One without its layer still takes the number."""
     if not current.parent.is_dir():
         return []
     return [

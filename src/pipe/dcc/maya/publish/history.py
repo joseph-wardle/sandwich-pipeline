@@ -22,7 +22,7 @@ from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.maya.runtime import get_main_qt_window
 from pipe.dcc.maya.shotfile.anim import MAnimShotFileManager
 
-from .anim_index import DEPARTMENT, AnimStream
+from .anim_index import DEPARTMENT
 
 SHOTS_DIRNAME = "shot"
 
@@ -40,10 +40,7 @@ def _show(window: QtWidgets.QWidget | None) -> None:
     scene, shot_code = _anim_scene()
     conn = ShotGrid.connect(DB_Config)
     shot = conn.get_shot(code=shot_code)
-    # Both streams, which number their versions together.
-    entries = history(
-        [shot_target(shot, DEPARTMENT, stream.layer_name) for stream in AnimStream]
-    )
+    entries = history(shot_target(shot, DEPARTMENT))
     if not entries:
         raise Refused(f"Nothing has been published for {shot_code} {DEPARTMENT} yet.")
 

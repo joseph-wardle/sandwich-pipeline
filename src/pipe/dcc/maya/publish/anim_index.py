@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,31 +20,6 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 DEPARTMENT = "anim"
-
-
-class AnimStream(Enum):
-    """Which of the two parallel anim publishes a run writes.
-
-    Each stream has its own current layer and names its own layers in a version,
-    so that publishing one never disturbs the other.
-    """
-
-    MAIN = "main"
-    SPLINE = "spline"
-
-    @property
-    def layer_name(self) -> str:
-        """Names the current layer `anim.usd`, or `anim.spline.usd` on Spline."""
-        return DEPARTMENT if self is AnimStream.MAIN else f"{DEPARTMENT}.{self.value}"
-
-    @property
-    def anim_layer_suffix(self) -> str:
-        """Names `mr_yoon.anim.usd`, or `mr_yoon.spline.anim.usd` on Spline."""
-        return "anim" if self is AnimStream.MAIN else f"{self.value}.anim"
-
-    def stitched_layer_name(self, name: str) -> str:
-        """Names `mr_yoon.usd`, or `mr_yoon.spline.usd` on Spline."""
-        return name if self is AnimStream.MAIN else f"{name}.{self.value}"
 
 
 def index_key(name: str) -> str:

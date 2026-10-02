@@ -16,7 +16,7 @@ from pipe.core.struct.timeline import Timeline
 from pipe.core.ui import MessageDialog
 from pipe.dcc.maya.playblast import AnimPlayblastDialog
 
-from .anim_index import AnimStream, entries_to_json, index_key, read_anim_index
+from .anim_index import entries_to_json, index_key, read_anim_index
 from .anim_lock import confirm_locked_republish
 from .namespaces import namespace_of
 from .rig_selection import PublishSelection, select_rigs_to_publish
@@ -43,14 +43,6 @@ _TRS_DEFAULTS: dict[str, float] = {
     "scaleY": 1.0,
     "scaleZ": 1.0,
 }
-
-
-def _chaser_mode(stream: AnimStream) -> ExportChaserMode:
-    match stream:
-        case AnimStream.MAIN:
-            return ExportChaserMode.ANIM
-        case AnimStream.SPLINE:
-            return ExportChaserMode.SPLINE_ANIM
 
 
 class AnimPublisher(VersionPublisher):
@@ -129,7 +121,7 @@ class AnimPublisher(VersionPublisher):
         return {
             "chaser": [ExportChaser.ID],
             "chaserArgs": [
-                (ExportChaser.ID, "mode", _chaser_mode(self._selection.stream)),
+                (ExportChaser.ID, "mode", ExportChaserMode.ANIM),
                 (ExportChaser.ID, "timeline", self._timeline.to_json()),
                 (
                     ExportChaser.ID,
@@ -151,8 +143,9 @@ class AnimPublisher(VersionPublisher):
         }
 
     def _detail(self) -> str:
-        rigs = [namespace_of(cache_set) for cache_set in self._selection.sets_to_export]
-        return ", ".join([self._selection.stream.value, *rigs])
+        return ", ".join(
+            namespace_of(cache_set) for cache_set in self._selection.sets_to_export
+        )
 
     def _warnings(self) -> list[str]:
         warnings: list[str] = []

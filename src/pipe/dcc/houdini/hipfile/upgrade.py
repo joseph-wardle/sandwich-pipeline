@@ -41,7 +41,8 @@ _DEPARTMENTS = "|".join(("anim", *PUBLISHING_DEPARTMENTS))
 # Where each publish was, and where its current layer is now.
 _MOVED = (
     (re.compile(rf"/({_DEPARTMENTS})/usd/main\.usd$"), r"/\1/publish/\1.usd"),
-    (re.compile(r"/anim/usd/spline\.usd$"), "/anim/publish/anim.spline.usd"),
+    # Anim once published a smoothed copy too. What read it reads the animation.
+    (re.compile(r"/anim/usd/spline\.usd$"), "/anim/publish/anim.usd"),
     (re.compile(r"/cam/cam\.usd$"), "/cam/publish/cam.usd"),
 )
 

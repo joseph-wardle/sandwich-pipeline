@@ -37,7 +37,7 @@ def _show(window: QtWidgets.QWidget | None) -> None:
         raise Refused(NOT_A_PUBLISHING_HIP)
     conn = ShotGrid.connect(DB_Config)
     target = hip_target(conn, hip_path)
-    entries = history([target])
+    entries = history(target)
     if not entries:
         raise Refused(f"Nothing has been published for {target.name} yet.")
 
