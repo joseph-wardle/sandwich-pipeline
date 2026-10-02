@@ -38,7 +38,6 @@ from pipe.dcc.substance_painter.ui.dialogs import (
     SubstanceAssetDefaultProjectDialog,
     SubstanceAssetSelectDialog,
     default_project_settings,
-    project_path_for_variant,
     project_template_path,
     resolve_default_mesh_paths,
 )
@@ -46,9 +45,10 @@ from pipe.dcc.substance_painter.runtime import get_main_qt_window
 from pipe.dcc.substance_painter.util.docs import LOG_HINT
 from pipe.dcc.substance_painter.util.metadata import (
     ProjectIdentity,
-    get_asset_selection_metadata,
     identify_open_project,
+    note_with_source,
     project_version_stream,
+    read_tag,
     tag_project,
     write_tag,
 )
@@ -209,16 +209,12 @@ def _save_current_project_as(path: Path, parent: QtWidgets.QWidget | None) -> bo
     return True
 
 
-def _close_current_project(
-    parent: QtWidgets.QWidget | None, *, action_context: str
-) -> bool:
+def _close_current_project(parent: QtWidgets.QWidget | None) -> bool:
     """Close the current project. Returns True on success."""
     try:
         sp.project.close()
     except ProjectError:
-        log.exception(
-            f"Failed to close Substance Painter project before {action_context}."
-        )
+        log.exception("Failed to close the Substance Painter project.")
         MessageDialog(
             parent,
             "Failed to close the currently opened project. "
@@ -257,9 +253,7 @@ def _open_existing_project_for_asset(
     if sp.project.is_open():
         if sp.project.needs_saving() and not _confirm_discard_unsaved(parent):
             return
-        if not _close_current_project(
-            parent, action_context="opening another asset project"
-        ):
+        if not _close_current_project(parent):
             return
 
     if not _open_existing_project(project_path, parent):
@@ -289,7 +283,7 @@ def _save_current_project_as_asset(
         return
 
     project_path.parent.mkdir(parents=True, exist_ok=True)
-    previous_tag = get_asset_selection_metadata()
+    previous_tag = read_tag()
     tag_project(asset, geo_variant)
     if not _save_current_project_as(project_path, parent):
         # The project is still the original file, so it keeps the original tag.
@@ -342,9 +336,7 @@ def _create_default_project_for_asset(
     if sp.project.is_open():
         if sp.project.needs_saving() and not _confirm_discard_unsaved(parent):
             return
-        if not _close_current_project(
-            parent, action_context="creating a default asset project"
-        ):
+        if not _close_current_project(parent):
             return
 
     if project_path.exists() and not _confirm_overwrite_project(parent, project_path):
@@ -431,7 +423,7 @@ def launch_open_asset_textures() -> None:
         f"({action}, variant={geo_variant})"
     )
     paths = paths_for_asset(asset)
-    project_path = project_path_for_variant(paths, geo_variant)
+    project_path = paths.textures_variant_path(geo_variant)
 
     if action == SubstanceAssetSelectDialog.ACTION_OPEN_EXISTING:
         _open_existing_project_for_asset(asset, project_path, geo_variant=geo_variant)
@@ -537,9 +529,7 @@ def _restore_project_version(
             return
 
     # Close the open project before restoring overwrites its file on disk.
-    if sp.project.is_open() and not _close_current_project(
-        parent, action_context="restoring a version"
-    ):
+    if sp.project.is_open() and not _close_current_project(parent):
         return
 
     try:
@@ -602,8 +592,7 @@ def _save_named_version(
             identity.project_path,
             project_stream,
             title=dialog.get_title(),
-            note="\n".join(filter(None, (identity.copy_note, dialog.get_note())))
-            or None,
+            note=note_with_source(identity, dialog.get_note()),
         )
     except Exception as exc:
         log.exception("Failed to save Substance Painter version.")

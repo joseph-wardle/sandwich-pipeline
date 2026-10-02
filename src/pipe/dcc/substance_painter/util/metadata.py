@@ -59,35 +59,6 @@ _SHOTGRID_LOOKUP_FAILED_MESSAGE = (
 
 
 # ---------------------------------------------------------------------------
-# Metadata read helpers
-# ---------------------------------------------------------------------------
-
-
-def _metadata_handle() -> sp.project.Metadata:
-    """Return a Metadata handle scoped to the asset pipeline context."""
-    return sp.project.Metadata(PIPE_SP_METADATA_CONTEXT)
-
-
-def _safe_get_metadata() -> dict[str, Any]:
-    """Return the stored metadata dict, or an empty dict on any failure."""
-    if not sp.project.is_open():
-        return {}
-    try:
-        payload = _metadata_handle().get(PIPE_SP_METADATA_KEY)
-    except (ProjectError, ServiceNotFoundError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def get_asset_selection_metadata() -> dict[str, Any]:
-    """Return the stored asset-selection metadata for the current project.
-
-    Returns an empty dict when no project is open or no metadata is stored.
-    """
-    return _safe_get_metadata()
-
-
-# ---------------------------------------------------------------------------
 # Project identity
 # ---------------------------------------------------------------------------
 
@@ -103,17 +74,18 @@ class ProjectIdentity:
     is_working_file: bool
     """False for a copy of the variant's project saved under another name."""
 
-    @property
-    def copy_note(self) -> str | None:
-        """A version-note line naming this file when it is a copy, else None.
 
-        Version history lists a copy's versions beside the working file's own,
-        so the note is what tells them apart.
-        """
-        if self.is_working_file:
-            return None
-        relative = production_relative_path(self.project_path)
-        return f"Saved from {relative or self.project_path}."
+def note_with_source(identity: ProjectIdentity, note: str | None) -> str | None:
+    """Return a version's *note*, led by a line naming the file when it is a copy.
+
+    Version history lists a copy's versions beside the working file's own,
+    so that line is what tells them apart.
+    """
+    if identity.is_working_file:
+        return note
+    relative = production_relative_path(identity.project_path)
+    saved_from = f"Saved from {relative or identity.project_path}."
+    return f"{saved_from}\n{note}" if note else saved_from
 
 
 def resolve_project_identity(conn: ShotGrid) -> ProjectIdentity | None:
@@ -126,7 +98,7 @@ def resolve_project_identity(conn: ShotGrid) -> ProjectIdentity | None:
     if project_path is None:
         return None
 
-    tag = get_asset_selection_metadata()
+    tag = read_tag()
     asset = _asset_at(conn, project_path.parent) or _asset_from_tag(conn, tag)
     if asset is None:
         return None
@@ -209,8 +181,19 @@ def _asset_from_tag(conn: ShotGrid, tag: dict[str, Any]) -> Asset | None:
 
 
 # ---------------------------------------------------------------------------
-# Tag write
+# Tag read and write
 # ---------------------------------------------------------------------------
+
+
+def read_tag() -> dict[str, Any]:
+    """Return the open project's tag, or an empty dict when it has none."""
+    if not sp.project.is_open():
+        return {}
+    try:
+        tag = sp.project.Metadata(PIPE_SP_METADATA_CONTEXT).get(PIPE_SP_METADATA_KEY)
+    except (ProjectError, ServiceNotFoundError):
+        return {}
+    return tag if isinstance(tag, dict) else {}
 
 
 def tag_project(asset: Asset, geo_variant: str) -> None:
@@ -227,4 +210,4 @@ def tag_project(asset: Asset, geo_variant: str) -> None:
 
 def write_tag(tag: dict[str, Any]) -> None:
     """Replace the open project's tag, e.g. to put back the one it had."""
-    _metadata_handle().set(PIPE_SP_METADATA_KEY, tag)
+    sp.project.Metadata(PIPE_SP_METADATA_CONTEXT).set(PIPE_SP_METADATA_KEY, tag)

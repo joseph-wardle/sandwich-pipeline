@@ -23,7 +23,7 @@ from substance_painter.project import NormalMapFormat, ProjectWorkflow, TangentS
 from pipe.core.asset import DEFAULT_GEO_VARIANT, AssetPaths, paths_for_asset
 from pipe.core.ui import DialogFilteredList, ItemSource
 from pipe.core.shotgrid import Asset, ShotGrid
-from pipe.dcc.substance_painter.util.docs import docs_link_html
+from pipe.dcc.substance_painter.util.docs import docs_footer, docs_link_html
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -35,11 +35,6 @@ PIPE_SP_PROJECT_TEMPLATE_DIR = Path("painter_assets") / "templates"
 # ---------------------------------------------------------------------------
 # Helpers used by dialogs and other sp modules
 # ---------------------------------------------------------------------------
-
-
-def project_path_for_variant(paths: AssetPaths, variant: str) -> Path:
-    """Return the Substance Painter project file path for a geometry variant."""
-    return paths.textures_variant_path(variant)
 
 
 def resolve_default_mesh_paths(
@@ -59,10 +54,9 @@ def resolve_default_mesh_paths(
     if use_custom_mesh:
         return custom_mesh_path, None, None
 
-    variant_name = variant.strip() or DEFAULT_GEO_VARIANT
-    variant_path = paths.publish_source_variant_usd(variant_name)
+    variant_path = paths.publish_source_variant_usd(variant)
     fallback_path = (
-        paths.publish_source_model_usd if variant_name == DEFAULT_GEO_VARIANT else None
+        paths.publish_source_model_usd if variant == DEFAULT_GEO_VARIANT else None
     )
 
     if variant_path.exists():
@@ -88,22 +82,6 @@ def project_template_path() -> Path:
         / PIPE_SP_PROJECT_TEMPLATE_DIR
         / PIPE_SP_PROJECT_TEMPLATE_NAME
     )
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _geo_variants_for_asset(asset: Asset) -> list[str]:
-    """Return the asset's geometry variant names, sorted.
-
-    Falls back to ``[DEFAULT_GEO_VARIANT]`` when the asset lists none.
-    """
-    variants = sorted(v for v in (asset.geometry_variants or ()) if v)
-    if variants:
-        return [str(v) for v in variants]
-    return [DEFAULT_GEO_VARIANT]
 
 
 # ---------------------------------------------------------------------------
@@ -195,16 +173,11 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
         layout.addLayout(buttons_layout)
 
         # --- Footer ---
-        footer = QtWidgets.QLabel(
+        footer = docs_footer(
             "Tip: Select an asset and geometry variant. "
             "Each variant opens its own Substance Painter project file.<br>"
             f"For more information, see {docs_link_html()}."
         )
-        footer.setWordWrap(True)
-        footer.setTextFormat(QtCore.Qt.RichText)
-        footer.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
-        footer.setOpenExternalLinks(True)
-        footer.setStyleSheet("color: #8a8a8a;")
         layout.addWidget(footer)
 
         # --- Signals ---
@@ -263,7 +236,7 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
 
         self._asset = asset
         self._paths = paths_for_asset(asset)
-        variants = _geo_variants_for_asset(asset)
+        variants = sorted(asset.geometry_variants or {DEFAULT_GEO_VARIANT})
         self._geo_variant_dropdown.clear()
         self._geo_variant_dropdown.addItems(variants)
         self._geo_variant_dropdown.setCurrentText(
@@ -275,7 +248,7 @@ class SubstanceAssetSelectDialog(QtWidgets.QDialog, DialogFilteredList):
     def _selected_project_path(self) -> Path | None:
         if not self._paths:
             return None
-        return project_path_for_variant(self._paths, self.get_selected_variant())
+        return self._paths.textures_variant_path(self.get_selected_variant())
 
     def _update_project_info(self) -> None:
         path = self._selected_project_path()
@@ -314,7 +287,6 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
     ) -> None:
         super().__init__(parent)
         self._action = None
-        variant_name = geo_variant.strip() or DEFAULT_GEO_VARIANT
 
         self.setParent(parent)
         self.setWindowTitle("Create Asset Project")
@@ -326,7 +298,7 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
 
         asset_label = asset.display_name or asset.name or "Asset"
         title = QtWidgets.QLabel(
-            f"Create new Substance Painter project for {asset_label} ({variant_name})"
+            f"Create new Substance Painter project for {asset_label} ({geo_variant})"
         )
         title.setTextFormat(QtCore.Qt.PlainText)
         title.setWordWrap(True)
@@ -350,16 +322,11 @@ class SubstanceAssetCreateModeDialog(QtWidgets.QDialog):
         layout.addLayout(buttons_layout)
 
         # --- Footer ---
-        footer = QtWidgets.QLabel(
+        footer = docs_footer(
             'Tip: use "Create Default Project" unless you have talked with your team lead. '
             "The project will be saved to the selected geometry variant file.<br>"
             f"For more information, see {docs_link_html()}."
         )
-        footer.setWordWrap(True)
-        footer.setTextFormat(QtCore.Qt.RichText)
-        footer.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
-        footer.setOpenExternalLinks(True)
-        footer.setStyleSheet("color: #8a8a8a;")
         layout.addWidget(footer)
 
         # --- Signals ---
@@ -397,7 +364,7 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self._asset = asset
         self._paths = paths
-        self._geo_variant = geo_variant.strip() or DEFAULT_GEO_VARIANT
+        self._geo_variant = geo_variant
 
         self.setParent(parent)
         self.setWindowTitle("Create Default Project")
@@ -461,16 +428,11 @@ class SubstanceAssetDefaultProjectDialog(QtWidgets.QDialog):
         layout.addLayout(buttons_layout)
 
         # --- Footer ---
-        footer = QtWidgets.QLabel(
+        footer = docs_footer(
             "Tip: The selected geometry variant is locked for this project file. "
             "Use Custom Mesh to browse for any file.<br>"
             f"For more information, see {docs_link_html()}."
         )
-        footer.setWordWrap(True)
-        footer.setTextFormat(QtCore.Qt.RichText)
-        footer.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
-        footer.setOpenExternalLinks(True)
-        footer.setStyleSheet("color: #8a8a8a;")
         layout.addWidget(footer)
 
         # --- Signals ---

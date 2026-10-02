@@ -6,6 +6,8 @@ from typing import Callable
 
 
 class PublishStage(Enum):
+    # Listed in the order a publish runs them; the progress dialog numbers
+    # its steps by this order.
     SAVING_PROJECT = "Saving project"
     PREPARING_PUBLISH = "Preparing publish"
     PLANNING_EXPORT = "Planning texture export"
@@ -14,10 +16,6 @@ class PublishStage(Enum):
     WRITING_METADATA = "Writing material metadata"
     BACKING_UP_PROJECT = "Backing up project"
     RUNNING_HOUDINI = "Running Houdini publish"
-
-    @property
-    def label(self) -> str:
-        return self.value
 
 
 @dataclass(frozen=True)
@@ -29,15 +27,3 @@ class PublishProgressUpdate:
 
 
 PublishProgressCallback = Callable[[PublishProgressUpdate], None]
-
-
-DEFAULT_PUBLISH_STAGE_SEQUENCE: tuple[PublishStage, ...] = (
-    PublishStage.SAVING_PROJECT,
-    PublishStage.PREPARING_PUBLISH,
-    PublishStage.PLANNING_EXPORT,
-    PublishStage.EXPORTING_SOURCE,
-    PublishStage.CONVERTING_TEX,
-    PublishStage.WRITING_METADATA,
-    PublishStage.BACKING_UP_PROJECT,
-    PublishStage.RUNNING_HOUDINI,
-)

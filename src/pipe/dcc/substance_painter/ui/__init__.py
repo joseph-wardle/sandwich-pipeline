@@ -40,6 +40,7 @@ from pipe.dcc.substance_painter.util.houdini_bridge import (
 from pipe.dcc.substance_painter.runtime import get_main_qt_window
 from pipe.dcc.substance_painter.util.metadata import (
     ProjectIdentity,
+    note_with_source,
     project_version_stream,
 )
 from pipe.dcc.substance_painter.util.project import (
@@ -47,10 +48,9 @@ from pipe.dcc.substance_painter.util.project import (
     current_project_path,
     save_project,
 )
-from pipe.dcc.substance_painter.util.docs import LOG_HINT, docs_link_html
+from pipe.dcc.substance_painter.util.docs import LOG_HINT, docs_footer, docs_link_html
 from pipe.dcc.substance_painter.util.texture_set import texture_set_name
 from pipe.dcc.substance_painter.util.progress import (
-    DEFAULT_PUBLISH_STAGE_SEQUENCE,
     PublishProgressUpdate,
     PublishStage,
 )
@@ -85,7 +85,7 @@ class _PublishCancelled(Exception):
     error_code = "PUBLISH_CANCELLED"
 
     def __init__(self, stage: PublishStage) -> None:
-        super().__init__(f"Cancelled at: {stage.label}")
+        super().__init__(f"Cancelled at: {stage.value}")
         self.stage = stage
 
 
@@ -194,7 +194,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         texture_set_scroll_area.setWidgetResizable(True)
         self._main_layout.addWidget(texture_set_scroll_area, 1)
 
-        mat_items = self._variant_items(asset.material_variants or (), "default")
+        mat_items = sorted(asset.material_variants or {"default"})
         mat_default = "default" if "default" in mat_items else mat_items[0]
         self._mat_var_dropdown = self._build_variant_dropdown(
             label_text="Material Variant:",
@@ -209,9 +209,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         )
 
         project_variant = self._identity.variant
-        geo_items = self._variant_items(
-            asset.geometry_variants or (), DEFAULT_GEO_VARIANT
-        )
+        geo_items = sorted(asset.geometry_variants or {DEFAULT_GEO_VARIANT})
         self._geo_var_dropdown = self._build_variant_dropdown(
             label_text="Geometry Variant:",
             tooltip=("Geometry variant to match the published model."),
@@ -228,9 +226,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             warning_label.setStyleSheet("color: #d28d42;")
             self._main_layout.addWidget(warning_label)
 
-        material_layer_items = self._variant_items(
-            asset.material_layers or (), "default"
-        )
+        material_layer_items = sorted(asset.material_layers or {"default"})
         material_layer_default = (
             "default" if "default" in material_layer_items else material_layer_items[0]
         )
@@ -259,16 +255,11 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         )
         self._update_export_button_state()
 
-        footer = QLabel(
+        footer = docs_footer(
             "Tip: Open your project with Open Asset so it publishes to the right "
             "asset and variant. For more information, see "
             f"{docs_link_html()}."
         )
-        footer.setWordWrap(True)
-        footer.setTextFormat(QtCore.Qt.RichText)
-        footer.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
-        footer.setOpenExternalLinks(True)
-        footer.setStyleSheet("color: #8a8a8a;")
         self._main_layout.addWidget(footer)
 
     def _project_warning(self, geo_items: list[str]) -> str | None:
@@ -368,13 +359,6 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         if ok_btn:
             ok_btn.setEnabled(bool(self.version_title and self.geo_var))
 
-    @staticmethod
-    def _variant_items(options: typing.Iterable[str], default_value: str) -> list[str]:
-        items = sorted({option for option in options if option})
-        if items:
-            return items
-        return [default_value]
-
     @property
     def mat_var(self) -> str:
         return self._mat_var_dropdown.currentText()
@@ -396,7 +380,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         note = self._version_note_field.toPlainText().strip()
         return note or None
 
-    def do_export(self, isBatch: bool = False) -> None:
+    def do_export(self) -> None:
         """Validate inputs and start the texture publish pipeline.
 
         Gathers export settings from the UI, then hands off to
@@ -475,7 +459,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
         """Show the progress dialog, then publish once Painter is idle."""
         self._publish_stages = tuple(
             stage
-            for stage in DEFAULT_PUBLISH_STAGE_SEQUENCE
+            for stage in PublishStage
             if request.save_required or stage is not PublishStage.SAVING_PROJECT
         )
         self._progress_dialog = ProgressDialog(
@@ -630,8 +614,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
                     request.material_layer,
                 ),
                 context="publish",
-                note="\n".join(filter(None, (identity.copy_note, request.version_note)))
-                or None,
+                note=note_with_source(identity, request.version_note),
                 extra={
                     "geo": request.geo_var,
                     "material": request.mat_var,
@@ -721,7 +704,7 @@ class SubstanceExportWindow(QMainWindow, ButtonPair):
             step = len(self._publish_stages)
         dialog.set_progress(
             step=step,
-            stage=update.stage.label,
+            stage=update.stage.value,
             detail=update.message,
             current=update.current,
             total=update.total,
@@ -819,10 +802,8 @@ class TexSetWidget(QtWidgets.QWidget):
         self,
         parent: SubstanceExportWindow,
         tex_set: sp.textureset.TextureSet,
-        flags: QtCore.Qt.WindowFlags | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setParent(parent)
         self._tex_set = tex_set
         self.extra_channels = set()
         self._help_icon = QIcon(

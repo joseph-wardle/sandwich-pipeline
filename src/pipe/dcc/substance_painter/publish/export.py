@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 from pipe.core.util.paths import resolve_mapped_path
 from substance_painter.exception import ProjectError
 
-from pipe.core.asset import DEFAULT_GEO_VARIANT, paths_for_asset
+from pipe.core.asset import paths_for_asset
 from pipe.core.shotgrid import Asset
 from pipe.dcc.substance_painter.publish.config import (
     count_udim_sets,
@@ -74,7 +74,6 @@ class Exporter:
     _out_path: Path
     _preview_path: Path
     _src_path: Path
-    _tex_path: Path
 
     def __init__(self, asset: Asset) -> None:
         self._asset = asset
@@ -92,7 +91,6 @@ class Exporter:
         self._preview_path = resolve_mapped_path(
             paths.publish_textures_preview_dir(geo_var, mat_var, material_layer)
         )
-        self._tex_path = self._out_path
 
         self._out_path.mkdir(parents=True, exist_ok=True)
         self._src_path.mkdir(parents=True, exist_ok=True)
@@ -106,23 +104,6 @@ class Exporter:
         if asset_path:
             return Path(str(asset_path)).name
         return "unknown_asset"
-
-    def _texture_export_payload(
-        self,
-        *,
-        geo_variant: str,
-        material_variant: str,
-        renderman_variant: str,
-        texture_set_count: int,
-        udim_set_count: int,
-    ) -> dict[str, object]:
-        return {
-            "geo_variant": str(geo_variant or DEFAULT_GEO_VARIANT),
-            "material_variant": str(material_variant or "main"),
-            "renderman_variant": str(renderman_variant or "main"),
-            "texture_set_count": max(0, int(texture_set_count)),
-            "udim_set_count": max(0, int(udim_set_count)),
-        }
 
     def _src_lock_path(self) -> Path:
         return self._src_path / ".lock"
@@ -308,7 +289,7 @@ class Exporter:
             ) from exc
 
         tex_converter = TexConverter(
-            self._tex_path,
+            self._out_path,
             render_sources,
             asset_name=self._texture_export_asset_name(),
             geo_variant=geo_var,
@@ -379,13 +360,13 @@ class Exporter:
         Raises `TextureExportError` on any failure so the surrounding
         `record()` block records the right error code and message.
         """
-        initial_payload = self._texture_export_payload(
-            geo_variant=geo_var,
-            material_variant=mat_var,
-            renderman_variant=material_layer,
-            texture_set_count=len(exp_setting_arr),
-            udim_set_count=count_udim_sets(exp_setting_arr),
-        )
+        initial_payload = {
+            "geo_variant": geo_var,
+            "material_variant": mat_var,
+            "renderman_variant": material_layer,
+            "texture_set_count": len(exp_setting_arr),
+            "udim_set_count": count_udim_sets(exp_setting_arr),
+        }
 
         # Counts populated as work proceeds. The finally block at the bottom
         # emits one update() with whatever has been reached when the block
