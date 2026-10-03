@@ -152,7 +152,7 @@ class _RigSelectDialog(QDialog, DialogButtons):
         rigs = self._build_rows(survey_rigs(cache_sets, self._target.current, timeline))
 
         self._summary = QLabel()
-        self._publish_rows = PublishRows(self._target.label)
+        self._publish_rows = PublishRows(self._target)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 12)

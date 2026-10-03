@@ -30,6 +30,7 @@ SOURCE_DIRNAME = "_src"
 AUTHOR_KEY = "author"
 DATE_KEY = "date"
 NOTE_KEY = "note"
+FINAL_KEY = "final"
 
 _VERSION = re.compile(r"v([0-9]{3,})")
 _USD_SUFFIXES = (".usd", ".usda", ".usdc")
@@ -51,6 +52,8 @@ class VersionInfo:
     author: str
     date: datetime
     note: str
+    # Published as FINAL: downstream was told to work from it.
+    final: bool
     # The scene file in `_src/`; None for a version from before scenes were kept.
     source: Path | None
 
@@ -130,7 +133,20 @@ def version_info(current: Path, version: int) -> VersionInfo:
         author=data.get(AUTHOR_KEY, ""),
         date=date,
         note=data.get(NOTE_KEY, ""),
+        final=bool(data.get(FINAL_KEY, False)),
         source=_source(current, version),
+    )
+
+
+def latest_final(current: Path) -> int | None:
+    """The newest version published as FINAL; None when there is none yet."""
+    return next(
+        (
+            version
+            for version in versions(current)
+            if version_info(current, version).final
+        ),
+        None,
     )
 
 
@@ -153,14 +169,15 @@ def copy_source(current: Path, version: int, source: Path) -> Path:
     return Path(shutil.copy2(source, folder / source.name))
 
 
-def stamp(current: Path, version: int, *, author: str, note: str) -> None:
-    """Record on a staged version's layer who published it, when and why."""
+def stamp(current: Path, version: int, *, author: str, note: str, final: bool) -> None:
+    """Record on a staged version's layer who published it, when, why and as what."""
     layer = Sdf.Layer.FindOrOpen(str(staging_layer_path(current, version)))
     layer.customLayerData = {
         **layer.customLayerData,
         AUTHOR_KEY: author,
         DATE_KEY: datetime.now().astimezone().isoformat(timespec="seconds"),
         NOTE_KEY: note,
+        FINAL_KEY: final,
     }
     layer.Save()
 

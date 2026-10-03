@@ -91,7 +91,7 @@ class PublishCameraDialog(FilteredListDialog):
 
         self._layout.insertWidget(0, camera_widget)
 
-        self.rows = PublishRows("")
+        self.rows = PublishRows(None)
         # Above the buttons.
         self._layout.insertWidget(self._layout.count() - 1, self.rows)
 
@@ -108,7 +108,7 @@ class PublishCameraDialog(FilteredListDialog):
         self._target = (
             shot_target(self._shots[code], DEPARTMENT) if code is not None else None
         )
-        self.rows.set_version_label(self._target.label if self._target else "")
+        self.rows.set_target(self._target)
         # Break-out names each RLO camera after its shot, so picking the shot picks
         # its camera. Scenes without one keep whatever camera is showing.
         cameras = [self._camera.itemText(i) for i in range(self._camera.count())]

@@ -61,6 +61,8 @@ class VersionPublisher(Publisher):
             scene=scene,
             author=resolve_artist_display_name(),
             note=self._choice.note,
+            announce=self._choice.announce,
+            final=self._choice.final,
             write=self._write,
             detail=self._detail(),
         )

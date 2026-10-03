@@ -81,7 +81,7 @@ def _publish(window: QtWidgets.QWidget | None) -> _Published | None:
     frame_range = _frame_range(target.entity)
     node = _publish_node()
 
-    choice = prompt_publish(window, target.label)
+    choice = prompt_publish(window, target)
     if choice is None:
         return None
     _save_hip()
@@ -98,6 +98,8 @@ def _publish(window: QtWidgets.QWidget | None) -> _Published | None:
             scene=hip_path,
             author=resolve_artist_display_name(),
             note=choice.note,
+            announce=choice.announce,
+            final=choice.final,
             write=write,
         )
     except _BackedOut:

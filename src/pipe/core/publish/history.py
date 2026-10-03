@@ -76,7 +76,8 @@ def move_current(conn: ShotGrid, entry: Entry, *, author: str) -> list[str]:
         ) from None
 
     lines = [f"{entry.label} is current."]
-    if target.department is not None:
+    # As loud as a publish of this layer would be.
+    if target.department is not None and target.final is not None:
         lines += announce_publish(
             conn,
             deliverable=cast(Shot, target.entity),

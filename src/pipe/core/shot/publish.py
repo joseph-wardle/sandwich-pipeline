@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from pipe.core.publish import PUBLISH_DIRNAME, Target, next_version
+from pipe.core.publish import PUBLISH_DIRNAME, Target, latest_final, next_version
 from pipe.core.shotgrid import Shot
 
 from .version_adapter import shot_root_path
@@ -34,4 +34,5 @@ def shot_target(shot: Shot, department: str) -> Target:
         file_name=department,
         file_code=published_file_code(code, department, version),
         department=department,
+        final=latest_final(current),
     )

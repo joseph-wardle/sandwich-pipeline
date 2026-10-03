@@ -21,6 +21,7 @@ TITLE = "Version History"
 _COLUMNS = ("Version", "", "Note", "By", "Date")
 _NOTE_COLUMN = 2
 _CURRENT = "current"
+_FINAL = "FINAL"
 _DATE_FORMAT = "%b %d %H:%M"
 _NO_SCENE = "No scene was kept with this version."
 _SIZE = (720, 400)
@@ -74,7 +75,14 @@ class _HistoryDialog(QtWidgets.QDialog):
             info = entry.info
             cells = (
                 entry.label,
-                _CURRENT if entry.current else "",
+                ", ".join(
+                    mark
+                    for mark, applies in (
+                        (_CURRENT, entry.current),
+                        (_FINAL, info.final),
+                    )
+                    if applies
+                ),
                 info.note,
                 info.author,
                 info.date.strftime(_DATE_FORMAT),

@@ -8,6 +8,7 @@ from pathlib import Path
 from env import discord_publish_webhook, discord_role_ids
 
 from pipe.core.shotgrid import Asset, Shot, ShotGrid, User
+from pipe.core.util.text import and_list as _and
 from pipe.core.util.users import resolve_artist_display_name
 
 from .discord import post_message
@@ -142,13 +143,6 @@ def _announce_on_shotgrid(
 
 def _name(user: User) -> str:
     return user.name or f"user {user.id}"
-
-
-def _and(items: list[str]) -> str:
-    """'CFX', 'CFX and FX', 'CFX, FX and Lighting'."""
-    if len(items) < 2:
-        return "".join(items)
-    return f"{', '.join(items[:-1])} and {items[-1]}"
 
 
 __all__ = ["DOWNSTREAM", "announce_publish"]

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from pipe.core.announce import announce_publish
+from pipe.core.announce import DOWNSTREAM, announce_publish
 from pipe.core.shotgrid import Set, Shot, ShotGrid, ShotGridError
 
 from .versions import (
@@ -41,11 +41,21 @@ class Target:
     file_code: str
     # Whose downstream is told. None tells no one.
     department: str | None
+    final: int | None
 
     @property
     def label(self) -> str:
         """How the dialogs name this version, such as `A_210 cfx v005`."""
         return f"{self.name} v{self.version:03d}"
+
+    @property
+    def downstream(self) -> list[str]:
+        """The Steps an announcement tells. Empty when there is no one to tell."""
+        return DOWNSTREAM[self.department] if self.department is not None else []
+
+    def announced(self, announce: bool, final: bool) -> bool:
+        """Whether a publish the artist asked to announce or not, as FINAL or not, is."""
+        return announce or final or self.final is not None
 
 
 def publish_version(
@@ -55,25 +65,36 @@ def publish_version(
     scene: Path,
     author: str,
     note: str,
+    announce: bool,
+    final: bool,
     write: Callable[[Path], None],
     detail: str = "",
 ) -> list[str]:
     """Publish `target` from `scene`, which the caller has just saved.
 
     `write` exports the layer to the path it is given. Whatever it raises stops
-    the publish with nothing published. `detail` is what the announcement says
-    besides the version and the note, such as which rigs were published.
-    Returns the result box's lines.
+    the publish with nothing published. `announce` and `final` are what the
+    artist asked; `Target.announced` says whether downstream is told. `detail`
+    is what the announcement says besides the version and the note, such as
+    which rigs were published. Returns the result box's lines.
     """
     staged = _stage(target)
     try:
         write(staged)
         copy_source(target.current, target.version, scene)
-        stamp(target.current, target.version, author=author, note=note)
+        stamp(target.current, target.version, author=author, note=note, final=final)
     except BaseException:
         _discard(target)
         raise
-    return _release(conn, target, author=author, note=note, detail=detail)
+    return _release(
+        conn,
+        target,
+        author=author,
+        note=note,
+        action="published as FINAL" if final else "published",
+        announce=target.announced(announce, final),
+        detail=detail,
+    )
 
 
 def _stage(target: Target) -> Path:
@@ -115,7 +136,14 @@ def _discard(target: Target) -> None:
 
 
 def _release(
-    conn: ShotGrid, target: Target, *, author: str, note: str, detail: str
+    conn: ShotGrid,
+    target: Target,
+    *,
+    author: str,
+    note: str,
+    action: str,
+    announce: bool,
+    detail: str,
 ) -> list[str]:
     """Make the staged version current, register it in ShotGrid and tell downstream."""
     staging = staging_layer_path(target.current, target.version).parent
@@ -137,7 +165,7 @@ def _release(
             f"{target.current} with version {target.version}."
         ) from None
 
-    lines = [f"Published {target.label}."]
+    lines = [f"{target.label} {action}."]
     try:
         conn.create_published_file(
             target.entity,
@@ -150,7 +178,7 @@ def _release(
     except ShotGridError:
         log.exception("Could not register %s in ShotGrid.", target.label)
         lines.append("ShotGrid: the version wasn't registered. Tell a TD.")
-    if target.department is not None:
+    if target.department is not None and announce:
         said = ", ".join(filter(None, [version_path.parent.name, detail]))
         lines += announce_publish(
             conn,
@@ -158,6 +186,7 @@ def _release(
             department=target.department,
             artist=author,
             path=version_path,
+            action=action,
             detail=f"{said}: {note}" if note else said,
         )
     return lines
