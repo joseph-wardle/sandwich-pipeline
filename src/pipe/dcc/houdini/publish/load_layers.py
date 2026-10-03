@@ -7,7 +7,12 @@ from typing import cast
 
 import hou
 
-from pipe.core.publish import current_version, version_layer_path, versions
+from pipe.core.publish import (
+    current_version,
+    version_layer_path,
+    version_name,
+    versions,
+)
 from pipe.core.shot import current_layer_path
 
 CURRENT = "current"
@@ -35,10 +40,10 @@ def version_menu(node: hou.Node, row: str) -> list[str]:
     """A row's menu: its department's current layer, then each version to pin to."""
     current = _current(node, row)
     behind = current_version(current)
-    label = _name(behind) if behind is not None else "not published"
+    label = version_name(behind) if behind is not None else "not published"
     menu = [CURRENT, f"Current \N{EM DASH} {label}"]
     for version in versions(current):
-        menu += [_name(version), _name(version)]
+        menu += [version_name(version), version_name(version)]
     return menu
 
 
@@ -96,7 +101,3 @@ def _label(node: hou.Node, row: str) -> str:
 def _text(node: hou.Node, name: str) -> str:
     # evalParm's type covers every kind of parm.
     return str(node.evalParm(name))
-
-
-def _name(version: int) -> str:
-    return f"v{version:03d}"

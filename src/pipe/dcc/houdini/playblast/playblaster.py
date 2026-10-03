@@ -8,7 +8,7 @@ import hou
 
 from pipe.core.hud import ARTIST, HudContent, labeled_line, line_date, line_shot
 from pipe.core.playblast import Playblaster, PreviewClip
-from pipe.core.publish import scene_version
+from pipe.core.publish import scene_version, version_name
 from pipe.core.shot import current_layer_path, shot_root_path
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.houdini.hipfile.paths import current_hip_path
@@ -90,7 +90,7 @@ class HPlayblaster(Playblaster):
             return None
         current = current_layer_path(shot_root_path(shot), hip_path.parent.name)
         version = scene_version(current, hip_path)
-        return None if version is None else f"v{version:03d}"
+        return None if version is None else version_name(version)
 
     def _write_images(self, shot: Shot, path: str) -> None:
         cut_in, cut_out = shot.frame_range

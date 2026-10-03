@@ -20,6 +20,7 @@ from .versions import (
     next_version,
     staging_layer_path,
     stamp,
+    version_name,
 )
 
 log = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ class Target:
     @property
     def label(self) -> str:
         """How the dialogs name this version, such as `A_210 cfx v005`."""
-        return f"{self.name} v{self.version:03d}"
+        return f"{self.name} {version_name(self.version)}"
 
     @property
     def downstream(self) -> list[str]:
@@ -117,7 +118,7 @@ def _stage(target: Target) -> Path:
     if next_version(target.current) != target.version:
         _discard(target)
         raise Refused(
-            f"Nothing was published: v{target.version:03d} was published while "
+            f"Nothing was published: {version_name(target.version)} was published while "
             "this dialog was open. Publish again to make the next version."
         )
     return staged

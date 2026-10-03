@@ -7,7 +7,13 @@ from pathlib import Path
 
 from pxr import Usd, UsdGeom
 
-from pipe.core.publish import PUBLISH_DIRNAME, Target, latest_final, next_version
+from pipe.core.publish import (
+    PUBLISH_DIRNAME,
+    Target,
+    latest_final,
+    next_version,
+    version_name,
+)
 from pipe.core.shotgrid import Set
 from pipe.core.util.paths import get_production_path
 
@@ -43,7 +49,7 @@ def set_target(set: Set) -> Target:
         current=current,
         version=version,
         file_name=PUBLISHED_FILE_NAME,
-        file_code=f"{set.name}_v{version:03d}",
+        file_code=f"{set.name}_{version_name(version)}",
         department=None,
         final=latest_final(current),
     )

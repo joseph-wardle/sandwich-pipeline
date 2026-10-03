@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from Qt import QtCore, QtWidgets
 
+from pipe.core.publish import version_name
 from pipe.core.util.text import and_list
 
 from .dialogs import DialogButtons
@@ -24,7 +25,7 @@ _NOTE_LINES = 3
 
 _TELL = "Tell {}"
 _TELLS = "Tells {}"
-_TELLS_SINCE = "Tells {} (v{:03d} was final)"
+_TELLS_SINCE = "Tells {} ({} was final)"
 _FINAL = "Final"
 
 _WIDTH = 380
@@ -111,7 +112,7 @@ class PublishRows(QtWidgets.QWidget):
         steps = and_list(self._target.downstream)
         since = self._target.final
         if since is not None:
-            text = _TELLS_SINCE.format(steps, since)
+            text = _TELLS_SINCE.format(steps, version_name(since))
         elif self._final.isChecked():
             text = _TELLS.format(steps)
         else:

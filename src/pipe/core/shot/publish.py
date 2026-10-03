@@ -5,7 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from pipe.core.publish import PUBLISH_DIRNAME, Target, latest_final, next_version
+from pipe.core.publish import (
+    PUBLISH_DIRNAME,
+    Target,
+    latest_final,
+    next_version,
+    version_name,
+)
 from pipe.core.shotgrid import Shot
 
 from .version_adapter import shot_root_path
@@ -18,7 +24,7 @@ def current_layer_path(shot_dir: Path, department: str) -> Path:
 
 def published_file_code(shot_code: str, department: str, version: int) -> str:
     """A publish version's code on its ShotGrid PublishedFile, such as `A_050_cfx_v005`."""
-    return f"{shot_code}_{department}_v{version:03d}"
+    return f"{shot_code}_{department}_{version_name(version)}"
 
 
 def shot_target(shot: Shot, department: str) -> Target:

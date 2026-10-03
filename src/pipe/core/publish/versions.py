@@ -59,7 +59,7 @@ class VersionInfo:
 
 
 def version_layer_path(current: Path, version: int) -> Path:
-    return current.parent / _version_dirname(version) / f"{current.stem}.usd"
+    return current.parent / version_name(version) / f"{current.stem}.usd"
 
 
 def staging_layer_path(current: Path, version: int) -> Path:
@@ -68,7 +68,7 @@ def staging_layer_path(current: Path, version: int) -> Path:
     A sibling of the version directory, so the relative asset paths written into
     the layer stay valid when it is renamed.
     """
-    staging = f".{_version_dirname(version)}.tmp"
+    staging = f".{version_name(version)}.tmp"
     return current.parent / staging / f"{current.stem}.usd"
 
 
@@ -274,13 +274,14 @@ def _points_at(layer: Sdf.Layer, current: Path) -> int | None:
 
 
 def _source(current: Path, version: int) -> Path | None:
-    folder = current.parent / _version_dirname(version) / SOURCE_DIRNAME
+    folder = current.parent / version_name(version) / SOURCE_DIRNAME
     return next(folder.glob("*"), None)
 
 
 def _sublayer(current: Path, version: int) -> str:
-    return f"./{_version_dirname(version)}/{current.stem}.usd"
+    return f"./{version_name(version)}/{current.stem}.usd"
 
 
-def _version_dirname(version: int) -> str:
+def version_name(version: int) -> str:
+    """How a version is named everywhere: its folder, menus, messages."""
     return f"v{version:03d}"

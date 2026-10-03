@@ -21,7 +21,7 @@ import tractor.api.author as author
 from pxr import Sdf, Tf, Usd, UsdRender
 
 from pipe.core.playblast.presets import FFmpegPreset
-from pipe.core.publish import current_version, loaded_version, pin
+from pipe.core.publish import current_version, loaded_version, pin, version_name
 from pipe.core.render import RENDER_USD
 from pipe.dcc.houdini.tractor import (
     SendRefused,
@@ -333,11 +333,12 @@ def _sent_version(current: Path) -> int | None:
     loaded = loaded_version(current)
     if version is None or loaded is None or loaded == version:
         return version
+    on_disk, in_hip = version_name(version), version_name(loaded)
     raise SendRefused(
-        f"{current} is at v{version:03d}, but this hip has v{loaded:03d} loaded, "
-        "so the job would not render what you see here. Press Reload on the "
-        f"node that loads it to read v{version:03d}, or pin v{loaded:03d} there "
-        "to keep it. Then Send again."
+        f"{current} is at {on_disk}, but this hip has {in_hip} loaded, so the "
+        "job would not render what you see here. Press Reload on the node that "
+        f"loads it to read {on_disk}, or pin {in_hip} there to keep it. Then "
+        "Send again."
     )
 
 

@@ -21,6 +21,7 @@ from .versions import (
     stamp,
     version_info,
     version_layer_path,
+    version_name,
     versions,
 )
 
@@ -50,5 +51,6 @@ __all__ = [
     "stamp",
     "version_info",
     "version_layer_path",
+    "version_name",
     "versions",
 ]

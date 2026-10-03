@@ -78,7 +78,7 @@ class _HistoryDialog(QtWidgets.QDialog):
                 ", ".join(
                     mark
                     for mark, applies in (
-                        (_CURRENT, entry.current),
+                        (_CURRENT, entry.is_current),
                         (_FINAL, info.final),
                     )
                     if applies
@@ -120,7 +120,7 @@ class _HistoryDialog(QtWidgets.QDialog):
         has_scene = entry.info.source is not None
         self._open.setEnabled(has_scene)
         self._open.setToolTip("" if has_scene else _NO_SCENE)
-        self._make_current.setEnabled(not entry.current)
+        self._make_current.setEnabled(not entry.is_current)
 
     def _choose_open(self) -> None:
         entry = self._selected()

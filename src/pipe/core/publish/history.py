@@ -18,6 +18,7 @@ from .versions import (
     make_current,
     version_info,
     version_layer_path,
+    version_name,
     versions,
 )
 
@@ -28,12 +29,12 @@ log = logging.getLogger(__name__)
 class Entry:
     target: Target
     info: VersionInfo
-    current: bool
+    is_current: bool
 
     @property
     def label(self) -> str:
         """The name its publish gave it, such as `A_210 cfx v003`."""
-        return f"{self.target.name} v{self.info.version:03d}"
+        return f"{self.target.name} {version_name(self.info.version)}"
 
 
 def history(target: Target) -> list[Entry]:
@@ -84,7 +85,9 @@ def move_current(conn: ShotGrid, entry: Entry, *, author: str) -> list[str]:
             department=target.department,
             artist=author,
             path=version_layer_path(target.current, version),
-            action=f"moved to v{version:03d}",
-            detail=f"{target.file_name} was v{was:03d}" if was is not None else "",
+            action=f"moved to {version_name(version)}",
+            detail=f"{target.file_name} was {version_name(was)}"
+            if was is not None
+            else "",
         )
     return lines

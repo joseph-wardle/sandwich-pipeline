@@ -23,7 +23,7 @@ from pipe.core.playblast import (
     custom_folder_destination,
 )
 from pipe.core.playblast.naming import build_edit_output_directory
-from pipe.core.publish import scene_version
+from pipe.core.publish import scene_version, version_name
 from pipe.core.shot import current_layer_path, shot_root_path
 from pipe.core.shotgrid import Shot
 from pipe.dcc.maya.playblast.shot.config import (
@@ -149,4 +149,4 @@ def _published_version(shot: Shot) -> str | None:
     scene = Path(str(mc.file(query=True, sceneName=True)))
     current = current_layer_path(shot_root_path(shot), DEPARTMENT)
     version = scene_version(current, scene)
-    return None if version is None else f"v{version:03d}"
+    return None if version is None else version_name(version)

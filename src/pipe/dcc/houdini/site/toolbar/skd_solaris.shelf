@@ -14,14 +14,14 @@
 
   <toolshelf name="skd_sets" label="SKD Sets">
     <memberTool name="open_set"/>
-    <memberTool name="set_version_history"/>
+    <memberTool name="skd_version_history"/>
     <memberTool name="skd_publish"/>
     <memberTool name="skd_playblast"/>
   </toolshelf>
 
   <toolshelf name="skd_shots" label="SKD Shots">
     <memberTool name="open_shot"/>
-    <memberTool name="shot_version_history"/>
+    <memberTool name="skd_version_history"/>
     <memberTool name="skd_publish"/>
     <memberTool name="skd_playblast"/>
   </toolshelf>
@@ -61,17 +61,12 @@ fm = HSetFileManager()
 fm.open_file()]]></script>
   </tool>
 
-  <tool name="set_version_history" label="Set Version History" icon="BUTTONS_history">
-    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.publish import history
-history.show()]]></script>
-  </tool>
-
   <tool name="open_shot" label="Open Shot" icon="NETWORKS_scene">
     <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HShotFileManager
 HShotFileManager().open_file()]]></script>
   </tool>
 
-  <tool name="shot_version_history" label="Shot Version History" icon="BUTTONS_history">
+  <tool name="skd_version_history" label="Version History" icon="BUTTONS_history">
     <script scriptType="python"><![CDATA[from pipe.dcc.houdini.publish import history
 history.show()]]></script>
   </tool>
