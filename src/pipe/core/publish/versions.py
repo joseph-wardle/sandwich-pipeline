@@ -22,8 +22,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from pxr import Sdf, Tf, UsdUtils
+if TYPE_CHECKING:
+    from pxr import Sdf
 
 PUBLISH_DIRNAME = "publish"
 SOURCE_DIRNAME = "_src"
@@ -106,6 +108,8 @@ def current_version(current: Path) -> int | None:
     Read from disk: USD's layer cache keeps whatever the session opened earlier,
     which is the previous version once someone has published.
     """
+    from pxr import Sdf
+
     layer = Sdf.Layer.OpenAsAnonymous(str(current), metadataOnly=True)
     return None if layer is None else _points_at(layer, current)
 
@@ -115,11 +119,15 @@ def loaded_version(current: Path) -> int | None:
 
     None if the session hasn't opened `current`, or it isn't a current layer.
     """
+    from pxr import Sdf
+
     layer = Sdf.Layer.Find(str(current))
     return None if layer is None else _points_at(layer, current)
 
 
 def version_info(current: Path, version: int) -> VersionInfo:
+    from pxr import Sdf
+
     path = version_layer_path(current, version)
     layer = Sdf.Layer.OpenAsAnonymous(str(path), metadataOnly=True)
     data = layer.customLayerData
@@ -171,6 +179,8 @@ def copy_source(current: Path, version: int, source: Path) -> Path:
 
 def stamp(current: Path, version: int, *, author: str, note: str, final: bool) -> None:
     """Record on a staged version's layer who published it, when, why and as what."""
+    from pxr import Sdf
+
     layer = Sdf.Layer.FindOrOpen(str(staging_layer_path(current, version)))
     layer.customLayerData = {
         **layer.customLayerData,
@@ -200,6 +210,8 @@ def make_current(current: Path, version: int) -> None:
         FileNotFoundError: `version` was never published.
         OSError: The current layer couldn't be written.
     """
+    from pxr import Sdf, Tf
+
     version_path = version_layer_path(current, version)
     version_layer = Sdf.Layer.FindOrOpen(str(version_path))
     if version_layer is None:
@@ -234,6 +246,7 @@ def pin(
     passes one that remembers its answers, so a publish that lands between two
     of them can't give them different versions.
     """
+    from pxr import UsdUtils
 
     def pinned(path: str) -> str:
         current = Path(layer.ComputeAbsolutePath(path))
