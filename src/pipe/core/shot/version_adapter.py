@@ -3,6 +3,9 @@
 Shot versioning needs explicit stream identity because a single shot root can own
 multiple working-file streams across departments and DCCs. This module keeps that
 translation in one place so DCC integrations stay thin.
+
+Only RLO and fx2d keep a save history. Every other shot department's history is
+its publish versions (`pipe.core.publish`).
 """
 
 from __future__ import annotations
@@ -14,7 +17,6 @@ from pipe.core.util.paths import get_production_path
 from pipe.core.shotgrid import Shot
 from pipe.core.versioning import (
     DCC_BLENDER,
-    DCC_HOUDINI,
     DCC_MAYA,
     VERSION_MANIFEST_FILENAME,
     VersionOwner,
@@ -79,23 +81,6 @@ def shot_stream(
     )
 
 
-def maya_anim_stream(
-    shot: Shot,
-    *,
-    owner: VersionOwner | None = None,
-) -> VersionStreamSpec:
-    return shot_stream(
-        shot,
-        DCC_MAYA,
-        stream_name="anim",
-        subpath="anim",
-        stem=shot.code or "",
-        ext="mb",
-        owner=owner,
-        label="Animation Scene",
-    )
-
-
 def maya_rlo_stream(
     shot: Shot,
     *,
@@ -123,25 +108,6 @@ def maya_rlo_stream(
     )
 
 
-def houdini_department_stream(
-    shot: Shot,
-    department: str,
-    *,
-    owner: VersionOwner | None = None,
-) -> VersionStreamSpec:
-    resolved_department = normalize_text(department) or "unknown"
-    return shot_stream(
-        shot,
-        DCC_HOUDINI,
-        stream_name=resolved_department,
-        subpath=resolved_department,
-        stem=resolved_department,
-        ext="hipnc",
-        owner=owner,
-        label=f"{resolved_department.upper()} Scene",
-    )
-
-
 def blender_fx2d_stream(
     shot: Shot,
     *,
@@ -161,8 +127,6 @@ def blender_fx2d_stream(
 
 __all__ = [
     "blender_fx2d_stream",
-    "houdini_department_stream",
-    "maya_anim_stream",
     "maya_rlo_stream",
     "shot_owner_for",
     "shot_root_path",

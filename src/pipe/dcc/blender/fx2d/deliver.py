@@ -46,6 +46,16 @@ def _uncut(scene: Scene) -> list[str]:
     ]
 
 
+def _missing_camera_files(scene: Scene) -> list[str]:
+    """The files the camera move is read from that are gone."""
+    context_collection = scene.collection.children[util.CONTEXT]
+    return [
+        cache_file.filepath
+        for cache_file in util.camera_cache_files(context_collection)
+        if not Path(bpy.path.abspath(cache_file.filepath)).is_file()
+    ]
+
+
 class SKD_OT_fx2d_deliver(Operator):
     """Render every effect layer to a new version for comp."""
 
@@ -89,6 +99,17 @@ class SKD_OT_fx2d_deliver(Operator):
             self.report(
                 {"ERROR"},
                 "Could not deliver because no layer collection has anything in it.",
+            )
+            return {"CANCELLED"}
+
+        missing = _missing_camera_files(scene)
+        if missing:
+            self.report(
+                {"ERROR"},
+                "Could not deliver because the file the shot camera reads is missing: "
+                f"{', '.join(missing)}. Without it the camera is in the wrong place. "
+                "Nothing was rendered. Run SKD > Refresh to read the published "
+                "camera, then deliver again.",
             )
             return {"CANCELLED"}
 

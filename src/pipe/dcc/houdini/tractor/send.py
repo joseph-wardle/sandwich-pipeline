@@ -1,15 +1,18 @@
 """Send: one Tractor job for every Configure → Denoise → Encode chain wired into Submit.
 
 Send claims each chain's version folder, writes `render.usd` into it with every
-output's path, reads what the job needs from that file, and spools the job.
+output's path and every publish it reads pinned, reads what the job needs from
+that file, and spools the job.
 """
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import re
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +21,7 @@ import tractor.api.author as author
 from pxr import Sdf, Tf, Usd, UsdRender
 
 from pipe.core.playblast.presets import FFmpegPreset
+from pipe.core.publish import current_version, loaded_version, pin, version_name
 from pipe.core.render import RENDER_USD
 from pipe.dcc.houdini.tractor import (
     SendRefused,
@@ -200,19 +204,23 @@ def _title(submit: hou.Node, chains: list[Chain]) -> str:
 
 
 def build(submit: hou.Node, title: str, chains: list[Chain]) -> author.Job:
+    # Each current layer is read once, so every layer of the job renders the
+    # same versions even when someone publishes during the Send.
+    version_of = functools.cache(_sent_version)
     return job.build(
         title,
         int(submit.evalParm("priority")),
         _setenv(),
-        [_layer(c) for c in chains],
+        [_layer(c, version_of) for c in chains],
     )
 
 
-def _layer(chain: Chain) -> commands.Layer:
+def _layer(chain: Chain, version_of: Callable[[Path], int | None]) -> commands.Layer:
     configure = chain.configure
     folder = Path(parms.text(configure, parms.OUTPUT))
     frames = parms.frames(configure)
     _write_render_usd(configure, chain.output)
+    _pin(Sdf.Layer.FindOrOpen(str(folder / RENDER_USD)), version_of)
 
     stage = Usd.Stage.Open(str(folder / RENDER_USD), Usd.Stage.LoadNone)
     settings = paths.rendered_settings(stage, parms.toggled(configure, parms.SETTINGS))
@@ -296,6 +304,42 @@ def _write_render_usd(configure: hou.Node, output: hou.Node) -> None:
         raise SendRefused(
             f"{configure.path()} could not write render.usd:\n\n" + "\n".join(errors)
         )
+
+
+def _pin(layer: Sdf.Layer, version_of: Callable[[Path], int | None]) -> None:
+    """Pin `layer` and the layers the ROP wrote beside it.
+
+    The job then renders the versions that were current at the Send, on every
+    frame and every retry.
+    """
+    pin(layer, version_of)
+    layer.Save()
+    folder = Path(layer.realPath).parent
+    for path in layer.GetCompositionAssetDependencies():
+        written = Path(layer.ComputeAbsolutePath(path))
+        if written.parent == folder:
+            _pin(Sdf.Layer.FindOrOpen(str(written)), version_of)
+
+
+def _sent_version(current: Path) -> int | None:
+    """The version of `current` the job renders, which is the one on disk.
+
+    Raises:
+        SendRefused: The hip shows another version. The job would render one
+            the artist hasn't seen, under whatever this hip authored on top of
+            the other.
+    """
+    version = current_version(current)
+    loaded = loaded_version(current)
+    if version is None or loaded is None or loaded == version:
+        return version
+    on_disk, in_hip = version_name(version), version_name(loaded)
+    raise SendRefused(
+        f"{current} is at {on_disk}, but this hip has {in_hip} loaded, so the "
+        "job would not render what you see here. Press Reload on the node that "
+        f"loads it to read {on_disk}, or pin {in_hip} there to keep it. Then "
+        "Send again."
+    )
 
 
 def _write_denoise(folder: Path, product: Usd.Prim) -> commands.Denoise:

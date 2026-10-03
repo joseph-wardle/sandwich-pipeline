@@ -1,0 +1,22 @@
+# Dialog script for skd::main::publish::1.0 automatically generated
+
+{
+    name	skd::main::publish::1.0
+    script	skd::main::publish::1.0
+    label	"SKD Publish"
+
+    help {
+    }
+
+    inputlabel	1	"Input Stage"
+
+    parm {
+        name    "publish"
+        label   "Publish"
+        type    button
+        default { "0" }
+        help    "Publish the next version of what is wired into this node."
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import version; version.publish()" }
+        parmtag { "script_callback_language" "python" }
+    }
+}

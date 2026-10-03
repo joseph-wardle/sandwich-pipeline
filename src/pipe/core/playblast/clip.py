@@ -97,6 +97,8 @@ class ShotGridDestination:
 
     entity: ReviewEntity
     default_on: bool = True
+    # What the viewer's description field starts with.
+    description: str = ""
 
     @property
     def playlist_required(self) -> bool:

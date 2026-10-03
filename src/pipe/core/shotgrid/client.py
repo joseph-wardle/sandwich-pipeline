@@ -175,9 +175,6 @@ _SG_NOTE_AUTHOR = "user"
 
 # The `sg_asset_type` of an Asset row that is a set.
 SET_ASSET_TYPE = "Set"
-# Every set version registers as a PublishedFile with this name, the way Piper
-# names a product.
-SET_PUBLISHED_FILE_NAME = "set"
 
 # ShotGrid seeds a new record's task list from a template of this entity type.
 _SG_TASK_TEMPLATE_TYPE = "TaskTemplate"
@@ -1005,20 +1002,33 @@ class ShotGrid:
         invalidate(self)
         return self._created(row, Set)
 
-    def create_set_published_file(
-        self, set: Set, *, version: int, path: Path, description: str
+    # ---- writes: published files -------------------------------------------
+
+    def create_published_file(
+        self,
+        entity: Shot | Set,
+        *,
+        name: str,
+        code: str,
+        version: int,
+        path: Path,
+        description: str,
     ) -> None:
-        """Register one published set version.
+        """Register one publish version of a set or a shot department.
+
+        `name` says what was published and is the same on every version, the way
+        Piper names a product (`set`, `cfx`). `code` is this version's own label.
 
         Raises:
             ShotGridWriteError: ShotGrid rejected the create.
         """
+        sg_type = "Shot" if isinstance(entity, Shot) else "Asset"
         payload = {
             _SG_PROJECT: self._project_ref(),
-            _SG_PUBLISHED_FILE_ENTITY: _entity_ref("Asset", set),
-            _SG_PUBLISHED_FILE_NAME: SET_PUBLISHED_FILE_NAME,
+            _SG_PUBLISHED_FILE_ENTITY: _entity_ref(sg_type, entity),
+            _SG_PUBLISHED_FILE_NAME: name,
             _SG_PUBLISHED_FILE_VERSION: version,
-            _SG_PUBLISHED_FILE_CODE: f"{set.name}_v{version:03d}",
+            _SG_PUBLISHED_FILE_CODE: code,
             _SG_PUBLISHED_FILE_PATH: {"url": path.as_uri(), "name": path.name},
             _SG_PUBLISHED_FILE_DESCRIPTION: description,
         }

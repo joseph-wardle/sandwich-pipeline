@@ -1,0 +1,14 @@
+Operator:     skd::main::load_layers::2.0
+Label:        SKD Load Layers
+Path:         oplib:/skd::main::Lop/load_layers::2.0?skd::main::Lop/load_layers::2.0
+Icon:         LOP_sublayer
+Table:        Lop
+License:      
+Extra:        
+User:         
+Inputs:       0 to 1
+Subnet:       true
+Python:       false
+Empty:        false
+Modified:     Fri Oct  2 09:15:11 2026
+

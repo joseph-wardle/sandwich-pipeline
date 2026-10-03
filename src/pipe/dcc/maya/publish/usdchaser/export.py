@@ -13,7 +13,6 @@ from pxr import Usd
 from pipe.core.asset import paths_for_asset
 
 from ..anim_index import (
-    AnimStream,
     PublishedAnim,
     RigReference,
     author_rig_entry,
@@ -49,12 +48,15 @@ from pipe.core.util import log_errors
 
 log = logging.getLogger(__name__)
 
+# A rig's frames from the shot's head on are written to `<rig>.anim.usd`, which
+# `<rig>.usd` stitches to its preroll.
+_BODY_SUFFIX = "anim"
+
 
 class ExportChaserMode(IntEnum):
     ANIM = 1
     CAM = 2
     RIG = 3
-    SPLINE_ANIM = 4
 
 
 @attrs.define
@@ -91,16 +93,14 @@ class ExportChaser(mayaUsdLib.ExportChaser):
     def PostExport(self) -> bool:
         match self._chaser_args.mode:
             case ExportChaserMode.ANIM:
-                self._post_export_anim(AnimStream.MAIN)
-            case ExportChaserMode.SPLINE_ANIM:
-                self._post_export_anim(AnimStream.SPLINE)
+                self._post_export_anim()
             case ExportChaserMode.RIG:
                 self._post_export_rig()
             case ExportChaserMode.CAM:
                 self._post_export_cam()
         return True
 
-    def _post_export_anim(self, stream: AnimStream) -> None:
+    def _post_export_anim(self) -> None:
         assert self._chaser_args.timeline is not None
         # First, so that a rig the artist kept whose animation has since gone
         # missing costs nothing but the message.
@@ -116,9 +116,7 @@ class ExportChaser(mayaUsdLib.ExportChaser):
 
         scale_down_geo(self._stage)
         make_topo_attrs_default(self._stage)
-        layers = split_by_namespace(
-            self._stage, stream.anim_layer_suffix, path_dag_mapping
-        )
+        layers = split_by_namespace(self._stage, _BODY_SUFFIX, path_dag_mapping)
         conn = ShotGrid.connect(DB_Config)
 
         # Everything that can fail happens here, while the shot's previous index
@@ -130,10 +128,7 @@ class ExportChaser(mayaUsdLib.ExportChaser):
                 name,
                 Path(
                     split_preroll(
-                        layer,
-                        stream.stitched_layer_name(name),
-                        RIG_GEO_PATH,
-                        self._chaser_args.timeline,
+                        layer, name, RIG_GEO_PATH, self._chaser_args.timeline
                     ).realPath
                 ),
                 _rig_reference(conn, name),

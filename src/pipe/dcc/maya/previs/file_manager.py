@@ -14,7 +14,6 @@ from pipe.core.ui import MessageDialog
 from pipe.core.util import log_errors
 from pipe.core.util.filemanager import OpenFileDialog
 from pipe.core.util.paths import get_legacy_previs_path, get_previs_path
-from pipe.core.versioning import VersionStreamSpec
 
 from pipe.dcc.maya.shotfile.stage import build_shot_stage
 from pipe.dcc.maya.shotfile.sets import sync_shot_sets
@@ -29,9 +28,6 @@ class MPrevisFileManager(MShotFileManager):
         super().__init__(version_msg="Open older previs file")
         # Alternates ARE the history surface
         self._versioning = False
-
-    def _entity_label(self) -> str:
-        return "previs"
 
     def _check_unsaved_changes(self) -> bool:
         return True
@@ -167,9 +163,3 @@ class MPrevisFileManager(MShotFileManager):
         if not mc.about(batch=True):
             code = cast("list[str]", mc.fileInfo("code", query=True))[0]
             sync_shot_sets(ShotGrid.connect(DB_Config).get_shot(code=code))
-
-    def _resolve_current_stream(
-        self, scene_path: Path
-    ) -> tuple[VersionStreamSpec, str, Shot] | None:
-        # Previs deliberately has no version-browser surface; stub satisfies the abstract.
-        return None

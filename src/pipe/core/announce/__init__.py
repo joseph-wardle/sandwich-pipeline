@@ -8,6 +8,7 @@ from pathlib import Path
 from env import discord_publish_webhook, discord_role_ids
 
 from pipe.core.shotgrid import Asset, Shot, ShotGrid, User
+from pipe.core.util.text import and_list as _and
 from pipe.core.util.users import resolve_artist_display_name
 
 from .discord import post_message
@@ -19,6 +20,13 @@ DOWNSTREAM: dict[str, list[str]] = {
     "rig": ["Animation"],
     "anim": ["CFX", "FX", "Lighting"],
     "cam": ["Animation", "Lighting"],
+    "flo": ["CFX", "FX", "Lighting"],
+    "cfx": ["Lighting"],
+    "fx": ["Lighting"],
+    # Not a real department. This row goes when envfx does.
+    "envfx": ["Lighting"],
+    # ShotGrid has no comp Step to tell.
+    "lighting": [],
 }
 
 
@@ -31,18 +39,24 @@ def announce_publish(
     artist: str | None = None,
     path: Path,
     announce_path: bool = False,
+    action: str = "published",
     detail: str = "",
     discord: bool = True,
     shotgrid: bool = True,
 ) -> list[str]:
     """Tell `department`'s downstream that `artist` published `shot`/`asset`.
 
-    `detail` is free text for the message, such as which rigs were published.
+    `action` is what the artist did when it wasn't a publish, as Make Current's
+    `moved to v003` is. `detail` is free text for the message, such as which rigs
+    were published.
+    Returns one line per channel, or none for a department with no downstream.
     """
+    steps = DOWNSTREAM[department]
+    if not steps:
+        return []
     resolved_artist = artist if artist else resolve_artist_display_name()
     resolved_deliverable_name = deliverable_name or deliverable.code
-    steps = DOWNSTREAM[department]
-    subject = f"{resolved_deliverable_name} {department} published"
+    subject = f"{resolved_deliverable_name} {department} {action}"
     sentence = f"{subject} by {resolved_artist}"
     if announce_path:
         sentence += f" to `{path}`"
@@ -129,13 +143,6 @@ def _announce_on_shotgrid(
 
 def _name(user: User) -> str:
     return user.name or f"user {user.id}"
-
-
-def _and(items: list[str]) -> str:
-    """'CFX', 'CFX and FX', 'CFX, FX and Lighting'."""
-    if len(items) < 2:
-        return "".join(items)
-    return f"{', '.join(items[:-1])} and {items[-1]}"
 
 
 __all__ = ["DOWNSTREAM", "announce_publish"]

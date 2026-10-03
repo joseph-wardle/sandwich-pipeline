@@ -1,23 +1,28 @@
-"""Where a set's published versions live on disk, and how one becomes current."""
+"""A set's current layer on disk, what its next publish writes and what it must hold."""
 
 from __future__ import annotations
 
-import os
 import re
-import shutil
 from pathlib import Path
 
-from pxr import Sdf, Usd, UsdGeom
+from pxr import Usd, UsdGeom
 
+from pipe.core.publish import (
+    PUBLISH_DIRNAME,
+    Target,
+    latest_final,
+    next_version,
+    version_name,
+)
+from pipe.core.shotgrid import Set
 from pipe.core.util.paths import get_production_path
 
 SETS_DIRNAME = "set"
-PUBLISH_DIRNAME = "publish"
 SOURCE_KEY = "source"
+# What every set version's ShotGrid PublishedFile is named.
+PUBLISHED_FILE_NAME = "set"
 
 _NAME = re.compile(r"[a-z][a-z0-9]*(_[a-z0-9]+)*")
-_VERSION = re.compile(r"v([0-9]{3,})")
-_STAGE_INFO_KEYS = ("metersPerUnit", "upAxis")
 
 
 def valid_set_name(name: str) -> bool:
@@ -30,47 +35,24 @@ def set_dir(name: str) -> Path:
 
 
 def current_layer_path(name: str) -> Path:
+    """The layer shots read. `pipe.core.publish` versions the folder it sits in."""
     return set_dir(name) / PUBLISH_DIRNAME / f"{name}.usda"
 
 
-def version_layer_path(name: str, version: int) -> Path:
-    return set_dir(name) / PUBLISH_DIRNAME / _version_dirname(version) / f"{name}.usd"
-
-
-def staging_layer_path(name: str, version: int) -> Path:
-    """Where a version is written before it is committed.
-
-    A sibling of the version directory, so the relative asset paths the USD ROP
-    writes stay valid when it is renamed.
-    """
-    staging = f".{_version_dirname(version)}.tmp"
-    return set_dir(name) / PUBLISH_DIRNAME / staging / f"{name}.usd"
-
-
-def create_staging(name: str, version: int) -> Path:
-    """Create the empty folder a version is written into; return its layer path.
-
-    Raises:
-        FileExistsError: Another publish of `version` is running, or one stopped
-            partway and left its folder behind.
-    """
-    staging = staging_layer_path(name, version).parent
-    staging.parent.mkdir(exist_ok=True)
-    # Never reused: whatever is already in it would be committed with this version.
-    staging.mkdir()
-    return staging_layer_path(name, version)
-
-
-def next_version(name: str) -> int:
-    publish_dir = set_dir(name) / PUBLISH_DIRNAME
-    if not publish_dir.is_dir():
-        return 1
-    versions = [
-        int(match.group(1))
-        for entry in publish_dir.iterdir()
-        if entry.is_dir() and (match := _VERSION.fullmatch(entry.name))
-    ]
-    return max(versions, default=0) + 1
+def set_target(set: Set) -> Target:
+    """The next version of a set's layer."""
+    current = current_layer_path(set.name)
+    version = next_version(current)
+    return Target(
+        entity=set,
+        name=set.display_name,
+        current=current,
+        version=version,
+        file_name=PUBLISHED_FILE_NAME,
+        file_code=f"{set.name}_{version_name(version)}",
+        department=None,
+        final=latest_final(current),
+    )
 
 
 def prepare_layer(layer_path: Path, name: str, source: Path) -> list[str]:
@@ -84,6 +66,9 @@ def prepare_layer(layer_path: Path, name: str, source: Path) -> list[str]:
     stage = Usd.Stage.Open(str(layer_path), load=Usd.Stage.LoadNone)
     root = stage.GetPrimAtPath(f"/{name}")
     if not root.IsValid():
+        # Closed first: the caller deletes the layer, which NFS refuses while it
+        # is open, and the raised error would otherwise keep it open.
+        del root, stage
         raise ValueError(f"{layer_path} has no /{name} prim.")
 
     stage.SetDefaultPrim(root)
@@ -98,44 +83,3 @@ def prepare_layer(layer_path: Path, name: str, source: Path) -> list[str]:
         for prim in stage.GetPseudoRoot().GetAllChildren()
         if prim != root
     ]
-
-
-def discard_staged(name: str, version: int) -> None:
-    shutil.rmtree(staging_layer_path(name, version).parent)
-
-
-def commit_version(name: str, version: int) -> Path:
-    """Rename the staged version into place. Shots read it once it is made current."""
-    staging = staging_layer_path(name, version).parent
-    staging.rename(version_layer_path(name, version).parent)
-    return version_layer_path(name, version)
-
-
-def make_current(name: str, version: int) -> None:
-    """Point the set's current layer at `version`. Also how a TD rolls back.
-
-    Raises:
-        FileNotFoundError: `version` was never published.
-    """
-    version_path = version_layer_path(name, version)
-    version_layer = Sdf.Layer.FindOrOpen(str(version_path))
-    if version_layer is None:
-        raise FileNotFoundError(f"Set {name} has no version {version}: {version_path}")
-
-    layer = Sdf.Layer.CreateAnonymous(".usda")
-    layer.subLayerPaths.append(f"./{_version_dirname(version)}/{name}.usd")
-    layer.defaultPrim = version_layer.defaultPrim
-    for key in _STAGE_INFO_KEYS:
-        if version_layer.pseudoRoot.HasInfo(key):
-            layer.pseudoRoot.SetInfo(key, version_layer.pseudoRoot.GetInfo(key))
-
-    # Written beside the current layer and swapped in, so a shot opening the set
-    # mid-publish reads either the old current layer or the new one, never half.
-    current = current_layer_path(name)
-    temp = current.with_name(f".{name}.tmp.usda")
-    layer.Export(str(temp))
-    os.replace(temp, current)
-
-
-def _version_dirname(version: int) -> str:
-    return f"v{version:03d}"

@@ -57,6 +57,7 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
     _custom_in: QtWidgets.QSpinBox
     _custom_out: QtWidgets.QSpinBox
     _default_shot_code: str
+    _description: str
     _main_layout: QtWidgets.QVBoxLayout
     _shot: Shot | None
     _shot_camera_value: QtWidgets.QLabel
@@ -70,10 +71,12 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         parent: QtWidgets.QWidget | None,
         conn: "ShotGrid",
         default_shot_code: str | None = None,
+        description: str = "",
     ) -> None:
         super().__init__(parent)
         self._conn = conn
         self._default_shot_code = (default_shot_code or "").strip()
+        self._description = description
         self._shot = self._resolve_shot_context(self._default_shot_code)
 
         self._init_buttons(True, "Playblast Shot", "Cancel")
@@ -355,7 +358,9 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
     def _clip_destinations(self) -> tuple[Destination, ...]:
         return (
             *self._clip_folders(),
-            ShotGridDestination(entity=self._review_entity()),
+            ShotGridDestination(
+                entity=self._review_entity(), description=self._description
+            ),
         )
 
     def _clip_folders(self) -> tuple[DiskDestination, ...]:

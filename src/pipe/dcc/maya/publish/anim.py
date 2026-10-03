@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
@@ -13,18 +12,16 @@ if TYPE_CHECKING:
 
 import maya.cmds as mc
 
-from pipe.core.announce import announce_publish
 from pipe.core.struct.timeline import Timeline
 from pipe.core.ui import MessageDialog
-from pipe.core.util.paths import get_production_path
-from pipe.core.util.users import resolve_artist_display_name
+from pipe.dcc.maya.playblast import AnimPlayblastDialog
 
-from .anim_index import AnimStream, entries_to_json, index_key, read_anim_index
+from .anim_index import entries_to_json, index_key, read_anim_index
 from .anim_lock import confirm_locked_republish
 from .namespaces import namespace_of
-from .publisher import Publisher
 from .rig_selection import PublishSelection, select_rigs_to_publish
 from .usdchaser import ExportChaser, ExportChaserMode
+from .version import VersionPublisher
 
 log = logging.getLogger(__name__)
 
@@ -48,15 +45,7 @@ _TRS_DEFAULTS: dict[str, float] = {
 }
 
 
-def _chaser_mode(stream: AnimStream) -> ExportChaserMode:
-    match stream:
-        case AnimStream.MAIN:
-            return ExportChaserMode.ANIM
-        case AnimStream.SPLINE:
-            return ExportChaserMode.SPLINE_ANIM
-
-
-class AnimPublisher(Publisher):
+class AnimPublisher(VersionPublisher):
     _PUBLISH_KIND = "anim"
 
     _shot: Shot
@@ -85,7 +74,7 @@ class AnimPublisher(Publisher):
         self._timeline = Timeline.from_shot(self._shot)
         self._init_success = True
 
-    def _prepublish(self) -> bool:
+    def _choose(self) -> bool:
         if not self._init_success:
             return False
 
@@ -109,39 +98,30 @@ class AnimPublisher(Publisher):
             return False
 
         selection = select_rigs_to_publish(
-            self._window,
-            cache_sets,
-            self._shot_code,
-            self._publish_dir,
-            self._timeline,
+            self._window, cache_sets, self._shot, self._timeline
         )
         if selection is None:
             return False
 
         self._selection = selection
+        self._target = selection.target
+        self._choice = selection.choice
         mc.select(*selection.sets_to_export, replace=True)
 
         return True
 
-    @property
-    def _publish_dir(self) -> Path:
-        return get_production_path() / self._shot.shot_path / "anim/usd"
-
-    def _get_save_path(self) -> Path | None:
-        return self._publish_dir / self._selection.stream.publish_filename
-
-    def _do_publish_export(self) -> None:
-        # The origin keys exist only while the export runs: every cancel path
-        # in `publish()` returns before this, and the undo on exit hands the
-        # artist their scene back unchanged.
+    def _mayausd_export_and_finalize(self) -> None:
+        # The origin keys exist only while the export runs: the scene is saved
+        # before this, and the undo on exit hands the artist their scene back
+        # unchanged.
         with _origin_keyframes(self._timeline.preroll):
-            super()._do_publish_export()
+            super()._mayausd_export_and_finalize()
 
     def _get_mayausd_kwargs(self) -> dict[str, Any]:
         return {
             "chaser": [ExportChaser.ID],
             "chaserArgs": [
-                (ExportChaser.ID, "mode", _chaser_mode(self._selection.stream)),
+                (ExportChaser.ID, "mode", ExportChaserMode.ANIM),
                 (ExportChaser.ID, "timeline", self._timeline.to_json()),
                 (
                     ExportChaser.ID,
@@ -162,15 +142,18 @@ class AnimPublisher(Publisher):
             "stripNamespaces": False,
         }
 
-    def _get_confirm_message(self) -> str:
-        count = len(self._selection.sets_to_export)
-        message = (
-            f"Published {self._selection.stream.value} animation for {count} "
-            f"{'rig' if count == 1 else 'rigs'} to {self._publish_path}"
+    def _detail(self) -> str:
+        return ", ".join(
+            namespace_of(cache_set) for cache_set in self._selection.sets_to_export
         )
+
+    def _warnings(self) -> list[str]:
+        warnings: list[str] = []
         if kept := self._selection.anims_to_keep:
-            message += "\n\nKept from the previous publish:\n"
-            message += "\n".join(f"    • {entry.name}" for entry in kept)
+            warnings.append(
+                "Kept from the previous publish:\n"
+                + "\n".join(f"    • {entry.name}" for entry in kept)
+            )
 
         exported = {
             index_key(namespace_of(cache_set))
@@ -178,29 +161,18 @@ class AnimPublisher(Publisher):
         }
         if unbound := [
             key
-            for key, entry in read_anim_index(self._publish_path).items()
+            for key, entry in read_anim_index(self._target.current).items()
             if entry.rig is None and key in exported
         ]:
-            message += (
-                "\n\nNo rig asset matched these, so downstream will see their "
+            warnings.append(
+                "No rig asset matched these, so downstream will see their "
                 "animation with no materials or CFX:\n"
+                + "\n".join(f"    • {key}" for key in unbound)
             )
-            message += "\n".join(f"    • {key}" for key in unbound)
-        return message
+        return warnings
 
-    def _announce(self) -> list[str]:
-        rigs = [namespace_of(cache_set) for cache_set in self._selection.sets_to_export]
-        return announce_publish(
-            self._conn,
-            deliverable=self._shot,
-            department="anim",
-            artist=resolve_artist_display_name(),
-            path=self._publish_path,
-            detail=(
-                f"{self._selection.stream.value}, {len(rigs)} "
-                f"{'rig' if len(rigs) == 1 else 'rigs'}: {', '.join(rigs)}"
-            ),
-        )
+    def _open_playblast(self, description: str) -> None:
+        AnimPlayblastDialog(self._window, description).show()
 
 
 @contextmanager
