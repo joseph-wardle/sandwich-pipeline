@@ -1,10 +1,10 @@
 """A publish folder's immutable versions, and the current layer that points at one.
 
 publish/
-├── <name>.usda         current: sublayers ./v002/<name>.usd
+├── <name>.usd          current: sublayers ./v002/<name>.usd (`.usda` for a set)
 ├── v001/
 ├── v002/
-│   ├── <name>.usd      holds who published it, when and why
+│   ├── <name>.usd      holds who published it, when, why and whether as FINAL
 │   └── _src/           the scene file that made it
 └── .v003.tmp/          a version being written
 
