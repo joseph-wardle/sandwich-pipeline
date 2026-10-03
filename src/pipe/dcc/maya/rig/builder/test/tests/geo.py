@@ -1,3 +1,5 @@
+import re
+
 from maya import cmds
 from maya.api.OpenMaya import MFnDependencyNode
 
@@ -116,6 +118,34 @@ class TestGeoNotSelectable(RigBuildTest):
             self.log_warn(
                 f"Scene has geometry that is selectable: "
                 f"{format_max_items(problem_geo, 'mesh(es)')} need to set to reference display to make them unselectable."
+            )
+            return False
+        else:
+            self.log_success()
+            return True
+
+
+class TestNoUnnamedTweakNodes(RigBuildTest):
+    """
+    Checks that the scene has no tweak nodes with names like `tweak1`.
+    These are usually a mistake caused by unbaked tweak data in the model.
+    Remove the tweak data from a mesh with `cmds.polyCollapseTweaks(mesh)`
+    """
+
+    def __init__(self):
+        super().__init__("No unnamed tweak nodes")
+
+    def run(self) -> bool:
+        tweak_nodes = cmds.ls(type="tweak")
+        problem_tweak_nodes = set(
+            node for node in tweak_nodes if re.match("^tweak\d*$", node)
+        )
+        if problem_tweak_nodes:
+            self.log_warn(
+                f"Scene has unnamed tweak nodes: "
+                f"{format_max_items(problem_tweak_nodes, 'node(s)')}. "
+                "These are usually a mistake caused by unbaked tweak data in the model. "
+                "Remove the tweak data from a mesh with `cmds.polyCollapseTweaks(mesh)`"
             )
             return False
         else:
