@@ -24,6 +24,7 @@ SERVICE = "EL9"
 
 RENDER_RETRIES = [
     3,  # Can't get license
+    134,  # Abort
     135,  # Bus error
     139,  # Segmentation fault
 ]
