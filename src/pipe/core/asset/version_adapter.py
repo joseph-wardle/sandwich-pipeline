@@ -19,7 +19,7 @@ from pipe.core.versioning import (
     stream_key_for,
 )
 
-from .paths import AssetPaths
+from .paths import DEFAULT_GEO_VARIANT, AssetPaths
 
 
 def asset_owner_for(asset: Asset) -> VersionOwner:
@@ -106,7 +106,7 @@ def substance_project_stream(
     *,
     owner: VersionOwner | None = None,
 ) -> VersionStreamSpec:
-    normalized_variant = normalize_text(variant) or "main"
+    normalized_variant = normalize_text(variant) or DEFAULT_GEO_VARIANT
     return asset_stream(
         asset_paths,
         DCC_SUBSTANCE,

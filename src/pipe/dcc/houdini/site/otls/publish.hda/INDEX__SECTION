@@ -1,0 +1,15 @@
+Operator:     skd::main::publish::1.0
+Label:        SKD Publish
+Path:         oplib:/skd::main::Lop/publish::1.0?skd::main::Lop/publish::1.0
+Icon:         ROP_usd
+Table:        Lop
+License:      
+Extra:        
+User:         
+Inputs:       1 to 1
+Outputs:      0
+Subnet:       true
+Python:       false
+Empty:        false
+Modified:     Thu Oct  1 10:34:41 2026
+

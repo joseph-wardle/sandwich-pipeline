@@ -72,6 +72,12 @@ def export_lights():
     _el.run()
 
 
+def make_brush_card():
+    import build_brush_card
+
+    build_brush_card.build()
+
+
 ################################### Nungeon buttons (Sidebar) ###################################
 toolbar = nuke.menu("Nodes")
 m = toolbar.addMenu("SKD", icon="MicrowaveIcon.png")
@@ -134,6 +140,12 @@ m.addCommand("SKD CFX Read", "make_skd_cfx_read_node()", icon="MicrowaveIcon.png
 
 m.addCommand("Build LPE Grade", "build_light_comp()", icon="MicrowaveIcon.png")
 m.addCommand("Export Light Grades", "export_lights()", icon="MicrowaveIcon.png")
+m.addCommand("BrushCard", "make_brush_card()", icon="MicrowaveIcon.png")
+m.addCommand(
+    "BrushCard Scene",
+    f'nuke.nodePaste("{str(_TOOLSETS / "brush_card_scene.nk")}")',
+    icon="MicrowaveIcon.png",
+)
 
 ################################### Nungeon Shelf Tool Buttons ###################################
 menu = nuke.menu("Nuke")

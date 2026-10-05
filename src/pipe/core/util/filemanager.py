@@ -197,6 +197,11 @@ class FileManager(metaclass=ABCMeta):
             path.mkdir(mode=0o770, parents=True)
         return True
 
+    def open_path(self, path: Path, entity: SGEntity) -> None:
+        """Open `entity`'s file at `path`, for a caller that has already chosen it."""
+        self._open_file(path)
+        self._post_open_file(entity)
+
     def open_file(self) -> None:
         if not self._check_unsaved_changes():
             return

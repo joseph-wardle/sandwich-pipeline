@@ -14,16 +14,15 @@
 
   <toolshelf name="skd_sets" label="SKD Sets">
     <memberTool name="open_set"/>
-    <memberTool name="save_set_version"/>
-    <memberTool name="set_version_history"/>
-    <memberTool name="publish_set"/>
+    <memberTool name="skd_version_history"/>
+    <memberTool name="skd_publish"/>
     <memberTool name="skd_playblast"/>
   </toolshelf>
 
   <toolshelf name="skd_shots" label="SKD Shots">
     <memberTool name="open_shot"/>
-    <memberTool name="save_shot_version"/>
-    <memberTool name="shot_version_history"/>
+    <memberTool name="skd_version_history"/>
+    <memberTool name="skd_publish"/>
     <memberTool name="skd_playblast"/>
   </toolshelf>
 
@@ -62,38 +61,19 @@ fm = HSetFileManager()
 fm.open_file()]]></script>
   </tool>
 
-  <tool name="save_set_version" label="Save Set Version" icon="BUTTONS_save">
-    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HSetFileManager
-fm = HSetFileManager()
-fm.save_version()]]></script>
-  </tool>
-
-  <tool name="set_version_history" label="Set Version History" icon="BUTTONS_history">
-    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HSetFileManager
-fm = HSetFileManager()
-fm.open_version_browser()]]></script>
-  </tool>
-
-  <tool name="publish_set" label="Publish Set" icon="BUTTONS_upload">
-    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HSetFileManager
-HSetFileManager().publish()]]></script>
-  </tool>
-
   <tool name="open_shot" label="Open Shot" icon="NETWORKS_scene">
     <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HShotFileManager
 HShotFileManager().open_file()]]></script>
   </tool>
 
-  <tool name="save_shot_version" label="Save Shot Version" icon="BUTTONS_save">
-    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HShotFileManager
-fm = HShotFileManager(prompt_for_department=False)
-fm.save_version()]]></script>
+  <tool name="skd_version_history" label="Version History" icon="BUTTONS_history">
+    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.publish import history
+history.show()]]></script>
   </tool>
 
-  <tool name="shot_version_history" label="Shot Version History" icon="BUTTONS_history">
-    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.hipfile import HShotFileManager
-fm = HShotFileManager(prompt_for_department=False)
-fm.open_version_browser()]]></script>
+  <tool name="skd_publish" label="Publish" icon="BUTTONS_upload">
+    <script scriptType="python"><![CDATA[from pipe.dcc.houdini.publish import version
+version.publish()]]></script>
   </tool>
 
   <tool name="skd_playblast" label="Playblast" icon="TOOLS_view">

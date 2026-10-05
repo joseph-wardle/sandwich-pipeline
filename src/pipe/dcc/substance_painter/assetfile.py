@@ -1,15 +1,4 @@
-"""Asset project workflows for Substance Painter.
-
-Entry points for opening, creating, and versioning Substance Painter
-projects associated with pipeline assets.  These are the functions wired
-to Substance Painter's shelf/menu buttons.
-
-Entry points
-------------
-- launch_open_asset_textures()
-- launch_version_browser_for_current_project()
-- launch_save_version()
-"""
+"""The SKD menu's asset project actions: Open Asset, Save Version, Version History."""
 
 from __future__ import annotations
 
@@ -18,11 +7,11 @@ from pathlib import Path
 
 import substance_painter as sp
 from env_sg import DB_Config
-from substance_painter.exception import ProjectError, ServiceNotFoundError
+from substance_painter.exception import ProjectError
 from Qt import QtWidgets
-from pipe.core.util.paths import resolve_mapped_path
+from pipe.core.util.paths import is_same_production_file, resolve_mapped_path
 
-from pipe.core.asset import asset_owner_for, paths_for_asset, substance_project_stream
+from pipe.core.asset import paths_for_asset
 from pipe.core.shotgrid import Asset, ShotGrid, group_assets_by_subdirectory
 from pipe.core.ui import (
     RESTORE_CANCEL,
@@ -38,17 +27,25 @@ from pipe.dcc.substance_painter.ui.dialogs import (
     SubstanceAssetDefaultProjectDialog,
     SubstanceAssetSelectDialog,
     default_project_settings,
-    project_path_for_variant,
     project_template_path,
     resolve_default_mesh_paths,
 )
 from pipe.dcc.substance_painter.runtime import get_main_qt_window
+from pipe.dcc.substance_painter.util.docs import LOG_HINT
 from pipe.dcc.substance_painter.util.metadata import (
+    ProjectIdentity,
+    identify_open_project,
+    note_with_source,
+    project_version_stream,
+    read_tag,
+    tag_project,
+    write_tag,
+)
+from pipe.dcc.substance_painter.util.project import (
+    check_not_busy,
+    check_project_editable,
     current_project_path,
-    get_active_asset_from_project,
-    get_asset_selection_metadata,
-    run_when_project_editable,
-    store_asset_metadata_when_ready,
+    save_project,
 )
 from pipe.core.versioning import (
     VersionRecord,
@@ -62,11 +59,6 @@ from pipe.core.versioning import (
 )
 
 log = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Confirmation dialogs (thin wrappers around MessageDialogCustomButtons)
-# ---------------------------------------------------------------------------
 
 
 def _confirm_discard_unsaved(parent: QtWidgets.QWidget | None) -> bool:
@@ -93,123 +85,70 @@ def _confirm_overwrite_project(parent: QtWidgets.QWidget | None, path: Path) -> 
     return bool(dialog.exec_())
 
 
-# ---------------------------------------------------------------------------
-# Project state helpers
-# ---------------------------------------------------------------------------
-
-
-def _current_geo_variant() -> str:
-    """Return the geometry variant stored in project metadata, or "main"."""
-    metadata = get_asset_selection_metadata()
-    variant = metadata.get("geo_variant")
-    if variant is None:
-        return "main"
-    text = str(variant).strip()
-    return text or "main"
-
-
-def _ensure_project_ready_for_version_action(
-    parent: QtWidgets.QWidget | None, *, action_name: str
+def _confirm_version_from_copy(
+    parent: QtWidgets.QWidget | None,
+    identity: ProjectIdentity,
+    project_stream: VersionStreamSpec,
 ) -> bool:
-    """Return True if the project is open, loaded, and idle.
+    label = project_stream.label
+    asset_label = identity.asset.display_name or identity.asset.name
+    dialog = MessageDialogCustomButtons(
+        parent,
+        f"The open file, {identity.project_path.name}, isn't {asset_label}'s "
+        f"working file ({label}).\n\n"
+        f"If you continue, this file is saved as the next version in {label}'s\n"
+        f"history. Restoring that version later replaces {label} with this file.\n\n"
+        "To make this file the working file instead, use Open Asset →\n"
+        "Create Asset Project → Use Currently Open Project.",
+        "Save Version",
+        has_cancel_button=True,
+        ok_name="Continue",
+        cancel_name="Cancel",
+    )
+    return bool(dialog.exec_())
 
-    Shows an appropriate message dialog and returns False otherwise.
+
+def _save_unsaved_changes(parent: QtWidgets.QWidget | None) -> bool:
+    """Offer to save unsaved changes; False if the artist declines or it fails."""
+    if not sp.project.needs_saving():
+        return True
+    dialog = MessageDialogCustomButtons(
+        parent,
+        "The project has unsaved changes. Save them before creating the version?",
+        "Save Required",
+        has_cancel_button=True,
+        ok_name="Save",
+        cancel_name="Cancel",
+    )
+    if not dialog.exec_():
+        return False
+    return save_project(
+        lambda message, title: MessageDialog(parent, message, title).exec_()
+    )
+
+
+def _versioned_project(
+    parent: QtWidgets.QWidget | None, action_name: str
+) -> tuple[ProjectIdentity, VersionStreamSpec] | None:
+    """Return the open project's identity and its variant's version stream.
+
+    Returns None, after telling the artist why, when the open file has no
+    asset or variant.  The file may be a copy of the working file.
     """
-    if not sp.project.is_open():
+    identity = identify_open_project(ShotGrid.connect(DB_Config), parent, action_name)
+    if identity is None:
+        return None
+    if identity.variant is None:
         MessageDialog(
             parent,
-            "No Substance Painter project is open. Open an asset project first.",
+            "The open file isn't linked to a geometry variant of this asset, so it "
+            "has no version history.\n\nUse Open Asset → Create Asset Project → "
+            "Use Currently Open Project to save it as a variant's project.",
             action_name,
         ).exec_()
-        return False
-
-    if sp.project.is_busy():
-        MessageDialog(
-            parent,
-            "Substance Painter is busy. Wait for the current operation to finish.",
-            action_name,
-        ).exec_()
-        return False
-
-    try:
-        if not sp.project.is_in_edition_state():
-            MessageDialog(
-                parent,
-                "The project is still loading. Wait for it to finish before continuing.",
-                action_name,
-            ).exec_()
-            return False
-    except ServiceNotFoundError:
-        log.exception(f"Failed to query project edition state for {action_name}.")
-        return False
-
-    return True
-
-
-def _ensure_project_saved_for_version_action(
-    parent: QtWidgets.QWidget | None, *, action_name: str
-) -> Path | None:
-    """Ensure the project is ready and saved; return the project path or None.
-
-    Prompts the user to save if there are unsaved changes.
-    """
-    if not _ensure_project_ready_for_version_action(parent, action_name=action_name):
         return None
 
-    project_path = current_project_path()
-    if project_path is None:
-        MessageDialog(
-            parent,
-            "This project has no file path yet. Use Save As first.",
-            "Save Required",
-        ).exec_()
-        return None
-
-    if sp.project.needs_saving():
-        dialog = MessageDialogCustomButtons(
-            parent,
-            f"The project has unsaved changes. Save before {action_name.lower()}?",
-            "Save Required",
-            has_cancel_button=True,
-            ok_name="Save",
-            cancel_name="Cancel",
-        )
-        if not dialog.exec_():
-            return None
-        try:
-            sp.project.save()
-        except ProjectError:
-            log.exception(f"Failed to save project before {action_name}.")
-            MessageDialog(
-                parent,
-                "Failed to save the current project. Resolve file issues and try again.",
-                "Save Failed",
-            ).exec_()
-            return None
-
-        if sp.project.needs_saving():
-            MessageDialog(
-                parent,
-                "The project still appears unsaved. Save manually and try again.",
-                "Save Required",
-            ).exec_()
-            return None
-
-        project_path = current_project_path()
-        if project_path is None:
-            MessageDialog(
-                parent,
-                "Could not resolve the project path after saving.",
-                "Save Failed",
-            ).exec_()
-            return None
-
-    return project_path
-
-
-# ---------------------------------------------------------------------------
-# Low-level project operations
-# ---------------------------------------------------------------------------
+    return identity, project_version_stream(identity.asset, identity.variant)
 
 
 def _open_existing_project(path: Path, parent: QtWidgets.QWidget | None) -> bool:
@@ -244,16 +183,12 @@ def _save_current_project_as(path: Path, parent: QtWidgets.QWidget | None) -> bo
     return True
 
 
-def _close_current_project(
-    parent: QtWidgets.QWidget | None, *, action_context: str
-) -> bool:
+def _close_current_project(parent: QtWidgets.QWidget | None) -> bool:
     """Close the current project. Returns True on success."""
     try:
         sp.project.close()
     except ProjectError:
-        log.exception(
-            f"Failed to close Substance Painter project before {action_context}."
-        )
+        log.exception("Failed to close the Substance Painter project.")
         MessageDialog(
             parent,
             "Failed to close the currently opened project. "
@@ -264,44 +199,34 @@ def _close_current_project(
     return True
 
 
-# ---------------------------------------------------------------------------
-# Asset-project workflows (composed from the pieces above)
-# ---------------------------------------------------------------------------
-
-
 def _open_existing_project_for_asset(
     asset: Asset, project_path: Path, *, geo_variant: str
 ) -> None:
-    """Open an existing Substance Painter project and tag it with asset metadata."""
+    """Open the asset's existing Substance Painter project."""
     parent = get_main_qt_window()
     if not project_path.exists():
         MessageDialog(
             parent,
-            "No Substance Painter project exists yet. Use Save Current As or Create Default.",
+            "This variant has no Substance Painter project yet. Use Create Asset "
+            "Project to make one.",
             "Missing Substance Painter Project",
         ).exec_()
         log.warning(f"Substance project missing at {project_path}")
         return
 
     cur = current_project_path()
-    if cur and cur.resolve() == project_path.resolve():
-        if sp.project.needs_saving():
-            if not _save_current_project_as(project_path, parent):
-                return
-        store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
+    if cur is not None and is_same_production_file(cur, project_path):
+        log.info(f"{project_path} is already open.")
         return
 
     if sp.project.is_open():
         if sp.project.needs_saving() and not _confirm_discard_unsaved(parent):
             return
-        if not _close_current_project(
-            parent, action_context="opening another asset project"
-        ):
+        if not _close_current_project(parent):
             return
 
     if not _open_existing_project(project_path, parent):
         return
-    store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
     asset_label = asset.display_name or asset.name
     log.info(
         f"Opened Substance project for asset {asset_label} (variant={geo_variant})"
@@ -323,18 +248,16 @@ def _save_current_project_as_asset(
         log.warning("Save current project requested with no project open.")
         return
 
-    cur = current_project_path()
-    if cur and cur.resolve() == project_path.resolve():
-        store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
-        return
-
     if project_path.exists() and not _confirm_overwrite_project(parent, project_path):
         return
 
     project_path.parent.mkdir(parents=True, exist_ok=True)
+    previous_tag = read_tag()
+    tag_project(asset, geo_variant)
     if not _save_current_project_as(project_path, parent):
+        # The project is still the original file, so it keeps the original tag.
+        write_tag(previous_tag)
         return
-    store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
     log.info(f"Saved Substance project to {project_path} (variant={geo_variant})")
 
 
@@ -379,17 +302,6 @@ def _create_default_project_for_asset(
         MessageDialog(parent, message, "Missing Mesh Source").exec_()
         return
 
-    if sp.project.is_open():
-        if sp.project.needs_saving() and not _confirm_discard_unsaved(parent):
-            return
-        if not _close_current_project(
-            parent, action_context="creating a default asset project"
-        ):
-            return
-
-    if project_path.exists() and not _confirm_overwrite_project(parent, project_path):
-        return
-
     template = project_template_path()
     if not template.exists():
         MessageDialog(
@@ -399,6 +311,20 @@ def _create_default_project_for_asset(
             "Contact production to restore the template.",
             "Missing Template",
         ).exec_()
+        return
+
+    # Every check and question comes before the close, so backing out keeps
+    # the open project open.
+    project_open = sp.project.is_open()
+    if (
+        project_open
+        and sp.project.needs_saving()
+        and not _confirm_discard_unsaved(parent)
+    ):
+        return
+    if project_path.exists() and not _confirm_overwrite_project(parent, project_path):
+        return
+    if project_open and not _close_current_project(parent):
         return
 
     project_path.parent.mkdir(parents=True, exist_ok=True)
@@ -420,41 +346,31 @@ def _create_default_project_for_asset(
         ).exec_()
         return
 
-    resolved_project_path = resolve_mapped_path(project_path)
-
-    def _finalize_save() -> None:
-        if not _save_current_project_as(resolved_project_path, parent):
+    def _tag_and_save() -> None:
+        tag_project(asset, variant)
+        if not _save_current_project_as(project_path, parent):
             return
-        store_asset_metadata_when_ready(asset, geo_variant=variant)
+        asset_label = asset.display_name or asset.name
+        log.info(f"Created Substance project at {project_path}")
+        sp.logging.info(
+            f"Created default project for {asset_label} (variant={variant})"
+        )
 
-    run_when_project_editable(_finalize_save)
-    asset_label = asset.display_name or asset.name
-    log.info(f"Created Substance project at {project_path}")
-    sp.logging.info(f"Created default project for {asset_label} (variant={variant})")
-
-
-# ---------------------------------------------------------------------------
-# Public entry points (wired to Substance Painter shelf/menu)
-# ---------------------------------------------------------------------------
+    # A heavy mesh keeps Painter busy after create() returns, and Painter
+    # refuses to save while busy.  It drops the callback if the project closes.
+    sp.project.execute_when_not_busy(_tag_and_save)
 
 
 def launch_open_asset_textures() -> None:
-    """Open or create the Substance Painter project for a selected asset.
-
-    Presents a sequence of dialogs:
-    1. Select an asset and geometry variant
-    2. Open existing project, or choose a creation method
-    3. (If creating) Pick a mesh source and create the project
-    """
-    if sp.project.is_busy():
-        sp.project.execute_when_not_busy(launch_open_asset_textures)
+    """Open or create the Substance Painter project for a selected asset."""
+    parent = get_main_qt_window()
+    if not check_not_busy(parent, "Open Asset"):
         return
 
     conn = ShotGrid.connect(DB_Config)
     # Keyed on `name`, not `display_name`: the dialog resolves its pick with
     # `get_asset(name=...)`.
     assets = group_assets_by_subdirectory(conn.find_assets(), key=lambda a: a.name)
-    parent = get_main_qt_window()
 
     select_dialog = SubstanceAssetSelectDialog(parent, assets, conn)
     if not select_dialog.exec_():
@@ -470,7 +386,7 @@ def launch_open_asset_textures() -> None:
         f"({action}, variant={geo_variant})"
     )
     paths = paths_for_asset(asset)
-    project_path = project_path_for_variant(paths, geo_variant)
+    project_path = paths.textures_variant_path(geo_variant)
 
     if action == SubstanceAssetSelectDialog.ACTION_OPEN_EXISTING:
         _open_existing_project_for_asset(asset, project_path, geo_variant=geo_variant)
@@ -503,35 +419,30 @@ def launch_open_asset_textures() -> None:
         )
 
 
-def launch_version_browser_for_current_project() -> None:
+def launch_version_history() -> None:
     """Show version history for the currently open asset project."""
-    if sp.project.is_busy():
-        sp.project.execute_when_not_busy(launch_version_browser_for_current_project)
-        return
 
     parent = get_main_qt_window()
-    if not _ensure_project_ready_for_version_action(
-        parent, action_name="Version History"
-    ):
+    if not check_project_editable(parent, "Version History"):
         return
 
-    conn = ShotGrid.connect(DB_Config)
-    asset = get_active_asset_from_project(conn)
-    if not asset:
+    versioned = _versioned_project(parent, "Version History")
+    if versioned is None:
+        return
+    identity, project_stream = versioned
+    if not identity.is_working_file:
+        # Restoring replaces the working file, so its history opens only from it.
+        label = project_stream.label
         MessageDialog(
             parent,
-            "Could not resolve the current asset from project metadata.",
+            f"The open file isn't this asset's {label}, so it has no version "
+            f"history of its own.\n\nUse Open Asset to open {label}, or Create "
+            "Asset Project → Use Currently Open Project to save this file as it.",
             "Version History",
         ).exec_()
         return
 
-    geo_variant = _current_geo_variant()
-    asset_paths = paths_for_asset(asset)
-    project_stream = substance_project_stream(
-        asset_paths,
-        geo_variant,
-        owner=asset_owner_for(asset),
-    )
+    asset = identity.asset
     records = list_version_records(project_stream)
     if not records:
         MessageDialog(
@@ -556,9 +467,7 @@ def launch_version_browser_for_current_project() -> None:
         return
 
     if selected_action == VersionBrowserWidget.ACTION_RESTORE:
-        _restore_project_version(
-            parent, selected_record, project_stream, asset, geo_variant=geo_variant
-        )
+        _restore_project_version(parent, selected_record, identity, project_stream)
 
 
 def _has_unversioned_work(project_stream: VersionStreamSpec) -> bool:
@@ -570,40 +479,39 @@ def _has_unversioned_work(project_stream: VersionStreamSpec) -> bool:
 def _restore_project_version(
     parent: QtWidgets.QWidget | None,
     record: VersionRecord,
+    identity: ProjectIdentity,
     project_stream: VersionStreamSpec,
-    asset: Asset,
-    *,
-    geo_variant: str,
 ) -> None:
     if _has_unversioned_work(project_stream):
         choice = prompt_restore_conflict(parent)
         if choice == RESTORE_CANCEL:
             return
         if choice == RESTORE_SAVE_FIRST and not _save_named_version(
-            parent, project_stream
+            parent, identity, project_stream
         ):
             return
 
     # Close the open project before restoring overwrites its file on disk.
-    if sp.project.is_open() and not _close_current_project(
-        parent, action_context="restoring a version"
-    ):
+    if sp.project.is_open() and not _close_current_project(parent):
         return
 
     try:
         working_path = restore_version(record, project_stream)
-    except Exception as exc:
+    except Exception:
         log.exception("Failed to restore Substance Painter version.")
         MessageDialog(
             parent,
-            f"Failed to restore version:\n{exc}",
+            "Could not restore that version, so the working file is unchanged. "
+            "Someone else may have it open, or the version's backup may be "
+            "missing.\n\n"
+            "The project was closed for the restore: use Open Asset to open it "
+            f"again. {LOG_HINT}",
             "Restore Version Failed",
         ).exec_()
         return
 
     if not _open_existing_project(working_path, parent):
         return
-    store_asset_metadata_when_ready(asset, geo_variant=geo_variant)
     MessageDialog(
         parent,
         restored_message(record),
@@ -612,63 +520,42 @@ def _restore_project_version(
 
 
 def launch_save_version() -> None:
-    """Create a manual version for the currently open asset project."""
-    if sp.project.is_busy():
-        sp.project.execute_when_not_busy(launch_save_version)
-        return
+    """Save the open asset project as a new named version."""
 
     parent = get_main_qt_window()
-    project_path = _ensure_project_saved_for_version_action(
-        parent, action_name="Save Version"
-    )
-    if project_path is None:
+    if not check_project_editable(parent, "Save Version"):
         return
-
-    conn = ShotGrid.connect(DB_Config)
-    asset = get_active_asset_from_project(conn)
-    if not asset:
-        MessageDialog(
-            parent,
-            "Could not resolve the current asset from project metadata.",
-            "Save Version",
-        ).exec_()
+    versioned = _versioned_project(parent, "Save Version")
+    if versioned is None:
         return
-
-    geo_variant = _current_geo_variant()
-    project_stream = substance_project_stream(
-        paths_for_asset(asset),
-        geo_variant,
-        owner=asset_owner_for(asset),
-    )
-    _write_named_version(parent, project_path, project_stream)
+    identity, project_stream = versioned
+    if not identity.is_working_file and not _confirm_version_from_copy(
+        parent, identity, project_stream
+    ):
+        return
+    _save_named_version(parent, identity, project_stream)
 
 
 def _save_named_version(
-    parent: QtWidgets.QWidget | None, project_stream: VersionStreamSpec
-) -> bool:
-    """Save the current project as a named version; return True on success."""
-    project_path = _ensure_project_saved_for_version_action(
-        parent, action_name="Save Version"
-    )
-    if project_path is None:
-        return False
-    return _write_named_version(parent, project_path, project_stream)
-
-
-def _write_named_version(
     parent: QtWidgets.QWidget | None,
-    project_path: Path,
+    identity: ProjectIdentity,
     project_stream: VersionStreamSpec,
 ) -> bool:
+    """Save the open project, then store it as a named version in *project_stream*.
+
+    Returns True on success.
+    """
+    if not _save_unsaved_changes(parent):
+        return False
     dialog = SaveVersionDialog(parent)
     if not dialog.exec_():
         return False
     try:
         record = save_version(
-            project_path,
+            identity.project_path,
             project_stream,
             title=dialog.get_title(),
-            note=dialog.get_note(),
+            note=note_with_source(identity, dialog.get_note()),
         )
     except Exception as exc:
         log.exception("Failed to save Substance Painter version.")
@@ -685,32 +572,3 @@ def _write_named_version(
         "Version Saved",
     ).exec_()
     return True
-
-
-# ---------------------------------------------------------------------------
-# Re-exports for public API stability
-# ---------------------------------------------------------------------------
-
-# These symbols were historically imported from this module by other code.
-# They now live in pipe.dcc.substance_painter.util.metadata but are re-exported here so that
-# existing import paths continue to work.
-from pipe.dcc.substance_painter.util.metadata import (  # noqa: E402, F401
-    PIPE_SP_METADATA_CONTEXT,
-    PIPE_SP_METADATA_KEY,
-    PIPE_SP_METADATA_SCHEMA_VERSION,
-    store_asset_metadata_for_project,
-    store_asset_selection_metadata,
-)
-
-__all__ = [
-    "PIPE_SP_METADATA_CONTEXT",
-    "PIPE_SP_METADATA_KEY",
-    "PIPE_SP_METADATA_SCHEMA_VERSION",
-    "get_active_asset_from_project",
-    "get_asset_selection_metadata",
-    "store_asset_metadata_for_project",
-    "store_asset_selection_metadata",
-    "launch_open_asset_textures",
-    "launch_save_version",
-    "launch_version_browser_for_current_project",
-]

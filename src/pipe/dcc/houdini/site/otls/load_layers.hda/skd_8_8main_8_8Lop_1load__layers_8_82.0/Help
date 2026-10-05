@@ -1,0 +1,22 @@
+= SKD Load Layers =
+
+"""Loads what the other departments of a shot have published."""
+
+Each row is a department. Untick a row to work without it.
+
+A row reads the department's current version, so a new publish reaches this hip when it is next opened or reloaded. Choose a version in a row's menu to pin it: the row reads that version until the menu is set back to Current. Pinned rows are listed in the node's comment. A row pinned to a version that is no longer published for the shot is an error on this node, naming the row and the version: choose another version in its menu, or untick the row.
+
+@inputs
+
+Input Stage:
+    The layers are added on top of this stage.
+
+@parameters
+
+Shot Directory:
+    #id: shot
+    The shot whose layers are loaded.
+
+Reload:
+    #id: reload
+    Reads every row's layer from disk again.

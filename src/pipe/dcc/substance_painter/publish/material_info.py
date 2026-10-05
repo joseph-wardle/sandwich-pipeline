@@ -36,7 +36,6 @@ def write_material_info(
                     displacement_source=export_settings.displacement_source,
                     has_udims=export_settings.tex_set.has_uv_tiles(),
                     normal_source=export_settings.normal_source,
-                    normal_type=export_settings.normal_type,
                 )
                 for export_settings in export_settings_arr
             },

@@ -24,7 +24,8 @@ if TYPE_CHECKING:
 SHOT_CODE_FALLBACK_PATTERN = re.compile(r"[A-Za-z]+_\d{3}(?:_[A-Za-z0-9]+)*")
 
 
-def launch_playblast() -> None:
+def launch_playblast(description: str = "") -> None:
+    """`description` is what the ShotGrid Version's description starts as."""
     if runtime.is_headless():
         MessageDialog(None, "Playblast requires the Houdini UI.", "Playblast").exec_()
         return
@@ -34,7 +35,7 @@ def launch_playblast() -> None:
     if conn is None:
         return
 
-    dialog = HPlayblastDialog(parent, conn, _resolve_shot_code())
+    dialog = HPlayblastDialog(parent, conn, _resolve_shot_code(), description)
     if not dialog.exec_():
         return
 
@@ -85,16 +86,7 @@ def _resolve_source_shot(dialog: HPlayblastDialog) -> Shot:
         cut_in, cut_out = dialog.custom_frame_range
         if cut_out < cut_in:
             cut_out = cut_in
-        return Shot(
-            code=dialog.custom_shot_code,
-            id=0,
-            assets=[],
-            cut_in=cut_in,
-            cut_out=cut_out,
-            cut_duration=max(0, cut_out - cut_in),
-            sequence=None,
-            sets=[],
-        )
+        return Shot(id=0, code=dialog.custom_shot_code, cut_in=cut_in, cut_out=cut_out)
 
     shot = dialog.shot
     if shot is None:

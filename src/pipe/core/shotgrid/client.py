@@ -107,7 +107,6 @@ _SG_FIELDS_SHOT: tuple[str, ...] = (
     "assets",
     "sg_cut_in",
     "sg_cut_out",
-    "sg_cut_duration",
     "sg_sequence",
     "sg_sets",
     "sg_substeps",
@@ -152,7 +151,6 @@ _SG_SHOT_DESCRIPTION = "description"
 _SG_SHOT_SEQUENCE = "sg_sequence"
 _SG_SHOT_CUT_IN = "sg_cut_in"
 _SG_SHOT_CUT_OUT = "sg_cut_out"
-_SG_SHOT_CUT_DURATION = "sg_cut_duration"
 _SG_SHOT_TASK_TEMPLATE = "task_template"
 _SG_SHOT_SETS = "sg_sets"
 _SG_VERSION_CODE = "code"
@@ -177,9 +175,6 @@ _SG_NOTE_AUTHOR = "user"
 
 # The `sg_asset_type` of an Asset row that is a set.
 SET_ASSET_TYPE = "Set"
-# Every set version registers as a PublishedFile with this name, the way Piper
-# names a product.
-SET_PUBLISHED_FILE_NAME = "set"
 
 # ShotGrid seeds a new record's task list from a template of this entity type.
 _SG_TASK_TEMPLATE_TYPE = "TaskTemplate"
@@ -1007,20 +1002,33 @@ class ShotGrid:
         invalidate(self)
         return self._created(row, Set)
 
-    def create_set_published_file(
-        self, set: Set, *, version: int, path: Path, description: str
+    # ---- writes: published files -------------------------------------------
+
+    def create_published_file(
+        self,
+        entity: Shot | Set,
+        *,
+        name: str,
+        code: str,
+        version: int,
+        path: Path,
+        description: str,
     ) -> None:
-        """Register one published set version.
+        """Register one publish version of a set or a shot department.
+
+        `name` says what was published and is the same on every version, the way
+        Piper names a product (`set`, `cfx`). `code` is this version's own label.
 
         Raises:
             ShotGridWriteError: ShotGrid rejected the create.
         """
+        sg_type = "Shot" if isinstance(entity, Shot) else "Asset"
         payload = {
             _SG_PROJECT: self._project_ref(),
-            _SG_PUBLISHED_FILE_ENTITY: _entity_ref("Asset", set),
-            _SG_PUBLISHED_FILE_NAME: SET_PUBLISHED_FILE_NAME,
+            _SG_PUBLISHED_FILE_ENTITY: _entity_ref(sg_type, entity),
+            _SG_PUBLISHED_FILE_NAME: name,
             _SG_PUBLISHED_FILE_VERSION: version,
-            _SG_PUBLISHED_FILE_CODE: f"{set.name}_v{version:03d}",
+            _SG_PUBLISHED_FILE_CODE: code,
             _SG_PUBLISHED_FILE_PATH: {"url": path.as_uri(), "name": path.name},
             _SG_PUBLISHED_FILE_DESCRIPTION: description,
         }
@@ -1106,11 +1114,10 @@ class ShotGrid:
         return {"type": _SG_TASK_TEMPLATE_TYPE, "id": rows[0]["id"]}
 
     def set_shot_cut_range(self, shot: Shot, *, cut_in: int, cut_out: int) -> Shot:
-        """Stamp `cut_in`/`cut_out` and the derived `cut_duration` onto `shot`.
+        """Stamp `cut_in`/`cut_out` onto `shot`.
 
         Used by the previs break-out, which fixes a shot's frame range at bake
-        time. `cut_duration` is always `cut_out - cut_in + 1`; it is written
-        alongside so ShotGrid stays internally consistent.
+        time.
 
         Raises:
             ValueError: `cut_out` precedes `cut_in`.
@@ -1539,14 +1546,9 @@ def _selected(**selectors: object) -> tuple[str, object]:
 
 
 def _cut_range_payload(cut_in: int, cut_out: int) -> dict[str, int]:
-    """The three cut fields ShotGrid must always see together."""
     if cut_out < cut_in:
         raise ValueError(f"cut_out ({cut_out}) precedes cut_in ({cut_in}).")
-    return {
-        _SG_SHOT_CUT_IN: cut_in,
-        _SG_SHOT_CUT_OUT: cut_out,
-        _SG_SHOT_CUT_DURATION: cut_out - cut_in + 1,
-    }
+    return {_SG_SHOT_CUT_IN: cut_in, _SG_SHOT_CUT_OUT: cut_out}
 
 
 def _entity_ref(sg_type: str, entity: SGEntity | None) -> dict[str, Any] | None:

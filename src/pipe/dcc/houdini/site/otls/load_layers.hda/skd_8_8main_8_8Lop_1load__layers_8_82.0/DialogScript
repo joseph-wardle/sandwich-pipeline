@@ -1,0 +1,199 @@
+# Dialog script for skd::main::load_layers::2.0 automatically generated
+
+{
+    name	skd::main::load_layers::2.0
+    script	skd::main::load_layers::2.0
+    label	"SKD Load Layers"
+
+    help {
+    }
+
+    inputlabel	1	"Input Stage"
+
+    parm {
+        name    "shot"
+        label   "Shot Directory"
+        type    directory
+        default { "$JOB/`@SHOT`" }
+    }
+    parm {
+        name    "sepparm"
+        label   ""
+        type    separator
+        default { "" }
+    }
+    parm {
+        name    "cam_enable"
+        label   "Camera"
+        type    toggle
+        nolabel
+        joinnext
+        default { "1" }
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import load_layers; load_layers.show_pins(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "cam_version"
+        label   "Camera"
+        type    string
+        default { "current" }
+        disablewhen "{ cam_enable == 0 }"
+        menu {
+            [ "from pipe.dcc.houdini.publish import load_layers" ]
+            [ "return load_layers.version_menu(kwargs[\"node\"], \"cam\")" ]
+            language python
+        }
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import load_layers; load_layers.show_pins(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "anim_enable"
+        label   "Animation"
+        type    toggle
+        nolabel
+        joinnext
+        default { "1" }
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import load_layers; load_layers.show_pins(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "anim_version"
+        label   "Animation"
+        type    string
+        default { "current" }
+        disablewhen "{ anim_enable == 0 }"
+        menu {
+            [ "from pipe.dcc.houdini.publish import load_layers" ]
+            [ "return load_layers.version_menu(kwargs[\"node\"], \"anim\")" ]
+            language python
+        }
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import load_layers; load_layers.show_pins(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "cfx_enable"
+        label   "CFX"
+        type    toggle
+        nolabel
+        joinnext
+        default { "1" }
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import load_layers; load_layers.show_pins(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "cfx_version"
+        label   "CFX"
+        type    string
+        default { "current" }
+        disablewhen "{ cfx_enable == 0 }"
+        menu {
+            [ "from pipe.dcc.houdini.publish import load_layers" ]
+            [ "return load_layers.version_menu(kwargs[\"node\"], \"cfx\")" ]
+            language python
+        }
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import load_layers; load_layers.show_pins(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "fx_enable"
+        label   "FX"
+        type    toggle
+        nolabel
+        joinnext
+        default { "1" }
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import load_layers; load_layers.show_pins(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "fx_version"
+        label   "FX"
+        type    string
+        default { "current" }
+        disablewhen "{ fx_enable == 0 }"
+        menu {
+            [ "from pipe.dcc.houdini.publish import load_layers" ]
+            [ "return load_layers.version_menu(kwargs[\"node\"], \"fx\")" ]
+            language python
+        }
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import load_layers; load_layers.show_pins(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "envfx_enable"
+        label   "EnvFX"
+        type    toggle
+        nolabel
+        joinnext
+        default { "1" }
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import load_layers; load_layers.show_pins(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "envfx_version"
+        label   "EnvFX"
+        type    string
+        default { "current" }
+        disablewhen "{ envfx_enable == 0 }"
+        menu {
+            [ "from pipe.dcc.houdini.publish import load_layers" ]
+            [ "return load_layers.version_menu(kwargs[\"node\"], \"envfx\")" ]
+            language python
+        }
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import load_layers; load_layers.show_pins(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "lighting_enable"
+        label   "Lighting"
+        type    toggle
+        nolabel
+        joinnext
+        default { "1" }
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import load_layers; load_layers.show_pins(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "lighting_version"
+        label   "Lighting"
+        type    string
+        default { "current" }
+        disablewhen "{ lighting_enable == 0 }"
+        menu {
+            [ "from pipe.dcc.houdini.publish import load_layers" ]
+            [ "return load_layers.version_menu(kwargs[\"node\"], \"lighting\")" ]
+            language python
+        }
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import load_layers; load_layers.show_pins(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "flo_enable"
+        label   "FLO"
+        type    toggle
+        nolabel
+        joinnext
+        default { "1" }
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import load_layers; load_layers.show_pins(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "flo_version"
+        label   "FLO"
+        type    string
+        default { "current" }
+        disablewhen "{ flo_enable == 0 }"
+        menu {
+            [ "from pipe.dcc.houdini.publish import load_layers" ]
+            [ "return load_layers.version_menu(kwargs[\"node\"], \"flo\")" ]
+            language python
+        }
+        parmtag { "script_callback" "from pipe.dcc.houdini.publish import load_layers; load_layers.show_pins(kwargs[\"node\"])" }
+        parmtag { "script_callback_language" "python" }
+    }
+    parm {
+        name    "reload"
+        label   "Reload"
+        type    button
+        default { "0" }
+    }
+}

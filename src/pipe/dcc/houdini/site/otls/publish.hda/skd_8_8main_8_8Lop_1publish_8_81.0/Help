@@ -1,0 +1,20 @@
+= SKD Publish =
+
+"""Marks what this hip publishes."""
+
+Wire it below the last node of the work to publish. Publish, here or on the shelf, writes the next version and makes it current. It tells the departments downstream when you tick Tell or Final in the dialog, and always once a version of this layer has been published as FINAL.
+
+Layers above a Layer Break are left out. Everything else is flattened into one file.
+
+A hip holds one publish node.
+
+@inputs
+
+Input Stage:
+    The stage to publish.
+
+@parameters
+
+Publish:
+    #id: publish
+    Opens the publish dialog.

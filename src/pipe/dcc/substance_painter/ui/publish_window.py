@@ -1,0 +1,819 @@
+from __future__ import annotations
+
+import logging
+from math import log2
+from re import findall
+from typing import TYPE_CHECKING
+
+from Qt import QtCore, QtWidgets
+from Qt.QtCore import QRegExp
+from Qt.QtGui import QCloseEvent, QIcon, QPixmap, QRegExpValidator
+from Qt.QtWidgets import (
+    QComboBox,
+    QLabel,
+    QLayout,
+    QMainWindow,
+)
+
+if TYPE_CHECKING:
+    import typing
+
+import substance_painter as sp
+from substance_painter.exception import ProjectError, ServiceNotFoundError
+
+from pipe.core.asset import DEFAULT_GEO_VARIANT, paths_for_asset
+from pipe.core.ui import ButtonPair, MessageDialog, MessageDialogCustomButtons
+from pipe.core.ui.progress import ProgressDialog
+from pipe.core.shotgrid import Asset, ShotGrid
+from pipe.dcc.substance_painter.publish.export import (
+    TexSetExportSettings,
+    TextureExportError,
+)
+from pipe.dcc.substance_painter.publish.progress import (
+    PublishProgressUpdate,
+    PublishStage,
+)
+from pipe.dcc.substance_painter.publish.sequence import (
+    PublishCancelled,
+    PublishRequest,
+    publish_textures,
+    register_material_selection,
+)
+from pipe.dcc.substance_painter.runtime import get_main_qt_window
+from pipe.dcc.substance_painter.util.metadata import ProjectIdentity
+from pipe.dcc.substance_painter.util.project import (
+    check_project_editable,
+    current_project_path,
+    save_project,
+)
+from pipe.dcc.substance_painter.util.docs import docs_footer, docs_link_html
+from pipe.dcc.substance_painter.util.texture_set import texture_set_name
+from pipe.core.struct.material import DisplacementSource, NormalSource
+from pipe.core.util import checkbox_callback_helper, dict_index
+from pipe.core.util.paths import get_repo_root
+
+log = logging.getLogger(__name__)
+
+_CANCELLED_BEFORE_EXPORT_MESSAGE = "Publish cancelled. No textures were exported."
+_CANCELLED_DURING_EXPORT_MESSAGE = (
+    "Publish cancelled before it finished.\n\n"
+    "Textures exported before you cancelled are already in the publish folder, "
+    "so it may hold a mix of old and new textures. Publish again to replace "
+    "them all."
+)
+_STAGES_BEFORE_EXPORT = (
+    PublishStage.SAVING_PROJECT,
+    PublishStage.PREPARING_PUBLISH,
+    PublishStage.PLANNING_EXPORT,
+)
+
+
+class SubstancePublishWindow(QMainWindow, ButtonPair):
+    _progress_dialog: ProgressDialog | None
+    _publish_stages: tuple[PublishStage, ...]
+    _curr_asset: Asset
+    _identity: ProjectIdentity
+    _central_widget: QtWidgets.QWidget
+    _conn: ShotGrid
+    _main_layout: QLayout
+    _mat_var_dropdown: QComboBox
+    _geo_var_dropdown: QComboBox
+    _material_layer_dropdown: QComboBox
+    _version_title_field: QtWidgets.QLineEdit
+    _version_note_field: QtWidgets.QTextEdit
+
+    _tex_set_dict: dict[sp.textureset.TextureSet, "TexSetWidget"]
+
+    def __init__(self, conn: ShotGrid, identity: ProjectIdentity) -> None:
+        super().__init__(get_main_qt_window())
+
+        self._progress_dialog = None
+        self._publish_stages = ()
+        self._tex_set_dict = {}
+        self._conn = conn
+        self._identity = identity
+        self._curr_asset = identity.asset
+        self._setup_publish_ui()
+
+    @property
+    def is_publishing(self) -> bool:
+        return self._progress_dialog is not None
+
+    @property
+    def _publish_cancelled(self) -> bool:
+        dialog = self._progress_dialog
+        return dialog is not None and dialog.cancelled
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self.is_publishing:
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def _setup_publish_ui(self) -> None:
+        asset = self._curr_asset
+
+        self.setWindowTitle("Publish Textures")
+        self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
+        self.resize(560, 700)
+
+        self._central_widget = QtWidgets.QWidget()
+        self.setCentralWidget(self._central_widget)
+        self._main_layout = QtWidgets.QVBoxLayout(self._central_widget)
+        self._main_layout.setContentsMargins(12, 12, 12, 12)
+        self._main_layout.setSpacing(8)
+
+        title = QLabel("Publish Textures")
+        title.setAlignment(QtCore.Qt.AlignCenter)
+        title.setStyleSheet("font-size: 15px; font-weight: bold;")
+        self._main_layout.addWidget(title)
+
+        asset_display_name = asset.display_name or asset.name or "Unknown Asset"
+        asset_label = QLabel(f"Asset: {asset_display_name}")
+        asset_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+        asset_label.setToolTip(
+            "Worked out from the folder the project file is saved in."
+        )
+        self._main_layout.addWidget(asset_label)
+
+        lock_warning = QLabel(
+            "<b>Heads up:</b> If this asset is open in Houdini on Windows, "
+            "stop the render and press <b>Reset RenderMan RIS/XPU</b> before "
+            "exporting or TEX conversion can fail."
+        )
+        lock_warning.setWordWrap(True)
+        lock_warning.setStyleSheet("color: #d28d42;")
+        self._main_layout.addWidget(lock_warning)
+
+        texture_set_layout = QtWidgets.QVBoxLayout()
+        for tex_set in sp.textureset.all_texture_sets():
+            widget = TexSetWidget(self, tex_set)
+            self._tex_set_dict[tex_set] = widget
+            texture_set_layout.addWidget(widget)
+
+        texture_set_widget = QtWidgets.QWidget()
+        texture_set_widget.setLayout(texture_set_layout)
+        texture_set_scroll_area = QtWidgets.QScrollArea()
+        texture_set_scroll_area.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarAlwaysOff
+        )
+        texture_set_scroll_area.setWidget(texture_set_widget)
+        texture_set_scroll_area.setWidgetResizable(True)
+        self._main_layout.addWidget(texture_set_scroll_area, 1)
+
+        mat_items = sorted(asset.material_variants or {"default"})
+        mat_default = "default" if "default" in mat_items else mat_items[0]
+        self._mat_var_dropdown = self._build_variant_dropdown(
+            label_text="Material Variant:",
+            tooltip=(
+                "Material variant name used in the publish folder. "
+                "Type a new name to create a variant."
+            ),
+            items=mat_items,
+            default_value=mat_default,
+            editable=True,
+            validator=QRegExpValidator(QRegExp("[a-z][a-z_\\d]*")),
+        )
+
+        project_variant = self._identity.variant
+        geo_items = sorted(asset.geometry_variants or {DEFAULT_GEO_VARIANT})
+        self._geo_var_dropdown = self._build_variant_dropdown(
+            label_text="Geometry Variant:",
+            tooltip=("Geometry variant to match the published model."),
+            items=geo_items,
+            default_value=project_variant or "",
+            editable=False,
+        )
+        if project_variant not in geo_items:
+            self._geo_var_dropdown.setCurrentIndex(-1)
+        project_warning = self._project_warning(geo_items)
+        if project_warning:
+            warning_label = QLabel(project_warning)
+            warning_label.setWordWrap(True)
+            warning_label.setStyleSheet("color: #d28d42;")
+            self._main_layout.addWidget(warning_label)
+
+        material_layer_items = sorted(asset.material_layers or {"default"})
+        material_layer_default = (
+            "default" if "default" in material_layer_items else material_layer_items[0]
+        )
+        self._material_layer_dropdown = self._build_variant_dropdown(
+            label_text="Material Layer:",
+            tooltip=("Material layer name used for layered materials."),
+            items=material_layer_items,
+            default_value=material_layer_default,
+            editable=True,
+            validator=QRegExpValidator(QRegExp("[a-z][a-z_\\d]*")),
+        )
+        self._build_version_metadata_fields()
+
+        self._init_buttons(has_cancel_button=True, ok_name="Publish")
+        self.buttons.rejected.connect(self.close)
+        self.buttons.accepted.connect(self.do_publish)
+        ok_btn = self.buttons.button(QtWidgets.QDialogButtonBox.Ok)
+        if ok_btn:
+            ok_btn.setToolTip("Export textures and convert them to TEX/preview files.")
+        cancel_btn = self.buttons.button(QtWidgets.QDialogButtonBox.Cancel)
+        if cancel_btn:
+            cancel_btn.setToolTip("Close without exporting.")
+        self._main_layout.addWidget(self.buttons)
+        self._geo_var_dropdown.currentIndexChanged.connect(
+            self._update_publish_button_state
+        )
+        self._update_publish_button_state()
+
+        footer = docs_footer(
+            "Tip: Open your project with Open Asset so it publishes to the right "
+            "asset and variant. For more information, see "
+            f"{docs_link_html()}."
+        )
+        self._main_layout.addWidget(footer)
+
+    def _project_warning(self, geo_items: list[str]) -> str | None:
+        """Return what the artist should know about the open file, if anything."""
+        identity = self._identity
+        if identity.variant is None:
+            return (
+                "This file isn't linked to a geometry variant. Choose where to "
+                "publish; the project is backed up as the next version in that "
+                "variant's history, and restoring that version replaces the "
+                "variant's working file."
+            )
+        warnings: list[str] = []
+        if not identity.is_working_file:
+            working_name = (
+                paths_for_asset(identity.asset)
+                .textures_variant_path(identity.variant)
+                .name
+            )
+            warnings.append(
+                f"This file is a copy, not the asset's working file ({working_name}). "
+                f"Publishing backs it up as the next version in {working_name}'s "
+                f"history; restoring that version replaces {working_name}."
+            )
+        if identity.variant not in geo_items:
+            warnings.append(
+                f"This project is for geometry variant '{identity.variant}', which "
+                "this asset doesn't list. Choose where to publish."
+            )
+        return " ".join(warnings) or None
+
+    def _build_variant_dropdown(
+        self,
+        *,
+        label_text: str,
+        tooltip: str,
+        items: list[str],
+        default_value: str,
+        editable: bool,
+        validator: QRegExpValidator | None = None,
+    ) -> QComboBox:
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        label = QLabel(label_text)
+        label.setToolTip(tooltip)
+        layout.addWidget(label, 30)
+
+        dropdown = QComboBox()
+        dropdown.addItems(items)
+        dropdown.setCurrentText(default_value)
+        dropdown.setEditable(editable)
+        dropdown.setToolTip(tooltip)
+        if validator is not None:
+            dropdown.setValidator(validator)
+        layout.addWidget(dropdown, 70)
+        self._main_layout.addWidget(widget)
+        return dropdown
+
+    def _build_version_metadata_fields(self) -> None:
+        title_widget = QtWidgets.QWidget()
+        title_layout = QtWidgets.QHBoxLayout(title_widget)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(6)
+
+        title_label = QLabel("Version Title:")
+        title_label.setToolTip("Required. This appears in version history.")
+        title_layout.addWidget(title_label, 30)
+
+        self._version_title_field = QtWidgets.QLineEdit()
+        self._version_title_field.setPlaceholderText("e.g. Dirt pass refinement")
+        self._version_title_field.setToolTip(
+            "Required. Artists see this title in version history."
+        )
+        self._version_title_field.textChanged.connect(self._update_publish_button_state)
+        title_layout.addWidget(self._version_title_field, 70)
+        self._main_layout.addWidget(title_widget)
+
+        note_label = QLabel("Version Note (optional):")
+        note_label.setToolTip("Optional context shown in version history details.")
+        self._main_layout.addWidget(note_label)
+
+        self._version_note_field = QtWidgets.QTextEdit()
+        self._version_note_field.setPlaceholderText(
+            "Optional details for this texture publish."
+        )
+        self._version_note_field.setFixedHeight(72)
+        self._version_note_field.setToolTip(
+            "Optional note shown in version history details."
+        )
+        self._main_layout.addWidget(self._version_note_field)
+
+    def _update_publish_button_state(self) -> None:
+        ok_btn = self.buttons.button(QtWidgets.QDialogButtonBox.Ok)
+        if ok_btn:
+            ok_btn.setEnabled(bool(self.version_title and self.geo_var))
+
+    @property
+    def mat_var(self) -> str:
+        return self._mat_var_dropdown.currentText()
+
+    @property
+    def geo_var(self) -> str:
+        return self._geo_var_dropdown.currentText()
+
+    @property
+    def material_layer(self) -> str:
+        return self._material_layer_dropdown.currentText()
+
+    @property
+    def version_title(self) -> str:
+        return self._version_title_field.text().strip()
+
+    @property
+    def version_note(self) -> str | None:
+        note = self._version_note_field.toPlainText().strip()
+        return note or None
+
+    def do_publish(self) -> None:
+        """Validate inputs and start the texture publish pipeline."""
+        if self.is_publishing:
+            return
+
+        version_title = self.version_title
+        if not version_title:
+            MessageDialog(
+                get_main_qt_window(),
+                "Version title is required before exporting textures.",
+                "Publish Textures",
+            ).exec_()
+            return
+        geo_var = self.geo_var.strip()
+        if not geo_var:
+            MessageDialog(
+                get_main_qt_window(),
+                "Choose a geometry variant before exporting textures.",
+                "Publish Textures",
+            ).exec_()
+            return
+        if not self._check_can_publish():
+            return
+        save_required = sp.project.needs_saving()
+        if save_required and not self._confirm_save_before_publish():
+            return
+
+        mat_var = self.mat_var.strip() or "default"
+        material_layer = self.material_layer.strip() or "default"
+
+        asset_label = (
+            self._curr_asset.display_name or self._curr_asset.name or "Unknown Asset"
+        )
+        log.info(
+            f"Publishing textures for {asset_label} "
+            f"(geo={geo_var}, mat={mat_var}, material_layer={material_layer})"
+        )
+
+        export_settings = [
+            TexSetExportSettings(
+                ts,
+                wgt.extra_channels,
+                wgt.resolution,
+                wgt.displacement_source,
+                wgt.normal_source,
+            )
+            for ts, wgt in self._tex_set_dict.items()
+            if wgt.enabled
+        ]
+        if not export_settings:
+            MessageDialog(
+                get_main_qt_window(),
+                "No texture sets are enabled for export.",
+                "Publish Textures",
+            ).exec_()
+            return
+        log.info(f"Exporting {len(export_settings)} texture sets")
+
+        request = PublishRequest(
+            asset_label=asset_label,
+            export_settings=tuple(export_settings),
+            geo_var=geo_var,
+            mat_var=mat_var,
+            material_layer=material_layer,
+            save_required=save_required,
+            version_title=version_title,
+            version_note=self.version_note,
+        )
+        self._begin_publish(request)
+
+    def _begin_publish(self, request: PublishRequest) -> None:
+        """Show the progress dialog, then publish once Painter is idle."""
+        self._publish_stages = tuple(
+            stage
+            for stage in PublishStage
+            if request.save_required or stage is not PublishStage.SAVING_PROJECT
+        )
+        self._progress_dialog = ProgressDialog(
+            self,
+            title="Publishing Textures",
+            total_steps=len(self._publish_stages),
+            cancellable=True,
+        )
+        self._set_publish_controls_enabled(False)
+        self._send_publish_progress(
+            PublishProgressUpdate(
+                stage=self._publish_stages[0],
+                message=(
+                    "Waiting for Substance Painter to become idle before saving and publishing."
+                    if request.save_required
+                    else "Waiting for Substance Painter to become idle before publishing."
+                ),
+            )
+        )
+
+        try:
+            # Painter runs this at once when it is already idle.
+            sp.project.execute_when_not_busy(lambda: self._run_publish_request(request))
+        except (ProjectError, ServiceNotFoundError):
+            log.exception("Failed to schedule publish when Substance Painter is idle.")
+            self._show_publish_message(
+                "Failed to start the publish in Substance Painter. Try again after the project finishes loading.",
+                title="Publish Startup Failed",
+            )
+
+    def _run_publish_request(self, request: PublishRequest) -> None:
+        """Save and publish; then report the outcome and clean up."""
+        try:
+            if self._publish_cancelled:
+                raise PublishCancelled(self._publish_stages[0])
+            self._curr_asset = register_material_selection(
+                self._conn, self._curr_asset, request
+            )
+
+            if request.save_required and not self._save_before_publish():
+                return
+
+            complete, summary = publish_textures(
+                self._curr_asset,
+                self._identity,
+                request,
+                report=self._send_publish_progress,
+                is_cancelled=lambda: self._publish_cancelled,
+            )
+            if complete:
+                sp.logging.info(f"Publish complete for {request.asset_label}")
+                title = "Publish Textures"
+            else:
+                sp.logging.warning(f"Publish incomplete for {request.asset_label}")
+                title = "Publish Incomplete"
+            self._show_publish_message(summary, title=title)
+        except PublishCancelled as cancelled:
+            log.info(f"Publish cancelled for {request.asset_label}: {cancelled}")
+            self._show_publish_message(
+                _CANCELLED_BEFORE_EXPORT_MESSAGE
+                if cancelled.stage in _STAGES_BEFORE_EXPORT
+                else _CANCELLED_DURING_EXPORT_MESSAGE,
+                title="Publish Cancelled",
+            )
+        except TextureExportError as exc:
+            log.error(f"Texture export failed for {request.asset_label}")
+            sp.logging.error(f"Publish failed for {request.asset_label}")
+            self._show_publish_message(str(exc), title="Texture Export Failed")
+        except Exception as exc:
+            log.exception(
+                f"Unexpected error while publishing textures for {request.asset_label}"
+            )
+            self._show_publish_message(
+                "An unexpected error occurred while publishing textures.\n"
+                f"Details: {exc}",
+                title="Publish Failed",
+            )
+        finally:
+            self._finish_publish()
+
+    def _save_before_publish(self) -> bool:
+        self._send_publish_progress(
+            PublishProgressUpdate(
+                stage=PublishStage.SAVING_PROJECT,
+                message="Saving the Substance Painter project before publish.",
+            )
+        )
+        return save_project(
+            lambda message, title: self._show_publish_message(message, title=title)
+        )
+
+    def _finish_publish(self) -> None:
+        dialog = self._progress_dialog
+        if dialog is None:
+            return
+        self._progress_dialog = None
+        dialog.finish()
+        self._set_publish_controls_enabled(True)
+
+    def _send_publish_progress(self, update: PublishProgressUpdate) -> None:
+        """Adapt a ``PublishProgressUpdate`` to the shared ``ProgressDialog``."""
+        dialog = self._progress_dialog
+        if dialog is None:
+            return
+        try:
+            step = self._publish_stages.index(update.stage) + 1
+        except ValueError:
+            step = len(self._publish_stages)
+        dialog.set_progress(
+            step=step,
+            stage=update.stage.value,
+            detail=update.message,
+            current=update.current,
+            total=update.total,
+        )
+
+    def _set_publish_controls_enabled(self, enabled: bool) -> None:
+        self._central_widget.setEnabled(enabled)
+        self.buttons.setEnabled(enabled)
+
+    def _show_publish_message(
+        self,
+        message: str,
+        *,
+        title: str | None = None,
+    ) -> None:
+        self._finish_publish()
+        MessageDialog(
+            get_main_qt_window(),
+            message,
+            title or "Publish Textures",
+        ).exec_()
+
+    def _check_can_publish(self) -> bool:
+        """Check that the project is editable and still the file this window is for.
+
+        Shows a message dialog and returns False if any precondition fails.
+        """
+        if not check_project_editable(get_main_qt_window(), "Publish Textures"):
+            return False
+
+        if current_project_path() != self._identity.project_path:
+            MessageDialog(
+                get_main_qt_window(),
+                "The project was saved under another name after this window "
+                "opened. Close this window and open Publish Textures again.",
+                "Publish Textures",
+            ).exec_()
+            return False
+
+        return True
+
+    def _confirm_save_before_publish(self) -> bool:
+        dialog = MessageDialogCustomButtons(
+            get_main_qt_window(),
+            "The project has unsaved changes. Save before publishing?",
+            "Save Required",
+            has_cancel_button=True,
+            ok_name="Save",
+            cancel_name="Cancel",
+        )
+        return bool(dialog.exec_())
+
+
+class TexSetWidget(QtWidgets.QWidget):
+    extra_channels: set[sp.textureset.Channel]
+
+    _displacement_source_dropdown: QComboBox
+    _enabled_checkbox: QtWidgets.QCheckBox
+    _extra_channels_layout: QLayout
+    _help_icon: QIcon
+    _normal_source_dropdown: QComboBox
+    _resolution_dropdown: QComboBox
+    _stack: sp.textureset.Stack | None
+    _tex_set: sp.textureset.TextureSet
+
+    DEFAULT_CHANNELS = [
+        sp.textureset.ChannelType.BaseColor,
+        sp.textureset.ChannelType.Height,
+        sp.textureset.ChannelType.Roughness,
+        sp.textureset.ChannelType.Opacity,
+        sp.textureset.ChannelType.Emissive,
+        sp.textureset.ChannelType.Metallic,
+        sp.textureset.ChannelType.Normal,
+        sp.textureset.ChannelType.Displacement,
+    ]
+
+    _NORM_SOURCE_STRS = {
+        NormalSource.NORMAL_HEIGHT: "Normal + Height (default)",
+        NormalSource.NORMAL_ONLY: "Normal Only",
+    }
+
+    _DISP_SOURCE_STRS = {
+        DisplacementSource.NONE: "None (default)",
+        DisplacementSource.HEIGHT: "Height",
+        DisplacementSource.DISPLACEMENT: "Displacement",
+    }
+
+    def __init__(
+        self,
+        parent: SubstancePublishWindow,
+        tex_set: sp.textureset.TextureSet,
+    ) -> None:
+        super().__init__(parent)
+        self._tex_set = tex_set
+        self.extra_channels = set()
+        self._help_icon = QIcon(
+            QPixmap(str(get_repo_root() / "resources/icon/material-help.svg"))
+        )
+
+        self._stack = None
+        try:
+            self._stack = self._tex_set.get_stack()
+        except ValueError:
+            MessageDialog(
+                get_main_qt_window(),
+                (
+                    f'Texture Set "{texture_set_name(self._tex_set)}" uses material '
+                    "layering. This publish tool currently supports non-layered "
+                    "texture sets only."
+                ),
+                "Publish Textures",
+            ).exec_()
+            self._setup_unsupported_layout()
+            return
+
+        self._setup_ui()
+
+    def _info_tooltip(self, message: str) -> QtWidgets.QToolButton:
+        button = QtWidgets.QToolButton()
+        button.setIcon(self._help_icon)
+        button.setStyleSheet("background-color: #00000000; border: none;")
+        button.setToolTip(message)
+        return button
+
+    @staticmethod
+    def _get_default(items: typing.Iterable[str]) -> str:
+        return next((i for i in items if i.endswith("(default)")), "")
+
+    def _setup_unsupported_layout(self) -> None:
+        layout = QtWidgets.QHBoxLayout()
+        self._enabled_checkbox = QtWidgets.QCheckBox()
+        self._enabled_checkbox.setChecked(False)
+        self._enabled_checkbox.setEnabled(False)
+        layout.addWidget(self._enabled_checkbox, 10, QtCore.Qt.AlignTop)
+
+        message = QLabel(
+            f"{texture_set_name(self._tex_set)} "
+            "(material layering not supported by this exporter)"
+        )
+        message.setWordWrap(True)
+        message.setStyleSheet("font-size: 11px; color: #8a8a8a;")
+        layout.addWidget(message, 90)
+        self.setLayout(layout)
+
+    def _setup_ui(self) -> None:
+        assert self._stack is not None
+        layout = QtWidgets.QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.setAlignment(QtCore.Qt.AlignTop)
+
+        self._enabled_checkbox = QtWidgets.QCheckBox()
+        self._enabled_checkbox.setChecked(True)
+        self._enabled_checkbox.setStyleSheet("padding-top: 10px;")
+        self._enabled_checkbox.setToolTip("Include this texture set in the export.")
+        layout.addWidget(self._enabled_checkbox, 10, QtCore.Qt.AlignTop)
+        settings_container = QtWidgets.QWidget()
+        self._enabled_checkbox.toggled.connect(
+            checkbox_callback_helper(self._enabled_checkbox, settings_container)
+        )
+        settings_layout = QtWidgets.QGridLayout(settings_container)
+        settings_layout.setSpacing(2)
+        layout.addWidget(settings_container, 90)
+
+        self.label = QLabel(texture_set_name(self._tex_set))
+        self.label.setStyleSheet("font-size: 11px; font-weight: bold;")
+        settings_layout.addWidget(self.label, 0, 0, 1, 3)
+
+        extra_channels = QtWidgets.QWidget()
+        self._extra_channels_layout = QtWidgets.QHBoxLayout(extra_channels)
+        if self._setup_extra_channel_layout():
+            settings_layout.addWidget(QLabel("Extra Maps:"), 1, 0)
+            settings_layout.addWidget(extra_channels)
+
+        settings_layout.addWidget(QLabel("Resolution:"), 2, 0)
+        self._resolution_dropdown = QComboBox()
+        self._resolution_dropdown.addItems(
+            ["128", "256", "512", "1024", "2048", "4096"]
+        )
+        current_res_log2 = int(log2(self._tex_set.get_resolution().width))
+        self._resolution_dropdown.setCurrentIndex(current_res_log2 - 7)
+        settings_layout.addWidget(self._resolution_dropdown)
+
+        settings_layout.addWidget(QLabel("Normal Map Source:"), 3, 0)
+        self._normal_source_dropdown = QComboBox()
+        ns_items = self._NORM_SOURCE_STRS.values()
+        self._normal_source_dropdown.addItems(ns_items)
+        self._normal_source_dropdown.setCurrentText(self._get_default(ns_items))
+        settings_layout.addWidget(self._normal_source_dropdown)
+        settings_layout.addWidget(
+            self._info_tooltip(
+                "Substance's default behavior is to convert the Height channel "
+                "to a normal map, then combine it with the Normal channel. \n"
+                '"Normal + Height" keeps this behavior. \n'
+                '"Normal Only" does not combine in the Height channel.'
+            )
+        )
+
+        settings_layout.addWidget(QLabel("Displacement Map Source:"), 4, 0)
+        self._displacement_source_dropdown = QComboBox()
+        ds_items = list(self._DISP_SOURCE_STRS.values())
+        self._displacement_source_dropdown.addItems(ds_items)
+        self._displacement_source_dropdown.setCurrentText(self._get_default(ds_items))
+        if sp.textureset.ChannelType.Displacement in self._stack.all_channels().keys():
+            self._displacement_source_dropdown.setCurrentText(
+                self._DISP_SOURCE_STRS[DisplacementSource.DISPLACEMENT]
+            )
+        else:
+            self._displacement_source_dropdown.removeItem(
+                ds_items.index(self._DISP_SOURCE_STRS[DisplacementSource.DISPLACEMENT])
+            )
+        settings_layout.addWidget(self._displacement_source_dropdown)
+        settings_layout.addWidget(
+            self._info_tooltip(
+                "Displacement is expensive and should only be used on assets "
+                "that will be close enough to the camera that the changes to "
+                "the silhouette will be noticeable. You can source the "
+                "displacement map from the Height channel, or from the "
+                "Displacement channel."
+            )
+        )
+
+        self.setLayout(layout)
+
+    def _setup_extra_channel_layout(self) -> bool:
+        """Sets up extra channel layout. Returns False if there are no extra channels"""
+        if self._stack is None:
+            return False
+        has_channels: bool = False
+        for channel_type, channel in self._stack.all_channels().items():
+            if channel_type not in self.DEFAULT_CHANNELS:
+                # get channel name
+                name = (
+                    getattr(channel, "label", None)
+                    and channel.label().title().replace(" ", "")
+                    or channel.type().name
+                )
+                # add spaces
+                name = " ".join(
+                    findall(r"[A-Z0-9](?:[a-z0-9]+|[A-Z]*(?=[A-Z]|$))", name)
+                )
+                # set up checkboxes
+                checkbox = QtWidgets.QCheckBox(name)
+                checkbox.setChecked(False)
+                checkbox.stateChanged.connect(self._extra_channels_updater(channel))
+                self._extra_channels_layout.addWidget(checkbox)
+                has_channels = True
+
+        return has_channels
+
+    def _extra_channels_updater(
+        self, ch: sp.textureset.Channel
+    ) -> typing.Callable[[], None]:
+        """Callback function generator for extra channels checkboxes"""
+
+        def inner() -> None:
+            if ch in self.extra_channels:
+                self.extra_channels.remove(ch)
+            else:
+                self.extra_channels.add(ch)
+
+        return inner
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled_checkbox.isChecked()
+
+    @property
+    def resolution(self) -> int:
+        """Returns the resolution log 2"""
+        return self._resolution_dropdown.currentIndex() + 7
+
+    @property
+    def normal_source(self) -> NormalSource:
+        return dict_index(
+            self._NORM_SOURCE_STRS, self._normal_source_dropdown.currentText()
+        )
+
+    @property
+    def displacement_source(self) -> DisplacementSource:
+        return dict_index(
+            self._DISP_SOURCE_STRS,
+            self._displacement_source_dropdown.currentText(),
+        )

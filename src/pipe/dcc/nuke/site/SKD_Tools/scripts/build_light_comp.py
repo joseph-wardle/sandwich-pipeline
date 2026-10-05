@@ -1,8 +1,11 @@
 import os
+from pathlib import Path
+
 import nuke
 
+from pipe.core.shot import current_layer_path
 
-USD_RELATIVE = os.path.join("..", "lighting", "usd", "main.usd")
+DEPARTMENT = "lighting"
 
 BRANCH_SPACING = 120
 SHUFFLE_Y_OFFSET = 200
@@ -30,8 +33,8 @@ def _resolve_usd_path():
     script = nuke.root().name()
     if script == "Root":
         raise RuntimeError("Save the Nuke script before running this tool.")
-    script_dir = os.path.dirname(script)
-    return os.path.normpath(os.path.join(script_dir, USD_RELATIVE))
+    # A comp is `<shot>/comp/<shot>.nk`.
+    return str(current_layer_path(Path(script).parents[1], DEPARTMENT))
 
 
 def run():

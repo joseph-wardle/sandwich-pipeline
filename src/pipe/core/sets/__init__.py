@@ -1,32 +1,21 @@
-"""Sets: where their versions live on disk, and their hip's save history."""
+"""Sets: their current layer on disk and what a publish writes to it."""
 
 from .publish import (
+    PUBLISHED_FILE_NAME,
     SETS_DIRNAME,
-    commit_version,
-    create_staging,
     current_layer_path,
-    discard_staged,
-    make_current,
-    next_version,
     prepare_layer,
     set_dir,
+    set_target,
     valid_set_name,
-    version_layer_path,
 )
-from .version_adapter import hip_path, houdini_set_stream
 
 __all__ = [
+    "PUBLISHED_FILE_NAME",
     "SETS_DIRNAME",
-    "commit_version",
-    "create_staging",
     "current_layer_path",
-    "discard_staged",
-    "hip_path",
-    "houdini_set_stream",
-    "make_current",
-    "next_version",
     "prepare_layer",
     "set_dir",
+    "set_target",
     "valid_set_name",
-    "version_layer_path",
 ]

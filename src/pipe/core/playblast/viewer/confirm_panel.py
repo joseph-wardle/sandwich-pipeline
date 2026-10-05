@@ -345,6 +345,7 @@ class _ShotGridRow(_Row):
         self._refresh_button.clicked.connect(self._on_refresh)
         self._description = QLineEdit()
         self._description.setPlaceholderText("Description (optional)")
+        self._description.setText(destination.description)
 
         search_row = QHBoxLayout()
         search_row.addWidget(self._search_field, stretch=1)

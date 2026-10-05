@@ -48,11 +48,13 @@ class PrevisPlayblastDialog(MPlayblastDialog):
 
     SETTINGS_KEY = "maya_previs"
 
-    def __init__(self, parent: QWidget | None) -> None:
+    def __init__(self, parent: QWidget | None, description: str = "") -> None:
         # Read previs state before super(), so the tab set can branch on file
         # type while the UI is built.
         self._previs_state = previs_state.read_state()
-        super().__init__(parent, windowTitle="SKD Previs Playblast")
+        super().__init__(
+            parent, windowTitle="SKD Previs Playblast", description=description
+        )
 
     # ------------------------------------------------------------------
     # Base-dialog behaviour overrides for previs files
@@ -188,6 +190,7 @@ class PrevisPlayblastDialog(MPlayblastDialog):
         return ShotGridDestination(
             entity=self._review_entity(),
             default_on=self._selected_source_mode() != _MODE_SHOT,
+            description=self._description,
         )
 
     # ------------------------------------------------------------------

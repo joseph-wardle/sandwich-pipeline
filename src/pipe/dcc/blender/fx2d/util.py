@@ -6,10 +6,18 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import bpy
-from bpy.types import Collection, Operator, Scene, ViewLayer
+from bpy.types import (
+    CacheFile,
+    Collection,
+    Operator,
+    Scene,
+    TransformCacheConstraint,
+    ViewLayer,
+)
 from pxr import Sdf, Tf
 
 from pipe.core.cache import RENDER_DIRNAME, link_to_cache
+from pipe.core.shot import current_layer_path
 
 DEPARTMENT = "fx2d"
 FILE_NAME = "fx2d.blend"
@@ -43,15 +51,29 @@ def poll_fx2d_file(operator: type[Operator]) -> bool:
 
 
 def camera_usd(shot_root: Path) -> Path:
-    return shot_root / "cam" / "cam.usd"
+    return current_layer_path(shot_root, "cam")
+
+
+def camera_cache_files(context_collection: Collection) -> list[CacheFile]:
+    """What the shot camera's move is read from, live, whenever the file is opened.
+
+    Empty for a camera that doesn't move: the importer bakes where it stands.
+    """
+    return [
+        constraint.cache_file
+        for obj in context_collection.objects
+        for constraint in obj.constraints
+        if isinstance(constraint, TransformCacheConstraint)
+        and constraint.cache_file is not None
+    ]
 
 
 def anim_usd(shot_root: Path) -> Path:
-    return shot_root / "anim" / "usd" / "main.usd"
+    return current_layer_path(shot_root, "anim")
 
 
 def cfx_usd(shot_root: Path) -> Path:
-    return shot_root / "cfx" / "usd" / "main.usd"
+    return current_layer_path(shot_root, "cfx")
 
 
 def holdout_usd(shot_root: Path, source: str) -> Path:

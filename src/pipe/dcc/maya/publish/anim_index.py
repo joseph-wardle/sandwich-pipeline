@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import logging
-from enum import Enum
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import attrs
 import cattrs
 from pxr import Sdf
+
+from pipe.core.publish import current_version, version_layer_path
 
 from .prim_paths import ANIM_CLASS_PATH, RIG_ROOT_PATH, RIG_SCOPE_PATH
 
@@ -17,29 +19,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-
-class AnimStream(Enum):
-    """Which of the two parallel anim publishes a run writes.
-
-    Each stream owns a whole set of layers in the publish folder, distinguished
-    by name, so that publishing one never disturbs the other.
-    """
-
-    MAIN = "main"
-    SPLINE = "spline"
-
-    @property
-    def publish_filename(self) -> str:
-        return f"{self.value}.usd"
-
-    @property
-    def anim_layer_suffix(self) -> str:
-        """Names `mr_yoon.anim.usd`, or `mr_yoon.spline.anim.usd` on Spline."""
-        return "anim" if self is AnimStream.MAIN else f"{self.value}.anim"
-
-    def stitched_layer_name(self, name: str) -> str:
-        """Names `mr_yoon.usd`, or `mr_yoon.spline.usd` on Spline."""
-        return name if self is AnimStream.MAIN else f"{name}.{self.value}"
+DEPARTMENT = "anim"
 
 
 def index_key(name: str) -> str:
@@ -71,11 +51,14 @@ class PublishedAnim:
     rig: RigReference | None
 
 
-def read_anim_index(publish_path: Path) -> dict[str, PublishedAnim]:
+def read_anim_index(current: Path) -> dict[str, PublishedAnim]:
     """What the shot's current anim publish holds, keyed by `index_key`."""
-    if not publish_path.is_file():
+    version = current_version(current)
+    if version is None:
         return {}
 
+    # The rigs are indexed in the version. The current layer only sublayers it.
+    publish_path = version_layer_path(current, version)
     layer = _open_layer(publish_path)
     if layer is None:
         return {}
@@ -98,7 +81,7 @@ def read_anim_index(publish_path: Path) -> dict[str, PublishedAnim]:
                 spec.name,
             )
             continue
-        anim_layer = folder / anim_reference.assetPath
+        anim_layer = Path(os.path.normpath(folder / anim_reference.assetPath))
         if not anim_layer.is_file():
             # The shot has already lost this rig's animation, so republishing is
             # the fix. Dropping it here is what makes the row say so.
@@ -153,9 +136,7 @@ def author_rig_entry(
 
     if rig is not None:
         instance_spec.referenceList.Append(
-            Sdf.Reference(
-                _relative_to(root_layer, rig.asset_path), Sdf.Path(rig.prim_path)
-            )
+            Sdf.Reference(rig.asset_path.as_posix(), Sdf.Path(rig.prim_path))
         )
 
 
@@ -185,8 +166,13 @@ def entries_from_json(data: str) -> tuple[PublishedAnim, ...]:
     return cattrs.structure(json.loads(data), tuple[PublishedAnim, ...])
 
 
-def _relative_to(root_layer: Sdf.Layer, asset_path: Path) -> str:
-    return Sdf.ComputeAssetPathRelativeToLayer(root_layer, asset_path.as_posix())
+def _relative_to(root_layer: Sdf.Layer, anim_layer: Path) -> str:
+    """A publish's folder is renamed once it is written, and a kept rig's
+    animation stays in the folder of the publish that wrote it. Only a path
+    from the index itself is right in both."""
+    relative = os.path.relpath(anim_layer, Path(root_layer.realPath).parent)
+    # Without a leading dot USD takes the path for one to search for.
+    return relative if relative.startswith("../") else f"./{relative}"
 
 
 def _open_layer(path: Path, *, metadata_only: bool = False) -> Sdf.Layer | None:

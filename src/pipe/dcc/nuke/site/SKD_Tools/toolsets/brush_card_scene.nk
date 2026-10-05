@@ -1,0 +1,103 @@
+set cut_paste_input [stack 0]
+version 17.0 v4
+push $cut_paste_input
+Group {
+ name BrushCardScene
+ selected true
+ addUserKnob {20 brush_card_scene l BrushCardScene}
+ addUserKnob {26 usage l "" +STARTLINE T "Chain BrushCards into the 'cards' input. Open the group (Ctrl+Enter) and view\n'merge' in 3D to place cards against the set. Turn on Disable Sets when done."}
+ addUserKnob {1 shot l Shot}
+ addUserKnob {22 load l Load T "import brush_card_rig\nbrush_card_rig.load()" +STARTLINE}
+ addUserKnob {41 cam_file l "Cam File" T cam.file}
+ addUserKnob {41 cam_prim l "Cam Source Prim" T Camera1.source_prim_path}
+ addUserKnob {41 set_file1 l "Set 1 File" T set1.file}
+ addUserKnob {41 set_file2 l "Set 2 File" T set2.file}
+ addUserKnob {41 set_file3 l "Set 3 File" T set3.file}
+ addUserKnob {6 disable_sets l "Disable Sets" t "Turn the sets off, like pressing D on them. The camera stays. The render only ever includes /BrushCards, so this is for speed and a clean 3D view." +STARTLINE}
+}
+ GeoImport {
+  inputs 0
+  name cam
+  xpos -450
+  ypos 30
+  disable {{"\[string equal \[value file] \"\"]"}}
+ }
+set Nbb94260 [stack 0]
+push 0
+ Camera4 {
+  inputs 2
+  constraint_maintain_offset_frame 0
+  source_prim_path /cameras/shotCam
+  name Camera1
+  xpos -450
+  ypos 210
+ }
+ Input {
+  inputs 0
+  name cards
+  xpos -320
+  ypos 150
+ }
+push $Nbb94260
+ GeoImport {
+  inputs 0
+  name set3
+  xpos 20
+  ypos 30
+  disable {{"parent.disable_sets || \[string equal \[value file] \"\"]"}}
+ }
+ GeoImport {
+  inputs 0
+  name set2
+  xpos -70
+  ypos 30
+  disable {{"parent.disable_sets || \[string equal \[value file] \"\"]"}}
+ }
+ GeoImport {
+  inputs 0
+  name set1
+  xpos -160
+  ypos 30
+  disable {{"parent.disable_sets || \[string equal \[value file] \"\"]"}}
+ }
+ GeoMerge {
+  inputs 3
+  name sets
+  xpos -70
+  ypos 90
+ }
+ GeoTransform {
+  mask_patterns /*
+  uniform_scale 100
+  constraint_maintain_offset_frame 0
+  name set_scale
+  xpos -70
+  ypos 150
+  disable {{"set1.disable && set2.disable && set3.disable"}}
+ }
+ GeoMerge {
+  inputs 3
+  name merge
+  xpos -320
+  ypos 210
+ }
+push 0
+ ScanlineRender2 {
+  inputs 3
+  camera_motion_blur false
+  camera_lens_blur false
+  object_motion_blur false
+  object_deform_blur false
+  light_motion_blur false
+  objects_mask /BrushCards//*
+  render_only true
+  name ScanlineRender2
+  xpos -320
+  ypos 290
+ }
+ Output {
+  name Output1
+  xpos -320
+  ypos 370
+ }
+end_group
