@@ -1,10 +1,4 @@
-"""Build a BrushCard group: a GeoCard textured with a stroke from the library.
-
-Artists use it for alpha mattes only: chain BrushCards through their scene
-input (or merge them with a GeoMerge), then render the result through
-ScanlineRender2 with the shot camera.
-See brush_card_README.md.
-"""
+"""Builds a BrushCard group: a GeoCard textured with a stroke from the library."""
 
 from __future__ import annotations
 
@@ -15,17 +9,14 @@ import brush_card
 GROUP_NAME = "BrushCard1"
 PREMULT_KNOB = "premult"
 
-# GeoCard input 0 is the scene, passed through with the card added; the
-# texture goes to the material input.
 GEOCARD_SCENE_INPUT = 0
 GEOCARD_MATERIAL_INPUT = 1
 
-# Shot scenes are in centimeters (Maya camera; sets scaled x100), so new
-# cards start 1 m wide instead of 1 cm.
+# Shot scenes are in centimeters, so a new card is 1 m wide.
 DEFAULT_UNIFORM_SCALE = 100.0
 
-# Group callbacks tolerate a missing module so a saved comp still loads and
-# renders on machines without the studio menu (e.g. `nuke -t` on the farm).
+# A missing module is tolerated so a saved comp still loads and renders where
+# SKD_Tools is not on the path, such as `nuke -t` on the farm.
 ON_CREATE = """try:
     import brush_card
 except ImportError:
@@ -51,7 +42,6 @@ LINKED_TRANSFORM_KNOBS = (
 
 
 def build() -> nuke.Group:
-    """Create a BrushCard group in the current context and return it."""
     group = nuke.nodes.Group()
     group.setName(GROUP_NAME, uncollide=True)
     group["tile_color"].setValue(0x6B4F8FFF)
@@ -61,7 +51,7 @@ def build() -> nuke.Group:
     group["onCreate"].setValue(ON_CREATE)
     group["knobChanged"].setValue(KNOB_CHANGED)
 
-    # onCreate already fired, before the internals existed, so run its work now.
+    # onCreate fired before the internals existed.
     brush_card.sync_names(group)
     brush_card.refresh(group)
     return group

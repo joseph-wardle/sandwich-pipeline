@@ -11,10 +11,11 @@ INTENSITY_PARM_CANDIDATES = ("intensity", "lightIntensity", "xn__inputsintensity
 
 
 def _rebalance(old_color, old_intensity, multiply):
-    """Apply a per-channel multiply to (color, intensity) and re-normalize so
-    the resulting color's max channel is 1.0. Total light contribution per
-    channel is preserved: new_color * new_intensity == old_color * multiply *
-    old_intensity. If the product is all zero, intensity drops to 0."""
+    """Multiply a light's color, keeping its brightest channel at 1.0.
+
+    Intensity takes up the difference, so color * intensity per channel is what
+    the multiply asked for.
+    """
     combined = tuple(old_color[i] * multiply[i] for i in range(3))
     m = max(combined)
     if m <= 0:
@@ -59,12 +60,7 @@ def _find_intensity_parm(node):
 
 
 def apply_to_stage(stage, json_path):
-    """For each branch under /lights whose name matches a key in the JSON,
-    multiply every light prim's color component-wise by the branch's
-    multiply RGB, then re-normalize the color so its max channel is 1.0 and
-    absorb the brightness factor into intensity. Preserves total per-channel
-    contribution (new_color * new_intensity == old_color * multiply *
-    old_intensity). Use from a Python LOP."""
+    """Apply each /lights branch's multiply to its light prims. For a Python LOP."""
     from pxr import Usd, UsdLux
 
     edits = _load_edits(json_path)
@@ -116,9 +112,7 @@ def apply_to_stage(stage, json_path):
 
 
 def _build_leaf_to_branch_map(cooked_stage):
-    """From a cooked stage, return {leaf_name: [(branch, final_path), ...]}
-    for every UsdLuxLight under /lights/. Lets us answer "where does the
-    light created at /lights/red end up?" by matching leaf names."""
+    """{leaf name: [(branch, final path), ...]} of every light under /lights."""
     from pxr import UsdLux
 
     leaf_to_branches = {}
@@ -137,12 +131,11 @@ def _build_leaf_to_branch_map(cooked_stage):
 
 
 def apply_to_lops(json_path=None):
-    """Find Light LOPs and apply the JSON multiply for the branch each one
-    ends up in. Branches are determined from the cooked /stage (so graft /
-    restructure LOPs downstream are accounted for), then matched to LOPs by
-    primpath leaf name. Each LOP's existing color is multiplied
-    component-wise by the multiply and re-normalized; intensity absorbs the
-    brightness factor."""
+    """Apply each branch's multiply to the Light LOPs that author its lights.
+
+    A light's branch is read from the cooked /stage, since LOPs downstream of
+    the Light LOP may move it. LOPs are matched to lights by primpath leaf name.
+    """
     if json_path is None:
         json_path = _resolve_default_json_path()
 
