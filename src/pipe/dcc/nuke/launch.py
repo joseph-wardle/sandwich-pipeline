@@ -7,7 +7,6 @@ from pathlib import Path
 
 from pipe.core.color import ocio_env_vars
 from pipe.core.util.paths import (
-    get_production_path,
     get_shared_telemetry_spool_dir,
     resolve_mapped_path,
 )
@@ -36,10 +35,6 @@ class NukeLauncher(Launcher):
             "DCC_NUKE_THIRD_PARTY": str(this_path.parent / "third_party"),
             "NUKE_PATH": str(resolve_mapped_path(this_path.parent / "site")),
             **ocio_env_vars(),
-            # Stroke library for the BrushCard tool; an existing value wins so
-            # artists can point at a test library.
-            "BRUSH_CARD_LIB": os.getenv("BRUSH_CARD_LIB")
-            or str(get_production_path() / "lighting" / "crepuscular_cards"),
             "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
             "PYTHONPATH": str(src_path),
             "QT_SCALE_FACTOR": os.getenv("NUKE_SCALE_FACTOR")

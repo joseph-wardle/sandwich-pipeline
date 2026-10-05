@@ -1,20 +1,9 @@
-"""Callbacks and helpers for the BrushCard group (Nuke 17 USD-based 3D system).
+"""Callbacks of the BrushCard group, which `build_brush_card.build()` creates.
 
-A BrushCard is a Group holding Read -> Premult -> GeoCard. The group's
-callbacks only import this module and call into it, so fixes roll out
-without re-saving scripts. `build_brush_card.build()` creates the group.
-
-Two things must stay unique per group, because the GeoCards of every copy
-end up merged into one USD stage:
-
-* the GeoCard `prim_path`, since USD keeps one prim per path;
-* the names of the internal texture nodes, since Nuke names each card's
-  material prim after the node feeding the GeoCard's material input
-  (`/materials/NukeMaterialOps/<NodeName>_NdkSurfaceShader`). Duplicate
-  names make every card render the same stroke.
-
-`sync_names()` fixes both from the group's name. It runs on create (which
-covers paste and script load) and on rename.
+Every card ends up in one USD stage, so each needs a prim path of its own. Nuke
+also names a card's material prim after the node feeding the GeoCard's material
+input, so cards whose texture nodes share a name all render the same stroke.
+`sync_names()` derives both from the group's name.
 """
 
 from __future__ import annotations
@@ -25,6 +14,8 @@ from typing import TypeVar
 
 import nuke
 
+from pipe.core.util.paths import get_production_path
+
 KnobT = TypeVar("KnobT", bound=nuke.Knob)
 
 LIBRARY_ENV_VAR = "BRUSH_CARD_LIB"
@@ -33,27 +24,20 @@ PLACEHOLDER = "<no strokes found>"
 PRIM_ROOT = "/BrushCards"
 
 CARD_NODE = "Card"
-# Texture nodes are found by class because their names follow the group's
-# (see module docstring): {class: name suffix}.
+# By class, because the names follow the group's.
 TEXTURE_NODE_SUFFIXES = {"Read": "_Read", "Premult": "_Premult"}
-
-# Group user knobs.
 STROKE_KNOB = "stroke"
 
 
 def library_dir() -> Path:
-    """The stroke library folder, from `BRUSH_CARD_LIB`."""
     value = os.environ.get(LIBRARY_ENV_VAR)
     if value:
         return Path(value)
-    # Nuke launched outside the pipeline launcher; fall back to the show path.
-    from pipe.core.util.paths import get_production_path
-
     return get_production_path() / "lighting" / "crepuscular_cards"
 
 
 def strokes() -> dict[str, str]:
-    """Return {display name: file path} for every stroke in the library."""
+    """{display name: file path} of every stroke in the library."""
     lib = library_dir()
     if not lib.is_dir():
         return {}
@@ -65,7 +49,6 @@ def strokes() -> dict[str, str]:
 
 
 def _this_group() -> nuke.Group:
-    """The BrushCard group running the current callback."""
     node = nuke.thisNode()
     if not isinstance(node, nuke.Group):
         raise TypeError(f"BrushCard callback ran on {node.Class()} {node.name()!r}")
@@ -73,7 +56,6 @@ def _this_group() -> nuke.Group:
 
 
 def _knob(node: nuke.Node, name: str, kind: type[KnobT]) -> KnobT:
-    """`node[name]`, narrowed to the knob class the caller relies on."""
     knob = node[name]
     if not isinstance(knob, kind):
         raise TypeError(
@@ -98,11 +80,10 @@ def _read(group: nuke.Group) -> nuke.Node | None:
 
 
 def set_stroke(group: nuke.Group) -> None:
-    """Point the internal Read at the stroke selected in the dropdown.
+    """Point the Read at the chosen stroke.
 
-    With no stroke file the GeoCard is disabled, which passes the chained
-    scene through untouched. Disabling only the Read is not enough: the card
-    then falls back to an opaque default material and renders a rectangle.
+    With no stroke the GeoCard is disabled, not the Read: a card without a
+    texture falls back to an opaque material and renders a rectangle.
     """
     read = _read(group)
     card = group.node(CARD_NODE)
@@ -110,28 +91,24 @@ def set_stroke(group: nuke.Group) -> None:
         return
     path = strokes().get(_stroke_knob(group).value())
     if path is not None:
-        # Also sets the format and frame range.
         _knob(read, "file", nuke.File_Knob).fromUserText(path)
-        # Still images: hold the single frame across the whole comp.
         read["before"].setValue("hold")
         read["after"].setValue("hold")
-    # A stroke since removed from the library keeps its last file, so a saved
-    # comp does not change.
+    # A stroke removed from the library keeps its last file, so a saved comp
+    # doesn't change.
     has_stroke = bool(read["file"].value())
     read["disable"].setValue(False)
     card["disable"].setValue(not has_stroke)
 
 
 def refresh(group: nuke.Group | None = None) -> None:
-    """Rescan the library and repopulate the stroke dropdown."""
     group = group or _this_group()
     stroke = _stroke_knob(group)
     found = list(strokes())
     current = stroke.value()
 
     names = found or [PLACEHOLDER]
-    # A stroke deleted from the library stays selected so the comp does not
-    # silently change; the Read still points at its last file.
+    # A stroke removed from the library stays selected, as in `set_stroke`.
     if current and current != PLACEHOLDER and current not in names:
         names.append(current)
 
@@ -148,7 +125,6 @@ def refresh(group: nuke.Group | None = None) -> None:
 
 
 def sync_names(group: nuke.Group) -> None:
-    """Derive the card prim path and texture node names from the group's name."""
     card = group.node(CARD_NODE)
     if card is not None:
         path = f"{PRIM_ROOT}/{group.name()}"
@@ -162,7 +138,7 @@ def sync_names(group: nuke.Group) -> None:
 
 
 def on_create() -> None:
-    """Runs when the group is built, pasted, or loaded from a script."""
+    """Also runs when the group is pasted or loaded from a script."""
     group = _this_group()
     sync_names(group)
     read = _read(group)
