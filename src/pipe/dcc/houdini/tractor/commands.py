@@ -20,6 +20,9 @@ from pipe.core.render import (
 LICENSE_SERVER = "animlic.cs.byu.edu"
 # husk exits 3 without a license; point hserver at the license server before Tractor retries.
 LICENSE_TRAP = rf'trap "test \$? -eq 3 && hserver -S {LICENSE_SERVER} && exit 3" EXIT'
+# This catches jobs that segfault then keep running instead of failing
+HUSK_SEGFAULT = "Fatal error: Segmentation fault"
+SEGFAULT_EXIT = 139
 # RenderMan's denoiser reads this many frames either side of each frame.
 DENOISE_RADIUS = 3
 
@@ -64,6 +67,10 @@ class Layer:
 def render(layer: Layer, frame: int) -> str:
     """husk exits 0 even when it writes nothing, so the frame's old files are
     deleted first and checked for after.
+
+    husk can segfault at startup and then hang, holding the blade. The crash is
+    transient, so the script reads husk's output, kills it at the crash line and
+    exits as a segfault, which Tractor retries.
     """
     q = shlex.quote
     folders = " ".join(q(str(folder)) for folder in layer.render.folders)
@@ -75,7 +82,21 @@ def render(layer: Layer, frame: int) -> str:
             # husk makes no output folders.
             f"mkdir -p {folders}",
             f'for d in {folders}; do rm -f "$d/{frame:04}.exr"; done',
-            shlex.join(husk),
+            f"exec 3< <(exec {shlex.join(husk)} 2>&1)",
+            "husk=$!",
+            # Not traced, or -x would log three lines for each line of husk's.
+            "set +x",
+            "while IFS= read -r line <&3; do",
+            '    echo "$line"',
+            f'    if [[ "$line" == *"{HUSK_SEGFAULT}"* ]]; then',
+            '        echo "husk crashed and may never exit, so it was killed" >&2',
+            '        kill -9 "$husk"',
+            f"        exit {SEGFAULT_EXIT}",
+            "    fi",
+            "done",
+            "set -x",
+            # Fails with husk's own exit code, which stops the script under -e.
+            'wait "$husk"',
             f"for d in {folders}; do",
             f'    f="$d/{frame:04}.exr"',
             '    [ -f "$f" ] || { echo "husk exited without writing $f" >&2; exit 1; }',
