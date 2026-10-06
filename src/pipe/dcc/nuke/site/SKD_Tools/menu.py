@@ -30,10 +30,10 @@ def make_skd_cfx_read_node():
     skd_read_node.auto_read("cfx/render", "Bobo_CFX_read")
 
 
-def make_bobo_write_node():
-    import bobo_write_node_v2
+def make_skd_write_node():
+    import skd_write_node
 
-    bobo_write_node_v2.main()
+    skd_write_node.main()
 
 
 def import_render_layers():
@@ -129,7 +129,7 @@ m.addCommand("luma Distort", "nuke.createNode('lumaDistort')", icon="MicrowaveIc
 # lens node
 m.addCommand("Lens", "nuke.createNode('Lens')", icon="MicrowaveIcon.png")
 print(f"nuke.nodePaste({_TOOLSETS / 'shotTemplate.nk'})")
-m.addCommand("SKD Write Node", "make_bobo_write_node()", icon="MicrowaveIcon.png")
+m.addCommand("SKD Write Node", "make_skd_write_node()", icon="MicrowaveIcon.png")
 m.addCommand("SKD Open Shot", "choose_shot()", icon="MicrowaveIcon.png")
 m.addCommand(
     "SKD Read Node", "make_skd_read_node()", "ctrl+shift+r", icon="MicrowaveIcon.png"

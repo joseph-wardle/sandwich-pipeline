@@ -5,6 +5,7 @@ from typing import Any
 
 import nuke
 from env_sg import DB_Config
+from pipe.core.playblast.naming import edit_shot_directory, next_delivery_name
 from pipe.core.util.paths import get_edit_path, get_production_path
 
 from pipe.core.shotgrid import Playlist, ShotGrid, ShotGridError, ShotGridNotFound
@@ -225,54 +226,14 @@ def get_users_name():
     return user_data.get(username)
 
 
-def get_week_range():
-    """Returns the start and end date of the current week (Sunday to Saturday)."""
-    today = datetime.date.today()
-    start_of_week = today - datetime.timedelta(days=today.weekday() + 1)  # Sunday
-    end_of_week = start_of_week + datetime.timedelta(days=6)  # Saturday
-    return start_of_week, end_of_week
-
-
-def get_output_file_info_mov(create_missing=True):
+def get_output_file_info_mov():
+    """The next edit delivery for this shot. The MOV_write creates the folder."""
     currDept = getDepartment()
-    subdir = DEPT_DIR_MAP.get(currDept, currDept.lower())
-    base_path = get_edit_path() / subdir
-    start_of_week, end_of_week = get_week_range()
+    department = DEPT_DIR_MAP.get(currDept, currDept.lower())
     shot_code = get_shot_code()
-
-    valid_subfolder = None  # Store the most recent valid subfolder if found
-    latest_date = None  # Track the most recent date found
-
-    # Look for the most recent subfolder within the current week
-    for subfolder in os.listdir(base_path):
-        subfolder_path = os.path.join(base_path, subfolder)
-
-        if os.path.isdir(subfolder_path) and len(subfolder) == 10:
-            try:
-                folder_date = datetime.datetime.strptime(subfolder, "%m-%d-%Y").date()
-                if start_of_week <= folder_date <= end_of_week:
-                    if latest_date is None or folder_date > latest_date:
-                        latest_date = folder_date
-                        valid_subfolder = (
-                            subfolder_path  # Store the most recent valid folder
-                        )
-            except ValueError:
-                continue  # Skip non-matching folders
-
-    # If no valid subfolder is found, create one with today's date
-    if valid_subfolder is None:
-        today_str = datetime.date.today().strftime("%m-%d-%Y")
-        valid_subfolder = os.path.join(base_path, today_str)
-        if create_missing:
-            os.makedirs(valid_subfolder)
-            print(f"Created new subfolder: {valid_subfolder}")
-    else:
-        print(f"Using most recent subfolder: {valid_subfolder}")
-
-    next_version = get_version_num()
-    new_file_name = shot_code + "_" + next_version + ".mov"
-
-    return [new_file_name, valid_subfolder]  # Always returns a list
+    folder = edit_shot_directory(shot_code)
+    new_file_name = next_delivery_name(folder, shot_code, department) + ".mov"
+    return [new_file_name, str(folder)]
 
 
 def apply_mov_path_to_ui_and_write(group):
@@ -281,14 +242,13 @@ def apply_mov_path_to_ui_and_write(group):
       - the UI 'mov_export_path' label
       - the internal MOV_write 'file' knob
     """
-    new_file_name, folder_path = get_output_file_info_mov(create_missing=True)
-    full_path = os.path.join(folder_path, new_file_name)
-
-    if group.knob("mov_export_path"):
-        group["mov_export_path"].setValue(full_path)
-
+    # Inside the group, so getDepartment reads this group's dropdown.
     group.begin()
     try:
+        new_file_name, folder_path = get_output_file_info_mov()
+        full_path = os.path.join(folder_path, new_file_name)
+        if group.knob("mov_export_path"):
+            group["mov_export_path"].setValue(full_path)
         w = nuke.toNode("MOV_write")
         if w:
             w["file"].setValue(full_path)
@@ -304,6 +264,17 @@ def get_output_file_info_exr():
     folder_path = base_path + file_name
     full_path = folder_path + "/" + file_name + ".###.exr"
     return [folder_path, full_path]
+
+
+def make_timecode_node():
+    """Editorial lines a new delivery up by timecode, so the movie's timecode
+    must count shot frames: frame 1001 is 00:00:41:17."""
+    timecode_node = nuke.createNode("AddTimeCode")
+    _set_knob_value(timecode_node, "startcode", "00:00:00:00")
+    _set_knob_value(timecode_node, "fps", 24)
+    _set_knob_value(timecode_node, "useFrame", True)
+    _set_knob_value(timecode_node, "frame", 0)
+    return timecode_node
 
 
 def make_MOV_node():
@@ -448,6 +419,10 @@ first_frame = int(group["export_frame_in"].value())
 last_frame  = int(group["export_frame_out"].value())
 dept = group["departmentDropdown"].value() if group.knob("departmentDropdown") else "Lighting"
 
+# A second export is a new delivery; it must not overwrite the first.
+from skd_write_node import apply_mov_path_to_ui_and_write
+apply_mov_path_to_ui_and_write(group)
+
 group.begin()
 write_node = nuke.toNode("MOV_write")
 demo_node = nuke.toNode("MOV_write_noText")
@@ -574,7 +549,7 @@ nuke.message("This render will have 5 frames added to beginning and end of shot.
     groupNode.addKnob(desc_knob)
 
     # Send to ShotGrid button
-    send_to_sg_script = """from bobo_write_node_v2 import create_new_shot_version
+    send_to_sg_script = """from skd_write_node import create_new_shot_version
 create_new_shot_version()
 """
     send_sg_btn = nuke.PyScript_Knob(
@@ -586,7 +561,7 @@ create_new_shot_version()
     # Live update when the department changes
     group_knob_changed = """
 import nuke
-from bobo_write_node_v2 import apply_mov_path_to_ui_and_write  # adjust module name if different
+from skd_write_node import apply_mov_path_to_ui_and_write
 n = nuke.thisNode()
 k = nuke.thisKnob()
 if k and k.name() == "departmentDropdown":
@@ -887,6 +862,8 @@ def main():
 
         # reformat node
         nuke.createNode("Reformat")
+
+        make_timecode_node()
 
         # MOV node
         mov_node = make_MOV_node()
