@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+import subprocess
 from typing import Any
 
 import nuke
@@ -10,7 +11,8 @@ from pipe.core.util.paths import get_production_path
 
 from pipe.core.shotgrid import Playlist, ShotGrid, ShotGridError, ShotGridNotFound
 
-project_file = nuke.root()["name"].value()
+TAILS = 5
+EXPORTED_KNOB = "exported_mov"
 
 DEPT_DIR_MAP: dict[str, str] = {
     "Lighting": "lighting",
@@ -136,7 +138,7 @@ def update_text_messages(
     frame_num_text, shot_code_text, date_text, name_text, department_text
 ):
     _set_knob_value(frame_num_text, "message", "Frame: [frame]")
-    _set_knob_value(shot_code_text, "message", get_project_name())
+    _set_knob_value(shot_code_text, "message", get_shot_code())
     _set_knob_value(date_text, "message", get_date())
     _set_knob_value(name_text, "message", str(get_users_name()))
 
@@ -150,7 +152,7 @@ def get_in_out():
     Falls back to the script's own frame range if the shot cannot be found in
     ShotGrid or is missing cut_in / cut_out there.
     """
-    curr_shot = get_project_name()
+    curr_shot = get_shot_code()
     conn = ShotGrid.connect(DB_Config)
     try:
         shot = conn.get_shot(code=curr_shot)
@@ -163,16 +165,6 @@ def get_in_out():
         first = int(nuke.root()["first_frame"].value())
         last = int(nuke.root()["last_frame"].value())
         return [first, last]
-
-
-def get_project_name():
-    project_name = ""
-    if project_file:
-        project_name_with_ext = os.path.basename(project_file)
-        project_name, ext = os.path.splitext(project_name_with_ext)
-    else:
-        project_name = "Unsaved Project"
-    return project_name
 
 
 def get_date():
@@ -205,7 +197,9 @@ def get_version_num():
 
 
 def get_shot_code():
-    return os.path.splitext(os.path.basename(nuke.root().name()))[0]
+    """A comp is `shot/<shot>/comp/<any name>.nk`, so the shot is the folder,
+    not the file name."""
+    return os.path.basename(os.path.dirname(os.path.dirname(nuke.root().name())))
 
 
 def get_users_name():
@@ -226,9 +220,9 @@ def get_users_name():
     return user_data.get(username)
 
 
-def get_output_file_info_mov():
+def get_output_file_info_mov(group):
     """The next edit delivery for this shot. The MOV_write creates the folder."""
-    currDept = getDepartment()
+    currDept = getDepartment(group)
     department = DEPT_DIR_MAP.get(currDept, currDept.lower())
     shot_code = get_shot_code()
     folder = edit_shot_directory(shot_code)
@@ -237,23 +231,51 @@ def get_output_file_info_mov():
 
 
 def apply_mov_path_to_ui_and_write(group):
-    """
-    Recompute the MOV path based on current department and update:
-      - the UI 'mov_export_path' label
-      - the internal MOV_write 'file' knob
-    """
-    # Inside the group, so getDepartment reads this group's dropdown.
-    group.begin()
-    try:
-        new_file_name, folder_path = get_output_file_info_mov()
-        full_path = os.path.join(folder_path, new_file_name)
-        if group.knob("mov_export_path"):
-            group["mov_export_path"].setValue(full_path)
-        w = nuke.toNode("MOV_write")
-        if w:
-            w["file"].setValue(full_path)
-    finally:
-        group.end()
+    """Point the path label and MOV_write at the next delivery."""
+    new_file_name, folder_path = get_output_file_info_mov(group)
+    full_path = os.path.join(folder_path, new_file_name)
+    group["mov_export_path"].setValue(full_path)
+    group.node("MOV_write")["file"].setValue(full_path)
+    return full_path
+
+
+def _button(function_name):
+    """A saved comp keeps a knob's script as text, so the script only names a
+    function here; a fix to the function then reaches nodes made before it."""
+    return f"import skd_write_node; skd_write_node.{function_name}(nuke.thisNode())"
+
+
+def export_mov(group):
+    # A second export is a new delivery; it must not overwrite the first.
+    path = apply_mov_path_to_ui_and_write(group)
+    first_frame = int(group["export_frame_in"].value())
+    last_frame = int(group["export_frame_out"].value())
+    nuke.execute(group.node("MOV_write"), first_frame, last_frame, 1)
+    group[EXPORTED_KNOB].setValue(path)
+
+
+def open_folder(group):
+    folder = os.path.dirname(group["mov_export_path"].value())
+    if not os.path.isdir(folder):
+        nuke.message("This folder does not exist yet, but it will after you export.")
+        return
+    subprocess.Popen(["xdg-open", folder])
+
+
+def add_tails(group):
+    """Sets the range from the shot's, so pressing it twice adds nothing more."""
+    first, last = get_in_out()
+    group["export_frame_in"].setValue(first - TAILS)
+    group["export_frame_out"].setValue(last + TAILS)
+    nuke.message(
+        f"Frame range is now {first - TAILS}-{last + TAILS}: "
+        f"the shot plus {TAILS} tail frames on each side."
+    )
+
+
+def knob_changed(group, knob):
+    if knob.name() == "departmentDropdown":
+        apply_mov_path_to_ui_and_write(group)
 
 
 def make_timecode_node():
@@ -268,19 +290,9 @@ def make_timecode_node():
 
 
 def make_MOV_node():
-    # IF FX change output file
-    new_file_name = get_output_file_info_mov()[0]
-    folder_path = get_output_file_info_mov()[1]
-
-    # Create the full file path.
-    full_path = os.path.join(folder_path, new_file_name)
-    # print("full file path: " + full_path)
-
+    # The file path is set by makeUI, once the department dropdown exists.
     write_node = nuke.createNode("Write")
     write_node.setName("MOV_write")
-
-    # Set file and file type.
-    write_node["file"].setValue(full_path)
     write_node["file_type"].setValue("mov64")
 
     # Create directories automatically.
@@ -356,51 +368,14 @@ def makeUI(groupNode):
     tab_knob = nuke.Tab_Knob(mov_tab_name)
     groupNode.addKnob(tab_knob)
 
-    mov_export_script = """
-group = nuke.thisNode()
-first_frame = int(group["export_frame_in"].value())
-last_frame  = int(group["export_frame_out"].value())
-
-# A second export is a new delivery; it must not overwrite the first.
-from skd_write_node import apply_mov_path_to_ui_and_write
-apply_mov_path_to_ui_and_write(group)
-
-group.begin()
-write_node = nuke.toNode("MOV_write")
-
-if write_node:
-    nuke.execute(write_node.name(), first_frame, last_frame, 1)
-else:
-    nuke.message("MOV_write node not found inside the group!")
-
-group.end()
-"""
-
-    # render button
     mov_export_button = nuke.PyScript_Knob(
-        "mov_export", "Export MOV", mov_export_script
+        "mov_export", "Export MOV", _button("export_mov")
     )
-
-    new_file_name = get_output_file_info_mov()[0]
-    folder_path = get_output_file_info_mov()[1]
-    full_path = os.path.join(folder_path, new_file_name)
-
     mov_export_path = nuke.Text_Knob("mov_export_path", "")
-    mov_export_path.setValue(full_path)
-
-    button_script_open_file = f"""
-import os
-import nuke
-
-folder = "{folder_path}"
-if not os.path.exists(folder):
-    nuke.message("This folder does not exist yet, but it will after you export")
-else:
-    os.system("xdg-open '" + folder + "'")
-"""
-
+    exported_mov = nuke.String_Knob(EXPORTED_KNOB, "")
+    exported_mov.setFlag(nuke.INVISIBLE)
     open_folder_button = nuke.PyScript_Knob(
-        "open_folder", "Open Folder", button_script_open_file
+        "open_folder", "Open Folder", _button("open_folder")
     )
     open_folder_button.clearFlag(nuke.STARTLINE)
 
@@ -415,19 +390,8 @@ else:
     frame_out.setValue(get_in_out()[1])
     frame_out.clearFlag(nuke.STARTLINE)
 
-    # shot handles button
-    add_handles_script = """
-group = nuke.thisNode()
-original_in = int(group['export_frame_in'].value())
-original_out = int(group['export_frame_out'].value())
-new_in = original_in - 5
-new_out = original_out + 5
-group['export_frame_in'].setValue(new_in)
-group['export_frame_out'].setValue(new_out)
-nuke.message("This render will have 5 frames added to beginning and end of shot. Adjusted frame range = " + str(new_in) + "-" + str(new_out))
-"""
     add_handles_button = nuke.PyScript_Knob(
-        "add_shot_handles", "add shot handles", add_handles_script
+        "add_shot_handles", "Add Tails", _button("add_tails")
     )
     add_handles_button.clearFlag(nuke.STARTLINE)
 
@@ -455,6 +419,7 @@ nuke.message("This render will have 5 frames added to beginning and end of shot.
     groupNode.addKnob(divider2)
     groupNode.addKnob(mov_export_path)
     groupNode.addKnob(open_folder_button)
+    groupNode.addKnob(exported_mov)
 
     # Add Send to Shotgrid UI
     groupNode.addKnob(nuke.Text_Knob("shotgrid_divider", ""))
@@ -484,25 +449,16 @@ nuke.message("This render will have 5 frames added to beginning and end of shot.
     groupNode.addKnob(desc_knob)
 
     # Send to ShotGrid button
-    send_to_sg_script = """from skd_write_node import create_new_shot_version
-create_new_shot_version()
-"""
     send_sg_btn = nuke.PyScript_Knob(
-        "send_to_sg", "Send to ShotGrid", send_to_sg_script
+        "send_to_sg", "Send to ShotGrid", _button("create_new_shot_version")
     )
     groupNode.addKnob(send_sg_btn)
     apply_mov_path_to_ui_and_write(groupNode)
 
-    # Live update when the department changes
-    group_knob_changed = """
-import nuke
-from skd_write_node import apply_mov_path_to_ui_and_write
-n = nuke.thisNode()
-k = nuke.thisKnob()
-if k and k.name() == "departmentDropdown":
-    apply_mov_path_to_ui_and_write(n)
-"""
-    groupNode.knob("knobChanged").setValue(group_knob_changed)
+    groupNode.knob("knobChanged").setValue(
+        "import skd_write_node; "
+        "skd_write_node.knob_changed(nuke.thisNode(), nuke.thisKnob())"
+    )
 
 
 def createLinks(text_nodes, switch):
@@ -512,12 +468,8 @@ def createLinks(text_nodes, switch):
     )  # department
 
 
-# get the department
-def getDepartment() -> str:
-    grp = nuke.thisGroup()
-    if grp and grp.knob("departmentDropdown"):
-        return grp["departmentDropdown"].value()
-    return "Lighting"
+def getDepartment(group) -> str:
+    return group["departmentDropdown"].value()
 
 
 ### This is where we start sending things back to Shotgrid ###
@@ -549,11 +501,10 @@ def getShotGridUser():
         raise
 
 
-def getUserTask():
+def getUserTask(group):
     """
     Returns the Task object corresponding to the user's selection in the ShotGrid Task dropdown.
     """
-    group = nuke.thisGroup()
     selected_name = group["shotgrid_task"].value()
     shot = getShot()
     user = getShotGridUser()
@@ -564,13 +515,12 @@ def getUserTask():
     return None
 
 
-def getMostRecentPlaylist() -> Playlist | None:
+def getMostRecentPlaylist(group) -> Playlist | None:
     """
     Look at the departmentDropdown on this group,
     find all SG playlists whose code contains that department,
     parse the M/D/YY date prefix, and return the most recent one.
     """
-    group = nuke.thisGroup()
     dept = group["sgDepartmentDropdown"].value()
     if not dept:
         nuke.message("Please pick a department first.")
@@ -601,12 +551,15 @@ def getMostRecentPlaylist() -> Playlist | None:
     return most_recent
 
 
-# if FX grab FX video file
-def create_new_shot_version():
-    group = nuke.thisGroup()
+def create_new_shot_version(group):
+    video_path = group[EXPORTED_KNOB].value()
+    if not os.path.isfile(video_path):
+        nuke.message("Export the MOV before sending it to ShotGrid.")
+        return
+
     shot = getShot()
     user = getShotGridUser()
-    playlist = getMostRecentPlaylist()
+    playlist = getMostRecentPlaylist(group)
 
     if playlist:
         nuke.message(
@@ -621,21 +574,15 @@ def create_new_shot_version():
             nuke.message(
                 "Please select a valid playlist to continue. If you continue to recieve this error please talk to your lead"
             )
+            return
 
-    task = getUserTask()
+    task = getUserTask(group)
     if not task:
         nuke.message("Please select a valid ShotGrid task.")
         return
 
     task_name = task.content
     version_name = f"{get_users_name()}_{task_name}_{get_version_num()}"
-    if group.knob("mov_export_path"):
-        video_path = group["mov_export_path"].value()
-    else:
-        nuke.message(
-            "You haven't exported your video yet, please click exportMOV to continue."
-        )
-
     description = (
         group["shotgrid_description"].value()
         if group.knob("shotgrid_description")
