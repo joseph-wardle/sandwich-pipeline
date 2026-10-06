@@ -6,7 +6,7 @@ from typing import Any
 import nuke
 from env_sg import DB_Config
 from pipe.core.playblast.naming import edit_shot_directory, next_delivery_name
-from pipe.core.util.paths import get_edit_path, get_production_path
+from pipe.core.util.paths import get_production_path
 
 from pipe.core.shotgrid import Playlist, ShotGrid, ShotGridError, ShotGridNotFound
 
@@ -256,16 +256,6 @@ def apply_mov_path_to_ui_and_write(group):
         group.end()
 
 
-def get_output_file_info_exr():
-    base_path = str(get_edit_path() / "comp") + "/"
-
-    # setting the file parameter
-    file_name = get_shot_code()
-    folder_path = base_path + file_name
-    full_path = folder_path + "/" + file_name + ".###.exr"
-    return [folder_path, full_path]
-
-
 def make_timecode_node():
     """Editorial lines a new delivery up by timecode, so the movie's timecode
     must count shot frames: frame 1001 is 00:00:41:17."""
@@ -350,53 +340,6 @@ def update_mov_node(write_node):
         # write_node["mov64_dnxhr_profile"].setValue(<your-profile-index>)
 
 
-def make_demoReel_mov_node():
-    shot_code = get_shot_code() + ".mov"
-    folder_path = str(get_production_path().parent / "edit/Reel_Shots")
-
-    # Create the full file path.
-    full_path = os.path.join(folder_path, shot_code)
-    print(str(full_path))
-
-    reel_write_node = nuke.createNode("Write")
-    reel_write_node.setName("MOV_write_noText")
-
-    # Set file and file type.
-    reel_write_node["file"].setValue(full_path)
-    reel_write_node["file_type"].setValue("mov64")
-
-    # Create directories automatically.
-    reel_write_node["create_directories"].setValue(1)
-
-    # Other write node settings.
-    reel_write_node["colorspace"].setValue("Raw")
-    reel_write_node["transformType"].setValue(1)  # Display transform tried: 2,
-    reel_write_node["mov64_codec"].setValue(
-        "appr"
-    )  # Avid DnxHr (integer value 12 for some reason) #don't try 2!!
-    reel_write_node["mov_prores_codec_profile"].setValue(2)  # DNxHD 422 10-bit 220Mbit
-
-    return reel_write_node
-
-
-def make_EXR_node():
-    # folder_path = get_output_file_info_exr()[0]
-    full_path = get_output_file_info_exr()[1]
-
-    write_node = nuke.createNode("Write")
-    write_node["file"].setValue(full_path)
-    write_node.setName("EXR_write")
-
-    # create directories
-    write_node["create_directories"].setValue(1)
-
-    # TODO set exr settings and stuff
-    write_node["write_ACES_compliant_EXR"].setValue(1)
-    write_node["colorspace"].setValue("ACEScg")
-    write_node["transformType"].setValue(0)  # transform type- colorspace
-    return write_node
-
-
 def check_saved():
     current_script_name = get_shot_code()
     if current_script_name == "Root":
@@ -417,7 +360,6 @@ def makeUI(groupNode):
 group = nuke.thisNode()
 first_frame = int(group["export_frame_in"].value())
 last_frame  = int(group["export_frame_out"].value())
-dept = group["departmentDropdown"].value() if group.knob("departmentDropdown") else "Lighting"
 
 # A second export is a new delivery; it must not overwrite the first.
 from skd_write_node import apply_mov_path_to_ui_and_write
@@ -425,17 +367,11 @@ apply_mov_path_to_ui_and_write(group)
 
 group.begin()
 write_node = nuke.toNode("MOV_write")
-demo_node = nuke.toNode("MOV_write_noText")
 
 if write_node:
     nuke.execute(write_node.name(), first_frame, last_frame, 1)
 else:
     nuke.message("MOV_write node not found inside the group!")
-if dept == "Lighting" or dept == "Compositing":
-    if demo_node:
-        nuke.execute(demo_node.name(), first_frame, last_frame, 1)
-    else:
-        nuke.message("MOV_write_noText node not found inside the group!")
 
 group.end()
 """
@@ -501,7 +437,6 @@ nuke.message("This render will have 5 frames added to beginning and end of shot.
     # dividers
     divider1 = nuke.Text_Knob("divider1", "")
     divider2 = nuke.Text_Knob("divider2", "")
-    divider3 = nuke.Text_Knob("divider3", "")
 
     # dropdown
     department_dropdown = nuke.Enumeration_Knob(
@@ -569,78 +504,8 @@ if k and k.name() == "departmentDropdown":
 """
     groupNode.knob("knobChanged").setValue(group_knob_changed)
 
-    ### END MOV EXPORT ###
 
-    # EXR Export Tab
-    exr_tab_name = "EXR Export"
-    tab_knob = nuke.Tab_Knob(exr_tab_name)
-    groupNode.addKnob(tab_knob)
-
-    exr_export_script = """
-group = nuke.thisNode()
-first_frame = int(group["export_frame_in_exr"].value())
-last_frame  = int(group["export_frame_out_exr"].value())
-
-group.begin()
-write_node = nuke.toNode("EXR_write")
-if write_node:
-    nuke.execute(write_node.name(), first_frame, last_frame, 1)
-else:
-    nuke.message("EXR_write node not found inside the group!")
-group.end()
-"""
-
-    exr_export_button = nuke.PyScript_Knob(
-        "exr_export", "Export EXR", exr_export_script
-    )
-
-    frame_range_exr = nuke.Text_Knob("frame_range_exr", "")
-    frame_range_exr.setValue("Frame range is currently set to:")
-
-    frame_in_exr = nuke.Int_Knob("export_frame_in_exr", "")
-    frame_in_exr.setValue(get_in_out()[0])
-    frame_out_exr = nuke.Int_Knob("export_frame_out_exr", "")
-    frame_out_exr.setValue(get_in_out()[1])
-    frame_out_exr.clearFlag(nuke.STARTLINE)
-
-    note_exr = nuke.Text_Knob("note_exr", "")
-    note_exr.setValue("\n(Please note, EXR's will NOT have text overlay)\n")
-
-    full_path_exr = get_output_file_info_exr()[1]
-    folder_path_exr = get_output_file_info_exr()[0]
-    exr_export_path = nuke.Text_Knob("exr_export_path", "")
-    exr_export_path.setValue(full_path_exr)
-
-    button_script_open_exr = f"""
-
-import os
-import nuke
-
-folder = "{folder_path_exr}"
-if not os.path.exists(folder):
-    nuke.message("This folder does not exist yet, but it will after you export")
-else:
-    os.system("xdg-open '" + folder + "'")
-"""
-
-    open_folder_button_exr = nuke.PyScript_Knob(
-        "open_folder", "Open Folder", button_script_open_exr
-    )
-    open_folder_button_exr.clearFlag(nuke.STARTLINE)
-
-    # Add EXR UI knobs
-    groupNode.addKnob(exr_export_button)
-    groupNode.addKnob(frame_range_exr)
-    groupNode.addKnob(frame_in_exr)
-    groupNode.addKnob(frame_out_exr)
-    groupNode.addKnob(note_exr)
-    groupNode.addKnob(divider3)
-    groupNode.addKnob(exr_export_path)
-    groupNode.addKnob(open_folder_button_exr)
-
-
-def createLinks(groupNode, text_nodes, mov_node, exr_node, switch):
-    # mov export tab:
+def createLinks(text_nodes, switch):
     switch["which"].setExpression("parent.disable_text")
     text_nodes[4]["departmentDropdown"].setExpression(
         "parent.departmentDropdown"
@@ -881,24 +746,8 @@ def main():
         output_node.setInput(0, switcheroo)
         output_node.setXYpos(text_node_pos_x, text_node_pos_y + 100)
 
-        # EXR node
-        mov_node_pos_x = mov_node.xpos()
-        mov_node_pos_y = mov_node.ypos()
-        exr_node = make_EXR_node()
-        exr_node.setInput(0, reformat_node)
-        exr_node.setXYpos(mov_node_pos_x + 100, mov_node_pos_y)
-
-        # another mov node for demo reels
-        exr_node_pos_x = exr_node.xpos()
-        exr_node_pos_y = exr_node.ypos()
-        # if not FX
-        demo_write_node = make_demoReel_mov_node()
-        demo_write_node.setInput(0, reformat_node)
-        demo_write_node.setXYpos(exr_node_pos_x + 100, exr_node_pos_y)
-
         makeUI(groupNode)
-        createLinks(groupNode, text_nodes, mov_node, exr_node, switcheroo)
-        # Create Links
+        createLinks(text_nodes, switcheroo)
 
         for n in nuke.allNodes():
             n.hideControlPanel()
