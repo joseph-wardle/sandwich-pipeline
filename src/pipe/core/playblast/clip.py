@@ -7,6 +7,7 @@ from typing import Any, ClassVar, NewType
 
 import attrs
 
+from pipe.core.playblast.naming import edit_shot_directory
 from pipe.core.playblast.presets import FFmpegPreset
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 
@@ -71,8 +72,16 @@ def shot_or_scratch(shot_code: str, scratch_label: str) -> ReviewEntity:
 
 
 @attrs.frozen
+class EditDelivery:
+    shot_code: str
+    department: str
+
+
+@attrs.frozen
 class DiskDestination:
-    """`unavailable`, when set, is why this row cannot be delivered to yet."""
+    """`unavailable`, when set, is why this row cannot be delivered to yet.
+    `delivery`, when set, names the file as an edit delivery instead of with
+    the basename the other rows share."""
 
     id: DestinationId
     name: str
@@ -81,6 +90,7 @@ class DiskDestination:
     default_on: bool = True
     browsable: bool = False
     unavailable: str = ""
+    delivery: EditDelivery | None = None
 
 
 @attrs.frozen
@@ -116,6 +126,19 @@ def custom_folder_destination(*, default_on: bool = False) -> DiskDestination:
         preset=FFmpegPreset.WEB,
         default_on=default_on,
         browsable=True,
+    )
+
+
+def edit_destination(
+    shot_code: str, department: str, *, default_on: bool
+) -> DiskDestination:
+    return DiskDestination(
+        id=EDIT_FOLDER_ID,
+        name=EDIT_FOLDER_NAME,
+        directory=edit_shot_directory(shot_code),
+        preset=FFmpegPreset.EDIT_SQ,
+        default_on=default_on,
+        delivery=EditDelivery(shot_code, department),
     )
 
 
@@ -169,12 +192,14 @@ __all__ = [
     "Destination",
     "DestinationId",
     "DiskDestination",
+    "EditDelivery",
     "PreviewClip",
     "ReviewEntity",
     "ScratchEntity",
     "ShotEntity",
     "ShotGridDestination",
     "custom_folder_destination",
+    "edit_destination",
     "is_unlinked",
     "padded_frame_number",
 ]

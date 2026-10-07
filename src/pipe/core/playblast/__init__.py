@@ -19,6 +19,7 @@ from pipe.core.playblast.clip import (
     ShotEntity,
     ShotGridDestination,
     custom_folder_destination,
+    edit_destination,
     shot_or_scratch,
 )
 from pipe.core.playblast.confirm import (
@@ -60,5 +61,6 @@ __all__ = [
     "ShotGridDestination",
     "confirm_clip",
     "custom_folder_destination",
+    "edit_destination",
     "shot_or_scratch",
 ]

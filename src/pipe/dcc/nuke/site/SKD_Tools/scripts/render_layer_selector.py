@@ -286,6 +286,7 @@ class CascadingComboBox(QtWidgets.QWidget):
                 read["label"].setValue(
                     f"{self.current_layer} {version} {seq['folder']}"
                 )
+                skd_read_node.add_reformat(read)
         self.close()
 
 

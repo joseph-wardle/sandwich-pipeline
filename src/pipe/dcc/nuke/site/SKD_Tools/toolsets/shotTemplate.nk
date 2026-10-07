@@ -65079,7 +65079,6 @@ Dot {
 Read {
  inputs 0
  file_type exr
- format "1920 816 0 0 1920 816 1 Love_and_Dungeons_aspect_ratio"
  first 1001
  last 1101
  origfirst 1001
@@ -65087,6 +65086,17 @@ Read {
  origset true
  colorspace data
  name Read3
+ selected true
+ xpos -1550
+ ypos -3923
+}
+Reformat {
+ type "to box"
+ box_width {{root.format.width}}
+ box_height {{root.format.height}}
+ box_fixed true
+ pbb true
+ name Read3_reformat
  selected true
  xpos -1550
  ypos -3823
@@ -65107,7 +65117,6 @@ Dot {
 Read {
  inputs 0
  file_type exr
- format "1920 816 0 0 1920 816 1 Love_and_Dungeons_aspect_ratio"
  first 1001
  last 1101
  origfirst 1001
@@ -65115,6 +65124,17 @@ Read {
  origset true
  colorspace data
  name Read4
+ selected true
+ xpos -1083
+ ypos -4241
+}
+Reformat {
+ type "to box"
+ box_width {{root.format.width}}
+ box_height {{root.format.height}}
+ box_fixed true
+ pbb true
+ name Read4_reformat
  selected true
  xpos -1083
  ypos -4141

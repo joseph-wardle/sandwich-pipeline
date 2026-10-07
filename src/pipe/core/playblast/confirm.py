@@ -12,12 +12,17 @@ from pipe.core.playblast.clip import (
     Destination,
     DestinationId,
     DiskDestination,
+    EditDelivery,
     PreviewClip,
     ShotGridDestination,
 )
 from pipe.core.playblast.encoding import build_image_input_chain, encode_movie
 from pipe.core.playblast.errors import artist_reason
-from pipe.core.playblast.naming import existing_filenames, next_versioned_basename
+from pipe.core.playblast.naming import (
+    existing_filenames,
+    next_delivery_name,
+    next_versioned_basename,
+)
 from pipe.core.playblast.presets import FFmpegPreset
 from pipe.core.playblast.review.versions import (
     PlayblastVersionUploadRequest,
@@ -129,7 +134,7 @@ def _deliver_to_folder(
     destination = chosen.destination
     try:
         final_path = _encode_and_copy(
-            clip, chosen.directory, destination.preset, basename
+            clip, chosen.directory, destination.preset, basename, destination.delivery
         )
     except Exception as exc:
         log.exception("Confirm delivery to '%s' failed", destination.name)
@@ -138,11 +143,19 @@ def _deliver_to_folder(
 
 
 def _encode_and_copy(
-    clip: PreviewClip, directory: Path, preset: FFmpegPreset, basename: str
+    clip: PreviewClip,
+    directory: Path,
+    preset: FFmpegPreset,
+    basename: str,
+    delivery: EditDelivery | None,
 ) -> Path:
     movie = _encoded_movie(clip, preset, basename)
     directory.mkdir(mode=0o770, parents=True, exist_ok=True)
-    final_path = directory / movie.name
+    name = movie.name
+    if delivery is not None:
+        stem = next_delivery_name(directory, delivery.shot_code, delivery.department)
+        name = stem + movie.suffix
+    final_path = directory / name
     shutil.copyfile(movie, final_path)
     return final_path
 

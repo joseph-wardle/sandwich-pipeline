@@ -16,13 +16,11 @@ from Qt.QtWidgets import (
 from pipe.core.playblast import (
     CURRENT_FOLDER_ID,
     CURRENT_FOLDER_NAME,
-    EDIT_FOLDER_ID,
-    EDIT_FOLDER_NAME,
     DiskDestination,
     FFmpegPreset,
     custom_folder_destination,
+    edit_destination,
 )
-from pipe.core.playblast.naming import build_edit_output_directory
 from pipe.core.publish import scene_version, version_name
 from pipe.core.shot import current_layer_path, shot_root_path
 from pipe.core.shotgrid import Shot
@@ -104,14 +102,16 @@ class AnimPlayblastDialog(MPlayblastDialog):
 
     def _clip_folders(self) -> tuple[DiskDestination, ...]:
         scene_dir = Path(str(mc.file(query=True, sceneName=True) or ".")).parent
+        # Editorial swaps deliveries by shot frame, so only a full shot range
+        # can go to edit.
+        shot_code = self._review_shot_code()
+        edit = (
+            (edit_destination(shot_code, DEPARTMENT, default_on=False),)
+            if shot_code
+            else ()
+        )
         return (
-            DiskDestination(
-                id=EDIT_FOLDER_ID,
-                name=EDIT_FOLDER_NAME,
-                directory=build_edit_output_directory(DEPARTMENT),
-                preset=FFmpegPreset.EDIT_SQ,
-                default_on=False,
-            ),
+            *edit,
             DiskDestination(
                 id=CURRENT_FOLDER_ID,
                 name=CURRENT_FOLDER_NAME,

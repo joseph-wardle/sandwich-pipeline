@@ -13,8 +13,6 @@ from Qt import QtCore, QtWidgets
 from pipe.core.playblast import (
     CURRENT_FOLDER_ID,
     CURRENT_FOLDER_NAME,
-    EDIT_FOLDER_ID,
-    EDIT_FOLDER_NAME,
     Destination,
     DiskDestination,
     FFmpegPreset,
@@ -22,9 +20,9 @@ from pipe.core.playblast import (
     ReviewEntity,
     ShotGridDestination,
     custom_folder_destination,
+    edit_destination,
     shot_or_scratch,
 )
-from pipe.core.playblast.naming import build_edit_output_directory
 from pipe.core.shotgrid import ShotGridError
 from pipe.core.ui import FAIL_STYLE, DialogButtons, set_tab_available
 
@@ -364,13 +362,16 @@ class HPlayblastDialog(QtWidgets.QDialog, DialogButtons):
         )
 
     def _clip_folders(self) -> tuple[DiskDestination, ...]:
+        # Editorial swaps deliveries by shot frame, so only a full shot range
+        # can go to edit.
+        shot_code = self.shot_code if self.selected_source_mode == "shot" else ""
+        edit = (
+            (edit_destination(shot_code, EDIT_DEPARTMENT, default_on=True),)
+            if shot_code
+            else ()
+        )
         return (
-            DiskDestination(
-                id=EDIT_FOLDER_ID,
-                name=EDIT_FOLDER_NAME,
-                directory=build_edit_output_directory(EDIT_DEPARTMENT),
-                preset=FFmpegPreset.EDIT_SQ,
-            ),
+            *edit,
             DiskDestination(
                 id=CURRENT_FOLDER_ID,
                 name=CURRENT_FOLDER_NAME,
