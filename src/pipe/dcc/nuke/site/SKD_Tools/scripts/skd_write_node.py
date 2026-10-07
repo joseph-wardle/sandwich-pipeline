@@ -1,24 +1,30 @@
 import datetime
-import json
 import os
+import re
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import nuke
 from env_sg import DB_Config
+from pipe.core.playblast import ShotEntity
 from pipe.core.playblast.naming import edit_shot_directory, next_delivery_name
-from pipe.core.util.paths import get_production_path
-
-from pipe.core.shotgrid import Playlist, ShotGrid, ShotGridError, ShotGridNotFound
+from pipe.core.playblast.review import (
+    PlayblastVersionUploadRequest,
+    upload_playblast_version,
+)
+from pipe.core.shotgrid import Playlist, ShotGrid, ShotGridError, Task
+from pipe.core.util.users import resolve_artist_display_name
 
 TAILS = 5
+# The last movie this node wrote, which is what Send to ShotGrid uploads.
 EXPORTED_KNOB = "exported_mov"
 
-DEPT_DIR_MAP: dict[str, str] = {
+DEPARTMENTS: dict[str, str] = {
     "Lighting": "lighting",
     "Compositing": "comp",
     "FX": "fx",
-    "Shading": "lighting",
+    "CFX": "cfx",
 }
 
 
@@ -68,7 +74,7 @@ def make_text_nodes():
     dropdown_knob = nuke.Enumeration_Knob(
         "departmentDropdown",
         "departmentDropdown",
-        ["Lighting", "Compositing", "FX", "Shading"],
+        list(DEPARTMENTS),
     )
     department_text.addKnob(dropdown_knob)
     # message set below to force the font size to update
@@ -140,7 +146,7 @@ def update_text_messages(
     _set_knob_value(frame_num_text, "message", "Frame: [frame]")
     _set_knob_value(shot_code_text, "message", get_shot_code())
     _set_knob_value(date_text, "message", get_date())
-    _set_knob_value(name_text, "message", str(get_users_name()))
+    _set_knob_value(name_text, "message", resolve_artist_display_name())
 
     # department dropdown and text
     _set_knob_value(department_text, "message", "[value departmentDropdown]")
@@ -153,9 +159,8 @@ def get_in_out():
     ShotGrid or is missing cut_in / cut_out there.
     """
     curr_shot = get_shot_code()
-    conn = ShotGrid.connect(DB_Config)
     try:
-        shot = conn.get_shot(code=curr_shot)
+        shot = ShotGrid.connect(DB_Config).get_shot(code=curr_shot)
         return list(shot.frame_range)
     except ShotGridError as exc:
         nuke.message(
@@ -173,57 +178,15 @@ def get_date():
     return formatted_date
 
 
-def increment_version_num(curr_version):
-    num_str = curr_version.split("_")[1]
-    num_int = int(num_str) + 1
-    return f"V_{num_int:0{len(num_str)}d}"
-
-
-def get_version_num():
-    # path to the shot versions json
-    json_path = get_production_path() / "json/shot_versions.json"
-
-    with open(json_path, "r") as f:
-        shot_data = json.load(f)
-
-    # I think this should return the version number, with V_001 is the default. Hopefully.
-    shot_code = get_shot_code()
-    if shot_data.get(shot_code):
-        return increment_version_num(
-            shot_data.get(shot_code)
-        )  # if a shot code already exists, you gotta increment it.
-    else:
-        return "V_001"  # If the shot has never been rendered out before
-
-
 def get_shot_code():
     """A comp is `shot/<shot>/comp/<any name>.nk`, so the shot is the folder,
     not the file name."""
     return os.path.basename(os.path.dirname(os.path.dirname(nuke.root().name())))
 
 
-def get_users_name():
-    """
-    Returns the full name corresponding to the current user's login as defined in usernames.json.
-    If the username is not found in the JSON file, returns None.
-    """
-    # Get the current login username
-    username = os.getlogin()
-    json_path = get_production_path() / "json/usernames.json"
-
-    # Open and load the JSON file.
-    with open(json_path, "r") as f:
-        user_data = json.load(f)
-
-    # Return the corresponding name for the username.
-    # If the key is not found, .get() will return None.
-    return user_data.get(username)
-
-
 def get_output_file_info_mov(group):
     """The next edit delivery for this shot. The MOV_write creates the folder."""
-    currDept = getDepartment(group)
-    department = DEPT_DIR_MAP.get(currDept, currDept.lower())
+    department = DEPARTMENTS[getDepartment(group)]
     shot_code = get_shot_code()
     folder = edit_shot_directory(shot_code)
     new_file_name = next_delivery_name(folder, shot_code, department) + ".mov"
@@ -302,65 +265,19 @@ def make_MOV_node():
     write_node["colorspace"].setValue("Raw")
     write_node["transformType"].setValue(1)  # Display transform
 
-    fmt = write_node.format()
-    aspect = fmt.width() / float(fmt.height())
-
-    if abs(aspect - (16.0 / 9.0)) < 0.001:
-        # 16:9 → use DNxHD
-        write_node["mov64_codec"].setValue(11)  # Avid DNxHD
-        write_node["mov64_dnxhd_codec_profile"].setValue(1)  # DNxHD 422 10-bit 220 Mbps
-    else:
-        # anything else → stick with DNxHR
-        write_node["mov64_codec"].setValue(12)  # Avid DNxHR
-        # (you can also set mov64_dnxhr_profile if you need a specific DNxHR flavor)
-
-    # update the version number json.
-    shot_code = get_shot_code()
-    version_num = get_version_num()
-    json_path = str(get_production_path()) + "/json/shot_versions.json"
-    command = (
-        "import json, os\n"
-        'json_path = "{json_path}"\n'
-        'with open(json_path, "r") as f:\n'
-        "    data = json.load(f)\n"
-        'data["{shot_code}"] = "{version_num}"\n'
-        'with open(json_path, "w") as f:\n'
-        "    json.dump(data, f, indent=4)\n"
-    ).format(json_path=json_path, shot_code=shot_code, version_num=version_num)
-    write_node["afterRender"].setValue(command)
+    write_node["mov64_codec"].setValue("AVdh")
 
     return write_node
 
 
-def update_mov_node(write_node):
-    # get aspect ratio
-    fmt = write_node.format()
-    aspect = fmt.width() / float(fmt.height())
-
-    # look up the actual dropdown indices at runtime
-    # nuke.message("Codecs:\n" + "\n".join(f"{i}: {v}" for i,v in enumerate(vals))) #(if you ever need to see a list of codecs)
-    # pick the right codec
-    if abs(aspect - (16.0 / 9.0)) < 0.001:
-        # 16:9 → DNxHD 422 10-bit 220Mbps
-        write_node["mov64_codec"].setValue(12)
-        write_node["mov64_dnxhd_codec_profile"].setValue(1)
-    else:
-        # anything else → DNxHR (HQ for example)
-        write_node["mov64_codec"].setValue(13)
-        write_node["mov64_dnxhd_codec_profile"].setValue(0)
-        # if you want a specific DNxHR flavor you can also do:
-        # write_node["mov64_dnxhr_profile"].setValue(<your-profile-index>)
-
-
 def check_saved():
-    current_script_name = get_shot_code()
-    if current_script_name == "Root":
+    if not get_shot_code():
         nuke.message(
-            "This nuke script isn't saved, so I don't know what shot you're wanting to write out! Please save your shot!"
+            "Save this comp as shot/<shot>/comp/<name>.nk first. "
+            "The node names its movie after the shot folder."
         )
         return False
-    else:
-        return True
+    return True
 
 
 def makeUI(groupNode):
@@ -384,10 +301,11 @@ def makeUI(groupNode):
     frame_range.setValue("Frame range is currently set to:")
 
     # frame ranges
+    first, last = get_in_out()
     frame_in = nuke.Int_Knob("export_frame_in", "")
-    frame_in.setValue(get_in_out()[0])
+    frame_in.setValue(first)
     frame_out = nuke.Int_Knob("export_frame_out", "")
-    frame_out.setValue(get_in_out()[1])
+    frame_out.setValue(last)
     frame_out.clearFlag(nuke.STARTLINE)
 
     add_handles_button = nuke.PyScript_Knob(
@@ -404,7 +322,7 @@ def makeUI(groupNode):
 
     # dropdown
     department_dropdown = nuke.Enumeration_Knob(
-        "departmentDropdown", "", ["Lighting", "Compositing", "FX", "Shading"]
+        "departmentDropdown", "Department", list(DEPARTMENTS)
     )
 
     # Add all knobs
@@ -424,22 +342,13 @@ def makeUI(groupNode):
     # Add Send to Shotgrid UI
     groupNode.addKnob(nuke.Text_Knob("shotgrid_divider", ""))
 
-    # Populate ShotGrid Task dropdown dynamically
     try:
-        _conn = ShotGrid.connect(DB_Config)
-        tasks = _conn.find_tasks(shot=getShot(), user=getShotGridUser())
-        task_labels = [t.content for t in tasks if t.content]
-    except Exception:
+        task_labels = [t.content for t in find_my_tasks() if t.content]
+    except ShotGridError as exc:
+        nuke.message(f"Could not load your ShotGrid tasks: {exc}")
         task_labels = []
     task_knob = nuke.Enumeration_Knob("shotgrid_task", "ShotGrid Task", task_labels)
     groupNode.addKnob(task_knob)
-    dept_knob = nuke.Enumeration_Knob(
-        "sgDepartmentDropdown",
-        "Department",
-        ["Lighting", "Compositing", "FX", "Environment", "Shading"],
-    )
-    dept_knob.clearFlag(nuke.STARTLINE)
-    groupNode.addKnob(dept_knob)
 
     # Description field
     desc_knob = nuke.Multiline_Eval_String_Knob(
@@ -472,161 +381,85 @@ def getDepartment(group) -> str:
     return group["departmentDropdown"].value()
 
 
-### This is where we start sending things back to Shotgrid ###
-def getShot():
-    _conn = ShotGrid.connect(DB_Config)
-    try:
-        return _conn.get_shot(code=get_shot_code())
-    except ShotGridNotFound:
-        nuke.message("Invalid shot code")
-        return None
+def find_my_tasks() -> list[Task]:
+    """This shot's tasks assigned to the artist running Nuke."""
+    connection = ShotGrid.connect(DB_Config)
+    shot = connection.get_shot(code=get_shot_code())
+    user = connection.get_user(name=resolve_artist_display_name())
+    return connection.find_tasks(shot=shot, user=user)
 
 
-def getShotGridUser():
-    _conn = ShotGrid.connect(DB_Config)
-    username = get_users_name()
-    if not username:
-        nuke.message(
-            "Username did not match any users in Shotgrid. Talk to your lead or the pipeline person."
-        )
-        raise Exception(
-            "Username did not match any users in Shotgrid. Talk to your lead or the pipeline person."
-        )
-    try:
-        return _conn.get_user(name=username)
-    except ShotGridNotFound:
-        nuke.message(
-            f"No ShotGrid user found for '{username}'. Talk to your lead or the pipeline person."
-        )
-        raise
-
-
-def getUserTask(group):
-    """
-    Returns the Task object corresponding to the user's selection in the ShotGrid Task dropdown.
-    """
-    selected_name = group["shotgrid_task"].value()
-    shot = getShot()
-    user = getShotGridUser()
-    tasks = ShotGrid.connect(DB_Config).find_tasks(shot=shot, user=user)
-    for t in tasks:
-        if t.content == selected_name:
-            return t
-    return None
-
-
-def getMostRecentPlaylist(group) -> Playlist | None:
-    """
-    Look at the departmentDropdown on this group,
-    find all SG playlists whose code contains that department,
-    parse the M/D/YY date prefix, and return the most recent one.
-    """
-    dept = group["sgDepartmentDropdown"].value()
-    if not dept:
-        nuke.message("Please pick a department first.")
-        return None
-
-    try:
-        playlists = ShotGrid.connect(DB_Config).find_playlists(code_contains=dept)
-    except ShotGridError as e:
-        nuke.message(f"ShotGrid lookup failed: {e}")
-        return None
-
-    most_recent: Playlist | None = None
-    latest_date = None
-    for playlist in playlists:
-        date_str = (playlist.code or "").split(" ", 1)[0]
+def find_review_playlist(department: str) -> Playlist | None:
+    """The newest playlist named `<M/D/YY> ...` that names `department`."""
+    # A whole word, so "FX" does not pick up a CFX playlist.
+    names_department = re.compile(rf"\b{re.escape(department)}\b")
+    newest: Playlist | None = None
+    newest_date = None
+    for playlist in ShotGrid.connect(DB_Config).find_playlists(
+        code_contains=department
+    ):
+        code = playlist.code or ""
         try:
-            pl_date = datetime.datetime.strptime(date_str, "%m/%d/%y").date()
+            date = datetime.datetime.strptime(code.split(" ", 1)[0], "%m/%d/%y")
         except ValueError:
             continue
-        if latest_date is None or pl_date > latest_date:
-            latest_date = pl_date
-            most_recent = playlist
-
-    if most_recent is None:
-        nuke.message(f"No playlists found for “{dept}”.")
-        return None
-
-    return most_recent
+        if names_department.search(code) and (
+            newest_date is None or date > newest_date
+        ):
+            newest, newest_date = playlist, date
+    return newest
 
 
 def create_new_shot_version(group):
-    video_path = group[EXPORTED_KNOB].value()
-    if not os.path.isfile(video_path):
+    video_path = Path(group[EXPORTED_KNOB].value())
+    if not video_path.is_file():
         nuke.message("Export the MOV before sending it to ShotGrid.")
         return
 
-    shot = getShot()
-    user = getShotGridUser()
-    playlist = getMostRecentPlaylist(group)
+    department = getDepartment(group)
+    try:
+        playlist = find_review_playlist(department)
+        task_name = group["shotgrid_task"].value()
+        task = next((t for t in find_my_tasks() if t.content == task_name), None)
+    except ShotGridError as exc:
+        nuke.message(f"ShotGrid lookup failed, so nothing was sent: {exc}")
+        return
 
-    if playlist:
+    if task is None:
         nuke.message(
-            f"Using playlist: {playlist.code}\n"
-            "\n"
+            f"None of your ShotGrid tasks on {get_shot_code()} is called "
+            f"'{task_name}'. Pick one in ShotGrid Task, or ask your lead to "
+            "assign you one."
+        )
+        return
+    if playlist is None:
+        if not nuke.ask(
+            f"There is no dated {department} playlist, so this Version won't be "
+            "in a dailies review. Send it anyway?"
+        ):
+            return
+    else:
+        nuke.message(
+            f"Using playlist: {playlist.code}\n\n"
             "Contact your lead if you need a newer playlist!"
         )
-    else:
-        if not nuke.ask(
-            "Are you sure you want to continue? You will be creating a version that isn't attached to a dailies review."
-        ):
-            nuke.message(
-                "Please select a valid playlist to continue. If you continue to recieve this error please talk to your lead"
-            )
-            return
 
-    task = getUserTask(group)
-    if not task:
-        nuke.message("Please select a valid ShotGrid task.")
-        return
-
-    task_name = task.content
-    version_name = f"{get_users_name()}_{task_name}_{get_version_num()}"
-    description = (
-        group["shotgrid_description"].value()
-        if group.knob("shotgrid_description")
-        else ""
-    )
-
-    # Create the Version row first, then upload the movie as a separate step so
-    # an upload failure can be reported distinctly from a create failure.
-    _conn = ShotGrid.connect(DB_Config)
-    try:
-        new_version = _conn.create_version(
-            entity=shot,
-            code=version_name,
-            user=user,
+    result = upload_playblast_version(
+        PlayblastVersionUploadRequest(
+            entity=ShotEntity(get_shot_code()),
+            movie_path=video_path,
+            # The delivery's name, so the Version and the edit file match.
+            version_name=video_path.stem,
+            description=group["shotgrid_description"].value() or None,
+            artist_display_name=resolve_artist_display_name() or None,
+            review_playlist_id=playlist.id if playlist else None,
+            disk_path=video_path,
             task=task,
-            description=description,
-            path_to_frames=video_path,
         )
-    except Exception as e:
-        nuke.message(f"ShotGrid version creation failed: {e}")
-        return
-
-    try:
-        _conn.upload_movie(new_version, video_path)
-    except Exception as e:
-        nuke.message(f"Version '{version_name}' created, but movie upload failed: {e}")
-        return
-
-    if playlist is not None:
-        try:
-            _conn.link_to_playlist(new_version, playlist_id=playlist.id)
-        except Exception as e:
-            nuke.message(
-                f"Version '{version_name}' uploaded, but adding it to playlist "
-                f"'{playlist.code}' failed: {e}"
-            )
-            return
-
-    nuke.message(
-        f"ShotGrid version '{version_name}' created and movie uploaded successfully."
     )
+    nuke.message("\n".join([result.message, *result.warnings]))
 
 
-### End return to shotgrid helper functions ###
 def main():
     if check_saved():
         current_node = None
@@ -634,7 +467,7 @@ def main():
         if selected_nodes:
             current_node = selected_nodes[0]
 
-        base_name = "BOBO_Write"
+        base_name = "SKD_Write"
         final_name = base_name
 
         # Check if a node with the base name exists.
@@ -678,15 +511,12 @@ def main():
         make_timecode_node()
 
         # MOV node
-        mov_node = make_MOV_node()
+        make_MOV_node()
 
         # update text nodes messages
         update_text_messages(
             text_nodes[0], text_nodes[1], text_nodes[2], text_nodes[3], text_nodes[4]
         )
-
-        # update settings in mov node
-        update_mov_node(mov_node)
 
         # output Node
         output_node = nuke.createNode("Output")
@@ -705,7 +535,4 @@ def main():
         if current_node:
             groupNode.setInput(0, current_node)
 
-        groupNode["tile_color"].setValue(0xFF6699FF)  # Example: a blueish color
-
-
-# main()
+        groupNode["tile_color"].setValue(0xFF6699FF)

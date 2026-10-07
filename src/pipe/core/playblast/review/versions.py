@@ -17,7 +17,15 @@ from pipe.core.playblast.clip import (
     is_unlinked,
 )
 from pipe.core.playblast.review._connection import default_db_connection
-from pipe.core.shotgrid import Asset, Shot, ShotGrid, ShotGridError, User, Version
+from pipe.core.shotgrid import (
+    Asset,
+    Shot,
+    ShotGrid,
+    ShotGridError,
+    Task,
+    User,
+    Version,
+)
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +41,7 @@ class PlayblastVersionUploadRequest:
     # Where this playblast was also kept, if anywhere. `movie_path` is a temp
     # encode, so it is the only location worth recording on the Version.
     disk_path: Path | None = None
+    task: Task | None = None
 
 
 @attrs.frozen
@@ -77,6 +86,7 @@ def upload_playblast_version(
             code=request.version_name,
             entity=linked,
             user=_resolve_user(connection, request.artist_display_name, warnings),
+            task=request.task,
             description=_version_description(request),
             path_to_frames=request.disk_path,
         )
