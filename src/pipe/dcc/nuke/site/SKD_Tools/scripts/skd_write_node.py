@@ -140,8 +140,6 @@ def apply_mov_path_to_ui_and_write(group):
     group["mov_export_path"].setValue(full_path)
     write = group.node("MOV_write")
     write["file"].setValue(full_path)
-    # In proxy mode a Write renders to its proxy file instead.
-    write["proxy"].setValue(full_path)
     return full_path
 
 
@@ -156,28 +154,22 @@ def export_mov(group):
     path = apply_mov_path_to_ui_and_write(group)
     first_frame = int(group["export_frame_in"].value())
     last_frame = int(group["export_frame_out"].value())
-    with review_size():
+    with proxy_off():
         nuke.execute(group.node("MOV_write"), first_frame, last_frame, 1)
     group[EXPORTED_KNOB].setValue(path)
 
 
 @contextmanager
-def review_size() -> Iterator[None]:
-    """Render at REVIEW_HEIGHT: a UHD comp renders through proxy at half size,
-    which is also four times faster than rendering it full and shrinking it.
-    The artist's proxy settings come back afterwards."""
+def proxy_off() -> Iterator[None]:
+    """Proxy reads each 1080 render at half size, which would halve the movie's
+    detail; the review Reformat shrinks the full frame instead."""
     root = nuke.root()
-    knobs = ("proxy", "proxy_type", "proxy_scale")
-    saved = {name: root[name].value() for name in knobs}
-    scale = REVIEW_HEIGHT / root.format().height()
-    root["proxy_type"].setValue("scale")
-    root["proxy_scale"].setValue(min(scale, 1.0))
-    root["proxy"].setValue(scale < 1)
+    saved = root["proxy"].value()
+    root["proxy"].setValue(False)
     try:
         yield
     finally:
-        for name in knobs:
-            root[name].setValue(saved[name])
+        root["proxy"].setValue(saved)
 
 
 def open_folder(group):
@@ -213,6 +205,14 @@ def make_timecode_node():
     _set_knob_value(timecode_node, "useFrame", True)
     _set_knob_value(timecode_node, "frame", 0)
     return timecode_node
+
+
+def make_review_reformat():
+    """Shrinks the comp to REVIEW_HEIGHT for the movie; a 1080 comp passes through."""
+    reformat = nuke.createNode("Reformat")
+    _set_knob_value(reformat, "type", "scale")
+    reformat["scale"].setExpression(f"{REVIEW_HEIGHT} / root.format.height")
+    return reformat
 
 
 def make_MOV_node():
@@ -473,6 +473,7 @@ def main():
         switcheroo.setXYpos(text_node_pos_x + 100, text_node_pos_y)
 
         make_timecode_node()
+        make_review_reformat()
 
         # MOV node
         make_MOV_node()
