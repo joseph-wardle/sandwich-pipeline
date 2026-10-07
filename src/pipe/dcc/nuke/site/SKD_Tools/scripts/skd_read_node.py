@@ -8,6 +8,9 @@ from pathlib import Path
 
 from pipe.core import render
 
+REFORMAT_SUFFIX = "_reformat"
+REFORMAT_Y_OFFSET = 100
+
 
 def _gcd_list(values):
     """Greatest common divisor for a list of positive integers."""
@@ -157,6 +160,35 @@ def read_sequence(read, s):
     read["frame"].setValue(hold)
 
 
+def add_reformat(read: nuke.Node) -> nuke.Node:
+    """
+    The Reformat below a Read that sizes its frames to the comp's format.
+
+    Renders stay 1080p while a comp may be UHD. A new Reformat takes over the
+    Read's outputs, so comp already wired to the Read gets the resized frames.
+    """
+    name = read.name() + REFORMAT_SUFFIX
+    if existing := nuke.toNode(name):
+        return existing
+    outputs = read.dependent(nuke.INPUTS, forceEvaluate=False)
+
+    reformat = nuke.nodes.Reformat(name=name, inputs=[read])
+    # An expression rather than a format, so it follows the comp's format when that changes.
+    reformat["type"].setValue("to box")
+    reformat["box_fixed"].setValue(True)
+    reformat["box_width"].setExpression("root.format.width")
+    reformat["box_height"].setExpression("root.format.height")
+    # Keeps the overscan Tractor can render past the frame's edges.
+    reformat["pbb"].setValue(True)
+    reformat.setXYpos(read.xpos(), read.ypos() + REFORMAT_Y_OFFSET)
+
+    for node in outputs:
+        for i in range(node.inputs()):
+            if node.input(i) == read:
+                node.setInput(i, reformat)
+    return reformat
+
+
 def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
     """
     Make or update one Read per output folder of each layer's newest readable version.
@@ -167,6 +199,7 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
       label the artist gave it survive a re-run.
     - Reads this tool made under another name are left as they are, and named in a
       message when they read anything but a newest version.
+    - Each Read gets a Reformat below it to the comp's format (add_reformat).
     - When a Read changed, the project frame range is set to the union
       [min(first), max(last)] across all sequences.
     - For sequences detected as rendered on 2s/4s (or any N-s cadence), the Read node's
@@ -199,6 +232,8 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
             name=node_name, on_error="black"
         )
         reads.append(read)
+        # Reads made before the comp's format could differ from the renders' gain one.
+        add_reformat(read)
         # render/ is a link into /cache, and Reads hold either spelling.
         if os.path.realpath(read["file"].value()) == os.path.realpath(s["pattern"]):
             continue
@@ -212,7 +247,7 @@ def make_read_nodes(render_subdir="render", node_name_prefix="EXR_read"):
 
     notes = []
     if not changed:
-        notes.append("Every Read already reads the newest version, so nothing changed.")
+        notes.append("Every Read already reads the newest version.")
     if left := _left_behind(node_name_prefix, reads):
         lines = "\n".join(f"  {n.name()}: {n['file'].value()}" for n in left)
         notes.append(

@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import nuke
+import skd_read_node
 
 from pipe.core.shot import current_layer_path
 
@@ -73,6 +74,7 @@ def run():
     for n in nuke.selectedNodes():
         n.setSelected(False)
 
+    source = skd_read_node.add_reformat(read)
     grades = []
     for i, layer in enumerate(layer_names):
         nuke.Layer(
@@ -87,7 +89,7 @@ def run():
         x = base_x + i * BRANCH_SPACING
 
         shuffle = nuke.nodes.Shuffle2(name="Shuffle_%s" % layer, xpos=x, ypos=shuffle_y)
-        shuffle.setInput(0, read)
+        shuffle.setInput(0, source)
         shuffle["in1"].setValue(layer)
 
         grade = nuke.nodes.Grade(name="%s_grade" % layer, xpos=x, ypos=grade_y)
