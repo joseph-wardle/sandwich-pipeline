@@ -5,10 +5,9 @@ from env_sg import DB_Config
 
 from pipe.core.shotgrid import ShotGrid
 
-project_file = nuke.root()["name"].value()
-
 
 def get_project_name():
+    project_file = nuke.root()["name"].value()
     project_name = ""
     if project_file:
         project_name_with_ext = os.path.basename(project_file)
@@ -32,7 +31,8 @@ def set_frame_range(frame_in, frame_out):
 
 
 def set_full_frame_size(root_node):
-    root_node["format"].setValue("Love_and_Dungeons_aspect_ratio")
+    # site/init.py sets the show's format as the default.
+    root_node["format"].setValue(nuke.knobDefault("Root.format"))
 
 
 def set_frame_rate(root_node):
