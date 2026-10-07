@@ -107,7 +107,7 @@ set N9d0a940 [stack 0]
   ypos -383
  }
  Radial {
-  area {0 0 2048 1307}
+  area {0 0 {root.format.width*2048/1920} {root.format.height*1307/1080}}
   name Radial1
   xpos -92
   ypos -311
@@ -138,7 +138,10 @@ push $N9d0a940
   ypos -532
  }
  Reformat {
-  format "2048 1305 0 0 2048 1305 1 LnDanamorphic"
+  type "to box"
+  box_width {{root.format.width}}
+  box_height {{root.format.height}}
+  box_fixed true
   resize distort
   center false
   pbb true
@@ -1206,7 +1209,10 @@ push $N1a31a590
   ypos -20
  }
  Reformat {
-  format "2048 1305 0 0 2048 1305 1 LnDanamorphic"
+  type "to box"
+  box_width {{root.format.width}}
+  box_height {{root.format.height}}
+  box_fixed true
   resize fill
   name Reformat3
   xpos -398
@@ -1841,7 +1847,7 @@ push $N1a767bd0
   }
   Transform {
    scale 1.3
-   center {960 540}
+   center {{root.format.width/2} {root.format.height/2}}
    shutteroffset centred
    name Transform18
    xpos 270
@@ -1920,7 +1926,7 @@ push $N19f5bb20
   }
   Transform {
    scale 2
-   center {960 540}
+   center {{root.format.width/2} {root.format.height/2}}
    shutteroffset centred
    name Transform17
    xpos 270
@@ -2065,7 +2071,7 @@ set N19f40050 [stack 0]
    size 5
    gain 0.86
    gamma 0.2
-   center {960 540}
+   center {{root.format.width/2} {root.format.height/2}}
    name Noise2
    xpos 411
    ypos 2980
@@ -2951,7 +2957,7 @@ push $N19868e90
    size 5
    gain 0.86
    gamma 0.2
-   center {960 540}
+   center {{root.format.width/2} {root.format.height/2}}
    name Noise1
    xpos 449
    ypos 2386
@@ -5830,7 +5836,7 @@ set N1b7374f0 [stack 0]
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/dodecagon.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/dodecagon.png"
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read19
@@ -5850,7 +5856,7 @@ set N1b790a40 [stack 0]
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/undecagon.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/undecagon.png"
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read26
@@ -5870,7 +5876,7 @@ set N1b7c4af0 [stack 0]
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/decagon.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/decagon.png"
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read3
@@ -5890,7 +5896,7 @@ set N1b7f8f00 [stack 0]
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/nonagon.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/nonagon.png"
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read22
@@ -5910,7 +5916,7 @@ set N1b82d310 [stack 0]
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/octogon.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/octogon.png"
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read23
@@ -5930,7 +5936,7 @@ set N1b861720 [stack 0]
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/heptagon.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/heptagon.png"
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read20
@@ -5950,7 +5956,7 @@ set N1b895b30 [stack 0]
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/hexagon.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/hexagon.png"
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read21
@@ -5970,7 +5976,7 @@ set N1b8ca280 [stack 0]
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/pentagon.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/pentagon.png"
    format "512 512 0 0 512 512 1 square_512"
    origset true
    name Read24
@@ -6028,7 +6034,7 @@ set N1b8fe9d0 [stack 0]
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/twoCircle2.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/twoCircle2.png"
    format "256 256 0 0 256 256 1 square_256"
    origset true
    name Read12
@@ -6336,7 +6342,7 @@ push $N1b8fe9d0
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleNoise1.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleNoise1.png"
    format "256 256 0 0 256 256 1 square_256"
    origset true
    name Read7
@@ -6521,7 +6527,7 @@ push $N1b8fe9d0
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleHard1.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleHard1.png"
    format "256 256 0 0 256 256 1 square_256"
    origset true
    name Read14
@@ -6729,7 +6735,7 @@ push $N1b8fe9d0
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleBlur1.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleBlur1.png"
    format "256 256 0 0 256 256 1 square_256"
    origset true
    name Read9
@@ -7562,7 +7568,7 @@ push $N1b8fe9d0
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/twoCircle1.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/twoCircle1.png"
    format "256 256 0 0 256 256 1 square_256"
    origset true
    name Read11
@@ -8054,7 +8060,7 @@ push $N1b8fe9d0
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleHard3.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleHard3.png"
    format "256 256 0 0 256 256 1 square_256"
    origset true
    name Read6
@@ -8215,7 +8221,7 @@ push $N1b8fe9d0
   Read {
    inputs 0
    file_type png
-   file [getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleHard2.png
+   file "\[getenv DCC_NUKE_THIRD_PARTY]/NukeSurvivalToolkit_publicRelease/NukeSurvivalToolkit/images/circleHard2.png"
    format "256 256 0 0 256 256 1 square_256"
    origset true
    name Read5
@@ -9529,7 +9535,10 @@ push $N1ba8b360
   }
  end_group
  Reformat {
-  format "2048 1305 0 0 2048 1305 1 LnDanamorphic"
+  type "to box"
+  box_width {{root.format.width}}
+  box_height {{root.format.height}}
+  box_fixed true
   resize distort
   center false
   pbb true

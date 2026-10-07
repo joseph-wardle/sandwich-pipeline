@@ -2,6 +2,8 @@ import datetime
 import os
 import re
 import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,11 @@ from pipe.core.util.users import resolve_artist_display_name
 TAILS = 5
 # The last movie this node wrote, which is what Send to ShotGrid uploads.
 EXPORTED_KNOB = "exported_mov"
+# Dailies and edit movies stay 1080p whatever the comp's format.
+REVIEW_HEIGHT = 1080
+# The HUD was laid out on a 1080 frame; other formats scale it.
+HUD_LAYOUT_HEIGHT = 1080
+HUD_FONT_SIZE = 25
 
 DEPARTMENTS: dict[str, str] = {
     "Lighting": "lighting",
@@ -32,104 +39,37 @@ def _set_knob_value(node: Any, knob_name: str, value: Any) -> None:
     node.knob(knob_name).setValue(value)
 
 
+def _make_hud_text(
+    name: str, font_size: float, bottom: float, top_inset: float, xjustify: str
+) -> Any:
+    text = nuke.createNode("Text2")
+    _set_knob_value(text, "font_size", font_size)
+    width = nuke.root().format().width()
+    height = nuke.root().format().height()
+    pad = font_size  # The padding has always matched the font size.
+    _set_knob_value(text, "box", [pad, bottom, width - pad, height - top_inset])
+    _set_knob_value(text, "xjustify", xjustify)
+    _set_knob_value(text, "yjustify", "bottom")
+    _set_knob_value(text, "enable_background", 1)
+    text.setName(name)
+    return text
+
+
 def make_text_nodes():
-    # Text Padding
-    rl_padding = 25
-    tb_padding = 25
-    font_size = 25
-    frame_height = 816
-    frame_width = 1920
-
-    # Frame Number
-    frame_num_text = nuke.createNode("Text2", "font_size 30")
-    _set_knob_value(frame_num_text, "font_size", font_size)
-    _set_knob_value(
-        frame_num_text,
-        "box",
-        [rl_padding, tb_padding, frame_width - rl_padding, frame_height - tb_padding],
+    # Sized once, from the comp's format. Text2 fixes each character's size
+    # when its message is set, so an expression on font_size would not follow
+    # a later format change: rebuild the node after one.
+    size = HUD_FONT_SIZE * nuke.root().format().height() / HUD_LAYOUT_HEIGHT
+    frame_num_text = _make_hud_text("Frame_Number", size, size, size, "right")
+    department_text = _make_hud_text("department_text", size, size * 5, 0, "left")
+    department_text.addKnob(
+        nuke.Enumeration_Knob(
+            "departmentDropdown", "departmentDropdown", list(DEPARTMENTS)
+        )
     )
-    _set_knob_value(frame_num_text, "xjustify", "right")
-    _set_knob_value(frame_num_text, "yjustify", "bottom")
-    _set_knob_value(frame_num_text, "enable_background", 1)
-    frame_num_text.setName("Frame_Number")
-    # message set below to force the font size to update
-
-    # Department
-    department_text = nuke.createNode("Text2")
-    _set_knob_value(department_text, "font_size", font_size)
-    _set_knob_value(
-        department_text,
-        "box",
-        [
-            rl_padding,
-            tb_padding * 2 + font_size * 3,
-            frame_width - rl_padding,
-            frame_height,
-        ],
-    )
-    _set_knob_value(department_text, "xjustify", "left")
-    _set_knob_value(department_text, "yjustify", "bottom")
-    _set_knob_value(department_text, "enable_background", 1)
-    department_text.setName("department_text")
-    dropdown_knob = nuke.Enumeration_Knob(
-        "departmentDropdown",
-        "departmentDropdown",
-        list(DEPARTMENTS),
-    )
-    department_text.addKnob(dropdown_knob)
-    # message set below to force the font size to update
-
-    # Shot Code
-    shot_code_text = nuke.createNode("Text2")
-    _set_knob_value(shot_code_text, "font_size", font_size)
-    _set_knob_value(
-        shot_code_text,
-        "box",
-        [
-            rl_padding,
-            tb_padding + font_size * 2,
-            frame_width - rl_padding,
-            frame_height,
-        ],
-    )
-    _set_knob_value(shot_code_text, "xjustify", "right")
-    _set_knob_value(shot_code_text, "yjustify", "bottom")
-    _set_knob_value(shot_code_text, "enable_background", 1)
-    shot_code_text.setName("Shot_Code")
-    # message set below to force the font size to update
-
-    # date
-    date_text = nuke.createNode("Text2")
-    _set_knob_value(date_text, "font_size", font_size)
-    _set_knob_value(
-        date_text,
-        "box",
-        [
-            rl_padding,
-            tb_padding + font_size * 2,
-            frame_width - rl_padding,
-            frame_height,
-        ],
-    )
-    _set_knob_value(date_text, "xjustify", "left")
-    _set_knob_value(date_text, "yjustify", "bottom")
-    _set_knob_value(date_text, "enable_background", 1)
-    date_text.setName("date")
-    # message set below to force the font size to update
-
-    # user name
-    name_text = nuke.createNode("Text2")
-    _set_knob_value(name_text, "font_size", font_size)
-    _set_knob_value(
-        name_text,
-        "box",
-        [rl_padding, tb_padding, frame_width - rl_padding, frame_height - tb_padding],
-    )
-    _set_knob_value(name_text, "xjustify", "left")
-    _set_knob_value(name_text, "yjustify", "bottom")
-    _set_knob_value(name_text, "enable_background", 1)
-    name_text.setName("name")
-    # message set below to force the font size to update
+    shot_code_text = _make_hud_text("Shot_Code", size, size * 3, 0, "right")
+    date_text = _make_hud_text("date", size, size * 3, 0, "left")
+    name_text = _make_hud_text("name", size, size, size, "left")
 
     blur_node = nuke.createNode("Blur")
     nuke.delete(
@@ -198,7 +138,10 @@ def apply_mov_path_to_ui_and_write(group):
     new_file_name, folder_path = get_output_file_info_mov(group)
     full_path = os.path.join(folder_path, new_file_name)
     group["mov_export_path"].setValue(full_path)
-    group.node("MOV_write")["file"].setValue(full_path)
+    write = group.node("MOV_write")
+    write["file"].setValue(full_path)
+    # In proxy mode a Write renders to its proxy file instead.
+    write["proxy"].setValue(full_path)
     return full_path
 
 
@@ -213,8 +156,28 @@ def export_mov(group):
     path = apply_mov_path_to_ui_and_write(group)
     first_frame = int(group["export_frame_in"].value())
     last_frame = int(group["export_frame_out"].value())
-    nuke.execute(group.node("MOV_write"), first_frame, last_frame, 1)
+    with review_size():
+        nuke.execute(group.node("MOV_write"), first_frame, last_frame, 1)
     group[EXPORTED_KNOB].setValue(path)
+
+
+@contextmanager
+def review_size() -> Iterator[None]:
+    """Render at REVIEW_HEIGHT: a UHD comp renders through proxy at half size,
+    which is also four times faster than rendering it full and shrinking it.
+    The artist's proxy settings come back afterwards."""
+    root = nuke.root()
+    knobs = ("proxy", "proxy_type", "proxy_scale")
+    saved = {name: root[name].value() for name in knobs}
+    scale = REVIEW_HEIGHT / root.format().height()
+    root["proxy_type"].setValue("scale")
+    root["proxy_scale"].setValue(min(scale, 1.0))
+    root["proxy"].setValue(scale < 1)
+    try:
+        yield
+    finally:
+        for name in knobs:
+            root[name].setValue(saved[name])
 
 
 def open_folder(group):
@@ -489,9 +452,13 @@ def main():
         # input_node
         input_node = nuke.createNode("Input")
 
-        # reformat node
+        # An expression rather than a format, so the node follows the comp's
+        # format when that changes.
         reformat_node = nuke.createNode("Reformat")
-        reformat_node["format"].setValue("Bobo_aspect_ratio")
+        reformat_node["type"].setValue("to box")
+        reformat_node["box_fixed"].setValue(True)
+        reformat_node["box_width"].setExpression("root.format.width")
+        reformat_node["box_height"].setExpression("root.format.height")
         reformat_node.setInput(0, input_node)
 
         # All text nodes
@@ -504,9 +471,6 @@ def main():
         switcheroo.setInput(0, text_nodes[3])
         switcheroo.setInput(1, reformat_node)
         switcheroo.setXYpos(text_node_pos_x + 100, text_node_pos_y)
-
-        # reformat node
-        nuke.createNode("Reformat")
 
         make_timecode_node()
 
