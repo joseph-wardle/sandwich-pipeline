@@ -55,6 +55,25 @@ def unpublishable_reason(cache_set: str) -> UnpublishableReason | None:
             "geometry to publish. Rigs built for previs are often not set up "
             "for animation publishing — check with rigging.",
         )
+    if foreign_root := _root_outside_namespace(cache_set, namespace):
+        return UnpublishableReason(
+            f"parented under {foreign_root}",
+            f"Parented under '{foreign_root}', which isn't part of the rig. "
+            "Unparent the rig to the world to publish it.",
+        )
+    return None
+
+
+def _root_outside_namespace(cache_set: str, namespace: str) -> str | None:
+    """The top of the hierarchy holding the cache set's members, when that top is
+    not in the rig's namespace."""
+    # `sets` is typed as returning any of its flags' results; a membership
+    # query returns a list of names.
+    members = cast("list[str]", mc.sets(cache_set, query=True))
+    for member in mc.ls(*members, long=True):
+        root = member.split("|")[1].split(".")[0]
+        if namespace_of(root) != namespace:
+            return root
     return None
 
 
