@@ -9,7 +9,7 @@ from pathlib import Path
 from maya import cmds as mc
 from pxr import Gf, Usd, UsdGeom
 
-from pipe.core.asset.paths import production_relative_identifier
+from pipe.core.asset.paths import AssetPaths, production_relative_identifier
 from pipe.core.assembly.model import Piece, PieceTarget, SplitError, SplitResult
 from pipe.core.assembly.normalize import (
     SOURCE_LAYER_LINEAR_UNIT,
@@ -21,6 +21,7 @@ from pipe.core.assembly.normalize import (
     placement_for,
     prim_point_bounds,
 )
+from pipe.core.assembly.provenance import stamp_assembly
 from pipe.dcc.maya.assembly.scan import (
     renderable_meshes,
     world_matrix,
@@ -42,7 +43,7 @@ _PENDING_SUFFIX = ".writing.usd"
 
 
 def split_piece(
-    piece: Piece, target: PieceTarget, *, assembly_name: str
+    piece: Piece, target: PieceTarget, *, assembly_root: Path
 ) -> SplitResult:
     """Move `piece` out of the Maya scene and into `target`, in place."""
     _refuse_existing_model(target)
@@ -51,11 +52,12 @@ def split_piece(
     scale = _bakeable_scale(piece)
     bounds_before = _piece_bounds(piece)
 
-    normalization = _install_source_layer(piece, target, scale)
+    _link_textures(target, assembly_root)
+    normalization = _install_source_layer(piece, target, scale, assembly_root)
     placement = placement_for(piece.world_matrix, normalization)
 
     stage = ensure_assembly_stage()
-    prim = _author_piece_prim(stage, assembly_name, target, placement)
+    prim = _author_piece_prim(stage, assembly_root.name, target, placement)
     bounds_after = _prim_world_bounds(prim)
     _confirm_unmoved(piece, target, stage, prim, bounds_before, bounds_after)
 
@@ -142,8 +144,25 @@ def _piece_bounds(piece: Piece) -> Gf.Range3d:
     return world_point_bounds(piece.node)
 
 
+def _link_textures(target: PieceTarget, assembly_root: Path) -> None:
+    """Make the child's `publish/tex` the assembly's"""
+    link = AssetPaths(target.asset_root).publish_textures_dir
+    textures = AssetPaths(assembly_root).publish_textures_dir
+    # Relative, so the pair survives a move together and either mount of /job.
+    relative = os.path.relpath(textures, link.parent)
+    if link.is_symlink() and os.readlink(link) == relative:
+        return
+    if link.exists() or link.is_symlink():
+        raise SplitError(
+            f"'{target.asset_name}' already has textures at {link}, and a split "
+            f"child's are its assembly's ({textures}). Split under a different name."
+        )
+    link.parent.mkdir(parents=True, exist_ok=True)
+    os.symlink(relative, link)
+
+
 def _install_source_layer(
-    piece: Piece, target: PieceTarget, scale: float
+    piece: Piece, target: PieceTarget, scale: float, assembly_root: Path
 ) -> Gf.Matrix4d:
     """Write `target.source_layer`, normalized, and return the normalization."""
     pending = target.source_layer.with_name(target.source_layer.stem + _PENDING_SUFFIX)
@@ -159,7 +178,7 @@ def _install_source_layer(
                 unit=SOURCE_LAYER_LINEAR_UNIT,
                 shadingMode=_SHADING_MODE,
             )
-        normalization = _normalize_layer(pending, target, scale)
+        normalization = _prepare_layer(pending, target, scale, assembly_root)
         os.replace(pending, target.source_layer)
     except Exception:
         pending.unlink(missing_ok=True)
@@ -167,8 +186,10 @@ def _install_source_layer(
     return normalization
 
 
-def _normalize_layer(layer: Path, target: PieceTarget, scale: float) -> Gf.Matrix4d:
-    """Rewrite the exported layer so its contents rest at the origin."""
+def _prepare_layer(
+    layer: Path, target: PieceTarget, scale: float, assembly_root: Path
+) -> Gf.Matrix4d:
+    """Rest the exported contents at the origin and record where they came from."""
     stage = Usd.Stage.Open(str(layer))
     root = stage.GetDefaultPrim()
     group = _exported_group(root, target)
@@ -179,6 +200,7 @@ def _normalize_layer(layer: Path, target: PieceTarget, scale: float) -> Gf.Matri
 
     normalization = normalization_matrix(prim_point_bounds(root), scale)
     UsdGeom.Xformable(group).MakeMatrixXform().Set(normalization)
+    stamp_assembly(stage.GetRootLayer(), assembly_root)
     stage.GetRootLayer().Save()
     return normalization
 
