@@ -206,7 +206,9 @@ def _encoded_movie(clip: PreviewClip, preset: FFmpegPreset, basename: str) -> Pa
         output_path=movie,
         preset=preset,
         frame_rate=clip.fps,
-        start_frame=clip.frame_start,
+        start_frame=(
+            clip.frame_start if clip.timecode_start is None else clip.timecode_start
+        ),
     )
 
 

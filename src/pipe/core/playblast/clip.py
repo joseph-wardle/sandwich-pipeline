@@ -169,6 +169,7 @@ class PreviewClip:
     fps: int
     output_prefix: str = ""
     settings_key: str = ""
+    timecode_start: int | None = None
     destinations: tuple[Destination, ...] = attrs.field(
         default=(), validator=_validate_destinations
     )
