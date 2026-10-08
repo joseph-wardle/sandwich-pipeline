@@ -42,9 +42,6 @@ RIG_DIRNAME = "rig"
 RIG_VERSIONS_DIRNAME = ".versions"
 DEFAULT_GEOMETRY_VARIANT = "main"
 
-# The geometry variant an asset has when nobody chose one.
-DEFAULT_GEOMETRY_VARIANT = "main"
-
 # Publish filenames
 PUBLISH_SOURCE_MODEL_FILENAME = "model.usd"
 PUBLISH_ASSET_USD_FILENAME = "asset.usd"

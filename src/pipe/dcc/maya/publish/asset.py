@@ -18,6 +18,7 @@ from pipe.core.asset import (
     maya_model_stream,
     paths_for_asset,
 )
+from pipe.core.assembly.model import AssemblyError
 from pipe.core.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
 from pipe.core.ui import (
     FilteredListDialog,
@@ -42,6 +43,7 @@ from Qt.QtWidgets import (
 )
 
 from pipe.dcc.houdini.launch import HoudiniLauncher
+from pipe.dcc.maya.assembly.stage import stage_shape
 from pipe.dcc.maya.assetfile import (
     read_asset_metadata,
     resolve_asset_from_scene_path,
@@ -480,6 +482,25 @@ class AssetPublisher(Publisher):
             base_name = f"{base_name}_{variant}"
         return name, base_name
 
+    def _ensure_unsplit(self) -> bool:
+        """A split scene would export only its unsplit geometry, so refuse it
+        until assemblies publish through the builder (ADR-0032)."""
+        try:
+            shape = stage_shape()
+        except AssemblyError as exc:
+            MessageDialog(self._window, str(exc), "Cannot publish").exec_()
+            return False
+        if shape is None:
+            return True
+        MessageDialog(
+            self._window,
+            "This scene has been split into pieces, and publishing a split "
+            "assembly is not supported yet. Nothing was exported, so the "
+            "published asset is unchanged.",
+            "Cannot publish: split assembly",
+        ).exec_()
+        return False
+
     def _prepublish(self) -> bool:
         if is_random_color_active():
             MessageDialog(
@@ -719,6 +740,8 @@ class AssetPublisher(Publisher):
             self._version_note = None
 
             if not self._ensure_scene_saved():
+                return
+            if not self._ensure_unsplit():
                 return
             if not self._prepublish():
                 return

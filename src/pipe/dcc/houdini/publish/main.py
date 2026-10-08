@@ -18,7 +18,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, NotRequired, TypedDict
+from typing import Any, Mapping, NotRequired, TypedDict, cast
 
 import hou
 from Qt import QtWidgets
@@ -43,6 +43,7 @@ from . import hooks as publish_hooks
 log = logging.getLogger(__name__)
 
 COMPONENT_OUTPUT_TYPE_NAME = "componentoutput"
+EXPORT_ROP_NAME = "rop"
 EXPORT_PARMS = ("execute", "render", "renderbutton")
 REBUILD_COMMAND = "pipe houdini -p -m pipe.dcc.houdini.gallery.rebuild"
 MANIFEST_FILENAME = VERSION_MANIFEST_FILENAME
@@ -620,7 +621,6 @@ def _export_component(
     context.export_path.parent.mkdir(parents=True, exist_ok=True)
 
     node = context.node
-    previous_errors = tuple(node.errors())
     executed = False
     method = "none"
 
@@ -649,21 +649,24 @@ def _export_component(
         )
         return None
 
-    new_errors = [err for err in node.errors() if err not in previous_errors]
-    if new_errors:
+    rop = cast(hou.RopNode, node.node(EXPORT_ROP_NAME))
+    if errors := rop.errors():
         _error(
             result,
             "ExportNodeError",
-            "Component Output reported errors after export: " + "; ".join(new_errors),
+            f"{node.path()} could not write {context.export_path}, so the "
+            "previous publish is still current:\n" + "\n".join(errors),
         )
         return None
 
     if not context.export_path.exists():
-        _warn(
+        _error(
             result,
             "ExportPathMissingAfterExport",
-            f"Export executed, but output file is missing: {context.export_path}",
+            f"{node.path()} reported no errors but wrote no file at "
+            f"{context.export_path}; check the nodes above it.",
         )
+        return None
 
     return {
         "attempted": True,
