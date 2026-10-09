@@ -21,6 +21,7 @@ from pipe.core.assembly.normalize import (
     SOURCE_LAYER_LINEAR_UNIT,
     SOURCE_LAYER_UP_AXIS,
     bounds_match,
+    clear_transform,
     inspect_scale,
     normalization_matrix,
     placement_for,
@@ -34,6 +35,7 @@ from pipe.dcc.maya.assembly.scan import (
     world_point_bounds,
 )
 from pipe.dcc.maya.assembly.stage import ensure_assembly_stage, stage_shape
+from pipe.dcc.maya.util.materials import delete_unused_shading_groups, shading_groups
 from pipe.dcc.maya.util.selection import maintain_selection
 from pipe.dcc.maya.util.usd_export import export_selection
 
@@ -67,7 +69,10 @@ def split_piece(
     bounds_after = _prim_world_bounds(prim)
     _confirm_unmoved(piece, target, stage, prim, bounds_before, bounds_after)
 
+    materials = shading_groups([piece.node])
     mc.delete(piece.node)
+    # The piece's materials went with it; one still used by another group stays.
+    delete_unused_shading_groups(materials)
 
     return SplitResult(
         piece_name=piece.name,
@@ -191,17 +196,18 @@ def _prepare_layer(
 ) -> Gf.Matrix4d:
     """Rest the exported contents at the origin and record where they came from."""
     stage = Usd.Stage.Open(str(layer))
+    root_layer = stage.GetRootLayer()
     root = stage.GetDefaultPrim()
     group = _exported_group(root, target)
 
-    if _clear_transform(root):
+    if clear_transform(root_layer.GetPrimAtPath(root.GetPath())):
         log.warning("Cleared an unexpected transform on the exported root of %s", layer)
-    _clear_transform(group)
+    clear_transform(root_layer.GetPrimAtPath(group.GetPath()))
 
     normalization = normalization_matrix(prim_point_bounds(root), scale)
     UsdGeom.Xformable(group).MakeMatrixXform().Set(normalization)
-    stamp_assembly(stage.GetRootLayer(), assembly_root)
-    stage.GetRootLayer().Save()
+    stamp_assembly(root_layer, assembly_root)
+    root_layer.Save()
     return normalization
 
 
@@ -215,14 +221,6 @@ def _exported_group(root: Usd.Prim, target: PieceTarget) -> Usd.Prim:
             f"contains {names}. Split a group that holds all of the piece's geometry."
         )
     return candidates[0]
-
-
-def _clear_transform(prim: Usd.Prim) -> bool:
-    """Drop any transform on `prim`, reporting whether there was one."""
-    xformable = UsdGeom.Xformable(prim)
-    had_transform = bool(xformable.GetXformOpOrderAttr().HasAuthoredValue())
-    xformable.ClearXformOpOrder()
-    return had_transform
 
 
 def _author_piece_prim(

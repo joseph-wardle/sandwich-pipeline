@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
-from pxr import Gf, Usd, UsdGeom
+from pxr import Gf, Sdf, Usd, UsdGeom
 
 SOURCE_LAYER_LINEAR_UNIT = "cm"
 SOURCE_LAYER_UP_AXIS = "Y"
@@ -26,6 +26,8 @@ _MESH_SCHEMA = "Mesh"
 _SCALE_TOLERANCE = 1e-4
 
 _RIGHT_ANGLE_TOLERANCE = 1e-4
+
+_XFORM_OP_PREFIX = "xformOp:"
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,19 @@ def normalization_matrix(bbox: Gf.Range3d, scale: float) -> Gf.Matrix4d:
 def placement_for(world_matrix: Gf.Matrix4d, normalization: Gf.Matrix4d) -> Gf.Matrix4d:
     """Return `P`: the transform the assembly authors on the piece prim."""
     return normalization.GetInverse() * world_matrix
+
+
+def clear_transform(spec: Sdf.PrimSpec) -> bool:
+    """Remove every transform op authored on `spec`, reporting whether there was one."""
+    ops = [
+        prop
+        for prop in spec.properties
+        if prop.name == UsdGeom.Tokens.xformOpOrder
+        or prop.name.startswith(_XFORM_OP_PREFIX)
+    ]
+    for prop in ops:
+        spec.RemoveProperty(prop)
+    return bool(ops)
 
 
 def prim_point_bounds(

@@ -33,7 +33,7 @@ ILLEGAL_SHADER_TYPES = {"aiStandardSurface", "aiAmbientOcclusion"}
 def material_problems(nodes: Iterable[str]) -> list[str]:
     """What is wrong with the materials on the meshes under `nodes`, one line each."""
     failures: dict[str, list[str]] = {}
-    for shading_group in sorted(_shading_groups(nodes)):
+    for shading_group in sorted(shading_groups(nodes)):
         shaders = cast(
             list[str] | None,
             mc.listConnections(f"{shading_group}.surfaceShader", source=True),
@@ -50,7 +50,33 @@ def material_problems(nodes: Iterable[str]) -> list[str]:
     return [f"{message}: {', '.join(items)}" for message, items in failures.items()]
 
 
-def _shading_groups(nodes: Iterable[str]) -> set[str]:
+def delete_unused_shading_groups(names: Iterable[str]) -> list[str]:
+    """Delete the shading groups in `names` that no geometry uses, each with its
+    surface shader when nothing else uses that either. Returns the names still in use.
+
+    Deletes scene nodes. A shading group left behind by geometry that has gone
+    into USD would make the next pull of that geometry rename its materials.
+    """
+    in_use: list[str] = []
+    for name in names:
+        if not mc.ls(name, type="shadingEngine"):
+            continue
+        if mc.sets(name, query=True):
+            in_use.append(name)
+            continue
+        shaders = cast(
+            list[str] | None,
+            mc.listConnections(f"{name}.surfaceShader", source=True, destination=False),
+        )
+        mc.delete(name)
+        for shader in shaders or []:
+            if not mc.listConnections(shader, type="shadingEngine"):
+                mc.delete(shader)
+    return in_use
+
+
+def shading_groups(nodes: Iterable[str]) -> set[str]:
+    """The shading groups assigned to the meshes under `nodes`."""
     nodes = list(nodes)
     if not nodes:
         return set()

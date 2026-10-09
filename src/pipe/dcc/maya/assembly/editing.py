@@ -7,23 +7,33 @@ own layer, so a merge has to be aimed across the payload arc that brought it in.
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import cast
 
+import maya.api.OpenMaya as om
 import mayaUsd.ufe
 from maya import cmds as mc
 from mayaUsd.lib import PrimUpdaterManager
-from pxr import Pcp, Sdf, Tf, Usd
+from pxr import Gf, Pcp, Sdf, Tf, Usd, UsdGeom
 
 from pipe.core.asset.paths import production_relative_identifier
 from pipe.core.assembly.model import AssemblyError, EditError
+from pipe.core.assembly.normalize import clear_transform
 from pipe.dcc.maya.assembly.stage import stage_shape
+from pipe.dcc.maya.util.materials import (
+    delete_unused_shading_groups,
+    material_problems,
+)
 
 log = logging.getLogger(__name__)
 
 _HUD_NAME = "assemblyEditTarget"
 _HUD_LABEL = "Piece edits save to"
 _HUD_SECTION = 0
+
+_MATERIAL_TYPE = "Material"
+_PLACEMENT_TOLERANCE = 1e-6
 
 
 def edit_piece(prim: Usd.Prim) -> str:
@@ -41,9 +51,9 @@ def edit_piece(prim: Usd.Prim) -> str:
             "discard it before opening another piece."
         )
 
-    child_source_layer(
-        prim
-    )  # Refuse a piece with no payload before anything is pulled.
+    # Refuse a piece with no payload before anything is pulled.
+    child_layer = child_source_layer(prim)
+    _release_materials(prim, child_layer)
     ufe_path = _ufe_path(prim)
     if not PrimUpdaterManager.canEditAsMaya(ufe_path):
         raise EditError(
@@ -67,12 +77,20 @@ def merge_piece(stage: Usd.Stage) -> None:
     child_target = _child_edit_target(piece)
     child_layer = child_target.GetLayer()
     maya_node = pulled_maya_node(piece)
+    _refuse_moved(piece, maya_node)
+    _refuse_material_problems(piece, maya_node)
 
     assembly_before = stage.GetRootLayer().ExportToString()
     with Usd.EditContext(stage, child_target):
         mc.mayaUsdMergeToUsd(maya_node)  # type: ignore
+    # The merge writes the pulled group's transform, the placement, onto the
+    # child's root; the child must stay at the origin or it is placed twice.
+    clear_transform(
+        child_layer.GetPrimAtPath(child_target.MapToSpecPath(piece.GetPath()))
+    )
     _confirm_assembly_untouched(stage, piece, child_layer, assembly_before)
 
+    delete_unused_shading_groups(_material_names(child_layer))
     remove_edit_hud()
     _save_child_layer(piece, child_layer)
 
@@ -164,6 +182,90 @@ def _ufe_path(prim: Usd.Prim) -> str:
             "a piece out of an assembly first."
         )
     return f"{shape},{prim.GetPath()}"
+
+
+def _release_materials(prim: Usd.Prim, child_layer: Sdf.Layer) -> None:
+    """Clear the scene of shading groups named like the child's materials, so the
+    pull brings them in under their own names. Deletes scene nodes."""
+    in_use = delete_unused_shading_groups(_material_names(child_layer))
+    if in_use:
+        users = cast(list[str], mc.sets(in_use[0], query=True) or [])
+        raise EditError(
+            f"Material '{in_use[0]}' of '{prim.GetName()}' is still assigned to "
+            f"{', '.join(users[:3])} in this scene, so opening the piece would "
+            "bring its copy in under another name and its textures would no "
+            "longer find it. Split that geometry or give it a different "
+            "material, then open the piece again."
+        )
+
+
+def _material_names(layer: Sdf.Layer) -> list[str]:
+    """The child's materials, which are the shading groups a pull creates."""
+    names: list[str] = []
+
+    def visit(path: Sdf.Path | str) -> None:
+        spec = layer.GetPrimAtPath(path)
+        if spec is not None and spec.typeName == _MATERIAL_TYPE:
+            names.append(spec.name)
+
+    layer.Traverse(Sdf.Path.absoluteRootPath, visit)
+    return names
+
+
+def _refuse_moved(piece: Usd.Prim, maya_node: str) -> None:
+    """A piece is placed in the assembly, not while it is open for editing."""
+    placement = UsdGeom.Xformable(piece).GetLocalTransformation()
+    # `mc.xform` is typed as the union of every shape its flags can return.
+    values = cast(
+        list[float], mc.xform(maya_node, query=True, matrix=True, objectSpace=True)
+    )
+    opened = Gf.Matrix4d(*values)
+    moved = any(
+        (opened.GetRow(row) - placement.GetRow(row)).GetLength() > _PLACEMENT_TOLERANCE
+        for row in range(4)
+    )
+    if not moved:
+        return
+    translate, rotate, scale = _channel_values(placement)
+    raise EditError(
+        f"'{piece.GetName()}' was moved while open for editing, and a piece is "
+        "placed by moving it in the assembly, not its open copy. Set the group's "
+        f"Translate back to {translate}, Rotate to {rotate} and Scale to {scale} "
+        "(or undo the move), then Save Piece again."
+    )
+
+
+def _channel_values(matrix: Gf.Matrix4d) -> tuple[str, str, str]:
+    """`matrix` as Maya's channel box shows it: translate, rotate (degrees), scale."""
+    transform = om.MTransformationMatrix(
+        om.MMatrix([value for row in range(4) for value in matrix.GetRow(row)])
+    )
+    translate = transform.translation(om.MSpace.kTransform)
+    rotate = transform.rotation()
+    scale = transform.scale(om.MSpace.kTransform)
+    return (
+        _triple(translate.x, translate.y, translate.z),
+        _triple(*(math.degrees(angle) for angle in (rotate.x, rotate.y, rotate.z))),
+        _triple(*scale),
+    )
+
+
+def _triple(*values: float) -> str:
+    return (
+        "("
+        + ", ".join(f"{value:.3f}".rstrip("0").rstrip(".") for value in values)
+        + ")"
+    )
+
+
+def _refuse_material_problems(piece: Usd.Prim, maya_node: str) -> None:
+    """The child layer is a model: it meets the same material rules as a split."""
+    problems = material_problems([maya_node])
+    if problems:
+        raise EditError(
+            f"Fix the materials on '{piece.GetName()}' before saving it. "
+            + " ".join(f"{problem}." for problem in problems)
+        )
 
 
 def _child_edit_target(prim: Usd.Prim) -> Usd.EditTarget:
