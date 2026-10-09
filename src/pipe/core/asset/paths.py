@@ -38,6 +38,7 @@ PUBLISH_SOURCE_DIRNAME = "_src"
 PUBLISH_TEXTURES_DIRNAME = "tex"
 PUBLISH_TEXTURES_SOURCE_DIRNAME = "_src"
 PUBLISH_TEXTURES_PREVIEW_DIRNAME = "_preview"
+PUBLISH_ASSEMBLY_DIRNAME = "_asm"
 RIG_DIRNAME = "rig"
 RIG_VERSIONS_DIRNAME = ".versions"
 DEFAULT_GEOMETRY_VARIANT = "main"
@@ -48,6 +49,7 @@ PUBLISH_ASSET_USD_FILENAME = "asset.usd"
 PUBLISH_GEO_USD_FILENAME = "geo.usd"
 PUBLISH_MTL_USD_FILENAME = "mtl.usd"
 PUBLISH_PAYLOAD_USD_FILENAME = "payload.usd"
+PIECES_LAYER_FILENAME = "pieces.usda"
 
 # Texture naming rule: <material>.<variant>.<map>.<udim>.<ext>
 TEXTURE_NAME_TEMPLATE = "{material}.{variant}.{map}.{udim}"
@@ -106,6 +108,11 @@ class AssetPaths:
     @property
     def publish_textures_dir(self) -> Path:
         return self.publish_dir / PUBLISH_TEXTURES_DIRNAME
+
+    @property
+    def pieces_layer(self) -> Path:
+        """publish/_asm/pieces.usda; its presence makes the asset an assembly."""
+        return self.publish_dir / PUBLISH_ASSEMBLY_DIRNAME / PIECES_LAYER_FILENAME
 
     def publish_textures_layer_dir(
         self, geo: str, mat: str, material_layer: str
@@ -235,6 +242,8 @@ __all__ = [
     "PUBLISH_TEXTURES_DIRNAME",
     "PUBLISH_TEXTURES_SOURCE_DIRNAME",
     "PUBLISH_TEXTURES_PREVIEW_DIRNAME",
+    "PUBLISH_ASSEMBLY_DIRNAME",
+    "PIECES_LAYER_FILENAME",
     "PUBLISH_SOURCE_MODEL_FILENAME",
     "PUBLISH_ASSET_USD_FILENAME",
     "PUBLISH_GEO_USD_FILENAME",

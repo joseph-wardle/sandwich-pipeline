@@ -23,7 +23,9 @@ from typing import Any, Mapping, NotRequired, TypedDict, cast
 import hou
 from Qt import QtWidgets
 
+from pipe.core.assembly.kind import mark_published_assembly
 from pipe.core.asset import asset_owner_from_metadata
+from pipe.core.asset.paths import AssetPaths
 from pipe.core.ui.progress import progress_scope
 from pipe.dcc.houdini.gallery import SESSION_DB_ENV, production_db_path, thumbnail_path
 from pipe.dcc.houdini.gallery import db as gallery_db
@@ -210,6 +212,8 @@ def publish_component(
             export = _export_component(context=context, options=opts, result=result)
             if export is None:
                 return _finalize_result(result)
+            if AssetPaths(context.asset_root).pieces_layer.is_file():
+                mark_published_assembly(context.export_path)
 
             progress.begin_step("Rendering thumbnail")
             thumbnail, thumbnail_bytes = _render_thumbnail(

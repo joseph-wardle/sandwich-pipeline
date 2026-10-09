@@ -9,6 +9,8 @@ from typing import Any, cast
 import hou
 import loptoolutils  # type: ignore
 
+from pipe.core.asset.paths import AssetPaths
+
 from ..shading import variants
 
 """Node-graph builders for Houdini Solaris tools.
@@ -35,6 +37,8 @@ SKD_VARIANT_WARNINGS_KEY = "pipe_skd_variant_graph_warnings"
 SKD_VARIANT_COMMENT_PREFIX = "SKD Variant Graph Warnings"
 SKD_PENDING_COMMENT_PREFIX = "Pending Variant:"
 SKD_VARIANT_BOX_PREFIX = "skd_variant_"
+PIECES_NODE_NAME = "pieces"
+CONFIG_NODE_TYPE = "sdm223::lnd_componentconfig"
 
 log = logging.getLogger(__name__)
 
@@ -107,7 +111,14 @@ def ensure_managed_skd_component_builder(parent: hou.Node | None = None) -> hou.
     - It only creates a new builder when no managed/recognizable builder exists.
     """
     stage = _resolve_stage_context(parent)
+    output = _find_or_create_builder_output(stage)
+    pieces = _pieces_layer()
+    if pieces is not None:
+        _ensure_pieces_sublayer(output, pieces)
+    return output
 
+
+def _find_or_create_builder_output(stage: hou.Node) -> hou.Node:
     managed = _find_managed_builder_outputs(stage)
     if managed:
         if len(managed) > 1:
@@ -136,6 +147,63 @@ def ensure_managed_skd_component_builder(parent: hou.Node | None = None) -> hou.
     output = create_skd_component_builder({}, parent=stage)
     _mark_managed_builder(output)
     return output
+
+
+def _pieces_layer() -> Path | None:
+    """The hip's assembly pieces layer, or None for a component (ADR-0032)."""
+    pieces = AssetPaths(Path(hou.hscriptStringExpression("$HIP"))).pieces_layer
+    return pieces if pieces.is_file() else None
+
+
+def _ensure_pieces_sublayer(output: hou.Node, pieces: Path) -> None:
+    """Feed the config above `output` from the pieces layer, touching nothing else."""
+    config = output.input(0)
+    if config is None:
+        config = output.parent().createNode(CONFIG_NODE_TYPE, "config")
+        _mark_managed_variant_node(config, owner_path=output.path())
+        config.setPosition(output.position() + hou.Vector2(0.0, 1.6))
+        output.setInput(0, config)
+    if any(_is_pieces_sublayer(node, pieces) for node in config.inputAncestors()):
+        return
+
+    previous = config.input(0)
+    sublayer = _create_pieces_sublayer(
+        config.parent(), pieces, owner_path=output.path()
+    )
+    sublayer.setPosition(config.position() + hou.Vector2(0.0, 1.6))
+    config.setInput(0, sublayer)
+    if previous is not None:
+        log.warning(
+            "%s now publishes the assembly's pieces layer; %s is disconnected. "
+            "An assembly holds no geometry or materials of its own: move that "
+            "work into the children (ADR-0032).",
+            output.path(),
+            previous.path(),
+        )
+
+
+def _is_pieces_sublayer(node: hou.Node, pieces: Path) -> bool:
+    parm = node.parm("filepath1")
+    return (
+        node.type().name() == "sublayer"
+        and parm is not None
+        and Path(parm.evalAsString()) == pieces
+    )
+
+
+def _create_pieces_sublayer(
+    parent: hou.Node, pieces: Path, *, owner_path: str
+) -> hou.Node:
+    sublayer = parent.createNode("sublayer", PIECES_NODE_NAME)
+    _set_parm_if_exists(
+        sublayer,
+        "filepath1",
+        variants.to_hip_expression(
+            pieces, hip_root=Path(hou.hscriptStringExpression("$HIP"))
+        ),
+    )
+    _mark_managed_variant_node(sublayer, owner_path=owner_path)
+    return sublayer
 
 
 def _resolve_stage_context(parent: hou.Node | None) -> hou.Node:
@@ -714,6 +782,11 @@ def _set_pending_state(node: hou.Node, *, pending: bool, reason: str = "") -> No
 
 def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
     """Rebuild a deterministic managed variant graph around an output node."""
+    pieces = _pieces_layer()
+    if pieces is not None:
+        _rebuild_assembly_graph(output, pieces)
+        return ()
+
     parent = output.parent()
     out_pos = output.position()
     declared_geo, declared_mat, sg_warnings = _discover_asset_variants_from_shotgrid()
@@ -730,7 +803,7 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
         parent, keep_paths={output.path()}, owner_path=owner_path
     )
 
-    config = parent.createNode("sdm223::lnd_componentconfig")
+    config = parent.createNode(CONFIG_NODE_TYPE)
     config.setName("config", unique_name=True)
     _mark_managed_variant_node(config, owner_path=owner_path)
 
@@ -885,6 +958,28 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
 
     _set_variant_generation_warnings(output, warnings)
     return tuple(warnings)
+
+
+def _rebuild_assembly_graph(output: hou.Node, pieces: Path) -> None:
+    """An assembly publishes its pieces layer and nothing else (ADR-0032)."""
+    parent = output.parent()
+    out_pos = output.position()
+    owner_path = output.path()
+    _clear_managed_variant_boxes(parent, owner_path=owner_path)
+    _clear_managed_variant_nodes(parent, keep_paths={owner_path}, owner_path=owner_path)
+
+    sublayer = _create_pieces_sublayer(parent, pieces, owner_path=owner_path)
+    config = parent.createNode(CONFIG_NODE_TYPE, "config")
+    _mark_managed_variant_node(config, owner_path=owner_path)
+    lookdev = create_skd_lookdev(parent, "lookdev")
+    _mark_managed_variant_node(lookdev, owner_path=owner_path)
+
+    config.setInput(0, sublayer)
+    output.setInput(0, config)
+    lookdev.setInput(0, output)
+    sublayer.setPosition(hou.Vector2(out_pos.x(), out_pos.y() + 3.2))
+    config.setPosition(hou.Vector2(out_pos.x(), out_pos.y() + 1.6))
+    lookdev.setPosition(hou.Vector2(out_pos.x(), out_pos.y() - 1.7))
 
 
 def create_skd_component_builder(
