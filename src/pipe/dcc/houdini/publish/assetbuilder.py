@@ -11,7 +11,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Mapping, TypedDict
+from typing import Any, Iterable, Mapping, TypedDict
 
 import hou
 
@@ -22,7 +22,7 @@ from pipe.core.asset.paths import (
     AssetPaths,
     production_relative_identifier,
 )
-from pipe.core.assembly.pieces import child_asset_roots
+from pipe.core.assembly.pieces import child_variants
 from pipe.core.util.paths import resolve_mapped_path
 
 from . import nodelayouts
@@ -94,20 +94,23 @@ def run_headless_publish(
     - Regenerates managed variant graph only when requested
     - Delegates publish execution to `pipe.dcc.houdini.publish.main.publish_component`
     - Publishes an assembly's children first, since its composition references
-      their entry layers; a child that fails stops the publish there
+      their entry layers; a child that fails, or that does not build a variant
+      the assembly places, stops the publish there
     """
     # Keep the drive letter: hou.hipFile.load mangles Windows UNC paths.
     root = resolve_mapped_path(asset_root.expanduser())
 
     children: list[HeadlessPublishResult] = []
     if publish:
-        for child_root in child_asset_roots(AssetPaths(root).pieces_layer):
+        placed = child_variants(AssetPaths(root).pieces_layer)
+        for child_root, variants in placed.items():
             log.info("Publishing %s before its assembly %s", child_root.name, root.name)
             child = _run_one(
                 asset_root=child_root,
                 asset_path=production_relative_identifier(child_root),
                 ensure_builder=True,
                 publish=True,
+                required_variants=frozenset(variants),
             )
             children.append(child)
             if child["errors"]:
@@ -162,6 +165,7 @@ def _run_one(
     run_hooks: bool = False,
     turnaround: bool = False,
     fail_on_hook_error: bool = False,
+    required_variants: frozenset[str] = frozenset(),
 ) -> HeadlessPublishResult:
     """Ensure and publish one asset's builder; see `run_headless_publish`."""
     normalized_variant = (variant or "").strip() or DEFAULT_GEOMETRY_VARIANT
@@ -247,6 +251,20 @@ def _run_one(
             for variant_warning in warnings:
                 _warn(result, "VariantGraphWarning", variant_warning)
 
+        built = nodelayouts.geometry_variants_built(builder)
+        unbuilt = required_variants - built
+        if unbuilt:
+            _error(
+                result,
+                "VariantNotBuilt",
+                f"'{resolved_asset_name}' is placed as {_names(unbuilt)} but its "
+                f"builder only builds {_names(built)}. "
+                "Regenerate its managed variants (publish it with "
+                "--regen-managed-variants, which replaces the managed nodes), then "
+                "publish the assembly again.",
+            )
+            return _finalize(result)
+
     if ensure_requested and not publish:
         if not _save_hip(hip_path=hip_path, result=result):
             return _finalize(result)
@@ -312,6 +330,10 @@ def _run_one(
         "respected_existing": bool(respect_existing),
     }
     return _finalize(result)
+
+
+def _names(variants: Iterable[str]) -> str:
+    return ", ".join(sorted(variants)) or "nothing"
 
 
 def _empty_result(root: Path, *, variant: str, publish: bool) -> HeadlessPublishResult:

@@ -9,7 +9,13 @@ from pathlib import Path
 from maya import cmds as mc
 from pxr import Gf, Usd, UsdGeom
 
-from pipe.core.asset.paths import AssetPaths, production_relative_identifier
+from pipe.core.asset.paths import (
+    BLENDER_MODEL_FILENAME,
+    DEFAULT_GEOMETRY_VARIANT,
+    MODEL_FILENAME,
+    AssetPaths,
+    production_relative_identifier,
+)
 from pipe.core.assembly.model import Piece, PieceTarget, SplitError, SplitResult
 from pipe.core.assembly.normalize import (
     SOURCE_LAYER_LINEAR_UNIT,
@@ -66,6 +72,7 @@ def split_piece(
     return SplitResult(
         piece_name=piece.name,
         asset_name=target.asset_name,
+        variant=target.variant,
         source_layer=target.source_layer,
         prim_path=str(prim.GetPath()),
         placement=placement,
@@ -75,22 +82,18 @@ def split_piece(
 
 
 def _refuse_existing_model(target: PieceTarget) -> None:
-    """Refuse an asset that already holds a model, whatever it is called."""
-    existing = [target.asset_root / name for name in ("model.mb", "model.blend")]
-    source_dir = target.source_layer.parent
-    if source_dir.is_dir():
-        existing += [
-            layer
-            for layer in sorted(source_dir.glob("*.usd"))
-            if not layer.name.endswith(_PENDING_SUFFIX)
-        ]
-
+    """Refuse an asset modelled by hand, or one that already has this variant."""
+    existing = [
+        target.asset_root / MODEL_FILENAME,
+        target.asset_root / BLENDER_MODEL_FILENAME,
+        target.source_layer,
+    ]
     found = next((path for path in existing if path.exists()), None)
     if found is not None:
         raise SplitError(
             f"'{target.asset_name}' already has a model at {found}. Split under a "
-            "different name, or edit the existing asset from the assembly it was "
-            "split into."
+            "different name or variant, or edit the existing asset from the "
+            "assembly it was split into."
         )
 
 
@@ -145,9 +148,11 @@ def _piece_bounds(piece: Piece) -> Gf.Range3d:
 
 
 def _link_textures(target: PieceTarget, assembly_root: Path) -> None:
-    """Make the child's `publish/tex` the assembly's"""
-    link = AssetPaths(target.asset_root).publish_textures_dir
-    textures = AssetPaths(assembly_root).publish_textures_dir
+    """Make the child's textures for this variant the assembly's."""
+    link = AssetPaths(target.asset_root).publish_textures_variant_dir(target.variant)
+    textures = AssetPaths(assembly_root).publish_textures_variant_dir(
+        DEFAULT_GEOMETRY_VARIANT
+    )
     # Relative, so the pair survives a move together and either mount of /job.
     relative = os.path.relpath(textures, link.parent)
     if link.is_symlink() and os.readlink(link) == relative:
@@ -172,9 +177,9 @@ def _install_source_layer(
             export_selection(
                 pending,
                 stripNamespaces=True,
-                rootPrim=target.asset_name,
+                rootPrim=target.prim_name,
                 rootPrimType=_ROOT_PRIM_TYPE,
-                defaultPrim=target.asset_name,
+                defaultPrim=target.prim_name,
                 unit=SOURCE_LAYER_LINEAR_UNIT,
                 shadingMode=_SHADING_MODE,
             )
@@ -235,7 +240,7 @@ def _author_piece_prim(
     root = UsdGeom.Xform.Define(stage, f"/{assembly_name}")
     stage.SetDefaultPrim(root.GetPrim())
 
-    prim = stage.DefinePrim(f"/{assembly_name}/{target.asset_name}")
+    prim = stage.DefinePrim(root.GetPath().AppendChild(target.prim_name))
     prim.GetPayloads().AddPayload(production_relative_identifier(target.source_layer))
     UsdGeom.Xformable(prim).MakeMatrixXform().Set(placement)
     return prim

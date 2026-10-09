@@ -42,6 +42,8 @@ PUBLISH_ASSEMBLY_DIRNAME = "_asm"
 RIG_DIRNAME = "rig"
 RIG_VERSIONS_DIRNAME = ".versions"
 DEFAULT_GEOMETRY_VARIANT = "main"
+# The variant set a published asset's geometry variants are selected through.
+GEOMETRY_VARIANT_SET = "geo"
 
 # Publish filenames
 PUBLISH_SOURCE_MODEL_FILENAME = "model.usd"
@@ -195,6 +197,10 @@ class AssetPaths:
         """Return the publish/_src USD path for a named variant."""
         return self.publish_source_dir / f"{variant.strip()}.usd"
 
+    def publish_textures_variant_dir(self, variant: str) -> Path:
+        """Return publish/tex/<variant>: the textures published for a geometry variant."""
+        return self.publish_textures_dir / variant.strip()
+
     @property
     def publish_asset_usd(self) -> Path:
         return self.publish_dir / PUBLISH_ASSET_USD_FILENAME
@@ -240,6 +246,7 @@ def production_relative_identifier(
 __all__ = [
     "AssetPaths",
     "DEFAULT_GEOMETRY_VARIANT",
+    "GEOMETRY_VARIANT_SET",
     "DCC_MAYA",
     "DCC_HOUDINI",
     "DCC_SUBSTANCE",

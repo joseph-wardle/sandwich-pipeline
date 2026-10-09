@@ -9,7 +9,7 @@ from typing import Any, cast
 import hou
 import loptoolutils  # type: ignore
 
-from pipe.core.asset.paths import AssetPaths
+from pipe.core.asset.paths import GEOMETRY_VARIANT_SET, AssetPaths
 
 from ..shading import variants
 
@@ -745,9 +745,8 @@ def _first_managed_geometry_node(
 ) -> hou.Node | None:
     geometry_nodes = [
         node
-        for node in parent.children()
-        if node.type().name() == "componentgeometry"
-        and node.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
+        for node in _geometry_nodes(parent)
+        if node.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
         == SKD_VARIANT_GRAPH_MANAGED_VALUE
         and (
             owner_path is None
@@ -757,6 +756,20 @@ def _first_managed_geometry_node(
     if not geometry_nodes:
         return None
     return sorted(geometry_nodes, key=lambda node: node.name().casefold())[0]
+
+
+def geometry_variants_built(output: hou.Node) -> set[str]:
+    """The geometry variants the builder around `output` has a geometry node for."""
+    return {
+        str(node.evalParm("geovariantname"))
+        for node in _geometry_nodes(output.parent())
+    }
+
+
+def _geometry_nodes(parent: hou.Node) -> list[hou.Node]:
+    return [
+        node for node in parent.children() if node.type().name() == "componentgeometry"
+    ]
 
 
 def _set_node_bypass(node: hou.Node, enabled: bool) -> None:
@@ -939,11 +952,18 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
         for index, (_, branch) in enumerate(branch_outputs):
             geo_variants.setInput(index, branch)
 
-        _set_parm_if_exists(geo_variants, "variantset", "geo")
-        _set_parm_if_exists(geo_variants, "variantnamesrc", 0)
-        _set_parm_if_exists(geo_variants, "variantcount", len(plan.geometry_variants))
-        for index, (geo_name, _) in enumerate(branch_outputs, start=1):
-            _set_parm_if_exists(geo_variants, f"variantname{index}", geo_name)
+        # Variant names come from the geometry nodes. The working variant is
+        # what the builder shows while editing: main when the asset has one. The
+        # output HDA decides the published default on its own.
+        names = [name for name, _ in branch_outputs]
+        default = (
+            variants.DEFAULT_GEO_VARIANT
+            if variants.DEFAULT_GEO_VARIANT in names
+            else names[0]
+        )
+        _set_parm_if_exists(geo_variants, "variantset", GEOMETRY_VARIANT_SET)
+        _set_parm_if_exists(geo_variants, "setcurrentselection", True)
+        _set_parm_if_exists(geo_variants, "variantname1", default)
 
         upstream = geo_variants
 
