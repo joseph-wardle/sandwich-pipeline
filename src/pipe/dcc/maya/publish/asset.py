@@ -689,6 +689,15 @@ class AssetPublisher(Publisher):
             children = result.get("children")
             if isinstance(children, list) and children:
                 details.append(f"- Pieces published first: {len(children)}")
+                regenerated = [
+                    child["asset_name"]
+                    for child in children
+                    if (child.get("summary") or {}).get("variant_graph_regenerated")
+                ]
+                if regenerated:
+                    details.append(
+                        "- Managed variants regenerated: " + ", ".join(regenerated)
+                    )
 
             def _append_messages(
                 heading: str,

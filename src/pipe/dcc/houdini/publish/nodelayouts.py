@@ -33,6 +33,7 @@ SKD_BUILDER_NODE_NAME = "skd_component_output"
 SKD_VARIANT_GRAPH_MANAGED_KEY = "pipe_skd_variant_graph_managed"
 SKD_VARIANT_GRAPH_MANAGED_VALUE = "1"
 SKD_VARIANT_GRAPH_OWNER_KEY = "pipe_skd_variant_graph_owner"
+SKD_VARIANT_GRAPH_NAME_KEY = "pipe_skd_variant_graph_name"
 SKD_VARIANT_WARNINGS_KEY = "pipe_skd_variant_graph_warnings"
 SKD_VARIANT_COMMENT_PREFIX = "SKD Variant Graph Warnings"
 SKD_PENDING_COMMENT_PREFIX = "Pending Variant:"
@@ -345,11 +346,13 @@ def _set_parm_if_exists(node: hou.Node, parm_name: str, value) -> None:
 def _mark_managed_variant_node(node: hou.Node, *, owner_path: str) -> None:
     node.setUserData(SKD_VARIANT_GRAPH_MANAGED_KEY, SKD_VARIANT_GRAPH_MANAGED_VALUE)
     node.setUserData(SKD_VARIANT_GRAPH_OWNER_KEY, owner_path)
+    node.setUserData(SKD_VARIANT_GRAPH_NAME_KEY, node.name())
 
 
 def _clear_managed_variant_nodes(
     parent: hou.Node, *, keep_paths: set[str], owner_path: str
 ) -> None:
+    """Destroy the owner's managed nodes; a copied or renamed one becomes the artist's."""
     for node in list(parent.children()):
         if node.path() in keep_paths:
             continue
@@ -360,7 +363,20 @@ def _clear_managed_variant_nodes(
             continue
         if node.userData(SKD_VARIANT_GRAPH_OWNER_KEY) not in ("", owner_path):
             continue
+        made_as = node.userData(SKD_VARIANT_GRAPH_NAME_KEY)
+        if made_as is not None and made_as != node.name():
+            _release_managed_variant_node(node)
+            continue
         node.destroy()
+
+
+def _release_managed_variant_node(node: hou.Node) -> None:
+    for key in (
+        SKD_VARIANT_GRAPH_MANAGED_KEY,
+        SKD_VARIANT_GRAPH_OWNER_KEY,
+        SKD_VARIANT_GRAPH_NAME_KEY,
+    ):
+        node.destroyUserData(key)
 
 
 def _clear_managed_variant_boxes(parent: hou.Node, *, owner_path: str) -> None:

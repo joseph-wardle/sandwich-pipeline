@@ -94,8 +94,8 @@ def run_headless_publish(
     - Regenerates managed variant graph only when requested
     - Delegates publish execution to `pipe.dcc.houdini.publish.main.publish_component`
     - Publishes an assembly's children first, since its composition references
-      their entry layers; a child that fails, or that does not build a variant
-      the assembly places, stops the publish there
+      their entry layers; a child whose builder lacks a placed variant is
+      regenerated once, and a child that still fails stops the publish there
     """
     # Keep the drive letter: hou.hipFile.load mangles Windows UNC paths.
     root = resolve_mapped_path(asset_root.expanduser())
@@ -105,13 +105,7 @@ def run_headless_publish(
         placed = child_variants(AssetPaths(root).pieces_layer)
         for child_root, variants in placed.items():
             log.info("Publishing %s before its assembly %s", child_root.name, root.name)
-            child = _run_one(
-                asset_root=child_root,
-                asset_path=production_relative_identifier(child_root),
-                ensure_builder=True,
-                publish=True,
-                required_variants=frozenset(variants),
-            )
+            child = _publish_child(child_root, frozenset(variants))
             children.append(child)
             if child["errors"]:
                 return _failed_child(root, child, children)
@@ -132,6 +126,28 @@ def run_headless_publish(
     )
     result["children"] = children
     return result
+
+
+def _publish_child(
+    child_root: Path, placed_variants: frozenset[str]
+) -> HeadlessPublishResult:
+    """Publish one piece, regenerating its managed variants if a placed one is unbuilt."""
+
+    def run(*, regen: bool) -> HeadlessPublishResult:
+        return _run_one(
+            asset_root=child_root,
+            asset_path=production_relative_identifier(child_root),
+            ensure_builder=True,
+            publish=True,
+            regen_managed_variants=regen,
+            required_variants=placed_variants,
+        )
+
+    child = run(regen=False)
+    if any(error["code"] == "VariantNotBuilt" for error in child["errors"]):
+        log.info("Regenerating the managed variants of %s", child_root.name)
+        child = run(regen=True)
+    return child
 
 
 def _failed_child(
@@ -258,10 +274,13 @@ def _run_one(
                 result,
                 "VariantNotBuilt",
                 f"'{resolved_asset_name}' is placed as {_names(unbuilt)} but its "
-                f"builder only builds {_names(built)}. "
-                "Regenerate its managed variants (publish it with "
-                "--regen-managed-variants, which replaces the managed nodes), then "
-                "publish the assembly again.",
+                f"builder only builds {_names(built)}"
+                + (
+                    ", even after its managed variants were regenerated. Each "
+                    "placed variant needs its source layer in publish/_src."
+                    if variant_graph_regenerated
+                    else ". Its managed variants need regenerating."
+                ),
             )
             return _finalize(result)
 
