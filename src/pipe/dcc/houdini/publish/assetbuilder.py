@@ -16,7 +16,13 @@ from typing import Any, Mapping, TypedDict
 import hou
 
 from pipe.core import telemetry
-from pipe.core.asset.paths import ASSET_BUILDER_FILENAME
+from pipe.core.asset.paths import (
+    ASSET_BUILDER_FILENAME,
+    DEFAULT_GEOMETRY_VARIANT,
+    AssetPaths,
+    production_relative_identifier,
+)
+from pipe.core.assembly.pieces import child_asset_roots
 from pipe.core.util.paths import resolve_mapped_path
 
 from . import nodelayouts
@@ -59,6 +65,7 @@ class HeadlessPublishResult(TypedDict):
     publish_requested: bool
     summary: BuilderSummary | None
     publish: Mapping[str, Any] | None
+    children: list[HeadlessPublishResult]
     warnings: list[ResultMessage]
     errors: list[ResultMessage]
 
@@ -86,23 +93,81 @@ def run_headless_publish(
     - Respects existing artist graph by default
     - Regenerates managed variant graph only when requested
     - Delegates publish execution to `pipe.dcc.houdini.publish.main.publish_component`
+    - Publishes an assembly's children first, since its composition references
+      their entry layers; a child that fails stops the publish there
     """
-
-    normalized_variant = (variant or "").strip() or "main"
     # Keep the drive letter: hou.hipFile.load mangles Windows UNC paths.
     root = resolve_mapped_path(asset_root.expanduser())
-    result: HeadlessPublishResult = {
-        "status": "failed",
-        "asset_root": str(root),
-        "asset_name": "",
-        "variant": normalized_variant,
-        "ensure_builder": bool(ensure_builder),
-        "publish_requested": bool(publish),
-        "summary": None,
-        "publish": None,
-        "warnings": [],
-        "errors": [],
-    }
+
+    children: list[HeadlessPublishResult] = []
+    if publish:
+        for child_root in child_asset_roots(AssetPaths(root).pieces_layer):
+            log.info("Publishing %s before its assembly %s", child_root.name, root.name)
+            child = _run_one(
+                asset_root=child_root,
+                asset_path=production_relative_identifier(child_root),
+                ensure_builder=True,
+                publish=True,
+            )
+            children.append(child)
+            if child["errors"]:
+                return _failed_child(root, child, children)
+
+    result = _run_one(
+        asset_root=root,
+        asset_name=asset_name,
+        asset_path=asset_path,
+        asset_id=asset_id,
+        variant=variant,
+        ensure_builder=ensure_builder,
+        publish=publish,
+        respect_existing=respect_existing,
+        regen_managed_variants=regen_managed_variants,
+        run_hooks=run_hooks,
+        turnaround=turnaround,
+        fail_on_hook_error=fail_on_hook_error,
+    )
+    result["children"] = children
+    return result
+
+
+def _failed_child(
+    root: Path, child: HeadlessPublishResult, children: list[HeadlessPublishResult]
+) -> HeadlessPublishResult:
+    """The assembly's result when one of its children could not be published."""
+    result = _empty_result(root, variant=DEFAULT_GEOMETRY_VARIANT, publish=True)
+    result["asset_name"] = root.name
+    result["children"] = children
+    _error(
+        result,
+        "ChildPublishFailed",
+        f"'{child['asset_name']}' could not be published, so the assembly "
+        f"{root.name} was not. Fix that piece and publish again: "
+        f"{_first_error_message(child) or 'see the log'}",
+    )
+    return _finalize(result)
+
+
+def _run_one(
+    *,
+    asset_root: Path,
+    asset_name: str | None = None,
+    asset_path: str | None = None,
+    asset_id: int | None = None,
+    variant: str | None = None,
+    ensure_builder: bool = False,
+    publish: bool = False,
+    respect_existing: bool = True,
+    regen_managed_variants: bool = False,
+    run_hooks: bool = False,
+    turnaround: bool = False,
+    fail_on_hook_error: bool = False,
+) -> HeadlessPublishResult:
+    """Ensure and publish one asset's builder; see `run_headless_publish`."""
+    normalized_variant = (variant or "").strip() or DEFAULT_GEOMETRY_VARIANT
+    root = resolve_mapped_path(asset_root.expanduser())
+    result = _empty_result(root, variant=normalized_variant, publish=publish)
+    result["ensure_builder"] = bool(ensure_builder)
 
     ensure_requested = ensure_builder or publish
     if not ensure_requested and not publish:
@@ -247,6 +312,22 @@ def run_headless_publish(
         "respected_existing": bool(respect_existing),
     }
     return _finalize(result)
+
+
+def _empty_result(root: Path, *, variant: str, publish: bool) -> HeadlessPublishResult:
+    return {
+        "status": "failed",
+        "asset_root": str(root),
+        "asset_name": "",
+        "variant": variant,
+        "ensure_builder": False,
+        "publish_requested": bool(publish),
+        "summary": None,
+        "publish": None,
+        "children": [],
+        "warnings": [],
+        "errors": [],
+    }
 
 
 def _collect_hook_specs(*, run_hooks: bool, turnaround: bool) -> list[str]:

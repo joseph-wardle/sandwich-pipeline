@@ -19,6 +19,11 @@ def scan_pieces() -> list[Piece]:
     return [piece_for_node(node) for node in _candidate_groups()]
 
 
+def unsplit_nodes() -> list[str]:
+    """Every top-level node still holding geometry: what an assembly publish needs split."""
+    return [node for node in _top_level_nodes() if renderable_meshes(node)]
+
+
 def piece_for_node(node: str) -> Piece:
     """Read one group's identity and placement, without modifying it."""
     return Piece(node=node, world_matrix=world_matrix(node))
@@ -55,12 +60,18 @@ def world_matrix(node: str) -> Gf.Matrix4d:
 
 def _candidate_groups() -> list[str]:
     groups: list[str] = []
-    for node in mc.ls(assemblies=True, long=True) or []:
-        if node.rsplit("|", 1)[-1] in _DEFAULT_CAMERAS:
-            continue
+    for node in _top_level_nodes():
         if mc.listRelatives(node, shapes=True, fullPath=True):
             continue
         if not renderable_meshes(node):
             continue
         groups.append(node)
     return groups
+
+
+def _top_level_nodes() -> list[str]:
+    return [
+        node
+        for node in mc.ls(assemblies=True, long=True) or []
+        if node.rsplit("|", 1)[-1] not in _DEFAULT_CAMERAS
+    ]

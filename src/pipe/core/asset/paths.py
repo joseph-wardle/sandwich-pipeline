@@ -109,6 +109,19 @@ class AssetPaths:
     def publish_textures_dir(self) -> Path:
         return self.publish_dir / PUBLISH_TEXTURES_DIRNAME
 
+    @classmethod
+    def from_entry_layer(cls, entry_layer: Path) -> AssetPaths:
+        return cls(entry_layer.parents[1])
+
+    @classmethod
+    def from_source_layer(cls, source_layer: Path) -> AssetPaths:
+        return cls(source_layer.parents[2])
+
+    @property
+    def entry_layer(self) -> Path:
+        """publish/<name>.usd: the one layer anything outside the asset references."""
+        return self.publish_dir / f"{self.root.name}.usd"
+
     @property
     def pieces_layer(self) -> Path:
         """publish/_asm/pieces.usda; its presence makes the asset an assembly."""

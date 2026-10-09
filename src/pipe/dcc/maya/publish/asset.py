@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +17,7 @@ from pipe.core.asset import (
     paths_for_asset,
 )
 from pipe.core.assembly.model import AssemblyError
+from pxr import Usd
 from pipe.core.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
 from pipe.core.ui import (
     FilteredListDialog,
@@ -43,7 +42,7 @@ from Qt.QtWidgets import (
 )
 
 from pipe.dcc.houdini.launch import HoudiniLauncher
-from pipe.dcc.maya.assembly.stage import stage_shape
+from pipe.dcc.maya.assembly.publish import assembly_stage, export_assembly
 from pipe.dcc.maya.assetfile import (
     read_asset_metadata,
     resolve_asset_from_scene_path,
@@ -51,6 +50,7 @@ from pipe.dcc.maya.assetfile import (
 )
 from pipe.dcc.maya.util.random_color import is_random_color_active
 from pipe.dcc.maya.util.selection import maintain_selection
+from pipe.dcc.maya.util.usd_export import export_selection
 
 from .publisher import PublishCopyError, Publisher, USDExportError
 
@@ -332,6 +332,8 @@ class AssetPublisher(Publisher):
         self._component_basename = None
         self._asset_name = None
         self._houdini_result = None
+        self._assembly_stage: Usd.Stage | None = None
+        self._asset_paths: AssetPaths | None = None
         self._scene_asset: Asset | None = None
         self._backup_result: BackupResult | None = None
         self._backup_status: str | None = None
@@ -482,24 +484,14 @@ class AssetPublisher(Publisher):
             base_name = f"{base_name}_{variant}"
         return name, base_name
 
-    def _ensure_unsplit(self) -> bool:
-        """A split scene would export only its unsplit geometry, so refuse it
-        until assemblies publish through the builder (ADR-0032)."""
+    def _resolve_assembly(self) -> bool:
+        """Decide whether this scene publishes as an assembly, refusing one not ready."""
         try:
-            shape = stage_shape()
+            self._assembly_stage = assembly_stage()
         except AssemblyError as exc:
             MessageDialog(self._window, str(exc), "Cannot publish").exec_()
             return False
-        if shape is None:
-            return True
-        MessageDialog(
-            self._window,
-            "This scene has been split into pieces, and publishing a split "
-            "assembly is not supported yet. Nothing was exported, so the "
-            "published asset is unchanged.",
-            "Cannot publish: split assembly",
-        ).exec_()
-        return False
+        return True
 
     def _prepublish(self) -> bool:
         if is_random_color_active():
@@ -511,6 +503,11 @@ class AssetPublisher(Publisher):
                 "Cannot export: Random Colors",
             ).exec_()
             return False
+
+        if self._assembly_stage is not None:
+            # An assembly holds no geometry of its own to check.
+            self._configure_dialog_for_scene()
+            return True
 
         checker = ModelChecker.get()
         self._override = False
@@ -631,11 +628,15 @@ class AssetPublisher(Publisher):
         name, basename = self._compute_component_basename(asset, variant_name)
         asset_paths = paths_for_asset(asset)
         self._asset_name = name
+        self._asset_paths = asset_paths
         self._component_basename = basename
         return asset_paths.publish_source_variant_usd(variant_name)
 
     def _get_confirm_message(self) -> str:
-        message = super()._get_confirm_message()
+        if self._assembly_stage is None:
+            message = super()._get_confirm_message()
+        else:
+            message = f"The assembly has been published to {self._publish_path.parent}"
 
         details: list[str] = []
         if self._backup_status:
@@ -684,6 +685,10 @@ class AssetPublisher(Publisher):
                     gallery_status = str(gallery.get("status", "")).strip()
                     if gallery_status:
                         details.append(f"- Gallery sync: {gallery_status}")
+
+            children = result.get("children")
+            if isinstance(children, list) and children:
+                details.append(f"- Pieces published first: {len(children)}")
 
             def _append_messages(
                 heading: str,
@@ -741,7 +746,7 @@ class AssetPublisher(Publisher):
 
             if not self._ensure_scene_saved():
                 return
-            if not self._ensure_unsplit():
+            if not self._resolve_assembly():
                 return
             if not self._prepublish():
                 return
@@ -856,25 +861,21 @@ class AssetPublisher(Publisher):
         return steps
 
     def _export_usd_to_publish_path(self) -> None:
-        """Run `mayaUSDExport` plus the Windows-specific temp-file workaround.
-
-        On Windows, `mayaUSDExport` writes to a temp directory and then we
-        move the result into the final publish path — see
-        https://github.com/PixarAnimationStudios/OpenUSD/issues/849.
-        """
-        self._publish_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_publish_path = os.getenv("TEMP", "") + os.pathsep + self._publish_path.name
-
-        kwargs = {
-            "file": str(temp_publish_path if self._IS_WINDOWS else self._publish_path),
-            "selection": True,
-            "stripNamespaces": True,
-            "exportCollectionBasedBindings": True,
-            **self._get_mayausd_kwargs(),
-        }
-
+        """Write the source layer: the selection, or an assembly's pieces and flat mesh."""
         try:
-            mc.mayaUSDExport(**kwargs)  # type: ignore
+            if self._assembly_stage is not None:
+                export_assembly(
+                    self._assembly_stage,
+                    pieces=cast(AssetPaths, self._asset_paths).pieces_layer,
+                    mesh=self._publish_path,
+                )
+            else:
+                export_selection(
+                    self._publish_path,
+                    stripNamespaces=True,
+                    exportCollectionBasedBindings=True,
+                    **self._get_mayausd_kwargs(),
+                )
         except Exception as exc:
             log.exception("USD export failed")
             MessageDialog(
@@ -883,15 +884,6 @@ class AssetPublisher(Publisher):
                 "Export Failed",
             ).exec_()
             raise USDExportError(str(exc) or exc.__class__.__name__) from exc
-
-        if self._IS_WINDOWS:
-            try:
-                shutil.move(temp_publish_path, self._publish_path)
-            except Exception as exc:
-                raise PublishCopyError(
-                    f"Could not move publish from {temp_publish_path} to "
-                    f"{self._publish_path}: {exc}"
-                ) from exc
 
     def _run_postpublish_hook(self) -> None:
         """Invoke the subclass postpublish hook (e.g. the Houdini build)."""
