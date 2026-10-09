@@ -13,10 +13,12 @@ from pipe.core.asset.paths import (
     production_relative_identifier,
 )
 from pipe.core.assembly.model import AssemblyError
+from pipe.core.assembly.provenance import assembly_of
 from pipe.core.util.paths import get_production_path
 
 # The component config renames this root to the asset's own name on publish.
 PIECES_ROOT_PRIM = "ASSET"
+_CONFIG_EMPTY_VARIANT = "__EMPTY"
 
 
 def pieces_layer_for(stage: Usd.Stage) -> Sdf.Layer:
@@ -64,6 +66,44 @@ def child_variants(pieces_layer: Path) -> dict[Path, set[str]]:
             )
             children.setdefault(child.root, set()).add(variant)
     return children
+
+
+def placed_variants(child_root: Path) -> set[str]:
+    """The variants the assemblies a child was split from place of it."""
+    sources = AssetPaths(child_root).publish_source_dir
+    assemblies = {
+        assembly
+        for source in sorted(sources.glob("*.usd"))
+        if (assembly := assembly_of(source)) is not None
+    }
+    placed: set[str] = set()
+    for assembly in assemblies:
+        pieces = AssetPaths(get_production_path() / assembly).pieces_layer
+        for root, variants in child_variants(pieces).items():
+            # By name: the hip and the pieces layer may reach /job by different mounts.
+            if root.name == child_root.name:
+                placed |= variants
+    return placed
+
+
+def published_variants(child_root: Path) -> set[str]:
+    """The geometry variants a child's current publish provides.
+
+    A single-branch publish names no variant, so its one source names it; with
+    a second source on disk the publish is stale and provides nothing.
+    """
+    paths = AssetPaths(child_root)
+    if not paths.entry_layer.is_file():
+        return set()
+    stage = Usd.Stage.Open(str(paths.entry_layer))
+    variant_set = (
+        stage.GetDefaultPrim().GetVariantSets().GetVariantSet(GEOMETRY_VARIANT_SET)
+    )
+    names = set(variant_set.GetVariantNames()) - {_CONFIG_EMPTY_VARIANT}
+    if names:
+        return names
+    sources = {source.stem for source in paths.publish_source_dir.glob("*.usd")}
+    return sources if len(sources) == 1 else set()
 
 
 def _child_source_layer(piece: Usd.Prim) -> Path:

@@ -775,10 +775,15 @@ def _first_managed_geometry_node(
 
 
 def geometry_variants_built(output: hou.Node) -> set[str]:
-    """The geometry variants the builder around `output` has a geometry node for."""
+    """The geometry variants the builder around `output` builds.
+
+    A branch generated without its source layer is bypassed (pending), and a
+    bypassed branch publishes no geometry for its variant.
+    """
     return {
         str(node.evalParm("geovariantname"))
         for node in _geometry_nodes(output.parent())
+        if not node.isGenericFlagSet(hou.nodeFlag.Bypass)
     }
 
 

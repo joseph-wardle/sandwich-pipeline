@@ -11,9 +11,16 @@ from typing import Any, Mapping
 
 import hou
 
+from pipe.core.assembly.pieces import (
+    child_variants,
+    placed_variants,
+    published_variants,
+)
+from pipe.core.asset.paths import AssetPaths
 from pipe.dcc.houdini.gallery import production_db_path
 
 from . import hooks as publish_hooks
+from . import nodelayouts
 from .main import PublishOptions, publish_component
 
 TURNAROUND_HOOK = "turnaround"
@@ -119,6 +126,8 @@ def preflight(node: hou.Node) -> dict[str, Any]:
                 }
             )
 
+    errors.extend(_empty_piece_problems(node))
+
     hook_specs = _collect_hook_specs(node)
     for spec in hook_specs:
         try:
@@ -153,16 +162,66 @@ def publish(node: hou.Node) -> Mapping[str, Any]:
     """Publish using the shared pipe.dcc.houdini.publish.main service."""
     _repair_broken_output_paths(node)
 
-    options = _collect_publish_options(node)
-    try:
-        parent = hou.qt.mainWindow()
-    except Exception:
-        parent = None
-    result = publish_component(node.path(), options, parent=parent)
+    result: Mapping[str, Any]
+    problems = _empty_piece_problems(node)
+    if problems:
+        result = {"status": "failed", "warnings": [], "errors": problems}
+    else:
+        options = _collect_publish_options(node)
+        try:
+            parent = hou.qt.mainWindow()
+        except Exception:
+            parent = None
+        result = publish_component(node.path(), options, parent=parent)
     _write_status(node, title="Publish", payload=result)
     _apply_node_color(node, result)
     _show_ui_message(result, title="SKD Publish")
     return result
+
+
+def _empty_piece_problems(node: hou.Node) -> list[dict[str, str]]:
+    """Why publishing this hip would leave an assembly with an empty piece."""
+    root = _eval_path(node, "asset_root_override") or Path(
+        hou.hscriptStringExpression("$HIP")
+    )
+    paths = AssetPaths(root)
+    problems: list[dict[str, str]] = []
+    if paths.pieces_layer.is_file():
+        for child, placed in child_variants(paths.pieces_layer).items():
+            missing = placed - published_variants(child)
+            if missing:
+                problems.append(
+                    {
+                        "code": "ChildNotPublished",
+                        "message": (
+                            f"'{child.name}' is placed as {_names(missing)}, which "
+                            f"its publish does not provide. Publish '{root.name}' "
+                            "from Maya, which publishes every piece first, or "
+                            f"publish '{child.name}' from its own builder."
+                        ),
+                    }
+                )
+        return problems
+
+    built = nodelayouts.geometry_variants_built(node)
+    unbuilt = placed_variants(root) - built
+    if unbuilt:
+        problems.append(
+            {
+                "code": "VariantNotBuilt",
+                "message": (
+                    f"'{root.name}' is placed as {_names(unbuilt)} but this builder "
+                    f"only builds {_names(built)}. Publish the assembly from Maya, "
+                    "which regenerates the builder's variants, then publish here "
+                    "again."
+                ),
+            }
+        )
+    return problems
+
+
+def _names(variants: set[str]) -> str:
+    return ", ".join(sorted(variants)) or "nothing"
 
 
 def _collect_publish_options(node: hou.Node) -> PublishOptions:
@@ -431,10 +490,13 @@ def _show_ui_message(payload: Mapping[str, Any], *, title: str) -> None:
     elif warnings:
         severity = hou.severityType.Warning
 
+    # The counts alone send the artist to the node's comment for the reason.
+    reasons = [str(message.get("message", "")) for message in [*errors, *warnings]]
     hou.ui.displayMessage(
         f"Status: {payload.get('status')}\nWarnings: {len(warnings)}\nErrors: {len(errors)}",
         severity=severity,
         title=title,
+        details="\n\n".join(reason for reason in reasons if reason),
     )
 
 

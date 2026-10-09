@@ -132,6 +132,27 @@ def _publish_child(
     child_root: Path, placed_variants: frozenset[str]
 ) -> HeadlessPublishResult:
     """Publish one piece, regenerating its managed variants if a placed one is unbuilt."""
+    # A variant is its source layer, so one without it can never be built, and
+    # refusing first keeps a renamed or deleted child from being made empty.
+    sources = AssetPaths(child_root)
+    missing = {
+        variant
+        for variant in placed_variants
+        if not sources.publish_source_variant_usd(variant).is_file()
+    }
+    if missing:
+        child = _empty_result(
+            child_root, variant=DEFAULT_GEOMETRY_VARIANT, publish=True
+        )
+        child["asset_name"] = child_root.name
+        _error(
+            child,
+            "ChildSourceMissing",
+            f"'{child_root.name}' has no source layer for {_names(missing)} in "
+            f"{sources.publish_source_dir}, so it was not built. Restore the "
+            "folder, or remove the piece from the assembly.",
+        )
+        return _finalize(child)
 
     def run(*, regen: bool) -> HeadlessPublishResult:
         return _run_one(
