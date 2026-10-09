@@ -127,6 +127,10 @@ def preflight(node: hou.Node) -> dict[str, Any]:
             )
 
     errors.extend(_empty_piece_problems(node))
+    warnings.extend(
+        {"code": "MaterialsOutOfDate", "message": problem}
+        for problem in nodelayouts.material_warnings(node)
+    )
 
     hook_specs = _collect_hook_specs(node)
     for spec in hook_specs:

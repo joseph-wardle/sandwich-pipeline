@@ -41,6 +41,7 @@ from pipe.core.versioning import (
 )
 
 from . import hooks as publish_hooks
+from . import nodelayouts
 
 log = logging.getLogger(__name__)
 
@@ -197,6 +198,10 @@ def publish_component(
         context = _preflight_context(node_path=node_path, options=opts, result=result)
         if context is None:
             return _finalize_result(result)
+        # The preflight resolved the node, so it exists.
+        wrapper = cast(hou.Node, hou.node(node_path))
+        for problem in nodelayouts.material_warnings(wrapper):
+            _warn(result, "MaterialsOutOfDate", problem)
 
         with progress_scope(
             parent=parent,

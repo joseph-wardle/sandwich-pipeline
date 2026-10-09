@@ -733,6 +733,12 @@ class AssetPublisher(Publisher):
                     publish_result.get("warnings"),
                     details,
                 )
+            for child in children if isinstance(children, list) else []:
+                _append_messages(
+                    f"Warnings for '{child.get('asset_name')}':",
+                    child.get("warnings"),
+                    details,
+                )
             _append_messages("Errors:", result.get("errors"), details)
             if isinstance(publish_result, dict):
                 _append_messages(

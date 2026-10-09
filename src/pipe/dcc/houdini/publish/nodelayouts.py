@@ -11,6 +11,7 @@ import loptoolutils  # type: ignore
 
 from pipe.core.asset.paths import GEOMETRY_VARIANT_SET, AssetPaths
 
+from ..shading import main as shading
 from ..shading import variants
 
 """Node-graph builders for Houdini Solaris tools.
@@ -351,8 +352,10 @@ def _mark_managed_variant_node(node: hou.Node, *, owner_path: str) -> None:
 
 def _clear_managed_variant_nodes(
     parent: hou.Node, *, keep_paths: set[str], owner_path: str
-) -> None:
+) -> list[str]:
     """Destroy the owner's managed nodes; a copied or renamed one becomes the artist's."""
+    replaced: list[str] = []
+    released: list[str] = []
     for node in list(parent.children()):
         if node.path() in keep_paths:
             continue
@@ -366,8 +369,23 @@ def _clear_managed_variant_nodes(
         made_as = node.userData(SKD_VARIANT_GRAPH_NAME_KEY)
         if made_as is not None and made_as != node.name():
             _release_managed_variant_node(node)
+            released.append(node.name())
             continue
+        replaced.append(node.name())
         node.destroy()
+    warnings: list[str] = []
+    if replaced:
+        warnings.append(
+            f"Regenerating replaced {', '.join(replaced)}, so edits made on them "
+            "are gone. Rename a node to keep it through the next regeneration."
+        )
+    if released:
+        warnings.append(
+            f"Kept {', '.join(released)}, renamed or copied from managed nodes, "
+            "but nothing is wired to them now. Connect them where they belong, "
+            "or delete them."
+        )
+    return warnings
 
 
 def _release_managed_variant_node(node: hou.Node) -> None:
@@ -743,13 +761,7 @@ def _rebuild_matlib_for_variant(
     if not isinstance(matlib, hou.LopNode):
         return
     try:
-        from ..shading import main as shading_module
-    except Exception as exc:
-        warnings.append(f"MatLib rebuild unavailable for {matlib.path()}: {exc}")
-        return
-
-    try:
-        shading_module.matlib_rebuild(matlib)
+        shading.matlib_rebuild(matlib)
     except Exception as exc:
         warnings.append(
             f"MatLib rebuild failed for geo='{geo_variant}' mat='{mat_variant}': {exc}"
@@ -772,6 +784,20 @@ def _first_managed_geometry_node(
     if not geometry_nodes:
         return None
     return sorted(geometry_nodes, key=lambda node: node.name().casefold())[0]
+
+
+def material_warnings(output: hou.Node) -> list[str]:
+    """Why the materials feeding `output` no longer match the published textures."""
+    matlibs = sorted(
+        (node for node in output.inputAncestors() if _is_skd_matlib_like(node)),
+        key=lambda node: node.name(),
+    )
+    return [
+        problem
+        for matlib in matlibs
+        if isinstance(matlib, hou.LopNode)
+        for problem in shading.matlib_problems(matlib)
+    ]
 
 
 def geometry_variants_built(output: hou.Node) -> set[str]:
@@ -818,8 +844,9 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
     """Rebuild a deterministic managed variant graph around an output node."""
     pieces = _pieces_layer()
     if pieces is not None:
-        _rebuild_assembly_graph(output, pieces)
-        return ()
+        replaced = _rebuild_assembly_graph(output, pieces)
+        _set_variant_generation_warnings(output, replaced)
+        return tuple(replaced)
 
     parent = output.parent()
     out_pos = output.position()
@@ -833,8 +860,10 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
 
     owner_path = output.path()
     _clear_managed_variant_boxes(parent, owner_path=owner_path)
-    _clear_managed_variant_nodes(
-        parent, keep_paths={output.path()}, owner_path=owner_path
+    warnings.extend(
+        _clear_managed_variant_nodes(
+            parent, keep_paths={output.path()}, owner_path=owner_path
+        )
     )
 
     config = parent.createNode(CONFIG_NODE_TYPE)
@@ -1001,13 +1030,15 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
     return tuple(warnings)
 
 
-def _rebuild_assembly_graph(output: hou.Node, pieces: Path) -> None:
+def _rebuild_assembly_graph(output: hou.Node, pieces: Path) -> list[str]:
     """An assembly publishes its pieces layer and nothing else (ADR-0032)."""
     parent = output.parent()
     out_pos = output.position()
     owner_path = output.path()
     _clear_managed_variant_boxes(parent, owner_path=owner_path)
-    _clear_managed_variant_nodes(parent, keep_paths={owner_path}, owner_path=owner_path)
+    replaced = _clear_managed_variant_nodes(
+        parent, keep_paths={owner_path}, owner_path=owner_path
+    )
 
     sublayer = _create_pieces_sublayer(parent, pieces, owner_path=owner_path)
     config = parent.createNode(CONFIG_NODE_TYPE, "config")
@@ -1021,6 +1052,7 @@ def _rebuild_assembly_graph(output: hou.Node, pieces: Path) -> None:
     sublayer.setPosition(hou.Vector2(out_pos.x(), out_pos.y() + 3.2))
     config.setPosition(hou.Vector2(out_pos.x(), out_pos.y() + 1.6))
     lookdev.setPosition(hou.Vector2(out_pos.x(), out_pos.y() - 1.7))
+    return replaced
 
 
 def create_skd_component_builder(

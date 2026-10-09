@@ -555,25 +555,77 @@ class MatlibManager:
             )
             return
 
-        geo_variant = _string_parm(self._node, "geo_var", "main")
-        mat_variant = _string_parm(self._node, "mat_var", _NO_TEXTURES)
+        geo_variant, mat_variant = self._variants()
         # Component Material expects /ASSET/mtl/g_<geo>/v_<mat>/MAT_<texset>.
         _parm(matlib, "matpathprefix").set(
             variants.material_scope_path(mat_variant, geo_variant=geo_variant)
         )
+        MaterialGraphBuilder(matlib).rebuild(
+            self._materials(geo_variant, mat_variant),
+            build_preview=_toggle(self._node, "build_usd_preview", default=True),
+        )
 
+    def problems(self) -> list[str]:
+        """Why the generated materials no longer match the published textures."""
+        matlib = self._material_library()
+        if matlib is None:
+            return [
+                f"'{self._node.name()}' has no {_MATLIB_TYPE} node, so it builds nothing."
+            ]
+        geo_variant, mat_variant = self._variants()
+        wanted = {
+            f"MAT_{_node_name(material.texture_set)}": material.texture_set
+            for material in self._materials(geo_variant, mat_variant)
+        }
+        built = {
+            child.name()
+            for child in matlib.children()
+            if child.userData(_GENERATED_KEY) == _GENERATED_VALUE
+        }
+        unbuilt = sorted(
+            set_name for name, set_name in wanted.items() if name not in built
+        )
+        stale = sorted(built - wanted.keys())
+        name = self._node.name()
+        where = f"geo='{geo_variant}' mat='{mat_variant}'"
+        problems: list[str] = []
+        if unbuilt and self._node.isGenericFlagSet(hou.nodeFlag.Bypass):
+            problems.append(
+                f"'{name}' is bypassed, so it publishes no materials, but {where} now "
+                f"has textures for {', '.join(unbuilt)}. Un-bypass it and its Component "
+                "Material, press Rebuild Materials on it, then publish again."
+            )
+        elif unbuilt:
+            problems.append(
+                f"'{name}' has no material for {', '.join(unbuilt)}, which the geometry "
+                f"binds and {where} has textures for. Press Rebuild Materials on it, "
+                "then publish again."
+            )
+        if stale:
+            problems.append(
+                f"'{name}' still builds {', '.join(stale)}, whose textures are no longer "
+                f"published for {where} or which the geometry no longer binds. Press "
+                "Rebuild Materials on it to drop them, then publish again."
+            )
+        return problems
+
+    def _variants(self) -> tuple[str, str]:
+        return (
+            _string_parm(self._node, "geo_var", "main"),
+            _string_parm(self._node, "mat_var", _NO_TEXTURES),
+        )
+
+    def _materials(
+        self, geo_variant: str, mat_variant: str
+    ) -> Sequence[textures.MaterialSpec]:
+        """The materials this MatLib builds: published textures the geometry binds."""
         hip_root = Path(hou.hscriptStringExpression("$HIP"))
         tex_root = hip_root / variants.TEX_SOURCE_DIR / geo_variant / mat_variant
         materials = textures.published_materials(tex_root, hip_root=hip_root)
         if not materials:
             log.warning("No materials to build from %s", tex_root)
         source = hip_root / variants.GEO_SOURCE_DIR / f"{geo_variant}.usd"
-        materials = _bound_materials(materials, source)
-
-        MaterialGraphBuilder(matlib).rebuild(
-            materials,
-            build_preview=_toggle(self._node, "build_usd_preview", default=True),
-        )
+        return _bound_materials(materials, source)
 
     def _asset(self) -> Asset | None:
         try:
@@ -664,3 +716,7 @@ def matlib_on_variant_changed(node: hou.LopNode) -> None:
 
 def matlib_rebuild(node: hou.LopNode) -> None:
     MatlibManager(node).rebuild()
+
+
+def matlib_problems(node: hou.LopNode) -> list[str]:
+    return MatlibManager(node).problems()
