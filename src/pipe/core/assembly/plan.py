@@ -11,10 +11,9 @@ from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from pipe.core.asset.naming import Adopt, New, Occupied, classify
+from pipe.core.asset.naming import Adopt, New, Occupied, classify, name_problem
 from pipe.core.asset.paths import (
     BLENDER_MODEL_FILENAME,
-    DEFAULT_GEOMETRY_VARIANT,
     MODEL_FILENAME,
     AssetPaths,
     asset_root,
@@ -31,6 +30,7 @@ from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.core.shotgrid.paths import build_asset_path, normalize_display_name
 
 PASTED_PREFIX = "pasted__"
+_VARIANT_RE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
 
 
 @dataclass(frozen=True)
@@ -130,6 +130,7 @@ def plan_split(
         children.append(Child(display_name, assembly.subdirectory, claim, tuple(rows)))
 
     refusals = [
+        *_name_problems(children),
         *_name_collisions(children),
         *_variant_collisions(children),
         *_placed_collisions(children, placed),
@@ -217,9 +218,9 @@ def register_child(conn: ShotGrid, child: Child) -> Asset:
     asset = claim.asset
     for variant in child.variants:
         asset = conn.add_geometry_variant(asset, variant)
-    # An adopted record was born listing `main`, which nothing may ever fill.
-    if isinstance(claim, Adopt) and DEFAULT_GEOMETRY_VARIANT not in child.variants:
-        asset = conn.remove_geometry_variant(asset, DEFAULT_GEOMETRY_VARIANT)
+    if isinstance(claim, Adopt):
+        for stale in sorted(set(asset.geometry_variants or ()) - set(child.variants)):
+            asset = conn.remove_geometry_variant(asset, stale)
     return asset
 
 
@@ -248,6 +249,28 @@ def _scale_fault(check: ScaleCheck) -> str:
     if not check.orthogonal:
         return "sheared axes"
     return "non-uniform scale"
+
+
+def _name_problems(children: list[Child]) -> list[Refusal]:
+    """A group's name must make an asset name and a variant the show can spell."""
+    refusals = []
+    for child in children:
+        problem = name_problem(child.display_name)
+        for row in child.rows:
+            if problem is not None:
+                refusals.append(
+                    Refusal(row.group, f"'{row.group}' cannot name an asset: {problem}")
+                )
+            if row.variant and not _VARIANT_RE.fullmatch(row.variant):
+                refusals.append(
+                    Refusal(
+                        row.group,
+                        f"'{row.group}' names the variant '{row.variant}', and a "
+                        "variant is lowercase letters, digits and single "
+                        "underscores, starting with a letter (like 'main').",
+                    )
+                )
+    return refusals
 
 
 def _name_collisions(children: list[Child]) -> list[Refusal]:
