@@ -146,6 +146,7 @@ _SG_ASSET_TYPE = "sg_asset_type"
 _SG_ASSET_SUBDIRECTORY = "sg_subdirectory"
 _SG_ASSET_TAGS = "tags"
 _SG_ASSET_TASK_TEMPLATE = "task_template"
+_SG_ASSET_GEOMETRY_VARIANTS = "sg_geometry_variants"
 _SG_SHOT_CODE = "code"
 _SG_SHOT_DESCRIPTION = "description"
 _SG_SHOT_SEQUENCE = "sg_sequence"
@@ -721,8 +722,9 @@ class ShotGrid:
         subdirectory: str | None,
         task_template: str | None,
         tags: Collection[str] = (),
+        geometry_variants: Collection[str] = (),
     ) -> Asset:
-        """Create an Asset with its task list already in place.
+        """Create an Asset with its task list and geometry variants already in place.
 
         Raises:
             ValueError: An asset already has `code`'s derived name, or no Tag has
@@ -739,6 +741,8 @@ class ShotGrid:
             payload[_SG_ASSET_SUBDIRECTORY] = subdirectory
         if tags:
             payload[_SG_ASSET_TAGS] = self._tag_refs(tags)
+        if geometry_variants:
+            payload[_SG_ASSET_GEOMETRY_VARIANTS] = ",".join(sorted(geometry_variants))
         template = (
             self._task_template_ref(task_template, "Asset") if task_template else None
         )
@@ -821,7 +825,7 @@ class ShotGrid:
         """Register `name` as a geometry variant on `asset`. Idempotent."""
         return self._edit_asset_csv_field(
             asset,
-            field="sg_geometry_variants",
+            field=_SG_ASSET_GEOMETRY_VARIANTS,
             name=name,
             add=True,
         )
@@ -830,7 +834,7 @@ class ShotGrid:
         """Unregister `name` as a geometry variant on `asset`. Idempotent."""
         return self._edit_asset_csv_field(
             asset,
-            field="sg_geometry_variants",
+            field=_SG_ASSET_GEOMETRY_VARIANTS,
             name=name,
             add=False,
         )

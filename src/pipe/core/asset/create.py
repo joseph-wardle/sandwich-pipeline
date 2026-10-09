@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 
 from Qt import QtWidgets
 
 from pipe.core.asset.naming import Adopt, New
-from pipe.core.asset.paths import asset_root
+from pipe.core.asset.paths import DEFAULT_GEOMETRY_VARIANT, asset_root
 from pipe.core.shotgrid import Asset, ShotGrid, ShotGridError
 from pipe.core.ui import MessageDialog
 from pipe.core.ui.new_asset_dialog import ask_new_asset
@@ -61,8 +62,13 @@ def new_asset(conn: ShotGrid, parent: QtWidgets.QWidget | None) -> Asset | None:
     return asset
 
 
-def create_record(conn: ShotGrid, new: New) -> Asset:
-    """Create the ShotGrid Asset for `new`.
+def create_record(
+    conn: ShotGrid,
+    new: New,
+    *,
+    variants: Collection[str] = (DEFAULT_GEOMETRY_VARIANT,),
+) -> Asset:
+    """Create the ShotGrid Asset for `new`, born with exactly `variants`.
 
     Raises:
         ValueError: Someone took the name after `new` was judged.
@@ -74,6 +80,7 @@ def create_record(conn: ShotGrid, new: New) -> Asset:
         subdirectory=new.subdirectory,
         task_template=RIGGED_TASK_TEMPLATE if new.rigged else TASK_TEMPLATE,
         tags={ASSET_TAG, RIGGED_TAG} if new.rigged else {ASSET_TAG},
+        geometry_variants=variants,
     )
 
 
