@@ -12,6 +12,8 @@ from pipe.core.assembly.model import Piece
 
 # Maya's startup cameras are assemblies too, and are never pieces.
 _DEFAULT_CAMERAS = ("persp", "top", "front", "side")
+# The group mayaUsd parks a piece under while it is open for editing.
+_PULL_ROOT = "__mayaUsd__"
 
 
 def scan_pieces() -> list[Piece]:
@@ -73,5 +75,5 @@ def _top_level_nodes() -> list[str]:
     return [
         node
         for node in mc.ls(assemblies=True, long=True) or []
-        if node.rsplit("|", 1)[-1] not in _DEFAULT_CAMERAS
+        if node.rsplit("|", 1)[-1] not in (*_DEFAULT_CAMERAS, _PULL_ROOT)
     ]

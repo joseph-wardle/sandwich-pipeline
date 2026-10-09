@@ -10,6 +10,7 @@ import mayaUsd.ufe
 from pipe.core.assembly.plan import Plan, Refusal
 from pipe.core.assembly.plan import plan_split as plan_pieces
 from pipe.core.shotgrid import Asset
+from pipe.dcc.maya.assembly.editing import open_piece
 from pipe.dcc.maya.assembly.scan import scan_pieces, unsplit_nodes
 from pipe.dcc.maya.assembly.split import scene_units_problem
 from pipe.dcc.maya.assembly.stage import stage_shape
@@ -22,6 +23,9 @@ def plan_split(assembly: Asset, assets: Iterable[Asset]) -> Plan:
     plan = plan_pieces(pieces, assembly, assets, placed=placed_prim_names())
 
     refusals = list(plan.refusals)
+    editing = _open_piece_problem()
+    if editing is not None:
+        refusals.append(Refusal(None, editing))
     units = scene_units_problem()
     if units is not None:
         refusals.append(Refusal(None, units))
@@ -44,6 +48,20 @@ def plan_split(assembly: Asset, assets: Iterable[Asset]) -> Plan:
             refusals.append(Refusal(piece.name, f"'{piece.name}': {problem}"))
 
     return replace(plan, refusals=tuple(refusals))
+
+
+def _open_piece_problem() -> str | None:
+    """A split saves the scene and empties the undo queue, which an open piece
+    (whose Maya copy is the only one of its edits) must not be caught in."""
+    shape = stage_shape()
+    stage = mayaUsd.ufe.getStage(shape) if shape else None
+    piece = open_piece(stage) if stage is not None else None
+    if piece is None:
+        return None
+    return (
+        f"'{piece.GetName()}' is open for editing. Save or discard its edits, "
+        "then split again."
+    )
 
 
 def placed_prim_names() -> set[str]:

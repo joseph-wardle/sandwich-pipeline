@@ -51,15 +51,11 @@ def edit_piece(prim: Usd.Prim) -> str:
             "discard it before opening another piece."
         )
 
+    _refuse_non_piece(stage, prim)
     # Refuse a piece with no payload before anything is pulled.
     child_layer = child_source_layer(prim)
     _release_materials(prim, child_layer)
     ufe_path = _ufe_path(prim)
-    if not PrimUpdaterManager.canEditAsMaya(ufe_path):
-        raise EditError(
-            f"'{prim.GetName()}' cannot be opened for editing. Pick the piece "
-            "itself in the assembly, not a group above it or a mesh inside it."
-        )
 
     # mayaUsdPlugin's commands are not in the maya stubs.
     mc.mayaUsdEditAsMaya(ufe_path)  # type: ignore
@@ -182,6 +178,16 @@ def _ufe_path(prim: Usd.Prim) -> str:
             "a piece out of an assembly first."
         )
     return f"{shape},{prim.GetPath()}"
+
+
+def _refuse_non_piece(stage: Usd.Stage, prim: Usd.Prim) -> None:
+    """Only a piece prim is edited: mayaUsd would happily pull the assembly's root
+    or a mesh inside a piece, and neither counts as open afterwards."""
+    if prim.GetParent() != stage.GetDefaultPrim():
+        raise EditError(
+            f"'{prim.GetName()}' is not a piece of this assembly. Pick the piece "
+            "itself in the assembly, not a group above it or a mesh inside it."
+        )
 
 
 def _release_materials(prim: Usd.Prim, child_layer: Sdf.Layer) -> None:
