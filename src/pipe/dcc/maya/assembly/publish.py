@@ -10,19 +10,19 @@ from pipe.core.assembly.model import AssemblyError
 from pipe.core.assembly.pieces import pieces_layer_for
 from pipe.dcc.maya.assembly.editing import open_piece
 from pipe.dcc.maya.assembly.scan import unsplit_nodes
-from pipe.dcc.maya.assembly.stage import ensure_assembly_stage, stage_shape
+from pipe.dcc.maya.assembly.stage import find_assembly_stage
 from pipe.dcc.maya.util.usd_export import export_layer
 
 
-def assembly_stage() -> Usd.Stage | None:
+def publishable_stage() -> Usd.Stage | None:
     """The working stage of an assembly ready to publish, or None for a component.
 
     An assembly publishes only once every piece is split and none is open for
     editing (ADR-0032); the refusal says which pieces stand in the way.
     """
-    if stage_shape() is None:
+    stage = find_assembly_stage()
+    if stage is None:
         return None
-    stage = ensure_assembly_stage()
 
     editing = open_piece(stage)
     if editing is not None:

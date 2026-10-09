@@ -5,15 +5,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import replace
 
-import mayaUsd.ufe
-
 from pipe.core.assembly.plan import Plan, Refusal
 from pipe.core.assembly.plan import plan_split as plan_pieces
 from pipe.core.shotgrid import Asset
 from pipe.dcc.maya.assembly.editing import open_piece
 from pipe.dcc.maya.assembly.scan import scan_pieces, unsplit_nodes
 from pipe.dcc.maya.assembly.split import scene_units_problem
-from pipe.dcc.maya.assembly.stage import stage_shape
+from pipe.dcc.maya.assembly.stage import find_assembly_stage
 from pipe.dcc.maya.util.materials import material_problems
 
 
@@ -53,8 +51,7 @@ def plan_split(assembly: Asset, assets: Iterable[Asset]) -> Plan:
 def _open_piece_problem() -> str | None:
     """A split saves the scene and empties the undo queue, which an open piece
     (whose Maya copy is the only one of its edits) must not be caught in."""
-    shape = stage_shape()
-    stage = mayaUsd.ufe.getStage(shape) if shape else None
+    stage = find_assembly_stage()
     piece = open_piece(stage) if stage is not None else None
     if piece is None:
         return None
@@ -66,10 +63,7 @@ def _open_piece_problem() -> str | None:
 
 def placed_prim_names() -> set[str]:
     """The pieces already in the assembly's stage, by prim name; empty before a split."""
-    shape = stage_shape()
-    if shape is None:
-        return set()
-    stage = mayaUsd.ufe.getStage(shape)
+    stage = find_assembly_stage()
     root = stage.GetDefaultPrim() if stage is not None else None
     if not root:
         return set()

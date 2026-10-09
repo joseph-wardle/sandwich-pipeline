@@ -235,12 +235,12 @@ def production_relative_identifier(
     """Return `path` as a USD layer identifier resolved through the search path."""
     prod_root = production_root or get_production_path()
     try:
-        return str(path.relative_to(prod_root))
+        return path.relative_to(prod_root).as_posix()
     except ValueError:
         log.warning(
             "Layer %s is outside the production root; using its full path", path
         )
-        return str(path)
+        return path.as_posix()
 
 
 __all__ = [

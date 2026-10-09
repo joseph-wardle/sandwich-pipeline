@@ -8,6 +8,7 @@ directories on disk.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -20,9 +21,14 @@ DB_FILENAME = "assetGallery.db"
 THUMBNAIL_DIRNAME = ".thumbnails"
 LOCK_TIMEOUT_SECONDS = 40
 SESSION_DB_ENV = "HOUDINI_ASSETGALLERY_DB_FILE"
+GALLERY_DB_ENV = "PIPE_ASSET_GALLERY_DB"
 
 
 def production_db_path() -> Path:
+    """The show's gallery, unless `PIPE_ASSET_GALLERY_DB` stands in for it."""
+    override = os.getenv(GALLERY_DB_ENV, "").strip()
+    if override:
+        return Path(override)
     return get_production_path() / "asset" / DB_FILENAME
 
 
@@ -52,6 +58,7 @@ def copy_db(db_path: Path, dest: Path) -> None:
 
 __all__ = [
     "DB_FILENAME",
+    "GALLERY_DB_ENV",
     "SESSION_DB_ENV",
     "THUMBNAIL_DIRNAME",
     "copy_db",

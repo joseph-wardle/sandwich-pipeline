@@ -1,4 +1,4 @@
-"""Everything Maya tells the builder about an assembly."""
+"""What the layers on disk say about an assembly: its pieces, their origin, its kind."""
 
 from __future__ import annotations
 
@@ -13,12 +13,14 @@ from pipe.core.asset.paths import (
     production_relative_identifier,
 )
 from pipe.core.assembly.model import AssemblyError
-from pipe.core.assembly.provenance import assembly_of
 from pipe.core.util.paths import get_production_path
 
 # The component config renames this root to the asset's own name on publish.
 PIECES_ROOT_PRIM = "ASSET"
 _CONFIG_EMPTY_VARIANT = "__EMPTY"
+
+ASSEMBLY_KEY = "assembly"
+ASSEMBLY_KIND = "assembly"
 
 
 def pieces_layer_for(stage: Usd.Stage) -> Sdf.Layer:
@@ -34,7 +36,7 @@ def pieces_layer_for(stage: Usd.Stage) -> Sdf.Layer:
     # placement keeps its rotation and scale and only its translation converts.
     to_metres = UsdGeom.GetStageMetersPerUnit(stage)
     for piece in stage.GetDefaultPrim().GetChildren():
-        source = _child_source_layer(piece)
+        source = Path(piece_edit_target(piece).GetLayer().realPath)
         entry = AssetPaths.from_source_layer(source).entry_layer
         placement = UsdGeom.Xformable(piece).GetLocalTransformation()
         placement.SetTranslateOnly(placement.ExtractTranslation() * to_metres)
@@ -45,6 +47,23 @@ def pieces_layer_for(stage: Usd.Stage) -> Sdf.Layer:
         prim.GetVariantSets().SetSelection(GEOMETRY_VARIANT_SET, source.stem)
         UsdGeom.Xformable(prim).MakeMatrixXform().Set(placement)
     return layer
+
+
+def piece_edit_target(piece: Usd.Prim) -> Usd.EditTarget:
+    """An edit target across the piece's one payload, into the child's own layer."""
+    payloads = [
+        arc
+        for arc in Usd.PrimCompositionQuery(piece).GetCompositionArcs()
+        if arc.GetArcType() == Pcp.ArcTypePayload
+    ]
+    if len(payloads) != 1:
+        raise AssemblyError(
+            f"'{piece.GetName()}' is built from {len(payloads)} payloads and a piece "
+            "has exactly one. Only a piece made by Split Pieces belongs in the "
+            "assembly's stage; delete anything else from it."
+        )
+    node = payloads[0].GetTargetNode()
+    return Usd.EditTarget(node.layerStack.identifier.rootLayer, node)
 
 
 def child_variants(pieces_layer: Path) -> dict[Path, set[str]]:
@@ -106,17 +125,33 @@ def published_variants(child_root: Path) -> set[str]:
     return sources if len(sources) == 1 else set()
 
 
-def _child_source_layer(piece: Usd.Prim) -> Path:
-    """The child's source layer, found through the piece's one payload."""
-    payloads = [
-        arc
-        for arc in Usd.PrimCompositionQuery(piece).GetCompositionArcs()
-        if arc.GetArcType() == Pcp.ArcTypePayload
-    ]
-    if len(payloads) != 1:
-        raise AssemblyError(
-            f"'{piece.GetName()}' is built from {len(payloads)} payloads and a piece "
-            "has exactly one. Only pieces written by Split Assembly can be published; "
-            "delete anything else from the assembly's stage."
+def stamp_assembly(layer: Sdf.Layer, assembly_root: Path) -> None:
+    """Record on `layer`, without saving it, the assembly the child was split from."""
+    layer.customLayerData = {
+        **layer.customLayerData,
+        ASSEMBLY_KEY: production_relative_identifier(assembly_root),
+    }
+
+
+def assembly_of(source_layer: Path) -> str | None:
+    """The assembly `source_layer` was split from, or None for a layer made by hand."""
+    layer = Sdf.Layer.FindOrOpen(str(source_layer))
+    if layer is None:
+        return None
+    return layer.customLayerData.get(ASSEMBLY_KEY)
+
+
+def mark_published_assembly(entry_layer: Path) -> None:
+    """Rewrite the root kind on `entry_layer` and on its payload, and save both."""
+    layer = Sdf.Layer.FindOrOpen(str(entry_layer))
+    root = layer.GetPrimAtPath(f"/{layer.defaultPrim}")
+    for payload in root.payloadList.GetAddedOrExplicitItems():
+        _set_root_kind(
+            Sdf.Layer.FindOrOpen(layer.ComputeAbsolutePath(payload.assetPath))
         )
-    return Path(payloads[0].GetTargetNode().layerStack.identifier.rootLayer.realPath)
+    _set_root_kind(layer)
+
+
+def _set_root_kind(layer: Sdf.Layer) -> None:
+    layer.GetPrimAtPath(f"/{layer.defaultPrim}").kind = ASSEMBLY_KIND
+    layer.Save()

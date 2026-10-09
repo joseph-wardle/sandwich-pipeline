@@ -8,8 +8,8 @@ from maya import cmds as mc
 from Qt import QtGui, QtWidgets
 
 from pipe.core.asset.naming import Adopt, New, Occupied
-from pipe.core.assembly.model import AssemblyError
-from pipe.core.assembly.plan import AddVariant, Plan, Row
+from pipe.core.assembly.model import AssemblyError, Piece
+from pipe.core.assembly.plan import AddVariant, Plan
 from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.core.ui import FAIL, FAIL_STYLE, MessageDialog, progress_scope
 from pipe.dcc.maya.assembly.plan import plan_split
@@ -78,11 +78,13 @@ class SplitDialog(QtWidgets.QDialog):
             )
             return
         plan = self._plan
-        self._show_rows([(child, row) for child in plan.children for row in child.rows])
+        self._show_rows(
+            [(child, piece) for child in plan.children for piece in child.pieces]
+        )
         problems = [refusal.reason for refusal in plan.refusals]
         if problems:
             self._show_status(problems, failed=True)
-        elif not plan.rows:
+        elif not plan.pieces:
             self._show_status(["No unsplit groups."], failed=False)
         else:
             self._show_status([], failed=False)
@@ -90,10 +92,10 @@ class SplitDialog(QtWidgets.QDialog):
     def _show_rows(self, rows: list[tuple]) -> None:
         plan = self._plan
         self._table.setRowCount(len(rows))
-        for index, (child, row) in enumerate(rows):
-            refused = plan is not None and bool(plan.refused(row.group))
+        for index, (child, piece) in enumerate(rows):
+            refused = plan is not None and bool(plan.refused(piece.name))
             outcome = _REFUSED if refused else _outcome(child.claim)
-            cells = (row.group, child.display_name, row.variant, outcome)
+            cells = (piece.name, child.display_name, piece.variant, outcome)
             for column, text in enumerate(cells):
                 item = QtWidgets.QTableWidgetItem(text)
                 if refused:
@@ -122,7 +124,7 @@ class SplitDialog(QtWidgets.QDialog):
         answer = mc.confirmDialog(
             title="Split Pieces",
             message=(
-                f"Split {len(plan.rows)} pieces into {len(plan.children)} assets?\n\n"
+                f"Split {len(plan.pieces)} pieces into {len(plan.children)} assets?\n\n"
                 "This cannot be undone. A version of the scene is kept first."
             ),
             button=["Split", "Cancel"],
@@ -166,16 +168,16 @@ class SplitDialog(QtWidgets.QDialog):
         )
 
     def _run(self, plan: Plan) -> RunReport:
-        total = len(plan.rows)
+        total = len(plan.pieces)
         done = 0
         with progress_scope(
             parent=self, title="Split Pieces", steps=[_RUN_STEP]
         ) as progress:
             progress.begin_step(_RUN_STEP, "Keeping a version of the scene")
 
-            def on_piece(row: Row) -> None:
+            def on_piece(piece: Piece) -> None:
                 nonlocal done
-                progress.update_substep(done, total, row.group)
+                progress.update_substep(done, total, piece.name)
                 done += 1
 
             return run_split(self._conn, self._assembly, plan, on_piece=on_piece)

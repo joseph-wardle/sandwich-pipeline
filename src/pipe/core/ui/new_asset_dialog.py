@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 
 from Qt import QtCore, QtWidgets
 
+from pipe.core.asset.create import create_record
 from pipe.core.asset.naming import (
     Adopt,
     New,
@@ -17,9 +19,52 @@ from pipe.core.asset.naming import (
     subdirectories_in_use,
     subdirectory_problem,
 )
-from pipe.core.shotgrid import Asset
+from pipe.core.asset.paths import asset_root
+from pipe.core.shotgrid import Asset, ShotGrid, ShotGridError
 from pipe.core.shotgrid.paths import build_asset_path, normalize_display_name
+from pipe.core.ui.dialogs import MessageDialog
 from pipe.core.ui.style import FAIL_STYLE, OK_STYLE, WARN_STYLE
+
+log = logging.getLogger(__name__)
+
+TITLE = "New Asset"
+
+
+def new_asset(conn: ShotGrid, parent: QtWidgets.QWidget | None) -> Asset | None:
+    """Ask the artist for a new asset, then make its ShotGrid record and folder."""
+    try:
+        assets = conn.find_assets()
+    except ShotGridError:
+        log.exception("Could not list the assets a new one must not collide with.")
+        _tell(parent, "Could not reach ShotGrid. Try again, or ask a TD.")
+        return None
+
+    choice = ask_new_asset(parent, assets, title=TITLE, accept_label="Create")
+    if choice is None:
+        return None
+
+    if isinstance(choice, Adopt):
+        asset = choice.asset
+    else:
+        try:
+            asset = create_record(conn, choice)
+        except ValueError as exc:
+            _tell(parent, f"Nothing was created. {exc}")
+            return None
+        except ShotGridError:
+            log.exception("Could not create the asset %s.", choice.display_name)
+            _tell(
+                parent,
+                "Could not create the asset in ShotGrid. Try again, or ask a TD.",
+            )
+            return None
+
+    asset_root(asset).mkdir(mode=0o770, parents=True, exist_ok=True)
+    return asset
+
+
+def _tell(parent: QtWidgets.QWidget | None, message: str) -> None:
+    MessageDialog(parent, message, TITLE).exec_()
 
 
 def ask_new_asset(
@@ -170,4 +215,4 @@ class NewAssetDialog(QtWidgets.QDialog):
         self.accept()
 
 
-__all__ = ["NewAssetDialog", "ask_new_asset"]
+__all__ = ["NewAssetDialog", "ask_new_asset", "new_asset"]

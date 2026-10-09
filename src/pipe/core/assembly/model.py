@@ -43,6 +43,15 @@ class Piece:
     def name(self) -> str:
         return self.node.rsplit("|", 1)[-1]
 
+    @property
+    def label(self) -> str:
+        """The asset part of the name: 'frame' for 'frame__tall'."""
+        return piece_name_parts(self.name)[0]
+
+    @property
+    def variant(self) -> str:
+        return piece_name_parts(self.name)[1]
+
 
 @dataclass(frozen=True)
 class PieceTarget:
@@ -71,17 +80,9 @@ class PieceTarget:
 
 @dataclass(frozen=True)
 class SplitResult:
-    """What a split produced.
-
-    The two bounds are the evidence `split_piece` checked before it deleted
-    anything; they are kept so the tool can show an artist what it measured.
-    """
+    """What a split produced: the piece, and the child and prim it became."""
 
     piece_name: str
     asset_name: str
     variant: str
-    source_layer: Path
     prim_path: str
-    placement: Gf.Matrix4d
-    world_bounds_before: Gf.Range3d
-    world_bounds_after: Gf.Range3d

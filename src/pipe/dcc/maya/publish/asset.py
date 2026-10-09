@@ -40,12 +40,8 @@ from Qt.QtWidgets import (
 )
 
 from pipe.dcc.houdini.launch import HoudiniLauncher
-from pipe.dcc.maya.assembly.publish import assembly_stage, export_assembly
-from pipe.dcc.maya.assetfile import (
-    read_asset_metadata,
-    resolve_asset_from_scene_path,
-    write_asset_metadata,
-)
+from pipe.dcc.maya.assembly.publish import export_assembly, publishable_stage
+from pipe.dcc.maya.assetfile import scene_asset, write_asset_metadata
 from pipe.dcc.maya.util.materials import material_problems
 from pipe.dcc.maya.util.random_color import is_random_color_active
 from pipe.dcc.maya.util.selection import maintain_selection
@@ -340,21 +336,9 @@ class AssetPublisher(Publisher):
         self._version_note: str | None = None
 
     def _resolve_scene_asset(self) -> Asset | None:
-        metadata = read_asset_metadata(self._conn)
-        if metadata.asset:
-            return metadata.asset
-
-        scene_path = _current_scene_path()
-        if scene_path is None:
-            log.warning("No scene path; cannot resolve asset metadata.")
-            return None
-
-        asset = resolve_asset_from_scene_path(self._conn, scene_path)
-        if asset:
-            log.info("Resolved asset from scene path; writing file metadata.")
-            write_asset_metadata(asset)
-        else:
-            log.warning("Failed to resolve asset from scene path: %s", scene_path)
+        asset = scene_asset(self._conn)
+        if asset is None:
+            log.warning("The open scene is not an asset's model file.")
         return asset
 
     def _ensure_scene_saved(self) -> bool:
@@ -486,7 +470,7 @@ class AssetPublisher(Publisher):
     def _resolve_assembly(self) -> bool:
         """Decide whether this scene publishes as an assembly, refusing one not ready."""
         try:
-            self._assembly_stage = assembly_stage()
+            self._assembly_stage = publishable_stage()
         except AssemblyError as exc:
             MessageDialog(self._window, str(exc), "Cannot publish").exec_()
             return False

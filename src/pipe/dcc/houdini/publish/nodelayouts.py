@@ -353,7 +353,7 @@ def _mark_managed_variant_node(node: hou.Node, *, owner_path: str) -> None:
 def _clear_managed_variant_nodes(
     parent: hou.Node, *, keep_paths: set[str], owner_path: str
 ) -> list[str]:
-    """Destroy the owner's managed nodes; a copied or renamed one becomes the artist's."""
+    """Destroy the owner's managed nodes; one it cannot prove it made becomes the artist's."""
     replaced: list[str] = []
     released: list[str] = []
     for node in list(parent.children()):
@@ -366,8 +366,7 @@ def _clear_managed_variant_nodes(
             continue
         if node.userData(SKD_VARIANT_GRAPH_OWNER_KEY) not in ("", owner_path):
             continue
-        made_as = node.userData(SKD_VARIANT_GRAPH_NAME_KEY)
-        if made_as is not None and made_as != node.name():
+        if node.userData(SKD_VARIANT_GRAPH_NAME_KEY) != node.name():
             _release_managed_variant_node(node)
             released.append(node.name())
             continue
@@ -381,9 +380,9 @@ def _clear_managed_variant_nodes(
         )
     if released:
         warnings.append(
-            f"Kept {', '.join(released)}, renamed or copied from managed nodes, "
-            "but nothing is wired to them now. Connect them where they belong, "
-            "or delete them."
+            f"Kept {', '.join(released)}, which were renamed, copied or made "
+            "before regeneration tracked names; they no longer feed the output. "
+            "Wire them back in where they belong, or delete them."
         )
     return warnings
 
@@ -394,7 +393,9 @@ def _release_managed_variant_node(node: hou.Node) -> None:
         SKD_VARIANT_GRAPH_OWNER_KEY,
         SKD_VARIANT_GRAPH_NAME_KEY,
     ):
-        node.destroyUserData(key)
+        # A node tagged before names were recorded has no name key to destroy.
+        if node.userData(key) is not None:
+            node.destroyUserData(key)
 
 
 def _clear_managed_variant_boxes(parent: hou.Node, *, owner_path: str) -> None:

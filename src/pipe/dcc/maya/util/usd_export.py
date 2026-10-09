@@ -1,4 +1,4 @@
-"""One place for the `mayaUSDExport` call and the Windows workaround. Can we just burn Windows?"""
+"""One place for the `mayaUSDExport` call and the Windows workaround."""
 
 from __future__ import annotations
 

@@ -11,6 +11,7 @@ from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from pipe.core.asset.create import create_record
 from pipe.core.asset.naming import Adopt, New, Occupied, classify, name_problem
 from pipe.core.asset.paths import (
     BLENDER_MODEL_FILENAME,
@@ -18,14 +19,9 @@ from pipe.core.asset.paths import (
     AssetPaths,
     asset_root,
 )
-from pipe.core.assembly.model import (
-    VARIANT_SEPARATOR,
-    Piece,
-    PieceTarget,
-    piece_name_parts,
-)
+from pipe.core.assembly.model import VARIANT_SEPARATOR, Piece, PieceTarget
 from pipe.core.assembly.normalize import ScaleCheck, inspect_scale
-from pipe.core.assembly.provenance import assembly_of
+from pipe.core.assembly.pieces import assembly_of
 from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.core.shotgrid.paths import build_asset_path, normalize_display_name
 
@@ -42,26 +38,13 @@ class AddVariant:
 
 
 @dataclass(frozen=True)
-class Row:
-    """One unsplit group, and the asset and variant its name declares."""
-
-    piece: Piece
-    label: str
-    variant: str
-
-    @property
-    def group(self) -> str:
-        return self.piece.name
-
-
-@dataclass(frozen=True)
 class Child:
-    """One child asset and the rows that become its geometry variants."""
+    """One child asset and the pieces that become its geometry variants."""
 
     display_name: str
     subdirectory: str | None
     claim: New | Adopt | AddVariant | Occupied
-    rows: tuple[Row, ...]
+    pieces: tuple[Piece, ...]
 
     @property
     def asset_name(self) -> str:
@@ -77,12 +60,12 @@ class Child:
 
     @property
     def variants(self) -> list[str]:
-        return [row.variant for row in self.rows]
+        return [piece.variant for piece in self.pieces]
 
 
 @dataclass(frozen=True)
 class Refusal:
-    """Why the split cannot run; `group` names the row it concerns, if one does."""
+    """Why a split cannot run, or stopped; `group` names the piece it concerns, if one does."""
 
     group: str | None
     reason: str
@@ -94,12 +77,12 @@ class Plan:
     refusals: tuple[Refusal, ...]
 
     @property
-    def rows(self) -> list[Row]:
-        return [row for child in self.children for row in child.rows]
+    def pieces(self) -> list[Piece]:
+        return [piece for child in self.children for piece in child.pieces]
 
     @property
     def ready(self) -> bool:
-        return bool(self.rows) and not self.refusals
+        return bool(self.pieces) and not self.refusals
 
     def refused(self, group: str) -> list[str]:
         return [r.reason for r in self.refusals if r.group == group]
@@ -115,26 +98,25 @@ def plan_split(
 ) -> Plan:
     """Decide what each of `pieces` becomes beside `assembly`, and what stops it."""
     assets = list(assets)
-    by_label: dict[str, list[Row]] = {}
+    by_label: dict[str, list[Piece]] = {}
     for piece in pieces:
-        label, variant = piece_name_parts(piece.name.removeprefix(PASTED_PREFIX))
-        by_label.setdefault(label, []).append(Row(piece, label, variant))
+        by_label.setdefault(piece.label, []).append(piece)
 
     children = []
-    for label, rows in by_label.items():
+    for label, group in by_label.items():
         display_name = display_name_for(label)
-        variants = [row.variant for row in rows]
+        variants = [piece.variant for piece in group]
         claim = claim_for(
             display_name, assembly.subdirectory, variants, assets, production_root
         )
-        children.append(Child(display_name, assembly.subdirectory, claim, tuple(rows)))
+        children.append(Child(display_name, assembly.subdirectory, claim, tuple(group)))
 
     refusals = [
         *_name_problems(children),
         *_name_collisions(children),
         *_variant_collisions(children),
         *_placed_collisions(children, placed),
-        *_row_problems(children),
+        *_piece_problems(children),
     ]
     return Plan(tuple(children), tuple(refusals))
 
@@ -163,17 +145,7 @@ def claim_for(
     (asset,) = holders
 
     paths = AssetPaths(asset_root(asset, production_root))
-    hand_made = next(
-        (
-            path
-            for path in (
-                paths.root / MODEL_FILENAME,
-                paths.root / BLENDER_MODEL_FILENAME,
-            )
-            if path.exists()
-        ),
-        None,
-    )
+    hand_made = hand_made_model(paths.root)
     if hand_made is not None:
         return Occupied(
             f'"{asset.display_name}" is modelled by hand ({hand_made}), so a split '
@@ -203,12 +175,23 @@ def claim_for(
     return AddVariant(asset, split_from)
 
 
-def register_child(conn: ShotGrid, child: Child) -> Asset:
-    """Create, adopt or extend the ShotGrid Asset for `child`, and return it."""
-    from pipe.core.asset.create import (
-        create_record,
+def hand_made_model(asset_root: Path) -> Path | None:
+    """The model file an artist made in Maya or Blender, which a split never joins."""
+    return next(
+        (
+            path
+            for path in (
+                asset_root / MODEL_FILENAME,
+                asset_root / BLENDER_MODEL_FILENAME,
+            )
+            if path.exists()
+        ),
+        None,
     )
 
+
+def register_child(conn: ShotGrid, child: Child) -> Asset:
+    """Create, adopt or extend the ShotGrid Asset for `child`, and return it."""
     claim = child.claim
     if isinstance(claim, New):
         return create_record(conn, claim, variants=child.variants)
@@ -256,16 +239,27 @@ def _name_problems(children: list[Child]) -> list[Refusal]:
     refusals = []
     for child in children:
         problem = name_problem(child.display_name)
-        for row in child.rows:
-            if problem is not None:
-                refusals.append(
-                    Refusal(row.group, f"'{row.group}' cannot name an asset: {problem}")
-                )
-            if row.variant and not _VARIANT_RE.fullmatch(row.variant):
+        for piece in child.pieces:
+            if piece.name.startswith(PASTED_PREFIX):
                 refusals.append(
                     Refusal(
-                        row.group,
-                        f"'{row.group}' names the variant '{row.variant}', and a "
+                        piece.name,
+                        f"'{piece.name}' still carries Maya's {PASTED_PREFIX} prefix "
+                        f"from a paste. Rename it {piece.name[len(PASTED_PREFIX) :]}.",
+                    )
+                )
+                continue
+            if problem is not None:
+                refusals.append(
+                    Refusal(
+                        piece.name, f"'{piece.name}' cannot name an asset: {problem}"
+                    )
+                )
+            if piece.variant and not _VARIANT_RE.fullmatch(piece.variant):
+                refusals.append(
+                    Refusal(
+                        piece.name,
+                        f"'{piece.name}' names the variant '{piece.variant}', and a "
                         "variant is lowercase letters, digits and single "
                         "underscores, starting with a letter (like 'main').",
                     )
@@ -281,12 +275,12 @@ def _name_collisions(children: list[Child]) -> list[Refusal]:
     for name, claimants in by_name.items():
         if len(claimants) < 2:
             continue
-        labels = ", ".join(f"'{child.rows[0].label}'" for child in claimants)
+        labels = ", ".join(f"'{child.pieces[0].label}'" for child in claimants)
         for child in claimants:
-            for row in child.rows:
+            for piece in child.pieces:
                 refusals.append(
                     Refusal(
-                        row.group,
+                        piece.name,
                         f"{labels} would all become the asset '{name}'. Rename all but one.",
                     )
                 )
@@ -297,14 +291,14 @@ def _variant_collisions(children: list[Child]) -> list[Refusal]:
     refusals = []
     for child in children:
         for variant in dict.fromkeys(child.variants):
-            rows = [row for row in child.rows if row.variant == variant]
-            if len(rows) < 2:
+            pieces = [piece for piece in child.pieces if piece.variant == variant]
+            if len(pieces) < 2:
                 continue
-            groups = ", ".join(f"'{row.group}'" for row in rows)
-            for row in rows:
+            groups = ", ".join(f"'{piece.name}'" for piece in pieces)
+            for piece in pieces:
                 refusals.append(
                     Refusal(
-                        row.group,
+                        piece.name,
                         f"{groups} would all be the '{variant}' variant of "
                         f"'{child.display_name}'. Rename all but one.",
                     )
@@ -315,42 +309,42 @@ def _variant_collisions(children: list[Child]) -> list[Refusal]:
 def _placed_collisions(children: list[Child], placed: Collection[str]) -> list[Refusal]:
     refusals = []
     for child in children:
-        for row in child.rows:
-            prim = PieceTarget(child.asset_name, Path(), row.variant).prim_name
+        for piece in child.pieces:
+            prim = PieceTarget(child.asset_name, Path(), piece.variant).prim_name
             if prim in placed:
                 refusals.append(
                     Refusal(
-                        row.group,
-                        f"'{row.group}' would become '{prim}', which is already a "
+                        piece.name,
+                        f"'{piece.name}' would become '{prim}', which is already a "
                         "piece of this assembly. Name it as another variant.",
                     )
                 )
     return refusals
 
 
-def _row_problems(children: list[Child]) -> list[Refusal]:
+def _piece_problems(children: list[Child]) -> list[Refusal]:
     refusals = []
     for child in children:
         if isinstance(child.claim, Occupied):
-            for row in child.rows:
+            for piece in child.pieces:
                 refusals.append(
                     Refusal(
-                        row.group,
-                        f"'{row.group}' cannot become '{child.display_name}': "
+                        piece.name,
+                        f"'{piece.name}' cannot become '{child.display_name}': "
                         f"{child.claim.reason}",
                     )
                 )
-        for row in child.rows:
-            if not row.variant:
+        for piece in child.pieces:
+            if not piece.variant:
                 refusals.append(
                     Refusal(
-                        row.group,
-                        f"'{row.group}' names no variant after '{VARIANT_SEPARATOR}'. "
+                        piece.name,
+                        f"'{piece.name}' names no variant after '{VARIANT_SEPARATOR}'. "
                         f"Name it <asset>{VARIANT_SEPARATOR}<variant>, or drop the "
                         "underscores.",
                     )
                 )
-            problem = scale_problem(row.piece)
+            problem = scale_problem(piece)
             if problem is not None:
-                refusals.append(Refusal(row.group, problem))
+                refusals.append(Refusal(piece.name, problem))
     return refusals

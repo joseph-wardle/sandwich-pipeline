@@ -28,9 +28,18 @@ def stage_shape() -> str | None:
     return shapes[0] if shapes else None
 
 
+def find_assembly_stage() -> Usd.Stage | None:
+    """The assembly's working stage, or None in a scene nothing was split in yet."""
+    shape = stage_shape()
+    return _open_stage(shape) if shape is not None else None
+
+
 def ensure_assembly_stage() -> Usd.Stage:
     """Return the assembly's working stage, creating an empty one on first split."""
-    shape = stage_shape() or _create_stage_shape()
+    return find_assembly_stage() or _open_stage(_create_stage_shape())
+
+
+def _open_stage(shape: str) -> Usd.Stage:
     stage = mayaUsd.ufe.getStage(shape)
     if stage is None:
         raise AssemblyError(
@@ -53,7 +62,7 @@ def _create_stage_shape() -> str:
             "mayaUsdPlugin is loaded, then try again."
         )
 
-    stage = mayaUsd.ufe.getStage(resolved)
+    stage = _open_stage(resolved)
     UsdGeom.SetStageMetersPerUnit(stage, _STAGE_METERS_PER_UNIT)
     UsdGeom.SetStageUpAxis(stage, SOURCE_LAYER_UP_AXIS)
     return resolved

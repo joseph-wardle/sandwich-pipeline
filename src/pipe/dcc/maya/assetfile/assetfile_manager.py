@@ -14,7 +14,7 @@ from pipe.dcc.maya.command import maya_command
 from pipe.core.util.paths import get_production_path
 
 from pipe.core.asset import asset_owner_for, maya_model_stream, paths_for_asset
-from pipe.core.asset.create import new_asset
+from pipe.core.ui.new_asset_dialog import new_asset
 from pipe.core.asset.paths import BACKUP_DIRNAME
 from pipe.core.ui import (
     RESTORE_CANCEL,

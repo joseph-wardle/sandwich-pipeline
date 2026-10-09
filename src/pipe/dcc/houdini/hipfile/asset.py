@@ -12,7 +12,7 @@ from pipe.core.asset import (
     houdini_asset_builder_stream,
     paths_for_asset,
 )
-from pipe.core.asset.create import new_asset
+from pipe.core.ui.new_asset_dialog import new_asset
 from pipe.core.asset.paths import BACKUP_DIRNAME
 from pipe.core.ui import (
     RESTORE_CANCEL,

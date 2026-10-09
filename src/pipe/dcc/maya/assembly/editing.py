@@ -12,15 +12,15 @@ from pathlib import Path
 from typing import cast
 
 import maya.api.OpenMaya as om
-import mayaUsd.ufe
 from maya import cmds as mc
 from mayaUsd.lib import PrimUpdaterManager
-from pxr import Gf, Pcp, Sdf, Tf, Usd, UsdGeom
+from pxr import Gf, Sdf, Tf, Usd, UsdGeom
 
 from pipe.core.asset.paths import production_relative_identifier
 from pipe.core.assembly.model import AssemblyError, EditError
 from pipe.core.assembly.normalize import clear_transform
-from pipe.dcc.maya.assembly.stage import stage_shape
+from pipe.core.assembly.pieces import piece_edit_target
+from pipe.dcc.maya.assembly.stage import find_assembly_stage, stage_shape
 from pipe.dcc.maya.util.materials import (
     delete_unused_shading_groups,
     material_problems,
@@ -64,13 +64,13 @@ def edit_piece(prim: Usd.Prim) -> str:
     return maya_node
 
 
-def merge_piece(stage: Usd.Stage) -> None:
+def save_piece(stage: Usd.Stage) -> None:
     """Write the open piece's Maya edits into its child asset's layer, and save it."""
     piece = open_piece(stage)
     if piece is None:
         raise EditError("No piece is open for editing, so there is nothing to save.")
 
-    child_target = _child_edit_target(piece)
+    child_target = piece_edit_target(piece)
     child_layer = child_target.GetLayer()
     maya_node = pulled_maya_node(piece)
     _refuse_moved(piece, maya_node)
@@ -125,7 +125,7 @@ def pulled_maya_node(prim: Usd.Prim) -> str:
 
 def child_source_layer(prim: Usd.Prim) -> Sdf.Layer:
     """The layer a piece's geometry comes from, which is where its edits belong."""
-    return _child_edit_target(prim).GetLayer()
+    return piece_edit_target(prim).GetLayer()
 
 
 def install_edit_hud() -> None:
@@ -153,8 +153,7 @@ def remove_edit_hud() -> None:
 def hud_text() -> str:
     """What the HUD says. Maya calls this on every viewport refresh."""
     try:
-        shape = stage_shape()
-        stage = mayaUsd.ufe.getStage(shape) if shape else None
+        stage = find_assembly_stage()
         if stage is None:
             return "no assembly stage in this scene"
         piece = open_piece(stage)
@@ -272,24 +271,6 @@ def _refuse_material_problems(piece: Usd.Prim, maya_node: str) -> None:
             f"Fix the materials on '{piece.GetName()}' before saving it. "
             + " ".join(f"{problem}." for problem in problems)
         )
-
-
-def _child_edit_target(prim: Usd.Prim) -> Usd.EditTarget:
-    """An edit target across the piece's one payload, into the child's own layer."""
-    payloads = [
-        arc
-        for arc in Usd.PrimCompositionQuery(prim).GetCompositionArcs()
-        if arc.GetArcType() == Pcp.ArcTypePayload
-    ]
-    if len(payloads) != 1:
-        raise EditError(
-            f"'{prim.GetName()}' is built from {len(payloads)} payloads and editing "
-            "needs exactly one. Only a piece written by Split Assembly can be "
-            "edited from the assembly."
-        )
-    payload = payloads[0]
-    node = payload.GetTargetNode()
-    return Usd.EditTarget(node.layerStack.identifier.rootLayer, node)
 
 
 def _confirm_assembly_untouched(

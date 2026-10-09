@@ -23,7 +23,7 @@ from typing import Any, Mapping, NotRequired, TypedDict, cast
 import hou
 from Qt import QtWidgets
 
-from pipe.core.assembly.kind import mark_published_assembly
+from pipe.core.assembly.pieces import mark_published_assembly
 from pipe.core.asset import asset_owner_from_metadata
 from pipe.core.asset.paths import AssetPaths
 from pipe.core.ui.progress import progress_scope

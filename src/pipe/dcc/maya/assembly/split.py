@@ -10,9 +10,7 @@ from maya import cmds as mc
 from pxr import Gf, Usd, UsdGeom
 
 from pipe.core.asset.paths import (
-    BLENDER_MODEL_FILENAME,
     DEFAULT_GEOMETRY_VARIANT,
-    MODEL_FILENAME,
     AssetPaths,
     production_relative_identifier,
 )
@@ -27,8 +25,8 @@ from pipe.core.assembly.normalize import (
     placement_for,
     prim_point_bounds,
 )
-from pipe.core.assembly.plan import scale_problem
-from pipe.core.assembly.provenance import stamp_assembly
+from pipe.core.assembly.pieces import stamp_assembly
+from pipe.core.assembly.plan import hand_made_model, scale_problem
 from pipe.dcc.maya.assembly.scan import (
     renderable_meshes,
     world_matrix,
@@ -78,22 +76,15 @@ def split_piece(
         piece_name=piece.name,
         asset_name=target.asset_name,
         variant=target.variant,
-        source_layer=target.source_layer,
         prim_path=str(prim.GetPath()),
-        placement=placement,
-        world_bounds_before=bounds_before,
-        world_bounds_after=bounds_after,
     )
 
 
 def _refuse_existing_model(target: PieceTarget) -> None:
     """Refuse an asset modelled by hand, or one that already has this variant."""
-    existing = [
-        target.asset_root / MODEL_FILENAME,
-        target.asset_root / BLENDER_MODEL_FILENAME,
-        target.source_layer,
-    ]
-    found = next((path for path in existing if path.exists()), None)
+    found = hand_made_model(target.asset_root)
+    if found is None and target.source_layer.exists():
+        found = target.source_layer
     if found is not None:
         raise SplitError(
             f"'{target.asset_name}' already has a model at {found}. Split under a "

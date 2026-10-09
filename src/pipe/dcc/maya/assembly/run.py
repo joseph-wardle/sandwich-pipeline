@@ -17,8 +17,8 @@ from maya import cmds as mc
 
 from pipe.core.asset import asset_owner_for, maya_model_stream, paths_for_asset
 from pipe.core.asset.paths import asset_root
-from pipe.core.assembly.model import AssemblyError, PieceTarget, SplitResult
-from pipe.core.assembly.plan import Child, Plan, Row, register_child
+from pipe.core.assembly.model import AssemblyError, Piece, PieceTarget, SplitResult
+from pipe.core.assembly.plan import Child, Plan, Refusal, register_child
 from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.core.versioning import save_version
 from pipe.dcc.maya.assembly.split import split_piece
@@ -29,18 +29,12 @@ VERSION_TITLE = "Before Split Pieces"
 
 
 @dataclass(frozen=True)
-class Failure:
-    """The piece the run stopped at, and why, in the artist's terms."""
-
-    group: str
-    reason: str
-
-
-@dataclass(frozen=True)
 class RunReport:
+    """What a run split, and the piece it stopped at, if one stopped it."""
+
     version: int | None
     split: tuple[SplitResult, ...]
-    failure: Failure | None
+    failure: Refusal | None
 
 
 def run_split(
@@ -48,11 +42,11 @@ def run_split(
     assembly: Asset,
     plan: Plan,
     *,
-    on_piece: Callable[[Row], None] | None = None,
+    on_piece: Callable[[Piece], None] | None = None,
 ) -> RunReport:
     """Write `plan` into the scene, ShotGrid and the children's publish folders.
 
-    `on_piece` is told each row as its split begins, for a progress bar.
+    `on_piece` is told each piece as its split begins, for a progress bar.
     """
     if not plan.ready:
         raise AssemblyError(
@@ -78,7 +72,7 @@ def run_split(
     )
 
     split: list[SplitResult] = []
-    failure: Failure | None = None
+    failure: Refusal | None = None
     try:
         for child in plan.children:
             failure = _split_child(conn, child, paths.root, split, on_piece)
@@ -95,16 +89,16 @@ def _split_child(
     child: Child,
     assembly_root: Path,
     split: list[SplitResult],
-    on_piece: Callable[[Row], None] | None,
-) -> Failure | None:
+    on_piece: Callable[[Piece], None] | None,
+) -> Refusal | None:
     """Register `child` in ShotGrid (and make its folder) as it is reached, then
-    split its rows in turn, appending each to `split` and stopping at the first
+    split its pieces in turn, appending each to `split` and stopping at the first
     failure. A child after the stop is untouched."""
-    for row in child.rows:
-        if not mc.objExists(row.piece.node):
-            return Failure(
-                row.group,
-                f"'{row.group}' is no longer in the scene, so the plan is out of "
+    for piece in child.pieces:
+        if not mc.objExists(piece.node):
+            return Refusal(
+                piece.name,
+                f"'{piece.name}' is no longer in the scene, so the plan is out of "
                 "date. Refresh the plan, then split again.",
             )
     try:
@@ -113,51 +107,51 @@ def _split_child(
         root.mkdir(mode=0o770, parents=True, exist_ok=True)
     except Exception as error:
         log.exception("Split Pieces could not register '%s'.", child.display_name)
-        return Failure(
-            child.rows[0].group,
+        return Refusal(
+            child.pieces[0].name,
             f"'{child.display_name}' could not be registered, so none of its pieces "
             f"was split: {error}",
         )
-    for row in child.rows:
+    for piece in child.pieces:
         if on_piece is not None:
-            on_piece(row)
+            on_piece(piece)
         outcome = _split_and_save(
-            row, PieceTarget(asset.name, root, row.variant), assembly_root
+            piece, PieceTarget(asset.name, root, piece.variant), assembly_root
         )
-        if isinstance(outcome, Failure):
+        if isinstance(outcome, Refusal):
             return outcome
         split.append(outcome)
     return None
 
 
 def _split_and_save(
-    row: Row, target: PieceTarget, assembly_root: Path
-) -> SplitResult | Failure:
-    """Split one row and save the scene, naming what stopped either.
+    piece: Piece, target: PieceTarget, assembly_root: Path
+) -> SplitResult | Refusal:
+    """Split one piece and save the scene, naming what stopped either.
 
     A failed save matters most: the split is done in memory and on disk, and
     the scene is the only record that the group is gone.
     """
     try:
-        result = split_piece(row.piece, target, assembly_root=assembly_root)
+        result = split_piece(piece, target, assembly_root=assembly_root)
     except AssemblyError as error:
-        log.exception("Split Pieces stopped at '%s'.", row.group)
-        return Failure(row.group, str(error))
+        log.exception("Split Pieces stopped at '%s'.", piece.name)
+        return Refusal(piece.name, str(error))
     except Exception:
-        log.exception("Split Pieces stopped at '%s' unexpectedly.", row.group)
-        return Failure(
-            row.group,
-            f"'{row.group}' could not be split for a reason the tool did not "
+        log.exception("Split Pieces stopped at '%s' unexpectedly.", piece.name)
+        return Refusal(
+            piece.name,
+            f"'{piece.name}' could not be split for a reason the tool did not "
             "expect; the Script Editor has the details. Reopen the scene without "
             "saving it, then ask a TD before splitting again.",
         )
     try:
         mc.file(save=True, force=True)
     except Exception:
-        log.exception("The scene could not be saved after splitting '%s'.", row.group)
-        return Failure(
-            row.group,
-            f"'{row.group}' is split, but the scene could not be saved afterwards; "
+        log.exception("The scene could not be saved after splitting '%s'.", piece.name)
+        return Refusal(
+            piece.name,
+            f"'{piece.name}' is split, but the scene could not be saved afterwards; "
             "the Script Editor has the details. Save the scene by hand (File > "
             "Save) before doing anything else, or the piece comes back unsplit "
             "beside its new asset.",

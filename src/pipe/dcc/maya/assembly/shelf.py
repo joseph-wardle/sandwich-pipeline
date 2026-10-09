@@ -12,9 +12,9 @@ from pxr import Usd
 from pipe.core.assembly.model import AssemblyError, EditError
 from pipe.core.shotgrid import ShotGrid
 from pipe.core.ui import MessageDialog
-from pipe.dcc.maya.assembly.editing import edit_piece, merge_piece
+from pipe.dcc.maya.assembly.editing import edit_piece, save_piece
 from pipe.dcc.maya.assembly.split_dialog import SplitDialog
-from pipe.dcc.maya.assembly.stage import stage_shape
+from pipe.dcc.maya.assembly.stage import find_assembly_stage
 from pipe.dcc.maya.assetfile import scene_asset
 from pipe.dcc.maya.command import maya_command
 from pipe.dcc.maya.runtime import get_main_qt_window
@@ -24,7 +24,7 @@ _dialog: SplitDialog | None = None
 
 @maya_command(name="split_pieces", label="Split Pieces...", category="assembly")
 def split_pieces() -> None:
-    """Open the Split Pieces plan for the assembly in the open scene."""
+    """Open the Split Pieces plan for the assembly in the open scene (Linux only)."""
     global _dialog
     window = get_main_qt_window()
     if platform.system() == "Windows":
@@ -65,13 +65,12 @@ def edit_selected_piece() -> None:
 def save_open_piece() -> None:
     """Write the open piece's edits into its child asset's layer."""
     try:
-        shape = stage_shape()
-        stage = mayaUsd.ufe.getStage(shape) if shape else None
+        stage = find_assembly_stage()
         if stage is None:
             raise EditError(
                 "This scene has no assembly stage, so no piece is open for editing."
             )
-        merge_piece(stage)
+        save_piece(stage)
     except AssemblyError as error:
         MessageDialog(get_main_qt_window(), str(error), "Save Piece").exec_()
 
