@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from pxr import Usd, UsdShade
+
 from pipe.core.asset.paths import (
     PUBLISH_TEXTURES_PREVIEW_DIRNAME,
     PUBLISH_TEXTURES_SOURCE_DIRNAME,
@@ -29,6 +31,7 @@ from .variants import to_hip_expression
 log = logging.getLogger(__name__)
 
 MANIFEST_NAME = "mat.json"
+_BOUND_SCHEMAS = ("Mesh", "GeomSubset")
 
 MAPS: tuple[str, ...] = ("BaseColor", "Metallic", "SpecularRoughness", "Normal")
 
@@ -120,6 +123,23 @@ def published_materials(tex_root: Path, *, hip_root: Path) -> tuple[MaterialSpec
 
         materials.append(MaterialSpec(tex_set, layer_specs, preview_maps))
     return tuple(materials)
+
+
+def bound_texture_sets(source_layer: Path) -> frozenset[str]:
+    """Texture sets the geometry in `source_layer` binds.
+
+    The component SOP names each face's `texset` after its bound material prim,
+    so a material prim's name is its texture set.
+    """
+    stage = Usd.Stage.Open(str(source_layer))
+    names = set()
+    for prim in stage.Traverse():
+        if not any(prim.IsA(schema) for schema in _BOUND_SCHEMAS):
+            continue
+        material, _ = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()
+        if material:
+            names.add(material.GetPath().name)
+    return frozenset(names)
 
 
 def _read_layer(layer_dir: Path) -> _Layer:
@@ -233,5 +253,6 @@ __all__ = [
     "MAPS",
     "LayerSpec",
     "MaterialSpec",
+    "bound_texture_sets",
     "published_materials",
 ]

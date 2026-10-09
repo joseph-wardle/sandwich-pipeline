@@ -567,6 +567,8 @@ class MatlibManager:
         materials = textures.published_materials(tex_root, hip_root=hip_root)
         if not materials:
             log.warning("No materials to build from %s", tex_root)
+        source = hip_root / variants.GEO_SOURCE_DIR / f"{geo_variant}.usd"
+        materials = _bound_materials(materials, source)
 
         MaterialGraphBuilder(matlib).rebuild(
             materials,
@@ -597,6 +599,22 @@ class MatlibManager:
             ),
             None,
         )
+
+
+def _bound_materials(
+    materials: Sequence[textures.MaterialSpec], source: Path
+) -> Sequence[textures.MaterialSpec]:
+    """Only the texture sets `source` binds."""
+    if not source.is_file():
+        log.warning(
+            "No geometry at %s yet, so every published material is built", source
+        )
+        return materials
+    bound = textures.bound_texture_sets(source)
+    skipped = [m.texture_set for m in materials if m.texture_set not in bound]
+    if skipped:
+        log.info("Not building %s: nothing in %s binds them", skipped, source)
+    return [m for m in materials if m.texture_set in bound]
 
 
 def _variant_names(declared: Iterable[str] | None, fallback: str) -> list[str]:
