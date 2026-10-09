@@ -1,0 +1,167 @@
+"""The "Split Pieces" as a read-only table."""
+
+from __future__ import annotations
+
+import logging
+
+from maya import cmds as mc
+from Qt import QtGui, QtWidgets
+
+from pipe.core.asset.naming import Adopt, New, Occupied
+from pipe.core.assembly.model import AssemblyError
+from pipe.core.assembly.plan import AddVariant, Plan, Row
+from pipe.core.shotgrid import Asset, ShotGrid
+from pipe.core.ui import FAIL, FAIL_STYLE, MessageDialog, progress_scope
+from pipe.dcc.maya.assembly.plan import plan_split
+from pipe.dcc.maya.assembly.run import RunReport, run_split
+
+log = logging.getLogger(__name__)
+
+_COLUMNS = ("Group", "Asset", "Variant", "Outcome")
+_RUN_STEP = "Splitting pieces"
+_REFUSED = "Refused"
+
+
+class SplitDialog(QtWidgets.QDialog):
+    def __init__(
+        self, parent: QtWidgets.QWidget | None, conn: ShotGrid, assembly: Asset
+    ) -> None:
+        super().__init__(parent)
+        self._conn = conn
+        self._assembly = assembly
+        self._plan: Plan | None = None
+        self.setWindowTitle(f"Split Pieces - {assembly.display_name}")
+        self.setMinimumSize(720, 360)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        self._table = QtWidgets.QTableWidget(0, len(_COLUMNS))
+        self._table.setHorizontalHeaderLabels(_COLUMNS)
+        self._table.verticalHeader().setVisible(False)
+        self._table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self._table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self._table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self._table)
+
+        self._status = QtWidgets.QLabel()
+        self._status.setWordWrap(True)
+        layout.addWidget(self._status)
+
+        buttons = QtWidgets.QDialogButtonBox()
+        refresh = buttons.addButton("Refresh", QtWidgets.QDialogButtonBox.ResetRole)
+        self._split = buttons.addButton("Split", QtWidgets.QDialogButtonBox.AcceptRole)
+        buttons.addButton(QtWidgets.QDialogButtonBox.Cancel)
+        refresh.clicked.connect(self.refresh)
+        buttons.accepted.connect(self._confirm_and_run)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.refresh()
+
+    def refresh(self) -> None:
+        """Plan again from the scene, ShotGrid and disk, and show the result."""
+        try:
+            self._plan = plan_split(self._assembly, self._conn.find_assets())
+        except AssemblyError as error:
+            self._plan = None
+            self._show_rows([])
+            self._show_status([str(error)], failed=True)
+            return
+        plan = self._plan
+        self._show_rows([(child, row) for child in plan.children for row in child.rows])
+        problems = [refusal.reason for refusal in plan.refusals]
+        if problems:
+            self._show_status(problems, failed=True)
+        elif not plan.rows:
+            self._show_status(["No unsplit groups."], failed=False)
+        else:
+            self._show_status([], failed=False)
+
+    def _show_rows(self, rows: list[tuple]) -> None:
+        plan = self._plan
+        self._table.setRowCount(len(rows))
+        for index, (child, row) in enumerate(rows):
+            refused = plan is not None and bool(plan.refused(row.group))
+            outcome = _REFUSED if refused else _outcome(child.claim)
+            cells = (row.group, child.display_name, row.variant, outcome)
+            for column, text in enumerate(cells):
+                item = QtWidgets.QTableWidgetItem(text)
+                if refused:
+                    item.setForeground(QtGui.QColor(FAIL))
+                self._table.setItem(index, column, item)
+            self._table.item(index, 1).setToolTip(child.asset_path)
+        self._table.resizeColumnsToContents()
+
+    def _show_status(self, lines: list[str], *, failed: bool) -> None:
+        self._status.setText("\n".join(lines))
+        self._status.setVisible(bool(lines))
+        self._status.setStyleSheet(FAIL_STYLE if failed else "")
+        self._split.setEnabled(self._plan is not None and self._plan.ready)
+
+    def _confirm_and_run(self) -> None:
+        """Ask once, split, report, then show what is left."""
+        plan = self._plan
+        if plan is None or not plan.ready:
+            return
+        answer = mc.confirmDialog(
+            title="Split Pieces",
+            message=(
+                f"Split {len(plan.rows)} pieces into {len(plan.children)} assets?\n\n"
+                "This cannot be undone. A version of the scene is kept first."
+            ),
+            button=["Split", "Cancel"],
+            defaultButton="Split",
+            cancelButton="Cancel",
+            dismissString="Cancel",
+        )
+        if answer != "Split":
+            return
+        try:
+            report = self._run(plan)
+        except AssemblyError as error:
+            MessageDialog(self, str(error), "Cannot split").exec_()
+            self.refresh()
+            return
+        MessageDialog(self, _report_text(report), "Split Pieces").exec_()
+        self.refresh()
+
+    def _run(self, plan: Plan) -> RunReport:
+        total = len(plan.rows)
+        done = 0
+        with progress_scope(
+            parent=self, title="Split Pieces", steps=[_RUN_STEP]
+        ) as progress:
+            progress.begin_step(_RUN_STEP, "Keeping a version of the scene")
+
+            def on_piece(row: Row) -> None:
+                nonlocal done
+                progress.update_substep(done, total, row.group)
+                done += 1
+
+            return run_split(self._conn, self._assembly, plan, on_piece=on_piece)
+
+
+def _outcome(claim: New | Adopt | AddVariant | Occupied) -> str:
+    if isinstance(claim, New):
+        return "New asset"
+    if isinstance(claim, Adopt):
+        return "Adopt record"
+    if isinstance(claim, AddVariant):
+        if claim.split_from:
+            return f"Add variant (split from {claim.split_from})"
+        return "Add variant"
+    return _REFUSED
+
+
+def _report_text(report: RunReport) -> str:
+    failure = report.failure
+    if failure is None:
+        return (
+            f"Split {len(report.split)} pieces. Version {report.version} holds the "
+            "scene from before.\n\nPress Publish to build the children."
+        )
+    before = (
+        f"The {len(report.split)} pieces before it are split and saved."
+        if report.split
+        else "Nothing was split."
+    )
+    return f"Stopped at '{failure.group}': {failure.reason}\n\n{before}"

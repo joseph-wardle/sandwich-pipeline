@@ -97,6 +97,8 @@ replace-imports-with-any = [
     # `mayaUsd` remains dynamic and is not fully typed.
     "mayaUsd",
     "mayaUsd.**",
+    # Maya's UFE selection module ships no stubs.
+    "ufe",
     # Substance API surface is partially dynamic in plugin runtime.
     "substance_painter",
     "substance_painter.**",

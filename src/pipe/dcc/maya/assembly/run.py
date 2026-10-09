@@ -9,7 +9,7 @@ only what is left.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,8 +43,17 @@ class RunReport:
     failure: Failure | None
 
 
-def run_split(conn: ShotGrid, assembly: Asset, plan: Plan) -> RunReport:
-    """Write `plan` into the scene, ShotGrid and the children's publish folders."""
+def run_split(
+    conn: ShotGrid,
+    assembly: Asset,
+    plan: Plan,
+    *,
+    on_piece: Callable[[Row], None] | None = None,
+) -> RunReport:
+    """Write `plan` into the scene, ShotGrid and the children's publish folders.
+
+    `on_piece` is told each row as its split begins, for a progress bar.
+    """
     if not plan.ready:
         raise AssemblyError(
             "Fix what the plan refuses, then refresh it before splitting."
@@ -67,6 +76,8 @@ def run_split(conn: ShotGrid, assembly: Asset, plan: Plan) -> RunReport:
     failure: Failure | None = None
     try:
         for row, target in _register_targets(conn, plan):
+            if on_piece is not None:
+                on_piece(row)
             try:
                 split.append(split_piece(row.piece, target, assembly_root=paths.root))
             except AssemblyError as error:
