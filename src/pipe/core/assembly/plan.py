@@ -146,7 +146,10 @@ def claim_for(
     production_root: Path | None = None,
 ) -> New | Adopt | AddVariant | Occupied:
     """What a split claims with `display_name`: naming's rules, except that a
-    record with files takes a variant it does not have yet."""
+    record with files takes a variant it has not built yet.
+
+    A variant ShotGrid lists without a source layer is one a split declared and
+    then failed to build."""
     assets = list(assets)
     claim = classify(display_name, subdirectory, assets, production_root)
     if not isinstance(claim, Occupied):
@@ -179,8 +182,7 @@ def claim_for(
     taken = [
         variant
         for variant in variants
-        if variant in (asset.geometry_variants or ())
-        or paths.publish_source_variant_usd(variant).exists()
+        if paths.publish_source_variant_usd(variant).exists()
     ]
     if taken:
         return Occupied(
