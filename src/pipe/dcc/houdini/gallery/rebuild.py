@@ -9,7 +9,7 @@ import argparse
 import logging
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from pipe.core.util.paths import get_production_path
 from pipe.core.versioning import (
@@ -43,6 +43,10 @@ def inventory(asset_root: Path) -> list[PublishedAsset]:
     assets: list[PublishedAsset] = []
     for manifest_path in manifests:
         asset_dir = manifest_path.parent
+        if any(
+            part.startswith(".") for part in asset_dir.relative_to(asset_root).parts
+        ):
+            continue
         export_path = asset_dir / "publish" / _published_filename(manifest_path)
         if not export_path.is_file():
             log.info("Skipping %s: no published component", asset_dir)
@@ -92,7 +96,7 @@ def _published_filename(manifest_path: Path) -> str:
     )
     export_path = (stream.get("current") or {}).get("extra", {}).get("export_path")
     if export_path:
-        return Path(export_path).name
+        return PureWindowsPath(export_path).name
     return f"{manifest_path.parent.name}.usd"
 
 
