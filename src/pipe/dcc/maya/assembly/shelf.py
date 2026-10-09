@@ -3,21 +3,19 @@
 from __future__ import annotations
 
 import platform
-from pathlib import Path
 
 import mayaUsd.ufe
 import ufe
 from env_sg import DB_Config
-from maya import cmds as mc
 from pxr import Usd
 
 from pipe.core.assembly.model import AssemblyError, EditError
-from pipe.core.shotgrid import Asset, ShotGrid
+from pipe.core.shotgrid import ShotGrid
 from pipe.core.ui import MessageDialog
 from pipe.dcc.maya.assembly.editing import edit_piece, merge_piece
 from pipe.dcc.maya.assembly.split_dialog import SplitDialog
 from pipe.dcc.maya.assembly.stage import stage_shape
-from pipe.dcc.maya.assetfile import read_asset_metadata, resolve_asset_from_scene_path
+from pipe.dcc.maya.assetfile import scene_asset
 from pipe.dcc.maya.command import maya_command
 from pipe.dcc.maya.runtime import get_main_qt_window
 
@@ -38,7 +36,7 @@ def split_pieces() -> None:
         ).exec_()
         return
     conn = ShotGrid.connect(DB_Config)
-    assembly = _scene_asset(conn)
+    assembly = scene_asset(conn)
     if assembly is None:
         MessageDialog(
             window,
@@ -76,17 +74,6 @@ def save_open_piece() -> None:
         merge_piece(stage)
     except AssemblyError as error:
         MessageDialog(get_main_qt_window(), str(error), "Save Piece").exec_()
-
-
-def _scene_asset(conn: ShotGrid) -> Asset | None:
-    """The asset the open scene models, as Publish resolves it."""
-    asset = read_asset_metadata(conn).asset
-    if asset is not None:
-        return asset
-    scene = mc.file(query=True, sceneName=True)
-    if not isinstance(scene, str) or not scene:
-        return None
-    return resolve_asset_from_scene_path(conn, Path(scene))
 
 
 def _selected_prim() -> Usd.Prim:

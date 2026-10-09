@@ -182,6 +182,17 @@ def _asset_path_from_root(asset_root: Path) -> str | None:
     return rel_path.as_posix()
 
 
+def scene_asset(conn: ShotGrid) -> Asset | None:
+    """The asset the open scene models: its file metadata, else its path."""
+    asset = read_asset_metadata(conn).asset
+    if asset is not None:
+        return asset
+    scene = mc.file(query=True, sceneName=True)
+    if not isinstance(scene, str) or not scene:
+        return None
+    return resolve_asset_from_scene_path(conn, Path(scene))
+
+
 def resolve_asset_from_scene_path(conn: ShotGrid, scene_path: Path) -> Asset | None:
     asset_root = _asset_root_from_scene_path(scene_path)
     if not asset_root:
@@ -649,6 +660,7 @@ __all__ = [
     "write_asset_metadata",
     "read_asset_metadata",
     "resolve_asset_from_scene_path",
+    "scene_asset",
     "AssetOpenDialog",
     "MAssetFileManager",
     "install_asset_menu",

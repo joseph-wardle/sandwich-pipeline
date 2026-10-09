@@ -107,9 +107,17 @@ def _split_child(
                 f"'{row.group}' is no longer in the scene, so the plan is out of "
                 "date. Refresh the plan, then split again.",
             )
-    asset = register_child(conn, child)
-    root = asset_root(asset)
-    root.mkdir(mode=0o770, parents=True, exist_ok=True)
+    try:
+        asset = register_child(conn, child)
+        root = asset_root(asset)
+        root.mkdir(mode=0o770, parents=True, exist_ok=True)
+    except Exception as error:
+        log.exception("Split Pieces could not register '%s'.", child.display_name)
+        return Failure(
+            child.rows[0].group,
+            f"'{child.display_name}' could not be registered, so none of its pieces "
+            f"was split: {error}",
+        )
     for row in child.rows:
         if on_piece is not None:
             on_piece(row)

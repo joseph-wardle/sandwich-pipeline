@@ -14,6 +14,7 @@ from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.core.ui import FAIL, FAIL_STYLE, MessageDialog, progress_scope
 from pipe.dcc.maya.assembly.plan import plan_split
 from pipe.dcc.maya.assembly.run import RunReport, run_split
+from pipe.dcc.maya.assetfile import scene_asset
 
 log = logging.getLogger(__name__)
 
@@ -60,11 +61,21 @@ class SplitDialog(QtWidgets.QDialog):
     def refresh(self) -> None:
         """Plan again from the scene, ShotGrid and disk, and show the result."""
         try:
+            self._refuse_other_scene()
             self._plan = plan_split(self._assembly, self._conn.find_assets())
         except AssemblyError as error:
             self._plan = None
             self._show_rows([])
             self._show_status([str(error)], failed=True)
+            return
+        except Exception:
+            log.exception("Split Pieces could not plan for %s", self._assembly.name)
+            self._plan = None
+            self._show_rows([])
+            self._show_status(
+                ["The plan could not be made; the Script Editor has the details."],
+                failed=True,
+            )
             return
         plan = self._plan
         self._show_rows([(child, row) for child in plan.children for row in child.rows])
@@ -102,6 +113,12 @@ class SplitDialog(QtWidgets.QDialog):
         plan = self._plan
         if plan is None or not plan.ready:
             return
+        try:
+            self._refuse_other_scene()
+        except AssemblyError as error:
+            MessageDialog(self, str(error), "Cannot split").exec_()
+            self.refresh()
+            return
         answer = mc.confirmDialog(
             title="Split Pieces",
             message=(
@@ -121,8 +138,32 @@ class SplitDialog(QtWidgets.QDialog):
             MessageDialog(self, str(error), "Cannot split").exec_()
             self.refresh()
             return
+        except Exception:
+            log.exception("Split Pieces stopped unexpectedly")
+            MessageDialog(
+                self,
+                "Split Pieces stopped for a reason the tool did not expect; the "
+                "Script Editor has the details. Every piece split before the stop "
+                "is saved, and the plan below shows what is left.",
+                "Split Pieces",
+            ).exec_()
+            self.refresh()
+            return
         MessageDialog(self, _report_text(report), "Split Pieces").exec_()
         self.refresh()
+
+    def _refuse_other_scene(self) -> None:
+        """The plan and the run read the open scene, which must still be this
+        assembly's: the dialog outlives Open Asset."""
+        current = scene_asset(self._conn)
+        if current == self._assembly:
+            return
+        name = current.display_name if current is not None else "a different scene"
+        raise AssemblyError(
+            f"This dialog splits '{self._assembly.display_name}', but the open scene "
+            f"is now {name}. Close this dialog, open the assembly's scene, and press "
+            "Split Pieces again."
+        )
 
     def _run(self, plan: Plan) -> RunReport:
         total = len(plan.rows)
