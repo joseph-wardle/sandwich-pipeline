@@ -20,13 +20,13 @@ from pipe.core.assembly.model import Piece, PieceTarget, SplitError, SplitResult
 from pipe.core.assembly.normalize import (
     SOURCE_LAYER_LINEAR_UNIT,
     SOURCE_LAYER_UP_AXIS,
-    ScaleCheck,
     bounds_match,
     inspect_scale,
     normalization_matrix,
     placement_for,
     prim_point_bounds,
 )
+from pipe.core.assembly.plan import scale_problem
 from pipe.core.assembly.provenance import stamp_assembly
 from pipe.dcc.maya.assembly.scan import (
     renderable_meshes,
@@ -53,7 +53,7 @@ def split_piece(
 ) -> SplitResult:
     """Move `piece` out of the Maya scene and into `target`, in place."""
     _refuse_existing_model(target)
-    _refuse_foreign_scene_units()
+    _refuse_scene_units()
     stage_shape()  # Refuse an ambiguous scene before anything is written.
     scale = _bakeable_scale(piece)
     bounds_before = _piece_bounds(piece)
@@ -97,44 +97,39 @@ def _refuse_existing_model(target: PieceTarget) -> None:
         )
 
 
-def _refuse_foreign_scene_units() -> None:
-    """Refuse a scene whose units a split would silently reinterpret."""
+def scene_units_problem() -> str | None:
+    """Why the scene's unit settings stop a split, or None if they do not."""
     unit = mc.currentUnit(query=True, linear=True)
     if unit != SOURCE_LAYER_LINEAR_UNIT:
-        raise SplitError(
-            f"This scene's working units are {unit}, and a split writes "
-            "centimetres. Scale the assembly's geometry to centimetres first — "
-            "changing the unit preference on its own relabels the scene and "
-            "leaves everything 100x off."
+        return (
+            f"This scene's working unit is {unit}, and a split writes centimetres. "
+            "Set the working unit to centimetres (Preferences > Settings), which "
+            "moves nothing; if the assembly then looks 100x too large, scale it "
+            "by 0.01 and freeze its transformations."
         )
 
     up_axis = str(mc.upAxis(query=True, axis=True)).upper()
     if up_axis != SOURCE_LAYER_UP_AXIS:
-        raise SplitError(
-            f"This scene is {up_axis}-up, and a split writes "
-            f"{SOURCE_LAYER_UP_AXIS}-up. Rotate the assembly upright and freeze "
-            "its transformations before splitting."
+        return (
+            f"This scene is {up_axis}-up, and a split writes {SOURCE_LAYER_UP_AXIS}-up. "
+            f"Set the up axis to {SOURCE_LAYER_UP_AXIS} first (Preferences > "
+            "Settings), then rotate the assembly upright and freeze its "
+            "transformations."
         )
+    return None
+
+
+def _refuse_scene_units() -> None:
+    problem = scene_units_problem()
+    if problem is not None:
+        raise SplitError(problem)
 
 
 def _bakeable_scale(piece: Piece) -> float:
-    check = inspect_scale(piece.world_matrix)
-    if not check.bakeable:
-        factors = ", ".join(f"{f:g}" for f in check.factors)
-        raise SplitError(
-            f"'{piece.name}' has {_scale_fault(check)} (scale {factors}) and "
-            "cannot be baked into a child asset. Freeze the piece's "
-            "transformations, or correct its scale, then split again."
-        )
-    return check.factor
-
-
-def _scale_fault(check: ScaleCheck) -> str:
-    if not check.positive:
-        return "negative or mirrored scale"
-    if not check.orthogonal:
-        return "sheared axes"
-    return "non-uniform scale"
+    problem = scale_problem(piece)
+    if problem is not None:
+        raise SplitError(problem)
+    return inspect_scale(piece.world_matrix).factor
 
 
 def _piece_bounds(piece: Piece) -> Gf.Range3d:

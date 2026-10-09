@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence, cast
 
@@ -48,6 +46,7 @@ from pipe.dcc.maya.assetfile import (
     resolve_asset_from_scene_path,
     write_asset_metadata,
 )
+from pipe.dcc.maya.util.materials import material_problems
 from pipe.dcc.maya.util.random_color import is_random_color_active
 from pipe.dcc.maya.util.selection import maintain_selection
 from pipe.dcc.maya.util.usd_export import export_selection
@@ -1108,43 +1107,12 @@ class AssetPublisher(Publisher):
             log.error("Houdini asset builder stderr:\n%s", stderr)
 
     def check_material_bindings_of_selected(self) -> bool:
-        selected: list[str] = mc.ls(selection=True)
-        selected_nodes = (
-            mc.listRelatives(selected, allDescendents=True, fullPath=True) or []  # type: ignore
-        )
-        shading_groups: set[str] = set()
-        for node in selected_nodes:
-            shapes: list[str] | None = mc.listRelatives(
-                node, shapes=True, fullPath=True
-            )
-            if shapes:
-                shading_groups.update(
-                    mc.listConnections(shapes, type="shadingEngine") or []  # type: ignore
-                )
-        failures: dict[str, list[str]] = {}
-        for shading_group in shading_groups:
-            shaders: list[str] = mc.listConnections(
-                f"{shading_group}.surfaceShader", source=True
-            )
-            if shaders:
-                shader = shaders[0]
-                shader_type: str = mc.nodeType(shader)  # type: ignore
-                if shader_type in ILLEGAL_SHADER_TYPES:
-                    failures.setdefault("Non-allowed shader type", []).append(
-                        f"{shading_group} ({shader_type})"
-                    )
-            for shader_rule in ILLEGAL_SHADER_RULES:
-                if shader_rule.pattern.search(shading_group):
-                    failures.setdefault(shader_rule.message, []).append(shading_group)
-        if failures:
-            failure_messages: list[str] = []
-            for message, items in failures.items():
-                failure_messages.append(f"{message}: {', '.join(items)}")
-            message_string = "\n".join(failure_messages)
+        problems = material_problems(cast(list[str], mc.ls(selection=True) or []))
+        if problems:
             MessageDialog(
                 self._window,
                 "The selected model has material issue(s) that need resolved: \n"
-                f"{message_string}",
+                + "\n".join(problems),
             ).exec_()
             return False
         return True
@@ -1181,26 +1149,6 @@ class AssetPublisher(Publisher):
         if messages:
             return "; ".join(messages)
         return "Unknown error"
-
-
-@dataclass(frozen=True)
-class ShaderRule:
-    pattern: re.Pattern
-    message: str
-
-
-ILLEGAL_SHADER_RULES: set[ShaderRule] = {
-    ShaderRule(re.compile("initialShadingGroup"), "No material set"),
-    ShaderRule(re.compile(r"\d$"), "Material name with a trailing digit"),
-    ShaderRule(re.compile(r"SG$"), 'Material name that ends with "SG"'),
-    ShaderRule(
-        re.compile(
-            r"aiStandardSurface|standardSurface|openPBRSurface|lambert|phong|blinn"
-        ),
-        "Unnamed material (material name has default shader name in it)",
-    ),
-}
-ILLEGAL_SHADER_TYPES = {"aiStandardSurface", "aiAmbientOcclusion"}
 
 
 class ModelChecker(MCUI):

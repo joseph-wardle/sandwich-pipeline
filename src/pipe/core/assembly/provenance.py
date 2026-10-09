@@ -17,3 +17,11 @@ def stamp_assembly(layer: Sdf.Layer, assembly_root: Path) -> None:
         **layer.customLayerData,
         ASSEMBLY_KEY: production_relative_identifier(assembly_root),
     }
+
+
+def assembly_of(source_layer: Path) -> str | None:
+    """The assembly `source_layer` was split from, or None for a layer made by hand."""
+    layer = Sdf.Layer.FindOrOpen(str(source_layer))
+    if layer is None:
+        return None
+    return layer.customLayerData.get(ASSEMBLY_KEY)
