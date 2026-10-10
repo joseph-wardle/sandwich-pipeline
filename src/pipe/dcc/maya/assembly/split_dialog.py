@@ -82,7 +82,7 @@ class SplitDialog(QtWidgets.QDialog):
         self._show_rows(
             [(child, piece) for child in plan.children for piece in child.pieces]
         )
-        problems = [refusal.reason for refusal in plan.refusals]
+        problems = list(dict.fromkeys(refusal.reason for refusal in plan.refusals))
         if problems:
             self._show_status([_REFUSALS_HEADING, *problems], failed=True)
         elif not plan.pieces:
