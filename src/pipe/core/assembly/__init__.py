@@ -1,1 +1,1 @@
-"""Assembly decomposition: turning the pieces of a Maya assembly into child assets."""
+"""Turn the pieces of a Maya assembly into child assets."""

@@ -1,6 +1,6 @@
 """Where a split child's geometry sits, and where the assembly puts it back.
 
-The one invariant this module exists to hold: a piece must not move on screen.
+A child's pivot should be at origin, and also not move in the assembly
 Writing the child at `N` and the placement at `P` satisfies that when
 
     p . N . P  ==  p . W

@@ -1,28 +1,9 @@
-"""Keep each geometry variant's material arcs inside that variant.
+"""Stop every geometry variant's materials landing on the selected one.
 
-Component Geometry Variants (Houdini 21.0.596) builds every variant from a
-hidden `/ASSET_geo_variant_N/ASSET` prim and references that prim twice: from
-the matching `geo` variant and directly from the root prim. The direct copy is
-stock design and harmless for geometry, which the hidden prim keeps inside a
-variant the root selection gates. Our builders give every branch its own
-Component Material, and Add Variant leaves those arcs (the `/ASSET_mtl_default`
-reference and the `mtl` variant set) outside the variant. Through the ungated
-root copies every variant's GeomSubsets and bindings compose onto whichever
-mesh is selected: subsets overlap, indices run past the face count, the
-renderer picks a texture at random and XPU dies at startup.
+Houdini also references each variant from the root prim, outside the variant,
+so all variants' materials compose onto whichever mesh is selected.
 
-Dropping a root reference the `geo` variant set already carries changes nothing
-for the selected variant (its variant arc is stronger) and withdraws the other
-variants' opinions. Root references no variant carries stay: a single-variant
-builder reaches its materials through one, and publishes made before variants
-were named reach their geometry through them alone.
-
-One call site: the Python LOP before `END` inside the config node
-(`lnd_componentconfig`). Component Output flattens the geo layer from that
-`END`, which the config node tags as the geometry source, and ignores anything
-wired after it, so the strip must sit there to reach the published file as well
-as the builder viewport, Explore Variants and the lookdev turnaround. Delete this
-module when each branch's material arcs are authored inside its geometry variant.
+Called from the Python LOP before `END` in the component config node.
 """
 
 from __future__ import annotations

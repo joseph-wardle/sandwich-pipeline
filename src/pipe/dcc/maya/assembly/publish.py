@@ -1,4 +1,7 @@
-"""What an assembly publishes from Maya: its pieces, and a flat mesh for Painter."""
+"""
+What an assembly publishes from Maya. This includes an assembled USD
+reference chain, and a flat mesh for Painter.
+"""
 
 from __future__ import annotations
 
@@ -15,11 +18,7 @@ from pipe.dcc.maya.util.usd_export import export_layer
 
 
 def publishable_stage() -> Usd.Stage | None:
-    """The working stage of an assembly ready to publish, or None for a component.
-
-    An assembly publishes only once every piece is split and none is open for
-    editing (ADR-0032); the refusal says which pieces stand in the way.
-    """
+    """The working stage of an assembly ready to publish, or None for a component."""
     stage = find_assembly_stage()
     if stage is None:
         return None

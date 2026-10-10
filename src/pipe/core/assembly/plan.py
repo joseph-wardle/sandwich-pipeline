@@ -1,8 +1,4 @@
-"""What Split Pieces would do: which group becomes which child, and what stops it.
-
-Everything here is decided from group names, ShotGrid and disk. What only Maya
-can judge (loose geometry, materials, scene units) is added by the Maya side.
-"""
+"""An itemized list of what Split Pieces would do, acting as a dry run preview."""
 
 from __future__ import annotations
 

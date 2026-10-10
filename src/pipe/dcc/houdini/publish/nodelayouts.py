@@ -159,7 +159,7 @@ def hip_asset_root() -> Path:
 
 
 def _pieces_layer() -> Path | None:
-    """The hip's assembly pieces layer, or None for a component (ADR-0032)."""
+    """The hip's assembly pieces layer, or None for a component."""
     pieces = AssetPaths(hip_asset_root()).pieces_layer
     return pieces if pieces.is_file() else None
 
@@ -582,7 +582,8 @@ def create_skd_component_geometry(
 
     # Configure Component Geometry node
     _set_parm_if_exists(cgeo, "dogeommodelapi", True)
-    _set_parm_if_exists(cgeo, "attribs", "P uv")
+    # Only the proxy has N, so the viewport draws its hard edges.
+    _set_parm_if_exists(cgeo, "attribs", "P uv N")
     _set_parm_if_exists(cgeo, "indexattribs", "texset")
     _set_parm_if_exists(cgeo, "prefixpartitionsubsets", False)
     _set_parm_if_exists(cgeo, "geovariantname", geo_variant or cgeo.name())

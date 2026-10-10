@@ -1,8 +1,4 @@
-"""Edit a piece in place: pull it into Maya, merge it back into the child's own layer.
-
-A piece's geometry lives in the child asset's source layer, never in the assembly's
-own layer, so a merge has to be aimed across the payload arc that brought it in.
-"""
+"""Edit a piece in place: pull it into Maya, merge it back into the child's own layer."""
 
 from __future__ import annotations
 

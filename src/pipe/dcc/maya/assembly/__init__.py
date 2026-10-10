@@ -6,7 +6,4 @@
 - A child has no `model.mb`; it is modelled only from inside the assembly, so
   an asset modelled by hand is never joined by a split.
 - A piece is placed by moving its prim in the assembly, never its open copy.
-- Publishing an assembly rebuilds every child whose placed variant is unbuilt,
-  which regenerates that child's builder graph; renamed nodes survive, the
-  rest are replaced.
 """

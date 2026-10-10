@@ -1,4 +1,4 @@
-"""The ShotGrid record every asset made by a pipeline tool starts from."""
+"""The ShotGrid record used to create an asset vea our tools."""
 
 from __future__ import annotations
 
@@ -8,11 +8,9 @@ from pipe.core.asset.naming import New
 from pipe.core.asset.paths import DEFAULT_GEOMETRY_VARIANT
 from pipe.core.shotgrid import Asset, ShotGrid
 
-# What every asset made here is in ShotGrid. Characters are made by production.
 ASSET_TYPE = "Set Piece"
 ASSET_TAG = "SKD_04_Asset"
 TASK_TEMPLATE = "SKD_asset"
-# A rigged asset gets rigging tasks, and the tag the rig builder lists props by.
 RIGGED_TAG = "SKD_02_rigged_asset"
 RIGGED_TASK_TEMPLATE = "SKD_riggedAsset"
 
