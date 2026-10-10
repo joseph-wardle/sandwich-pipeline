@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Iterator, cast
+from typing import TYPE_CHECKING, Generator, cast
 
 import hou
 
@@ -169,7 +169,7 @@ def _configure_flipbook(
 def _applied_viewport_camera(
     viewport: hou.GeometryViewport,
     camera_path: str | None,
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     if not camera_path:
         yield
         return
@@ -223,7 +223,7 @@ def _applied_viewport_camera(
 @contextmanager
 def _clean_viewport(
     scene_viewer: hou.SceneViewer, viewport: hou.GeometryViewport
-) -> Iterator[None]:
+) -> Generator[None]:
     vp_state = _apply_viewport_overrides(viewport)
     sv_state = (
         _apply_scene_viewer_overrides(scene_viewer) if HIDE_CONSTRUCTION_PLANE else None

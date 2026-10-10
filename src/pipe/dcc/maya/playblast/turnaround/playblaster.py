@@ -5,22 +5,22 @@ import math
 import shutil
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Generator
 
 import maya.cmds as mc
+from mayacapture.capture import capture  # type: ignore[import-not-found]
+from Qt import QtWidgets
+
 from pipe.core.hud import (
     ARTIST,
     HudContent,
     labeled_line,
 )
-from pipe.core.playblast.encoding import burn_hud_frames
 from pipe.core.playblast.clip import PreviewClip
+from pipe.core.playblast.encoding import burn_hud_frames
 from pipe.core.playblast.tempdir import create_preview_dir
 from pipe.core.ui.progress import progress_scope
 from pipe.core.util.users import resolve_artist_display_name
-from mayacapture.capture import capture  # type: ignore[import-not-found]
-from Qt import QtWidgets
-
 from pipe.dcc.maya.playblast.turnaround.config import (
     Elevation,
     TurnaroundPass,
@@ -247,7 +247,7 @@ def _pass_label(index: int, turnaround_pass: TurnaroundPass) -> str:
 
 
 @contextmanager
-def _preserved_current_time():
+def _preserved_current_time() -> Generator[None]:
     current_time = int(mc.currentTime(query=True))
     try:
         yield
@@ -256,7 +256,7 @@ def _preserved_current_time():
 
 
 @contextmanager
-def _held_animation() -> Iterator[None]:
+def _held_animation() -> Generator[None]:
     """Freeze the scene's existing animation on the current pose."""
     blocked = [
         curve
@@ -280,7 +280,7 @@ def _orbiting_turnaround_camera(
     pivot: tuple[float, float],
     frames_per_pass: int,
     focal_length: float,
-) -> Iterator[tuple[str, str]]:
+) -> Generator[tuple[str, str]]:
     """Yield a temporary camera that orbits the pivot as the timeline plays.
 
     The camera hangs under a scene-local group whose rotateY is keyed one
