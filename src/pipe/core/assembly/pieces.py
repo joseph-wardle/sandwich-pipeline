@@ -35,7 +35,8 @@ def pieces_layer_for(stage: Usd.Stage) -> Sdf.Layer:
     # The working stage is centimetres and a child publishes in metres, so a
     # placement keeps its rotation and scale and only its translation converts.
     to_metres = UsdGeom.GetStageMetersPerUnit(stage)
-    for piece in stage.GetDefaultPrim().GetChildren():
+    assembly = stage.GetDefaultPrim()
+    for piece in assembly.GetFilteredChildren(Usd.PrimAllPrimsPredicate):
         source = Path(piece_edit_target(piece).GetLayer().realPath)
         entry = AssetPaths.from_source_layer(source).entry_layer
         placement = UsdGeom.Xformable(piece).GetLocalTransformation()
