@@ -35,5 +35,5 @@
 	url = https://github.com/Aeoll/ae_SVG.git
 [submodule "src/pipe/dcc/maya/third_party/nxt_editor_git"]
 	path = src/pipe/dcc/maya/third_party/nxt_editor_git
-	url = https://github.com/michaelharmonart/nxt_editor.git
-	branch = qresources
+	url = https://github.com/nxt-dev/nxt_editor.git
+	branch = release
