@@ -153,9 +153,14 @@ def _find_or_create_builder_output(stage: hou.Node) -> hou.Node:
     return output
 
 
+def hip_asset_root() -> Path:
+    """The asset an asset_builder hip belongs to: the folder it is saved in."""
+    return Path(hou.hscriptStringExpression("$HIP"))
+
+
 def _pieces_layer() -> Path | None:
     """The hip's assembly pieces layer, or None for a component (ADR-0032)."""
-    pieces = AssetPaths(Path(hou.hscriptStringExpression("$HIP"))).pieces_layer
+    pieces = AssetPaths(hip_asset_root()).pieces_layer
     return pieces if pieces.is_file() else None
 
 
@@ -201,9 +206,7 @@ def _create_pieces_sublayer(
     _set_parm_if_exists(
         sublayer,
         "filepath1",
-        variants.to_hip_expression(
-            pieces, hip_root=Path(hou.hscriptStringExpression("$HIP"))
-        ),
+        variants.to_hip_expression(pieces, hip_root=hip_asset_root()),
     )
     _mark_managed_variant_node(sublayer, owner_path=owner_path)
     return sublayer
@@ -674,7 +677,7 @@ def create_skd_component_material(
 
 
 def _configure_component_output_defaults(out: hou.Node) -> None:
-    asset_name = Path(hou.hscriptStringExpression("$HIP")).name.strip() or "asset"
+    asset_name = hip_asset_root().name.strip() or "asset"
     _set_parm_if_exists(out, "filename", f"{asset_name}.usd")
     _set_parm_if_exists(out, "rootprim", "/" + asset_name)
     _set_parm_if_exists(out, "localize", False)
@@ -878,7 +881,7 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
     out_pos = output.position()
     declared_geo, declared_mat, sg_warnings = _discover_asset_variants_from_shotgrid()
     plan = variants.discover_build_plan(
-        Path(hou.hscriptStringExpression("$HIP")),
+        hip_asset_root(),
         preferred_geo_variants=declared_geo or None,
         preferred_mat_variants=declared_mat or None,
     )

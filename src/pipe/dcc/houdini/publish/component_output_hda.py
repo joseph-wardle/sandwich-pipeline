@@ -12,9 +12,11 @@ from typing import Any, Mapping
 import hou
 
 from pipe.core.assembly.pieces import (
+    child_source_problem,
     child_variants,
     placed_variants,
     published_variants,
+    variant_list,
 )
 from pipe.core.asset.paths import AssetPaths
 from pipe.dcc.houdini.gallery import production_db_path
@@ -185,47 +187,54 @@ def publish(node: hou.Node) -> Mapping[str, Any]:
 
 def _empty_piece_problems(node: hou.Node) -> list[dict[str, str]]:
     """Why publishing this hip would leave an assembly with an empty piece."""
-    root = _eval_path(node, "asset_root_override") or Path(
-        hou.hscriptStringExpression("$HIP")
-    )
-    paths = AssetPaths(root)
-    problems: list[dict[str, str]] = []
-    if paths.pieces_layer.is_file():
-        for child, placed in child_variants(paths.pieces_layer).items():
-            missing = placed - published_variants(child)
-            if missing:
-                problems.append(
-                    {
-                        "code": "ChildNotPublished",
-                        "message": (
-                            f"'{child.name}' is placed as {_names(missing)}, which "
-                            f"its publish does not provide. Publish '{root.name}' "
-                            "from Maya, which publishes every piece first, or "
-                            f"publish '{child.name}' from its own builder."
-                        ),
-                    }
-                )
-        return problems
+    root = _eval_path(node, "asset_root_override") or nodelayouts.hip_asset_root()
+    pieces = AssetPaths(root).pieces_layer
+    if pieces.is_file():
+        return _assembly_problems(root, pieces)
+    return _child_problems(node, root)
 
-    built = nodelayouts.geometry_variants_built(node)
-    unbuilt = placed_variants(root) - built
-    if unbuilt:
-        problems.append(
-            {
-                "code": "VariantNotBuilt",
-                "message": (
-                    f"'{root.name}' is placed as {_names(unbuilt)} but this builder "
-                    f"only builds {_names(built)}. Publish the assembly from Maya, "
-                    "which regenerates the builder's variants, then publish here "
-                    "again."
-                ),
-            }
-        )
+
+def _assembly_problems(root: Path, pieces: Path) -> list[dict[str, str]]:
+    """Every child must have, and have published, each variant it is placed as."""
+    problems: list[dict[str, str]] = []
+    for child, placed in child_variants(pieces).items():
+        unbuildable = child_source_problem(child, placed)
+        if unbuildable is not None:
+            problems.append({"code": "ChildSourceMissing", "message": unbuildable})
+            continue
+        missing = placed - published_variants(child)
+        if missing:
+            problems.append(
+                {
+                    "code": "ChildNotPublished",
+                    "message": (
+                        f"'{child.name}' is placed as {variant_list(missing)}, which "
+                        f"its publish does not provide. Publish '{root.name}' "
+                        "from Maya, which publishes every piece first, or "
+                        f"publish '{child.name}' from its own builder."
+                    ),
+                }
+            )
     return problems
 
 
-def _names(variants: set[str]) -> str:
-    return ", ".join(sorted(variants)) or "nothing"
+def _child_problems(node: hou.Node, root: Path) -> list[dict[str, str]]:
+    """This builder must build every variant the assemblies place of it."""
+    built = nodelayouts.geometry_variants_built(node)
+    unbuilt = placed_variants(root) - built
+    if not unbuilt:
+        return []
+    return [
+        {
+            "code": "VariantNotBuilt",
+            "message": (
+                f"'{root.name}' is placed as {variant_list(unbuilt)} but this "
+                f"builder only builds {variant_list(built)}. Publish the assembly "
+                "from Maya, which regenerates the builder's variants, then publish "
+                "here again."
+            ),
+        }
+    ]
 
 
 def _collect_publish_options(node: hou.Node) -> PublishOptions:
@@ -312,7 +321,7 @@ def _default_asset_name() -> str:
     if context_asset:
         return context_asset
 
-    hip_dir = Path(hou.hscriptStringExpression("$HIP")).name.strip()
+    hip_dir = nodelayouts.hip_asset_root().name.strip()
     if hip_dir:
         return hip_dir
     return "asset"

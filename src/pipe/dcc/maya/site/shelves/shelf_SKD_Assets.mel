@@ -154,7 +154,7 @@ global proc shelf_SKD_Assets () {
         -manage 1
         -visible 1
         -preventOverride 0
-        -annotation "Split the unsplit groups of an assembly into child assets"
+        -annotation "Split the unsplit groups of an assembly into child assets (Linux only)"
         -enableBackground 0
         -backgroundColor 0 0 0
         -highlightColor 0.321569 0.521569 0.65098

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 from pxr import Pcp, Sdf, Usd, UsdGeom
@@ -111,6 +112,27 @@ def child_variants(pieces_layer: Path) -> dict[Path, set[str]]:
             )
             children.setdefault(child.root, set()).add(variant)
     return children
+
+
+def child_source_problem(child_root: Path, variants: Iterable[str]) -> str | None:
+    """Why the child cannot build the placed `variants`, or None if it can."""
+    sources = AssetPaths(child_root)
+    missing = [
+        variant
+        for variant in variants
+        if not sources.publish_source_variant_usd(variant).is_file()
+    ]
+    if not missing:
+        return None
+    return (
+        f"'{child_root.name}' has no source layer for {variant_list(missing)} in "
+        f"{sources.publish_source_dir}, so it cannot be built. Restore the folder, "
+        "or remove the piece from the assembly."
+    )
+
+
+def variant_list(variants: Iterable[str]) -> str:
+    return ", ".join(sorted(variants)) or "nothing"
 
 
 def placed_variants(child_root: Path) -> set[str]:

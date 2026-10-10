@@ -50,19 +50,26 @@ def material_problems(nodes: Iterable[str]) -> list[str]:
     return [f"{message}: {', '.join(items)}" for message, items in failures.items()]
 
 
-def delete_unused_shading_groups(names: Iterable[str]) -> list[str]:
+def shading_groups_in_use(names: Iterable[str]) -> list[str]:
+    """The shading groups in `names` that some geometry is still assigned to."""
+    return [
+        name
+        for name in names
+        if mc.ls(name, type="shadingEngine") and mc.sets(name, query=True)
+    ]
+
+
+def delete_unused_shading_groups(names: Iterable[str]) -> None:
     """Delete the shading groups in `names` that no geometry uses, each with its
-    surface shader when nothing else uses that either. Returns the names still in use.
+    surface shader when nothing else uses that either.
 
     Deletes scene nodes. A shading group left behind by geometry that has gone
     into USD would make the next pull of that geometry rename its materials.
     """
-    in_use: list[str] = []
+    names = list(names)
+    in_use = set(shading_groups_in_use(names))
     for name in names:
-        if not mc.ls(name, type="shadingEngine"):
-            continue
-        if mc.sets(name, query=True):
-            in_use.append(name)
+        if name in in_use or not mc.ls(name, type="shadingEngine"):
             continue
         shaders = cast(
             list[str] | None,
@@ -72,7 +79,6 @@ def delete_unused_shading_groups(names: Iterable[str]) -> list[str]:
         for shader in shaders or []:
             if not mc.listConnections(shader, type="shadingEngine"):
                 mc.delete(shader)
-    return in_use
 
 
 def shading_groups(nodes: Iterable[str]) -> set[str]:

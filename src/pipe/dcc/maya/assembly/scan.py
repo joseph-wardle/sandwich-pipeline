@@ -1,7 +1,9 @@
-"""Finding the pieces in the assembly's DAG, and reading where they stand."""
+"""Reading the assembly scene: its pieces, where they stand, and what stops a split."""
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import replace
 from typing import cast
 
 import maya.api.OpenMaya as om
@@ -9,11 +11,85 @@ from maya import cmds as mc
 from pxr import Gf
 
 from pipe.core.assembly.model import Piece
+from pipe.core.assembly.normalize import SOURCE_LAYER_LINEAR_UNIT, SOURCE_LAYER_UP_AXIS
+from pipe.core.assembly.plan import Plan, Refusal, plan_children
+from pipe.core.shotgrid import Asset
+from pipe.dcc.maya.assembly.editing import open_piece
+from pipe.dcc.maya.assembly.stage import find_assembly_stage, placed_prim_names
+from pipe.dcc.maya.util.materials import material_problems
 
 # Maya's startup cameras are assemblies too, and are never pieces.
 _DEFAULT_CAMERAS = ("persp", "top", "front", "side")
 # The group mayaUsd parks a piece under while it is open for editing.
 _PULL_ROOT = "__mayaUsd__"
+
+
+def plan_split(assembly: Asset, assets: Iterable[Asset]) -> Plan:
+    """What Split Pieces would do to the open scene. Reads the scene and disk only."""
+    pieces = scan_pieces()
+    plan = plan_children(pieces, assembly, assets, placed=placed_prim_names())
+
+    refusals = list(plan.refusals)
+    editing = _open_piece_problem()
+    if editing is not None:
+        refusals.append(Refusal(None, editing))
+    units = scene_units_problem()
+    if units is not None:
+        refusals.append(Refusal(None, units))
+
+    grouped = {piece.node for piece in pieces}
+    for node in unsplit_nodes():
+        if node in grouped:
+            continue
+        name = node.rsplit("|", 1)[-1]
+        refusals.append(
+            Refusal(
+                name,
+                f"'{name}' is geometry outside any group, and a piece is a group. "
+                "Group it, or put it inside the piece it belongs to.",
+            )
+        )
+
+    for piece in pieces:
+        for problem in material_problems([piece.node]):
+            refusals.append(Refusal(piece.name, f"'{piece.name}': {problem}"))
+
+    return replace(plan, refusals=tuple(refusals))
+
+
+def scene_units_problem() -> str | None:
+    """Why the scene's unit settings stop a split, or None if they do not."""
+    unit = mc.currentUnit(query=True, linear=True)
+    if unit != SOURCE_LAYER_LINEAR_UNIT:
+        return (
+            f"This scene's working unit is {unit}, and a split writes centimetres. "
+            "Set the working unit to centimetres (Preferences > Settings), which "
+            "moves nothing; if the assembly then looks 100x too large, scale it "
+            "by 0.01 and freeze its transformations."
+        )
+
+    up_axis = str(mc.upAxis(query=True, axis=True)).upper()
+    if up_axis != SOURCE_LAYER_UP_AXIS:
+        return (
+            f"This scene is {up_axis}-up, and a split writes {SOURCE_LAYER_UP_AXIS}-up. "
+            f"Set the up axis to {SOURCE_LAYER_UP_AXIS} first (Preferences > "
+            "Settings), then rotate the assembly upright and freeze its "
+            "transformations."
+        )
+    return None
+
+
+def _open_piece_problem() -> str | None:
+    """A split saves the scene and empties the undo queue, which an open piece
+    (whose Maya copy is the only one of its edits) must not be caught in."""
+    stage = find_assembly_stage()
+    piece = open_piece(stage) if stage is not None else None
+    if piece is None:
+        return None
+    return (
+        f"'{piece.GetName()}' is open for editing. Save or discard its edits, "
+        "then split again."
+    )
 
 
 def scan_pieces() -> list[Piece]:

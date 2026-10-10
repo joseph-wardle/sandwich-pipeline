@@ -9,7 +9,7 @@ import ufe
 from env_sg import DB_Config
 from pxr import Usd
 
-from pipe.core.assembly.model import AssemblyError, EditError
+from pipe.core.assembly.model import AssemblyError
 from pipe.core.shotgrid import ShotGrid
 from pipe.core.ui import MessageDialog
 from pipe.dcc.maya.assembly.editing import edit_piece, save_piece
@@ -67,7 +67,7 @@ def save_open_piece() -> None:
     try:
         stage = find_assembly_stage()
         if stage is None:
-            raise EditError(
+            raise AssemblyError(
                 "This scene has no assembly stage, so no piece is open for editing."
             )
         save_piece(stage)
@@ -83,7 +83,7 @@ def _selected_prim() -> Usd.Prim:
         else None
     )
     if not prim:
-        raise EditError(
+        raise AssemblyError(
             "Select one piece in the assembly's stage, in the Outliner or the "
             "viewport, then press Edit Piece."
         )

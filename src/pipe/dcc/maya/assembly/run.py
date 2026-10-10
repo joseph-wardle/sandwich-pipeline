@@ -17,7 +17,7 @@ from maya import cmds as mc
 
 from pipe.core.asset import asset_owner_for, maya_model_stream, paths_for_asset
 from pipe.core.asset.paths import asset_root
-from pipe.core.assembly.model import AssemblyError, Piece, PieceTarget, SplitResult
+from pipe.core.assembly.model import AssemblyError, Piece, PieceTarget
 from pipe.core.assembly.plan import Child, Plan, Refusal, register_child
 from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.core.versioning import save_version
@@ -30,11 +30,11 @@ VERSION_TITLE = "Before Split Pieces"
 
 @dataclass(frozen=True)
 class RunReport:
-    """What a run split, and the piece it stopped at, if one stopped it."""
+    """How many pieces a run split, and the piece it stopped at, if one stopped it."""
 
     version: int | None
-    split: tuple[SplitResult, ...]
-    failure: Refusal | None
+    split: int
+    stop: Refusal | None
 
 
 def run_split(
@@ -46,12 +46,9 @@ def run_split(
 ) -> RunReport:
     """Write `plan` into the scene, ShotGrid and the children's publish folders.
 
-    `on_piece` is told each piece as its split begins, for a progress bar.
+    `on_piece` is told each piece as its split begins, for a progress bar. The
+    caller runs only a plan that is `ready`.
     """
-    if not plan.ready:
-        raise AssemblyError(
-            "Fix what the plan refuses, then refresh it before splitting."
-        )
     scene = _scene_path()
     if scene is None:
         raise AssemblyError(
@@ -71,24 +68,24 @@ def run_split(
         title=VERSION_TITLE,
     )
 
-    split: list[SplitResult] = []
-    failure: Refusal | None = None
+    split: list[Piece] = []
+    stop: Refusal | None = None
     try:
         for child in plan.children:
-            failure = _split_child(conn, child, paths.root, split, on_piece)
-            if failure is not None:
+            stop = _split_child(conn, child, paths.root, split, on_piece)
+            if stop is not None:
                 break
     finally:
         if split:
             mc.flushUndo()
-    return RunReport(record.version, tuple(split), failure)
+    return RunReport(record.version, len(split), stop)
 
 
 def _split_child(
     conn: ShotGrid,
     child: Child,
     assembly_root: Path,
-    split: list[SplitResult],
+    split: list[Piece],
     on_piece: Callable[[Piece], None] | None,
 ) -> Refusal | None:
     """Register `child` in ShotGrid (and make its folder) as it is reached, then
@@ -115,25 +112,25 @@ def _split_child(
     for piece in child.pieces:
         if on_piece is not None:
             on_piece(piece)
-        outcome = _split_and_save(
+        stop = _split_and_save(
             piece, PieceTarget(asset.name, root, piece.variant), assembly_root
         )
-        if isinstance(outcome, Refusal):
-            return outcome
-        split.append(outcome)
+        if stop is not None:
+            return stop
+        split.append(piece)
     return None
 
 
 def _split_and_save(
     piece: Piece, target: PieceTarget, assembly_root: Path
-) -> SplitResult | Refusal:
+) -> Refusal | None:
     """Split one piece and save the scene, naming what stopped either.
 
     A failed save matters most: the split is done in memory and on disk, and
     the scene is the only record that the group is gone.
     """
     try:
-        result = split_piece(piece, target, assembly_root=assembly_root)
+        split_piece(piece, target, assembly_root=assembly_root)
     except AssemblyError as error:
         log.exception("Split Pieces stopped at '%s'.", piece.name)
         return Refusal(piece.name, str(error))
@@ -156,7 +153,7 @@ def _split_and_save(
             "Save) before doing anything else, or the piece comes back unsplit "
             "beside its new asset.",
         )
-    return result
+    return None
 
 
 def _scene_path() -> Path | None:

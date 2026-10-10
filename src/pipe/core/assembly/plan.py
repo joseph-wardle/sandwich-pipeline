@@ -20,8 +20,8 @@ from pipe.core.asset.paths import (
     asset_root,
     production_relative_identifier,
 )
-from pipe.core.assembly.model import VARIANT_SEPARATOR, Piece, PieceTarget
-from pipe.core.assembly.normalize import ScaleCheck, inspect_scale
+from pipe.core.assembly.model import VARIANT_SEPARATOR, Piece, piece_prim_name
+from pipe.core.assembly.normalize import inspect_scale
 from pipe.core.assembly.pieces import assembly_of
 from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.core.shotgrid.paths import build_asset_path, normalize_display_name
@@ -60,8 +60,8 @@ class Child:
         return build_asset_path(self.display_name, self.subdirectory)
 
     @property
-    def variants(self) -> list[str]:
-        return [piece.variant for piece in self.pieces]
+    def variants(self) -> set[str]:
+        return {piece.variant for piece in self.pieces}
 
 
 @dataclass(frozen=True)
@@ -89,7 +89,7 @@ class Plan:
         return [r.reason for r in self.refusals if r.group == group]
 
 
-def plan_split(
+def plan_children(
     pieces: Iterable[Piece],
     assembly: Asset,
     assets: Iterable[Asset],
@@ -107,11 +107,10 @@ def plan_split(
     children = []
     for label, group in by_label.items():
         display_name = display_name_for(label)
-        variants = [piece.variant for piece in group]
         claim = claim_for(
             display_name,
             assembly.subdirectory,
-            variants,
+            {piece.variant for piece in group},
             assets,
             production_root,
             assembly_root=assembly_root,
@@ -143,8 +142,7 @@ def claim_for(
     record with files takes a variant it has not built yet.
 
     A variant ShotGrid lists without a source layer is one a split declared and
-    then failed to build. A source layer this assembly wrote that none of its
-    `placed` pieces uses is one an interrupted split left behind."""
+    then failed to build."""
     assets = list(assets)
     claim = classify(display_name, subdirectory, assets, production_root)
     if not isinstance(claim, Occupied):
@@ -157,34 +155,11 @@ def claim_for(
     (asset,) = holders
 
     paths = AssetPaths(asset_root(asset, production_root))
-    hand_made = hand_made_model(paths.root)
-    if hand_made is not None:
-        return Occupied(
-            f'"{asset.display_name}" is modelled by hand ({hand_made}), so a split '
-            "cannot add to it. Choose a different name."
-        )
-
-    taken: list[str] = []
-    orphaned: list[Path] = []
-    for variant in variants:
-        source = paths.publish_source_variant_usd(variant)
-        if not source.exists():
-            continue
-        prim_name = PieceTarget(name, paths.root, variant).prim_name
-        if orphaned_source(
-            source, prim_name, assembly_root=assembly_root, placed=placed
-        ):
-            orphaned.append(source)
-        else:
-            taken.append(variant)
-    if orphaned:
-        return Occupied(orphan_remedy(asset.display_name, orphaned))
-    if taken:
-        return Occupied(
-            f'"{asset.display_name}" already has the {", ".join(taken)} variant. '
-            f"Name the group {name}{VARIANT_SEPARATOR}<variant> with a variant it "
-            "does not have yet."
-        )
+    problem = existing_model_problem(
+        paths.root, name, variants, assembly_root=assembly_root, placed=placed
+    )
+    if problem is not None:
+        return Occupied(problem)
 
     split_from = next(
         (
@@ -197,29 +172,50 @@ def claim_for(
     return AddVariant(asset, split_from)
 
 
-def orphaned_source(
-    source: Path, prim_name: str, *, assembly_root: Path, placed: Collection[str]
-) -> bool:
-    """Whether `source` was left by an interrupted split of this assembly.
+def existing_model_problem(
+    child_root: Path,
+    asset_name: str,
+    variants: Collection[str],
+    *,
+    assembly_root: Path,
+    placed: Collection[str],
+) -> str | None:
+    """Why a split cannot write `variants` into the child at `child_root`, or None."""
+    hand_made = hand_made_model(child_root)
+    if hand_made is not None:
+        return (
+            f"'{asset_name}' is modelled by hand ({hand_made}), so a split cannot "
+            "add to it. Choose a different name."
+        )
 
-    A split writes the child's layer, then places the prim and saves the scene;
-    a crash or a failed save between the two leaves the layer with no piece
-    using it. Only the artist can say whether it is still wanted, so the file
-    is never overwritten.
-    """
-    return (
-        assembly_of(source) == production_relative_identifier(assembly_root)
-        and prim_name not in placed
-    )
-
-
-def orphan_remedy(asset_name: str, sources: Iterable[Path]) -> str:
-    files = ", ".join(str(source) for source in sources)
-    return (
-        f'"{asset_name}" has a layer from an interrupted split of this assembly '
-        f"that no piece uses: {files}. Delete the file, then refresh the plan "
-        "and split again."
-    )
+    paths = AssetPaths(child_root)
+    this_assembly = production_relative_identifier(assembly_root)
+    taken: list[str] = []
+    orphaned: list[str] = []
+    for variant in sorted(variants):
+        source = paths.publish_source_variant_usd(variant)
+        if not source.exists():
+            continue
+        if (
+            assembly_of(source) == this_assembly
+            and piece_prim_name(asset_name, variant) not in placed
+        ):
+            orphaned.append(str(source))
+        else:
+            taken.append(variant)
+    if orphaned:
+        return (
+            f"'{asset_name}' has a layer from an interrupted split of this assembly "
+            f"that no piece uses: {', '.join(orphaned)}. Delete the file, then "
+            "refresh the plan and split again."
+        )
+    if taken:
+        return (
+            f"'{asset_name}' already has the {', '.join(taken)} variant. Name the "
+            f"group {asset_name}{VARIANT_SEPARATOR}<variant> with a variant it does "
+            "not have yet."
+        )
+    return None
 
 
 def hand_made_model(asset_root: Path) -> Path | None:
@@ -241,15 +237,19 @@ def register_child(conn: ShotGrid, child: Child) -> Asset:
     """Create, adopt or extend the ShotGrid Asset for `child`, and return it."""
     claim = child.claim
     if isinstance(claim, New):
-        return create_record(conn, claim, variants=child.variants)
+        return create_record(conn, claim, variants=sorted(child.variants))
     if isinstance(claim, Occupied):
         raise ValueError(f"'{child.display_name}' is refused: {claim.reason}")
 
     asset = claim.asset
-    for variant in child.variants:
+    for variant in sorted(child.variants):
         asset = conn.add_geometry_variant(asset, variant)
-    if isinstance(claim, Adopt):
-        for stale in sorted(set(asset.geometry_variants or ()) - set(child.variants)):
+    sources = AssetPaths(asset_root(asset))
+    for stale in sorted(set(asset.geometry_variants or ()) - child.variants):
+        if (
+            isinstance(claim, Adopt)
+            or not sources.publish_source_variant_usd(stale).exists()
+        ):
             asset = conn.remove_geometry_variant(asset, stale)
     return asset
 
@@ -266,19 +266,19 @@ def scale_problem(piece: Piece) -> str | None:
     check = inspect_scale(piece.world_matrix)
     if check.bakeable:
         return None
+    advice = "Freeze the piece's transformations, or correct its scale."
+    if not check.positive:
+        # The factors are axis lengths, which never show the sign that is wrong.
+        return (
+            f"'{piece.name}' is mirrored or squashed flat (a negative or zero "
+            f"scale), which a child cannot bake. {advice}"
+        )
+    fault = "non-uniform scale" if check.orthogonal else "sheared axes"
     factors = ", ".join(f"{f:g}" for f in check.factors)
     return (
-        f"'{piece.name}' has {_scale_fault(check)} (scale {factors}), which a child "
-        "cannot bake. Freeze the piece's transformations, or correct its scale."
+        f"'{piece.name}' has {fault} (scale {factors}), which a child cannot "
+        f"bake. {advice}"
     )
-
-
-def _scale_fault(check: ScaleCheck) -> str:
-    if not check.positive:
-        return "negative or mirrored scale"
-    if not check.orthogonal:
-        return "sheared axes"
-    return "non-uniform scale"
 
 
 def _name_problems(children: list[Child]) -> list[Refusal]:
@@ -302,13 +302,15 @@ def _name_problems(children: list[Child]) -> list[Refusal]:
                         piece.name, f"'{piece.name}' cannot name an asset: {problem}"
                     )
                 )
-            if piece.variant and not _VARIANT_RE.fullmatch(piece.variant):
+            if not _VARIANT_RE.fullmatch(piece.variant):
                 refusals.append(
                     Refusal(
                         piece.name,
-                        f"'{piece.name}' names the variant '{piece.variant}', and a "
-                        "variant is lowercase letters, digits and single "
-                        "underscores, starting with a letter (like 'main').",
+                        f"'{piece.name}' needs a variant after '{VARIANT_SEPARATOR}' "
+                        "of lowercase letters, digits and single underscores, "
+                        f"starting with a letter (like '{piece.label}"
+                        f"{VARIANT_SEPARATOR}tall'), or no '{VARIANT_SEPARATOR}' "
+                        "at all for the main variant.",
                     )
                 )
     return refusals
@@ -357,7 +359,7 @@ def _placed_collisions(children: list[Child], placed: Collection[str]) -> list[R
     refusals = []
     for child in children:
         for piece in child.pieces:
-            prim = PieceTarget(child.asset_name, Path(), piece.variant).prim_name
+            prim = piece_prim_name(child.asset_name, piece.variant)
             if prim in placed:
                 refusals.append(
                     Refusal(
@@ -382,15 +384,6 @@ def _piece_problems(children: list[Child]) -> list[Refusal]:
                     )
                 )
         for piece in child.pieces:
-            if not piece.variant:
-                refusals.append(
-                    Refusal(
-                        piece.name,
-                        f"'{piece.name}' names no variant after '{VARIANT_SEPARATOR}'. "
-                        f"Name it <asset>{VARIANT_SEPARATOR}<variant>, or drop the "
-                        "underscores.",
-                    )
-                )
             problem = scale_problem(piece)
             if problem is not None:
                 refusals.append(Refusal(piece.name, problem))

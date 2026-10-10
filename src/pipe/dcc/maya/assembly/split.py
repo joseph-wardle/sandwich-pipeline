@@ -15,10 +15,9 @@ from pipe.core.asset.paths import (
     AssetPaths,
     production_relative_identifier,
 )
-from pipe.core.assembly.model import Piece, PieceTarget, SplitError, SplitResult
+from pipe.core.assembly.model import AssemblyError, Piece, PieceTarget
 from pipe.core.assembly.normalize import (
     SOURCE_LAYER_LINEAR_UNIT,
-    SOURCE_LAYER_UP_AXIS,
     bounds_match,
     clear_transform,
     inspect_scale,
@@ -27,18 +26,15 @@ from pipe.core.assembly.normalize import (
     prim_point_bounds,
 )
 from pipe.core.assembly.pieces import stamp_assembly
-from pipe.core.assembly.plan import (
-    hand_made_model,
-    orphan_remedy,
-    orphaned_source,
-    scale_problem,
-)
+from pipe.core.assembly.plan import existing_model_problem, scale_problem
 from pipe.dcc.maya.assembly.scan import (
     renderable_meshes,
+    scene_units_problem,
     world_matrix,
     world_point_bounds,
 )
 from pipe.dcc.maya.assembly.stage import (
+    STAGE_TRANSFORM_NAME,
     ensure_assembly_stage,
     placed_prim_names,
     stage_shape,
@@ -57,9 +53,7 @@ _PLACEMENT_TOLERANCE = 1e-3
 _PENDING_DIRNAME = ".writing"
 
 
-def split_piece(
-    piece: Piece, target: PieceTarget, *, assembly_root: Path
-) -> SplitResult:
+def split_piece(piece: Piece, target: PieceTarget, *, assembly_root: Path) -> None:
     """Move `piece` out of the Maya scene and into `target`, in place."""
     _refuse_existing_model(target, assembly_root)
     _refuse_scene_units()
@@ -81,74 +75,37 @@ def split_piece(
     # The piece's materials went with it; one still used by another group stays.
     delete_unused_shading_groups(materials)
 
-    return SplitResult(
-        piece_name=piece.name,
-        asset_name=target.asset_name,
-        variant=target.variant,
-        prim_path=str(prim.GetPath()),
-    )
-
 
 def _refuse_existing_model(target: PieceTarget, assembly_root: Path) -> None:
-    """Refuse an asset modelled by hand, one that already has this variant, or a
-    layer an interrupted split of this assembly left with no piece using it."""
-    found = hand_made_model(target.asset_root)
-    if found is None and target.source_layer.exists():
-        if orphaned_source(
-            target.source_layer,
-            target.prim_name,
-            assembly_root=assembly_root,
-            placed=placed_prim_names(),
-        ):
-            raise SplitError(orphan_remedy(target.asset_name, [target.source_layer]))
-        found = target.source_layer
-    if found is not None:
-        raise SplitError(
-            f"'{target.asset_name}' already has a model at {found}. Split under a "
-            "different name or variant, or edit the existing asset from the "
-            "assembly it was split into."
-        )
-
-
-def scene_units_problem() -> str | None:
-    """Why the scene's unit settings stop a split, or None if they do not."""
-    unit = mc.currentUnit(query=True, linear=True)
-    if unit != SOURCE_LAYER_LINEAR_UNIT:
-        return (
-            f"This scene's working unit is {unit}, and a split writes centimetres. "
-            "Set the working unit to centimetres (Preferences > Settings), which "
-            "moves nothing; if the assembly then looks 100x too large, scale it "
-            "by 0.01 and freeze its transformations."
-        )
-
-    up_axis = str(mc.upAxis(query=True, axis=True)).upper()
-    if up_axis != SOURCE_LAYER_UP_AXIS:
-        return (
-            f"This scene is {up_axis}-up, and a split writes {SOURCE_LAYER_UP_AXIS}-up. "
-            f"Set the up axis to {SOURCE_LAYER_UP_AXIS} first (Preferences > "
-            "Settings), then rotate the assembly upright and freeze its "
-            "transformations."
-        )
-    return None
+    """The plan's check, again: the scene or disk may have changed since it ran."""
+    problem = existing_model_problem(
+        target.asset_root,
+        target.asset_name,
+        [target.variant],
+        assembly_root=assembly_root,
+        placed=placed_prim_names(),
+    )
+    if problem is not None:
+        raise AssemblyError(problem)
 
 
 def _refuse_scene_units() -> None:
     problem = scene_units_problem()
     if problem is not None:
-        raise SplitError(problem)
+        raise AssemblyError(problem)
 
 
 def _bakeable_scale(piece: Piece) -> float:
     problem = scale_problem(piece)
     if problem is not None:
-        raise SplitError(problem)
+        raise AssemblyError(problem)
     return inspect_scale(piece.world_matrix).factor
 
 
 def _piece_bounds(piece: Piece) -> Gf.Range3d:
     """Measure the piece where it stands, refusing one there is nothing to measure."""
     if not renderable_meshes(piece.node):
-        raise SplitError(
+        raise AssemblyError(
             f"'{piece.name}' holds no visible geometry, so a split would produce "
             "an empty asset. Split a group that contains the piece's meshes."
         )
@@ -166,9 +123,10 @@ def _link_textures(target: PieceTarget, assembly_root: Path) -> None:
     if link.is_symlink() and os.readlink(link) == relative:
         return
     if link.exists() or link.is_symlink():
-        raise SplitError(
-            f"'{target.asset_name}' already has textures at {link}, and a split "
-            f"child's are its assembly's ({textures}). Split under a different name."
+        raise AssemblyError(
+            f"'{target.asset_name}' already has its own textures at {link}, but a "
+            f"split piece shares its assembly's ({textures}). Split under a "
+            "different name, or delete that folder if it is a leftover."
         )
     link.parent.mkdir(parents=True, exist_ok=True)
     os.symlink(relative, link)
@@ -227,7 +185,7 @@ def _exported_group(root: Usd.Prim, target: PieceTarget) -> Usd.Prim:
     candidates = [child for child in root.GetChildren() if child.IsA(UsdGeom.Xformable)]
     if len(candidates) != 1:
         names = ", ".join(child.GetName() for child in root.GetChildren()) or "nothing"
-        raise SplitError(
+        raise AssemblyError(
             f"'{target.asset_name}' did not export as a single group — {root.GetPath()} "
             f"contains {names}. Split a group that holds all of the piece's geometry."
         )
@@ -264,11 +222,20 @@ def _confirm_unmoved(
 
     stage.RemovePrim(prim.GetPath())
     target.source_layer.unlink(missing_ok=True)
-    raise SplitError(
-        f"'{piece.name}' did not come back in the same place, so nothing was "
-        f"changed. It occupied {before}, and composes at {after}. Check that "
-        f"{target.source_layer} is under the production root and that the "
-        "assembly's stage has not been moved or scaled."
+    raise AssemblyError(
+        f"'{piece.name}' did not come back in the same place, so it was not split. "
+        f"It spanned {_range_text(before)} cm and came back at "
+        f"{_range_text(after)}. Check that the assembly's stage "
+        f"({STAGE_TRANSFORM_NAME}) has not been moved or scaled, then split again; "
+        "if it has not, ask a TD."
+    )
+
+
+def _range_text(bounds: Gf.Range3d) -> str:
+    """'(0, 0, 0) to (10, 20, 5)', as an artist reads a bounding box."""
+    corners = (bounds.GetMin(), bounds.GetMax())
+    return " to ".join(
+        "(" + ", ".join(f"{value:.4g}" for value in corner) + ")" for corner in corners
     )
 
 
@@ -279,7 +246,6 @@ def _prim_world_bounds(prim: Usd.Prim) -> Gf.Range3d:
 
 def _stage_world_matrix() -> Gf.Matrix4d:
     shape = stage_shape()
-    if shape is None:
-        return Gf.Matrix4d(1.0)
+    assert shape is not None, "runs after ensure_assembly_stage"
     transform = mc.listRelatives(shape, parent=True, fullPath=True)[0]
     return world_matrix(transform)

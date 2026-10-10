@@ -17,13 +17,14 @@ from mayaUsd.lib import PrimUpdaterManager
 from pxr import Gf, Sdf, Tf, Usd, UsdGeom
 
 from pipe.core.asset.paths import production_relative_identifier
-from pipe.core.assembly.model import AssemblyError, EditError
+from pipe.core.assembly.model import AssemblyError
 from pipe.core.assembly.normalize import clear_transform
 from pipe.core.assembly.pieces import piece_edit_target
 from pipe.dcc.maya.assembly.stage import find_assembly_stage, stage_shape
 from pipe.dcc.maya.util.materials import (
     delete_unused_shading_groups,
     material_problems,
+    shading_groups_in_use,
 )
 
 log = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ _HUD_LABEL = "Piece edits save to"
 _HUD_SECTION = 0
 
 _MATERIAL_TYPE = "Material"
-_PLACEMENT_TOLERANCE = 1e-6
+_MATRIX_TOLERANCE = 1e-6
 
 
 def edit_piece(prim: Usd.Prim) -> str:
@@ -46,15 +47,15 @@ def edit_piece(prim: Usd.Prim) -> str:
 
     already_open = open_piece(stage)
     if already_open is not None:
-        raise EditError(
+        raise AssemblyError(
             f"'{already_open.GetName()}' is already open for editing. Save or "
             "discard it before opening another piece."
         )
 
     _refuse_non_piece(stage, prim)
     # Refuse a piece with no payload before anything is pulled.
-    child_layer = child_source_layer(prim)
-    _release_materials(prim, child_layer)
+    child_layer = piece_edit_target(prim).GetLayer()
+    _delete_leftover_shading_groups(prim, child_layer)
     ufe_path = _ufe_path(prim)
 
     # mayaUsdPlugin's commands are not in the maya stubs.
@@ -68,7 +69,9 @@ def save_piece(stage: Usd.Stage) -> None:
     """Write the open piece's Maya edits into its child asset's layer, and save it."""
     piece = open_piece(stage)
     if piece is None:
-        raise EditError("No piece is open for editing, so there is nothing to save.")
+        raise AssemblyError(
+            "No piece is open for editing, so there is nothing to save."
+        )
 
     child_target = piece_edit_target(piece)
     child_layer = child_target.GetLayer()
@@ -104,7 +107,7 @@ def open_piece(stage: Usd.Stage) -> Usd.Prim | None:
     ]
     if len(pulled) > 1:
         names = ", ".join(prim.GetName() for prim in pulled)
-        raise EditError(
+        raise AssemblyError(
             f"{len(pulled)} pieces are open for editing at once ({names}), and an "
             "assembly edits one at a time. Merge or discard all but one, then try "
             "again."
@@ -116,16 +119,11 @@ def pulled_maya_node(prim: Usd.Prim) -> str:
     """The Maya group a pulled piece is being edited as."""
     node = PrimUpdaterManager.readPullInformation(prim)
     if not node or not mc.objExists(node):
-        raise EditError(
+        raise AssemblyError(
             f"'{prim.GetName()}' is marked as open for editing but Maya has no "
             "editable copy of it. Save the scene, reopen it, and try again."
         )
     return node
-
-
-def child_source_layer(prim: Usd.Prim) -> Sdf.Layer:
-    """The layer a piece's geometry comes from, which is where its edits belong."""
-    return piece_edit_target(prim).GetLayer()
 
 
 def install_edit_hud() -> None:
@@ -159,7 +157,9 @@ def hud_text() -> str:
         piece = open_piece(stage)
         if piece is None:
             return "nothing is open for editing"
-        return f"{piece.GetName()} - {_layer_display(child_source_layer(piece))}"
+        return (
+            f"{piece.GetName()} - {_layer_display(piece_edit_target(piece).GetLayer())}"
+        )
     except AssemblyError as exc:
         # These refusals are already written for the artist, and their first
         # sentence is the whole story; the rest is advice for the dialog.
@@ -172,7 +172,7 @@ def hud_text() -> str:
 def _ufe_path(prim: Usd.Prim) -> str:
     shape = stage_shape()
     if shape is None:
-        raise EditError(
+        raise AssemblyError(
             "This scene has no assembly stage, so it holds no piece to edit. Split "
             "a piece out of an assembly first."
         )
@@ -183,25 +183,27 @@ def _refuse_non_piece(stage: Usd.Stage, prim: Usd.Prim) -> None:
     """Only a piece prim is edited: mayaUsd would happily pull the assembly's root
     or a mesh inside a piece, and neither counts as open afterwards."""
     if prim.GetParent() != stage.GetDefaultPrim():
-        raise EditError(
+        raise AssemblyError(
             f"'{prim.GetName()}' is not a piece of this assembly. Pick the piece "
             "itself in the assembly, not a group above it or a mesh inside it."
         )
 
 
-def _release_materials(prim: Usd.Prim, child_layer: Sdf.Layer) -> None:
+def _delete_leftover_shading_groups(prim: Usd.Prim, child_layer: Sdf.Layer) -> None:
     """Clear the scene of shading groups named like the child's materials, so the
-    pull brings them in under their own names. Deletes scene nodes."""
-    in_use = delete_unused_shading_groups(_material_names(child_layer))
+    pull brings them in under their own names. Refuses before deleting anything."""
+    names = _material_names(child_layer)
+    in_use = shading_groups_in_use(names)
     if in_use:
         users = cast(list[str], mc.sets(in_use[0], query=True) or [])
-        raise EditError(
+        raise AssemblyError(
             f"Material '{in_use[0]}' of '{prim.GetName()}' is still assigned to "
             f"{', '.join(users[:3])} in this scene, so opening the piece would "
             "bring its copy in under another name and its textures would no "
             "longer find it. Split that geometry or give it a different "
             "material, then open the piece again."
         )
+    delete_unused_shading_groups(names)
 
 
 def _material_names(layer: Sdf.Layer) -> list[str]:
@@ -226,13 +228,13 @@ def _refuse_moved(piece: Usd.Prim, maya_node: str) -> None:
     )
     opened = Gf.Matrix4d(*values)
     moved = any(
-        (opened.GetRow(row) - placement.GetRow(row)).GetLength() > _PLACEMENT_TOLERANCE
+        (opened.GetRow(row) - placement.GetRow(row)).GetLength() > _MATRIX_TOLERANCE
         for row in range(4)
     )
     if not moved:
         return
     translate, rotate, scale = _channel_values(placement)
-    raise EditError(
+    raise AssemblyError(
         f"'{piece.GetName()}' was moved while open for editing, and a piece is "
         "placed by moving it in the assembly, not its open copy. Set the group's "
         f"Translate back to {translate}, Rotate to {rotate} and Scale to {scale} "
@@ -267,7 +269,7 @@ def _refuse_material_problems(piece: Usd.Prim, maya_node: str) -> None:
     """The child layer is a model: it meets the same material rules as a split."""
     problems = material_problems([maya_node])
     if problems:
-        raise EditError(
+        raise AssemblyError(
             f"Fix the materials on '{piece.GetName()}' before saving it. "
             + " ".join(f"{problem}." for problem in problems)
         )
@@ -277,31 +279,14 @@ def _confirm_assembly_untouched(
     stage: Usd.Stage, prim: Usd.Prim, child_layer: Sdf.Layer, before: str
 ) -> None:
     """Prove the merge crossed the payload rather than landing in the assembly."""
-    root_layer = stage.GetRootLayer()
-    if root_layer.ExportToString() == before:
+    if stage.GetRootLayer().ExportToString() == before:
         return
-
-    raise EditError(
+    raise AssemblyError(
         f"The edits to '{prim.GetName()}' changed the assembly instead of "
         f"{_layer_display(child_layer)}, which would hide them from every other "
         "department. Nothing is lost: undo to bring the piece back into Maya, then "
-        f"tell a TD. {_assembly_change(root_layer, prim.GetPath())}"
+        "tell your TD."
     )
-
-
-def _assembly_change(root_layer: Sdf.Layer, path: Sdf.Path) -> str:
-    """Name what the assembly's layer gained, for the artist to quote to a TD."""
-    spec = root_layer.GetPrimAtPath(path)
-    if spec is None:
-        return "The piece is no longer in the assembly's layer at all."
-
-    gained = sorted(
-        [prop.name for prop in spec.properties if not prop.name.startswith("xformOp")]
-        + [child.name for child in spec.nameChildren]
-    )
-    if gained:
-        return f"The assembly gained {', '.join(gained)}."
-    return "The piece's placement in the assembly was overwritten."
 
 
 def _save_child_layer(prim: Usd.Prim, child_layer: Sdf.Layer) -> None:
@@ -314,10 +299,10 @@ def _save_child_layer(prim: Usd.Prim, child_layer: Sdf.Layer) -> None:
         child_layer.Save()
     except Tf.ErrorException as exc:
         log.exception("Could not save %s after merging it", child_layer.identifier)
-        raise EditError(
+        raise AssemblyError(
             f"The edits to '{prim.GetName()}' were merged but could not be written "
             f"to {_layer_display(child_layer)}. They exist only in this Maya "
-            "session: leave Maya open and ask a TD to save that layer."
+            "session: leave Maya open and ask your TD to save that layer."
         ) from exc
 
 

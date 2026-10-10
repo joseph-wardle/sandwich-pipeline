@@ -12,8 +12,8 @@ from pipe.core.assembly.model import AssemblyError, Piece
 from pipe.core.assembly.plan import AddVariant, Plan
 from pipe.core.shotgrid import Asset, ShotGrid
 from pipe.core.ui import FAIL, FAIL_STYLE, MessageDialog, progress_scope
-from pipe.dcc.maya.assembly.plan import plan_split
 from pipe.dcc.maya.assembly.run import RunReport, run_split
+from pipe.dcc.maya.assembly.scan import plan_split
 from pipe.dcc.maya.assetfile import scene_asset
 
 log = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 _COLUMNS = ("Group", "Asset", "Variant", "Outcome")
 _RUN_STEP = "Splitting pieces"
 _REFUSED = "Refused"
+_REFUSALS_HEADING = "Split is disabled until these are fixed:"
 
 
 class SplitDialog(QtWidgets.QDialog):
@@ -83,7 +84,7 @@ class SplitDialog(QtWidgets.QDialog):
         )
         problems = [refusal.reason for refusal in plan.refusals]
         if problems:
-            self._show_status(problems, failed=True)
+            self._show_status([_REFUSALS_HEADING, *problems], failed=True)
         elif not plan.pieces:
             self._show_status(["No unsplit groups."], failed=False)
         else:
@@ -93,15 +94,17 @@ class SplitDialog(QtWidgets.QDialog):
         plan = self._plan
         self._table.setRowCount(len(rows))
         for index, (child, piece) in enumerate(rows):
-            refused = plan is not None and bool(plan.refused(piece.name))
-            outcome = _REFUSED if refused else _outcome(child.claim)
+            reasons = plan.refused(piece.name) if plan is not None else []
+            outcome = _REFUSED if reasons else _outcome(child.claim)
             cells = (piece.name, child.display_name, piece.variant, outcome)
             for column, text in enumerate(cells):
                 item = QtWidgets.QTableWidgetItem(text)
-                if refused:
+                if reasons:
                     item.setForeground(QtGui.QColor(FAIL))
+                    item.setToolTip("\n".join(reasons))
                 self._table.setItem(index, column, item)
-            self._table.item(index, 1).setToolTip(child.asset_path)
+            if not reasons:
+                self._table.item(index, 1).setToolTip(child.asset_path)
         self._table.resizeColumnsToContents()
 
     def _show_status(self, lines: list[str], *, failed: bool) -> None:
@@ -196,15 +199,15 @@ def _outcome(claim: New | Adopt | AddVariant | Occupied) -> str:
 
 
 def _report_text(report: RunReport) -> str:
-    failure = report.failure
-    if failure is None:
+    stop = report.stop
+    if stop is None:
         return (
-            f"Split {len(report.split)} pieces. Version {report.version} holds the "
+            f"Split {report.split} pieces. Version {report.version} holds the "
             "scene from before.\n\nPress Publish to build the children."
         )
     before = (
-        f"The {len(report.split)} pieces before it are split and saved."
+        f"The {report.split} pieces before it are split and saved."
         if report.split
         else "Nothing was split."
     )
-    return f"Stopped at '{failure.group}': {failure.reason}\n\n{before}"
+    return f"Stopped at '{stop.group}': {stop.reason}\n\n{before}"

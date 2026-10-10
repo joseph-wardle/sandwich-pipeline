@@ -11,7 +11,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Iterable, Mapping, TypedDict
+from typing import Any, Mapping, TypedDict
 
 import hou
 
@@ -22,7 +22,11 @@ from pipe.core.asset.paths import (
     AssetPaths,
     production_relative_identifier,
 )
-from pipe.core.assembly.pieces import child_variants
+from pipe.core.assembly.pieces import (
+    child_source_problem,
+    child_variants,
+    variant_list,
+)
 from pipe.core.util.paths import resolve_mapped_path
 
 from . import nodelayouts
@@ -132,26 +136,14 @@ def _publish_child(
     child_root: Path, placed_variants: frozenset[str]
 ) -> HeadlessPublishResult:
     """Publish one piece, regenerating its managed graph when that is the remedy."""
-    # A variant is its source layer, so one without it can never be built, and
-    # refusing first keeps a renamed or deleted child from being made empty.
-    sources = AssetPaths(child_root)
-    missing = {
-        variant
-        for variant in placed_variants
-        if not sources.publish_source_variant_usd(variant).is_file()
-    }
-    if missing:
+    # Refusing first keeps a renamed or deleted child from being made empty.
+    problem = child_source_problem(child_root, placed_variants)
+    if problem is not None:
         child = _empty_result(
             child_root, variant=DEFAULT_GEOMETRY_VARIANT, publish=True
         )
         child["asset_name"] = child_root.name
-        _error(
-            child,
-            "ChildSourceMissing",
-            f"'{child_root.name}' has no source layer for {_names(missing)} in "
-            f"{sources.publish_source_dir}, so it was not built. Restore the "
-            "folder, or remove the piece from the assembly.",
-        )
+        _error(child, "ChildSourceMissing", problem)
         return _finalize(child)
 
     def run(*, regen: bool) -> HeadlessPublishResult:
@@ -309,14 +301,9 @@ def _run_one(
             _error(
                 result,
                 "VariantNotBuilt",
-                f"'{resolved_asset_name}' is placed as {_names(unbuilt)} but its "
-                f"builder only builds {_names(built)}"
-                + (
-                    ", even after its managed variants were regenerated. Each "
-                    "placed variant needs its source layer in publish/_src."
-                    if variant_graph_regenerated
-                    else ". Its managed variants need regenerating."
-                ),
+                f"'{resolved_asset_name}' is placed as {variant_list(unbuilt)} but "
+                f"its builder only builds {variant_list(built)}. Ask a TD to check "
+                f"{hip_path}.",
             )
             return _finalize(result)
 
@@ -385,10 +372,6 @@ def _run_one(
         "respected_existing": bool(respect_existing),
     }
     return _finalize(result)
-
-
-def _names(variants: Iterable[str]) -> str:
-    return ", ".join(sorted(variants)) or "nothing"
 
 
 def _empty_result(root: Path, *, variant: str, publish: bool) -> HeadlessPublishResult:
