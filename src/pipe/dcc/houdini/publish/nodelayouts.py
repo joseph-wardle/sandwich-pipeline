@@ -359,12 +359,7 @@ def _clear_managed_variant_nodes(
     for node in list(parent.children()):
         if node.path() in keep_paths:
             continue
-        if (
-            node.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
-            != SKD_VARIANT_GRAPH_MANAGED_VALUE
-        ):
-            continue
-        if node.userData(SKD_VARIANT_GRAPH_OWNER_KEY) not in ("", owner_path):
+        if not _managed_by(node, owner_path=owner_path):
             continue
         if node.userData(SKD_VARIANT_GRAPH_NAME_KEY) != node.name():
             _release_managed_variant_node(node)
@@ -385,6 +380,20 @@ def _clear_managed_variant_nodes(
             "Wire them back in where they belong, or delete them."
         )
     return warnings
+
+
+def _managed_by(node: hou.Node, *, owner_path: str) -> bool:
+    managed = node.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
+    owner = node.userData(SKD_VARIANT_GRAPH_OWNER_KEY)
+    return managed == SKD_VARIANT_GRAPH_MANAGED_VALUE and owner in ("", owner_path)
+
+
+def _regeneration_replaces(node: hou.Node, *, owner_path: str) -> bool:
+    """A managed node still carrying the name it was made with; a renamed one is kept."""
+    return (
+        _managed_by(node, owner_path=owner_path)
+        and node.userData(SKD_VARIANT_GRAPH_NAME_KEY) == node.name()
+    )
 
 
 def _release_managed_variant_node(node: hou.Node) -> None:
@@ -789,16 +798,31 @@ def _first_managed_geometry_node(
 
 def material_warnings(output: hou.Node) -> list[str]:
     """Why the materials feeding `output` no longer match the published textures."""
-    matlibs = sorted(
-        (node for node in output.inputAncestors() if _is_skd_matlib_like(node)),
-        key=lambda node: node.name(),
-    )
     return [
         problem
-        for matlib in matlibs
-        if isinstance(matlib, hou.LopNode)
+        for matlib in _feeding_matlibs(output)
         for problem in shading.matlib_problems(matlib)
     ]
+
+
+def materials_regenerable(output: hou.Node) -> bool:
+    """Whether regenerating would rebuild every matlib whose materials are out of date."""
+    return all(
+        _regeneration_replaces(matlib, owner_path=output.path())
+        for matlib in _feeding_matlibs(output)
+        if shading.matlib_problems(matlib)
+    )
+
+
+def _feeding_matlibs(output: hou.Node) -> list[hou.LopNode]:
+    return sorted(
+        (
+            node
+            for node in output.inputAncestors()
+            if isinstance(node, hou.LopNode) and _is_skd_matlib_like(node)
+        ),
+        key=lambda node: node.name(),
+    )
 
 
 def geometry_variants_built(output: hou.Node) -> set[str]:

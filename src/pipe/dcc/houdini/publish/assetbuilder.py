@@ -131,7 +131,7 @@ def run_headless_publish(
 def _publish_child(
     child_root: Path, placed_variants: frozenset[str]
 ) -> HeadlessPublishResult:
-    """Publish one piece, regenerating its managed variants if a placed one is unbuilt."""
+    """Publish one piece, regenerating its managed graph when that is the remedy."""
     # A variant is its source layer, so one without it can never be built, and
     # refusing first keeps a renamed or deleted child from being made empty.
     sources = AssetPaths(child_root)
@@ -165,10 +165,23 @@ def _publish_child(
         )
 
     child = run(regen=False)
-    if any(error["code"] == "VariantNotBuilt" for error in child["errors"]):
+    if _needs_regeneration(child):
         log.info("Regenerating the managed variants of %s", child_root.name)
         child = run(regen=True)
     return child
+
+
+def _needs_regeneration(child: HeadlessPublishResult) -> bool:
+    """A placed variant with no branch, or textures its managed matlibs have not built."""
+    codes = {entry["code"] for entry in (*child["errors"], *child["warnings"])}
+    if "VariantNotBuilt" in codes:
+        return True
+    if "Publish::MaterialsOutOfDate" not in codes:
+        return False
+    # `_run_one` leaves the child's hip open, so its builder is still here.
+    summary = child["summary"]
+    builder = hou.node(summary["builder_node_path"]) if summary else None
+    return builder is not None and nodelayouts.materials_regenerable(builder)
 
 
 def _failed_child(
