@@ -83,6 +83,8 @@ def _refuse_empty_pieces(stage: Usd.Stage) -> None:
 
 
 def export_assembly(stage: Usd.Stage, *, pieces: Path, mesh: Path) -> None:
-    """Write the pieces layer for the builder and the whole assembly, flat, for Painter."""
-    export_layer(pieces_layer_for(stage), pieces)
-    export_layer(stage.Flatten(), mesh)
+    """Write the whole assembly, flat, for Painter, then the pieces layer for the builder."""
+    flat = stage.Flatten()
+    pieces_layer = pieces_layer_for(stage)
+    export_layer(flat, mesh)
+    export_layer(pieces_layer, pieces)

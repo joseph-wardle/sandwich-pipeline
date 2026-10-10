@@ -39,6 +39,15 @@ def ensure_assembly_stage() -> Usd.Stage:
     return find_assembly_stage() or _open_stage(_create_stage_shape())
 
 
+def placed_prim_names() -> set[str]:
+    """The pieces in the assembly's stage, by prim name, loaded or not; empty before a split."""
+    stage = find_assembly_stage()
+    root = stage.GetDefaultPrim() if stage is not None else None
+    if not root:
+        return set()
+    return {prim.GetName() for prim in root.GetAllChildren()}
+
+
 def _open_stage(shape: str) -> Usd.Stage:
     stage = mayaUsd.ufe.getStage(shape)
     if stage is None:

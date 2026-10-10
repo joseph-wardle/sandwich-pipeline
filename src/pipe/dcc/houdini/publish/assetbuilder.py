@@ -265,7 +265,7 @@ def _run_one(
     if ensure_requested:
         preexisting_outputs = _component_output_paths(stage)
         try:
-            builder = nodelayouts.ensure_managed_skd_component_builder(stage)
+            builder, wiring = nodelayouts.ensure_managed_skd_component_builder(stage)
         except Exception as exc:
             _error(
                 result,
@@ -281,6 +281,8 @@ def _run_one(
                 "ensure_managed_skd_component_builder returned no node.",
             )
             return _finalize(result)
+        for warning in wiring:
+            _warn(result, "VariantGraphWarning", warning)
 
         builder_created = builder.path() not in preexisting_outputs
         should_regen = regen_managed_variants or (

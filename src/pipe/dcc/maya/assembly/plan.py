@@ -11,7 +11,7 @@ from pipe.core.shotgrid import Asset
 from pipe.dcc.maya.assembly.editing import open_piece
 from pipe.dcc.maya.assembly.scan import scan_pieces, unsplit_nodes
 from pipe.dcc.maya.assembly.split import scene_units_problem
-from pipe.dcc.maya.assembly.stage import find_assembly_stage
+from pipe.dcc.maya.assembly.stage import find_assembly_stage, placed_prim_names
 from pipe.dcc.maya.util.materials import material_problems
 
 
@@ -59,12 +59,3 @@ def _open_piece_problem() -> str | None:
         f"'{piece.GetName()}' is open for editing. Save or discard its edits, "
         "then split again."
     )
-
-
-def placed_prim_names() -> set[str]:
-    """The pieces already in the assembly's stage, by prim name; empty before a split."""
-    stage = find_assembly_stage()
-    root = stage.GetDefaultPrim() if stage is not None else None
-    if not root:
-        return set()
-    return {prim.GetName() for prim in root.GetChildren()}

@@ -58,13 +58,38 @@ def piece_edit_target(piece: Usd.Prim) -> Usd.EditTarget:
         if arc.GetArcType() == Pcp.ArcTypePayload
     ]
     if len(payloads) != 1:
-        raise AssemblyError(
-            f"'{piece.GetName()}' is built from {len(payloads)} payloads and a piece "
-            "has exactly one. Only a piece made by Split Pieces belongs in the "
-            "assembly's stage; delete anything else from it."
-        )
+        raise AssemblyError(_payload_problem(piece, len(payloads)))
+    # The node belongs to the arc, and dangles once the arc is released: build
+    # the target while `payloads` still holds it.
     node = payloads[0].GetTargetNode()
     return Usd.EditTarget(node.layerStack.identifier.rootLayer, node)
+
+
+def _payload_problem(piece: Usd.Prim, composed: int) -> str:
+    """Why `piece` composes through `composed` payloads instead of one, for the artist."""
+    name = piece.GetName()
+    if not piece.HasAuthoredPayloads():
+        return (
+            f"'{name}' has no payload, so it was not made by Split Pieces. Only a "
+            "piece belongs in the assembly's stage; delete anything else from it."
+        )
+    if not piece.IsLoaded():
+        return (
+            f"'{name}' is unloaded, so its child cannot be reached. Right-click it "
+            "in the Outliner and choose Load, then try again."
+        )
+    if composed == 0:
+        authored = piece.GetMetadata("payload").GetAddedOrExplicitItems()
+        files = ", ".join(payload.assetPath for payload in authored)
+        return (
+            f"'{name}' points at {files}, which could not be opened. Check that the "
+            "child's file is still under the production root, then try again."
+        )
+    return (
+        f"'{name}' is built from {composed} payloads and a piece has exactly one. "
+        "Only a piece made by Split Pieces belongs in the assembly's stage; delete "
+        "anything else from it."
+    )
 
 
 def child_variants(pieces_layer: Path) -> dict[Path, set[str]]:

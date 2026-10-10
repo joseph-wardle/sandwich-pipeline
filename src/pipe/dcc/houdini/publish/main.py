@@ -42,7 +42,6 @@ from pipe.core.versioning import (
 
 from . import hooks as publish_hooks
 from . import nodelayouts
-from .geo_variants import confine_geo_variant_references
 
 log = logging.getLogger(__name__)
 
@@ -218,7 +217,6 @@ def publish_component(
             export = _export_component(context=context, options=opts, result=result)
             if export is None:
                 return _finalize_result(result)
-            confine_geo_variant_references(context.export_path)
             if AssetPaths(context.asset_root).pieces_layer.is_file():
                 mark_published_assembly(context.export_path)
 

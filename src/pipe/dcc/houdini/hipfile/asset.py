@@ -76,7 +76,9 @@ class HAssetFileManager(HFileManager):
             log.warning("Unable to set ASSET context option; asset name missing")
 
         try:
-            nodelayouts.ensure_managed_skd_component_builder()
+            _, warnings = nodelayouts.ensure_managed_skd_component_builder()
+            for warning in warnings:
+                log.warning(warning)
         except Exception:
             log.exception("Failed to ensure SKD Component Builder for %s", asset_name)
 

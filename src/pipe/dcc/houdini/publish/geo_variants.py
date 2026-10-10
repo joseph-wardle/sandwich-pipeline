@@ -1,72 +1,71 @@
 """Keep each geometry variant's material arcs inside that variant.
 
-Component Geometry Variants references every variant's hidden
-`/ASSET_geo_variant_N/ASSET` prim twice: from the matching `geo` variant, and
-from the root prim itself. The variant gates the mesh, but the `mtl` variant
-set inside each referenced prim is not gated, so every variant's GeomSubsets
-and bindings compose onto whichever geometry is selected: subsets overlap,
-indices run past the face count, and the renderer picks a texture at random.
-Dropping the root-level copies leaves the variant set as the only path to each
-variant's prim. Observed on Houdini 21.0.596.
+Component Geometry Variants (Houdini 21.0.596) builds every variant from a
+hidden `/ASSET_geo_variant_N/ASSET` prim and references that prim twice: from
+the matching `geo` variant and directly from the root prim. The direct copy is
+stock design and harmless for geometry, which the hidden prim keeps inside a
+variant the root selection gates. Our builders give every branch its own
+Component Material, and Add Variant leaves those arcs (the `/ASSET_mtl_default`
+reference and the `mtl` variant set) outside the variant. Through the ungated
+root copies every variant's GeomSubsets and bindings compose onto whichever
+mesh is selected: subsets overlap, indices run past the face count, the
+renderer picks a texture at random and XPU dies at startup.
 
-Root references nothing carries stay: a single-variant builder reaches its
-materials through one (`/ASSET_mtl_default`), and publishes made before
-variants were named reach their geometry through them alone.
+Dropping a root reference the `geo` variant set already carries changes nothing
+for the selected variant (its variant arc is stronger) and withdraws the other
+variants' opinions. Root references no variant carries stay: a single-variant
+builder reaches its materials through one, and publishes made before variants
+were named reach their geometry through them alone.
 
-Delete this module when Houdini stops authoring the root-level references, or
-when materials are authored inside each geometry variant instead of a shared
-`mtl` variant set.
+One call site: the Python LOP before `END` inside the config node
+(`lnd_componentconfig`). Component Output flattens the geo layer from that
+`END`, which the config node tags as the geometry source, and ignores anything
+wired after it, so the strip must sit there to reach the published file as well
+as the builder viewport, Explore Variants and the lookdev turnaround. Delete this
+module when each branch's material arcs are authored inside its geometry variant.
 """
 
 from __future__ import annotations
 
-import logging
-from pathlib import Path
-
-from pxr import Sdf
+from pxr import Sdf, Usd
 
 from pipe.core.asset.paths import GEOMETRY_VARIANT_SET
 
-log = logging.getLogger(__name__)
+
+def confine_geo_variant_references(stage: Usd.Stage) -> int:
+    """Remove root references the `geo` variant set also carries; returns how many."""
+    dropped = 0
+    for prim in stage.GetPseudoRoot().GetChildren():
+        specs = [
+            spec
+            for layer in stage.GetLayerStack()
+            if (spec := layer.GetPrimAtPath(prim.GetPath()))
+        ]
+        carried = {
+            reference for spec in specs for reference in _variant_references(spec)
+        }
+        for reference in _root_references(specs):
+            if reference in carried:
+                prim.GetReferences().RemoveReference(reference)
+                dropped += 1
+    return dropped
 
 
-def confine_geo_variant_references(entry_layer: Path) -> None:
-    """Rewrite every layer `entry_layer` payloads, saving only those that change."""
-    layer = Sdf.Layer.FindOrOpen(str(entry_layer))
-    root = layer.GetPrimAtPath(f"/{layer.defaultPrim}")
-    for payload in root.payloadList.GetAddedOrExplicitItems():
-        payload_layer = Sdf.Layer.FindOrOpen(
-            layer.ComputeAbsolutePath(payload.assetPath)
-        )
-        payload_root = payload_layer.GetPrimAtPath(f"/{payload_layer.defaultPrim}")
-        for reference in payload_root.referenceList.GetAddedOrExplicitItems():
-            _drop_root_references_a_variant_carries(
-                Sdf.Layer.FindOrOpen(
-                    payload_layer.ComputeAbsolutePath(reference.assetPath)
-                )
-            )
+def _root_references(specs: list[Sdf.PrimSpec]) -> list[Sdf.Reference]:
+    """The references the layer stack composes onto the prim itself."""
+    references: list[Sdf.Reference] = []
+    for spec in reversed(specs):
+        if spec.HasInfo("references"):
+            references = spec.GetInfo("references").ApplyOperations(references) or []
+    return references
 
 
-def _drop_root_references_a_variant_carries(layer: Sdf.Layer) -> None:
-    root = layer.GetPrimAtPath(f"/{layer.defaultPrim}")
-    variant_set = root.variantSets.get(GEOMETRY_VARIANT_SET)
+def _variant_references(spec: Sdf.PrimSpec) -> list[Sdf.Reference]:
+    variant_set = spec.variantSets.get(GEOMETRY_VARIANT_SET)
     if variant_set is None:
-        return
-    carried = [
+        return []
+    return [
         reference
         for variant in variant_set.variants.values()
         for reference in variant.primSpec.referenceList.GetAddedOrExplicitItems()
     ]
-    references = root.referenceList.GetAddedOrExplicitItems()
-    kept = [reference for reference in references if reference not in carried]
-    if len(kept) == len(references):
-        return
-    root.referenceList.ClearEdits()
-    root.referenceList.prependedItems = kept
-    layer.Save()
-    log.info(
-        "%s: dropped %d root references the %s variant set already carries",
-        layer.identifier,
-        len(references) - len(kept),
-        GEOMETRY_VARIANT_SET,
-    )

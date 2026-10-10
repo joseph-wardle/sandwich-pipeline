@@ -14,6 +14,7 @@ from pipe.core.asset import (
     maya_model_stream,
     paths_for_asset,
 )
+from pipe.core.asset.paths import DEFAULT_GEOMETRY_VARIANT
 from pipe.core.assembly.model import AssemblyError
 from pxr import Usd
 from pipe.core.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
@@ -82,11 +83,13 @@ def _current_scene_path() -> Path | None:
 
 
 class _PublishAssetVariantControls:
+    _geo_var_widget: QWidget
     _geo_var_dropdown: QComboBox
     _conn: ShotGrid | None
 
     def _init_variant_controls(self) -> None:
         geo_var_widget = QWidget(cast(QWidget, self))
+        self._geo_var_widget = geo_var_widget
         geo_var_layout = QHBoxLayout(geo_var_widget)
         geo_var_layout.setContentsMargins(0, 0, 0, 0)
         geo_var_layout.setSpacing(0)
@@ -98,7 +101,7 @@ class _PublishAssetVariantControls:
 
         self._geo_var_dropdown = QComboBox()
         self._geo_var_dropdown.setEditable(True)
-        self._geo_var_dropdown.setCurrentText("main")
+        self._geo_var_dropdown.setCurrentText(DEFAULT_GEOMETRY_VARIANT)
         self._geo_var_dropdown.setToolTip(
             "Enter or select the geometry variant to publish."
         )
@@ -110,7 +113,14 @@ class _PublishAssetVariantControls:
         insert_at = max(self._layout.count() - 1, 0)  # type: ignore
         self._layout.insertWidget(insert_at, geo_var_widget)  # type: ignore
 
+    def hide_variant_controls(self) -> None:
+        """An assembly has no geometry variants of its own: it publishes its pieces,
+        so the field would only invite a variant nothing reads."""
+        self._geo_var_widget.hide()
+
     def get_selected_variant(self) -> str:
+        if self._geo_var_widget.isHidden():
+            return DEFAULT_GEOMETRY_VARIANT
         return self._geo_var_dropdown.currentText()
 
     def _populate_geo_var(self, asset: Asset | None) -> None:
@@ -119,11 +129,13 @@ class _PublishAssetVariantControls:
         else:
             variants = []
         if not variants:
-            variants = ["main"]
+            variants = [DEFAULT_GEOMETRY_VARIANT]
         self._geo_var_dropdown.clear()
         self._geo_var_dropdown.addItems(variants)
         self._geo_var_dropdown.setCurrentText(
-            "main" if "main" in variants else variants[0]
+            DEFAULT_GEOMETRY_VARIANT
+            if DEFAULT_GEOMETRY_VARIANT in variants
+            else variants[0]
         )
 
 
@@ -779,7 +791,10 @@ class AssetPublisher(Publisher):
         """
         dialog_type = cast(Any, self._dialog_T)
         if self._dialog_T in (PublishAssetOptionsDialog, PublishAssetPickerDialog):
-            self._dialog = dialog_type(self._window, entity_list, self._conn)
+            dialog = dialog_type(self._window, entity_list, self._conn)
+            if self._assembly_stage is not None:
+                dialog.hide_variant_controls()
+            self._dialog = dialog
         else:
             self._dialog = self._dialog_T(self._window, entity_list)
 

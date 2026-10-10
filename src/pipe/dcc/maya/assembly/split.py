@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import suppress
 from pathlib import Path
 
 from maya import cmds as mc
@@ -26,13 +27,22 @@ from pipe.core.assembly.normalize import (
     prim_point_bounds,
 )
 from pipe.core.assembly.pieces import stamp_assembly
-from pipe.core.assembly.plan import hand_made_model, scale_problem
+from pipe.core.assembly.plan import (
+    hand_made_model,
+    orphan_remedy,
+    orphaned_source,
+    scale_problem,
+)
 from pipe.dcc.maya.assembly.scan import (
     renderable_meshes,
     world_matrix,
     world_point_bounds,
 )
-from pipe.dcc.maya.assembly.stage import ensure_assembly_stage, stage_shape
+from pipe.dcc.maya.assembly.stage import (
+    ensure_assembly_stage,
+    placed_prim_names,
+    stage_shape,
+)
 from pipe.dcc.maya.util.materials import delete_unused_shading_groups, shading_groups
 from pipe.dcc.maya.util.selection import maintain_selection
 from pipe.dcc.maya.util.usd_export import export_selection
@@ -44,15 +54,14 @@ _ROOT_PRIM_TYPE = "xform"
 _SHADING_MODE = "useRegistry"
 
 _PLACEMENT_TOLERANCE = 1e-3
-
-_PENDING_SUFFIX = ".writing.usd"
+_PENDING_DIRNAME = ".writing"
 
 
 def split_piece(
     piece: Piece, target: PieceTarget, *, assembly_root: Path
 ) -> SplitResult:
     """Move `piece` out of the Maya scene and into `target`, in place."""
-    _refuse_existing_model(target)
+    _refuse_existing_model(target, assembly_root)
     _refuse_scene_units()
     stage_shape()  # Refuse an ambiguous scene before anything is written.
     scale = _bakeable_scale(piece)
@@ -80,10 +89,18 @@ def split_piece(
     )
 
 
-def _refuse_existing_model(target: PieceTarget) -> None:
-    """Refuse an asset modelled by hand, or one that already has this variant."""
+def _refuse_existing_model(target: PieceTarget, assembly_root: Path) -> None:
+    """Refuse an asset modelled by hand, one that already has this variant, or a
+    layer an interrupted split of this assembly left with no piece using it."""
     found = hand_made_model(target.asset_root)
     if found is None and target.source_layer.exists():
+        if orphaned_source(
+            target.source_layer,
+            target.prim_name,
+            assembly_root=assembly_root,
+            placed=placed_prim_names(),
+        ):
+            raise SplitError(orphan_remedy(target.asset_name, [target.source_layer]))
         found = target.source_layer
     if found is not None:
         raise SplitError(
@@ -161,7 +178,7 @@ def _install_source_layer(
     piece: Piece, target: PieceTarget, scale: float, assembly_root: Path
 ) -> Gf.Matrix4d:
     """Write `target.source_layer`, normalized, and return the normalization."""
-    pending = target.source_layer.with_name(target.source_layer.stem + _PENDING_SUFFIX)
+    pending = target.source_layer.parent / _PENDING_DIRNAME / target.source_layer.name
     try:
         with maintain_selection():
             mc.select(piece.node, replace=True)
@@ -179,6 +196,9 @@ def _install_source_layer(
     except Exception:
         pending.unlink(missing_ok=True)
         raise
+    finally:
+        with suppress(OSError):
+            pending.parent.rmdir()
     return normalization
 
 

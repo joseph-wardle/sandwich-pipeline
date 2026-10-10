@@ -104,8 +104,11 @@ def create_skd_lookdev(parent: hou.Node, node_name: str | None = None) -> hou.No
     return parent.createNode(node_type)
 
 
-def ensure_managed_skd_component_builder(parent: hou.Node | None = None) -> hou.Node:
-    """Return exactly one managed SKD builder output, creating one if missing.
+def ensure_managed_skd_component_builder(
+    parent: hou.Node | None = None,
+) -> tuple[hou.Node, tuple[str, ...]]:
+    """Return exactly one managed SKD builder output, creating one if missing,
+    and what the artist should know about its wiring.
 
     This function is intentionally conservative:
     - It never deletes nodes.
@@ -115,9 +118,8 @@ def ensure_managed_skd_component_builder(parent: hou.Node | None = None) -> hou.
     stage = _resolve_stage_context(parent)
     output = _find_or_create_builder_output(stage)
     pieces = _pieces_layer()
-    if pieces is not None:
-        _ensure_pieces_sublayer(output, pieces)
-    return output
+    warnings = _ensure_pieces_sublayer(output, pieces) if pieces is not None else ()
+    return output, warnings
 
 
 def _find_or_create_builder_output(stage: hou.Node) -> hou.Node:
@@ -157,7 +159,7 @@ def _pieces_layer() -> Path | None:
     return pieces if pieces.is_file() else None
 
 
-def _ensure_pieces_sublayer(output: hou.Node, pieces: Path) -> None:
+def _ensure_pieces_sublayer(output: hou.Node, pieces: Path) -> tuple[str, ...]:
     """Feed the config above `output` from the pieces layer, touching nothing else."""
     config = output.input(0)
     if config is None:
@@ -166,7 +168,7 @@ def _ensure_pieces_sublayer(output: hou.Node, pieces: Path) -> None:
         config.setPosition(output.position() + hou.Vector2(0.0, 1.6))
         output.setInput(0, config)
     if any(_is_pieces_sublayer(node, pieces) for node in config.inputAncestors()):
-        return
+        return ()
 
     previous = config.input(0)
     sublayer = _create_pieces_sublayer(
@@ -174,14 +176,13 @@ def _ensure_pieces_sublayer(output: hou.Node, pieces: Path) -> None:
     )
     sublayer.setPosition(config.position() + hou.Vector2(0.0, 1.6))
     config.setInput(0, sublayer)
-    if previous is not None:
-        log.warning(
-            "%s now publishes the assembly's pieces layer; %s is disconnected. "
-            "An assembly holds no geometry or materials of its own: move that "
-            "work into the children (ADR-0032).",
-            output.path(),
-            previous.path(),
-        )
+    if previous is None:
+        return ()
+    return (
+        f"{output.path()} now publishes the assembly's pieces layer; "
+        f"{previous.path()} is disconnected. An assembly holds no geometry or "
+        "materials of its own: move that work into the children (ADR-0032).",
+    )
 
 
 def _is_pieces_sublayer(node: hou.Node, pieces: Path) -> bool:

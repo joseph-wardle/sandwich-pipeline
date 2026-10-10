@@ -18,6 +18,7 @@ from pipe.core.asset.paths import (
     MODEL_FILENAME,
     AssetPaths,
     asset_root,
+    production_relative_identifier,
 )
 from pipe.core.assembly.model import VARIANT_SEPARATOR, Piece, PieceTarget
 from pipe.core.assembly.normalize import ScaleCheck, inspect_scale
@@ -98,6 +99,7 @@ def plan_split(
 ) -> Plan:
     """Decide what each of `pieces` becomes beside `assembly`, and what stops it."""
     assets = list(assets)
+    assembly_root = asset_root(assembly, production_root)
     by_label: dict[str, list[Piece]] = {}
     for piece in pieces:
         by_label.setdefault(piece.label, []).append(piece)
@@ -107,7 +109,13 @@ def plan_split(
         display_name = display_name_for(label)
         variants = [piece.variant for piece in group]
         claim = claim_for(
-            display_name, assembly.subdirectory, variants, assets, production_root
+            display_name,
+            assembly.subdirectory,
+            variants,
+            assets,
+            production_root,
+            assembly_root=assembly_root,
+            placed=placed,
         )
         children.append(Child(display_name, assembly.subdirectory, claim, tuple(group)))
 
@@ -127,12 +135,16 @@ def claim_for(
     variants: Collection[str],
     assets: Iterable[Asset],
     production_root: Path | None = None,
+    *,
+    assembly_root: Path,
+    placed: Collection[str] = (),
 ) -> New | Adopt | AddVariant | Occupied:
     """What a split claims with `display_name`: naming's rules, except that a
     record with files takes a variant it has not built yet.
 
     A variant ShotGrid lists without a source layer is one a split declared and
-    then failed to build."""
+    then failed to build. A source layer this assembly wrote that none of its
+    `placed` pieces uses is one an interrupted split left behind."""
     assets = list(assets)
     claim = classify(display_name, subdirectory, assets, production_root)
     if not isinstance(claim, Occupied):
@@ -152,11 +164,21 @@ def claim_for(
             "cannot add to it. Choose a different name."
         )
 
-    taken = [
-        variant
-        for variant in variants
-        if paths.publish_source_variant_usd(variant).exists()
-    ]
+    taken: list[str] = []
+    orphaned: list[Path] = []
+    for variant in variants:
+        source = paths.publish_source_variant_usd(variant)
+        if not source.exists():
+            continue
+        prim_name = PieceTarget(name, paths.root, variant).prim_name
+        if orphaned_source(
+            source, prim_name, assembly_root=assembly_root, placed=placed
+        ):
+            orphaned.append(source)
+        else:
+            taken.append(variant)
+    if orphaned:
+        return Occupied(orphan_remedy(asset.display_name, orphaned))
     if taken:
         return Occupied(
             f'"{asset.display_name}" already has the {", ".join(taken)} variant. '
@@ -173,6 +195,31 @@ def claim_for(
         None,
     )
     return AddVariant(asset, split_from)
+
+
+def orphaned_source(
+    source: Path, prim_name: str, *, assembly_root: Path, placed: Collection[str]
+) -> bool:
+    """Whether `source` was left by an interrupted split of this assembly.
+
+    A split writes the child's layer, then places the prim and saves the scene;
+    a crash or a failed save between the two leaves the layer with no piece
+    using it. Only the artist can say whether it is still wanted, so the file
+    is never overwritten.
+    """
+    return (
+        assembly_of(source) == production_relative_identifier(assembly_root)
+        and prim_name not in placed
+    )
+
+
+def orphan_remedy(asset_name: str, sources: Iterable[Path]) -> str:
+    files = ", ".join(str(source) for source in sources)
+    return (
+        f'"{asset_name}" has a layer from an interrupted split of this assembly '
+        f"that no piece uses: {files}. Delete the file, then refresh the plan "
+        "and split again."
+    )
 
 
 def hand_made_model(asset_root: Path) -> Path | None:
