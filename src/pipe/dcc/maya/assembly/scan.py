@@ -126,7 +126,7 @@ def renderable_meshes(node: str) -> list[str]:
     if not meshes:
         # `mc.ls` with nothing to filter would list the whole scene instead.
         return []
-    return cast(list[str], mc.ls(*meshes, noIntermediate=True, long=True) or [])
+    return mc.ls(*meshes, noIntermediate=True, long=True) or []
 
 
 def world_matrix(node: str) -> Gf.Matrix4d:

@@ -24,8 +24,9 @@ call ``set_progress`` / ``finish`` manually.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from contextlib import contextmanager
+from typing import Generator
 
 from Qt import QtCore, QtWidgets
 from Qt.QtWidgets import QDialog, QLabel, QProgressBar
@@ -249,7 +250,7 @@ def progress_scope(
     title: str,
     steps: Sequence[str],
     cancellable: bool = False,
-) -> Iterator[ProgressScope | _NoOpProgressScope]:
+) -> Generator[ProgressScope | _NoOpProgressScope]:
     """Show a progress dialog for the duration of a synchronous operation.
 
     The dialog is guaranteed to close when the block exits, even on exception.

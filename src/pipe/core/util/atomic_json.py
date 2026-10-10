@@ -9,7 +9,7 @@ import json
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Generator
 
 from filelock import FileLock
 
@@ -33,7 +33,7 @@ def write_json_atomic(path: Path, data: object) -> None:
 
 
 @contextmanager
-def json_write_lock(path: Path) -> Iterator[None]:
+def json_write_lock(path: Path) -> Generator[None]:
     """Hold an exclusive cross-process lock keyed on `path` for the block.
 
     The lock is a sibling `<name>.lock` file. `filelock` blocks until the

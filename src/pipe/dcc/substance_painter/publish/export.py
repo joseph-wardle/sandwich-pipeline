@@ -462,3 +462,4 @@ class Exporter:
                     planned_texture_count=planned_texture_count,
                     exported_texture_count=_file_count(all_exported_textures),
                 )
+        return all_exported_textures

@@ -6,7 +6,7 @@ import sqlite3
 import time
 from contextlib import closing, contextmanager
 from pathlib import Path
-from typing import Any, Iterator, cast
+from typing import Any, Generator, cast
 
 import hou
 
@@ -73,7 +73,7 @@ class Transaction:
 
 
 @contextmanager
-def transaction(db_path: Path) -> Iterator[Transaction]:
+def transaction(db_path: Path) -> Generator[Transaction]:
     """One locked write to `db_path`, creating the DB if it does not exist."""
     with db_lock(db_path):
         source = hou.AssetGalleryDataSource(str(db_path))

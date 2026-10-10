@@ -2,10 +2,9 @@ import datetime
 import os
 import re
 import subprocess
-from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator
 
 import nuke
 from env_sg import DB_Config
@@ -160,7 +159,7 @@ def export_mov(group):
 
 
 @contextmanager
-def proxy_off() -> Iterator[None]:
+def proxy_off() -> Generator[None]:
     """Proxy reads each 1080 render at half size, which would halve the movie's
     detail; the review Reformat shrinks the full frame instead."""
     root = nuke.root()
