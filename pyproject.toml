@@ -114,7 +114,7 @@ extra-paths = [
 ]
 
 [tool.ty.src]
-include = ["src", "tests"]
+include = ["src"]
 respect-ignore-files = false
 exclude = [
     ".git",
