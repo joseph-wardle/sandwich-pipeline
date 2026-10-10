@@ -115,6 +115,10 @@ def summarize_result(payload: dict[str, Any]) -> str:
             "in the asset builder."
         )
 
+    children = payload.get("children", [])
+    if isinstance(children, list) and children:
+        line += f" {len(children)} piece(s) rebuilt first."
+
     # The builder copies its publish step's warnings into this top-level list.
     warnings = payload.get("warnings", [])
     if isinstance(warnings, list) and warnings:

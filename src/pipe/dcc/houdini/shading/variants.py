@@ -14,7 +14,7 @@ from pathlib import Path
 USD_EXTENSIONS = frozenset({".usd", ".usda", ".usdc"})
 USD_EXTENSION_ORDER = (".usd", ".usdc", ".usda")
 DEFAULT_GEO_VARIANT = "main"
-DEFAULT_MAT_VARIANT = "main"
+DEFAULT_MAT_VARIANT = "default"
 GEOMETRY_SCOPE_PREFIX = "g_"
 MATERIAL_SCOPE_PREFIX = "v_"
 GEO_SOURCE_DIR = Path("publish") / "_src"

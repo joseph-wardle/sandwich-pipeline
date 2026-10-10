@@ -13,6 +13,7 @@ from .assetfile_manager import (
     install_asset_menu,
     read_asset_metadata,
     resolve_asset_from_scene_path,
+    scene_asset,
     write_asset_metadata,
 )
 
@@ -27,6 +28,7 @@ __all__ = [
     "write_asset_metadata",
     "read_asset_metadata",
     "resolve_asset_from_scene_path",
+    "scene_asset",
     "AssetOpenDialog",
     "MAssetFileManager",
     "install_asset_menu",

@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import re
-import shutil
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence, cast
 
@@ -18,6 +14,9 @@ from pipe.core.asset import (
     maya_model_stream,
     paths_for_asset,
 )
+from pipe.core.asset.paths import DEFAULT_GEOMETRY_VARIANT
+from pipe.core.assembly.model import AssemblyError
+from pxr import Usd
 from pipe.core.shotgrid import Asset, SGEntity, ShotGrid, ShotGridError
 from pipe.core.ui import (
     FilteredListDialog,
@@ -42,13 +41,12 @@ from Qt.QtWidgets import (
 )
 
 from pipe.dcc.houdini.launch import HoudiniLauncher
-from pipe.dcc.maya.assetfile import (
-    read_asset_metadata,
-    resolve_asset_from_scene_path,
-    write_asset_metadata,
-)
+from pipe.dcc.maya.assembly.publish import export_assembly, publishable_stage
+from pipe.dcc.maya.assetfile import scene_asset, write_asset_metadata
+from pipe.dcc.maya.util.materials import material_problems
 from pipe.dcc.maya.util.random_color import is_random_color_active
 from pipe.dcc.maya.util.selection import maintain_selection
+from pipe.dcc.maya.util.usd_export import export_selection
 
 from .publisher import PublishCopyError, Publisher, USDExportError
 
@@ -85,11 +83,13 @@ def _current_scene_path() -> Path | None:
 
 
 class _PublishAssetVariantControls:
+    _geo_var_widget: QWidget
     _geo_var_dropdown: QComboBox
     _conn: ShotGrid | None
 
     def _init_variant_controls(self) -> None:
         geo_var_widget = QWidget(cast(QWidget, self))
+        self._geo_var_widget = geo_var_widget
         geo_var_layout = QHBoxLayout(geo_var_widget)
         geo_var_layout.setContentsMargins(0, 0, 0, 0)
         geo_var_layout.setSpacing(0)
@@ -101,7 +101,7 @@ class _PublishAssetVariantControls:
 
         self._geo_var_dropdown = QComboBox()
         self._geo_var_dropdown.setEditable(True)
-        self._geo_var_dropdown.setCurrentText("main")
+        self._geo_var_dropdown.setCurrentText(DEFAULT_GEOMETRY_VARIANT)
         self._geo_var_dropdown.setToolTip(
             "Enter or select the geometry variant to publish."
         )
@@ -113,7 +113,14 @@ class _PublishAssetVariantControls:
         insert_at = max(self._layout.count() - 1, 0)  # type: ignore
         self._layout.insertWidget(insert_at, geo_var_widget)  # type: ignore
 
+    def hide_variant_controls(self) -> None:
+        """An assembly has no geometry variants of its own: it publishes its pieces,
+        so the field would only invite a variant nothing reads."""
+        self._geo_var_widget.hide()
+
     def get_selected_variant(self) -> str:
+        if self._geo_var_widget.isHidden():
+            return DEFAULT_GEOMETRY_VARIANT
         return self._geo_var_dropdown.currentText()
 
     def _populate_geo_var(self, asset: Asset | None) -> None:
@@ -122,11 +129,13 @@ class _PublishAssetVariantControls:
         else:
             variants = []
         if not variants:
-            variants = ["main"]
+            variants = [DEFAULT_GEOMETRY_VARIANT]
         self._geo_var_dropdown.clear()
         self._geo_var_dropdown.addItems(variants)
         self._geo_var_dropdown.setCurrentText(
-            "main" if "main" in variants else variants[0]
+            DEFAULT_GEOMETRY_VARIANT
+            if DEFAULT_GEOMETRY_VARIANT in variants
+            else variants[0]
         )
 
 
@@ -330,6 +339,8 @@ class AssetPublisher(Publisher):
         self._component_basename = None
         self._asset_name = None
         self._houdini_result = None
+        self._assembly_stage: Usd.Stage | None = None
+        self._asset_paths: AssetPaths | None = None
         self._scene_asset: Asset | None = None
         self._backup_result: BackupResult | None = None
         self._backup_status: str | None = None
@@ -337,21 +348,9 @@ class AssetPublisher(Publisher):
         self._version_note: str | None = None
 
     def _resolve_scene_asset(self) -> Asset | None:
-        metadata = read_asset_metadata(self._conn)
-        if metadata.asset:
-            return metadata.asset
-
-        scene_path = _current_scene_path()
-        if scene_path is None:
-            log.warning("No scene path; cannot resolve asset metadata.")
-            return None
-
-        asset = resolve_asset_from_scene_path(self._conn, scene_path)
-        if asset:
-            log.info("Resolved asset from scene path; writing file metadata.")
-            write_asset_metadata(asset)
-        else:
-            log.warning("Failed to resolve asset from scene path: %s", scene_path)
+        asset = scene_asset(self._conn)
+        if asset is None:
+            log.warning("The open scene is not an asset's model file.")
         return asset
 
     def _ensure_scene_saved(self) -> bool:
@@ -480,6 +479,15 @@ class AssetPublisher(Publisher):
             base_name = f"{base_name}_{variant}"
         return name, base_name
 
+    def _resolve_assembly(self) -> bool:
+        """Decide whether this scene publishes as an assembly, refusing one not ready."""
+        try:
+            self._assembly_stage = publishable_stage()
+        except AssemblyError as exc:
+            MessageDialog(self._window, str(exc), "Cannot publish").exec_()
+            return False
+        return True
+
     def _prepublish(self) -> bool:
         if is_random_color_active():
             MessageDialog(
@@ -490,6 +498,11 @@ class AssetPublisher(Publisher):
                 "Cannot export: Random Colors",
             ).exec_()
             return False
+
+        if self._assembly_stage is not None:
+            # An assembly holds no geometry of its own to check.
+            self._configure_dialog_for_scene()
+            return True
 
         checker = ModelChecker.get()
         self._override = False
@@ -610,11 +623,15 @@ class AssetPublisher(Publisher):
         name, basename = self._compute_component_basename(asset, variant_name)
         asset_paths = paths_for_asset(asset)
         self._asset_name = name
+        self._asset_paths = asset_paths
         self._component_basename = basename
         return asset_paths.publish_source_variant_usd(variant_name)
 
     def _get_confirm_message(self) -> str:
-        message = super()._get_confirm_message()
+        if self._assembly_stage is None:
+            message = super()._get_confirm_message()
+        else:
+            message = f"The assembly has been published to {self._publish_path.parent}"
 
         details: list[str] = []
         if self._backup_status:
@@ -664,6 +681,19 @@ class AssetPublisher(Publisher):
                     if gallery_status:
                         details.append(f"- Gallery sync: {gallery_status}")
 
+            children = result.get("children")
+            if isinstance(children, list) and children:
+                details.append(f"- Pieces published first: {len(children)}")
+                regenerated = [
+                    child["asset_name"]
+                    for child in children
+                    if (child.get("summary") or {}).get("variant_graph_regenerated")
+                ]
+                if regenerated:
+                    details.append(
+                        "- Managed variants regenerated: " + ", ".join(regenerated)
+                    )
+
             def _append_messages(
                 heading: str,
                 payload: Any,
@@ -699,6 +729,12 @@ class AssetPublisher(Publisher):
                     publish_result.get("warnings"),
                     details,
                 )
+            for child in children if isinstance(children, list) else []:
+                _append_messages(
+                    f"Warnings for '{child.get('asset_name')}':",
+                    child.get("warnings"),
+                    details,
+                )
             _append_messages("Errors:", result.get("errors"), details)
             if isinstance(publish_result, dict):
                 _append_messages(
@@ -719,6 +755,8 @@ class AssetPublisher(Publisher):
             self._version_note = None
 
             if not self._ensure_scene_saved():
+                return
+            if not self._resolve_assembly():
                 return
             if not self._prepublish():
                 return
@@ -753,7 +791,10 @@ class AssetPublisher(Publisher):
         """
         dialog_type = cast(Any, self._dialog_T)
         if self._dialog_T in (PublishAssetOptionsDialog, PublishAssetPickerDialog):
-            self._dialog = dialog_type(self._window, entity_list, self._conn)
+            dialog = dialog_type(self._window, entity_list, self._conn)
+            if self._assembly_stage is not None:
+                dialog.hide_variant_controls()
+            self._dialog = dialog
         else:
             self._dialog = self._dialog_T(self._window, entity_list)
 
@@ -833,25 +874,21 @@ class AssetPublisher(Publisher):
         return steps
 
     def _export_usd_to_publish_path(self) -> None:
-        """Run `mayaUSDExport` plus the Windows-specific temp-file workaround.
-
-        On Windows, `mayaUSDExport` writes to a temp directory and then we
-        move the result into the final publish path — see
-        https://github.com/PixarAnimationStudios/OpenUSD/issues/849.
-        """
-        self._publish_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_publish_path = os.getenv("TEMP", "") + os.pathsep + self._publish_path.name
-
-        kwargs = {
-            "file": str(temp_publish_path if self._IS_WINDOWS else self._publish_path),
-            "selection": True,
-            "stripNamespaces": True,
-            "exportCollectionBasedBindings": True,
-            **self._get_mayausd_kwargs(),
-        }
-
+        """Write the source layer: the selection, or an assembly's pieces and flat mesh."""
         try:
-            mc.mayaUSDExport(**kwargs)  # type: ignore
+            if self._assembly_stage is not None:
+                export_assembly(
+                    self._assembly_stage,
+                    pieces=cast(AssetPaths, self._asset_paths).pieces_layer,
+                    mesh=self._publish_path,
+                )
+            else:
+                export_selection(
+                    self._publish_path,
+                    stripNamespaces=True,
+                    exportCollectionBasedBindings=True,
+                    **self._get_mayausd_kwargs(),
+                )
         except Exception as exc:
             log.exception("USD export failed")
             MessageDialog(
@@ -860,15 +897,6 @@ class AssetPublisher(Publisher):
                 "Export Failed",
             ).exec_()
             raise USDExportError(str(exc) or exc.__class__.__name__) from exc
-
-        if self._IS_WINDOWS:
-            try:
-                shutil.move(temp_publish_path, self._publish_path)
-            except Exception as exc:
-                raise PublishCopyError(
-                    f"Could not move publish from {temp_publish_path} to "
-                    f"{self._publish_path}: {exc}"
-                ) from exc
 
     def _run_postpublish_hook(self) -> None:
         """Invoke the subclass postpublish hook (e.g. the Houdini build)."""
@@ -1084,43 +1112,12 @@ class AssetPublisher(Publisher):
             log.error("Houdini asset builder stderr:\n%s", stderr)
 
     def check_material_bindings_of_selected(self) -> bool:
-        selected: list[str] = mc.ls(selection=True)
-        selected_nodes = (
-            mc.listRelatives(selected, allDescendents=True, fullPath=True) or []  # type: ignore
-        )
-        shading_groups: set[str] = set()
-        for node in selected_nodes:
-            shapes: list[str] | None = mc.listRelatives(
-                node, shapes=True, fullPath=True
-            )
-            if shapes:
-                shading_groups.update(
-                    mc.listConnections(shapes, type="shadingEngine") or []  # type: ignore
-                )
-        failures: dict[str, list[str]] = {}
-        for shading_group in shading_groups:
-            shaders: list[str] = mc.listConnections(
-                f"{shading_group}.surfaceShader", source=True
-            )
-            if shaders:
-                shader = shaders[0]
-                shader_type: str = mc.nodeType(shader)  # type: ignore
-                if shader_type in ILLEGAL_SHADER_TYPES:
-                    failures.setdefault("Non-allowed shader type", []).append(
-                        f"{shading_group} ({shader_type})"
-                    )
-            for shader_rule in ILLEGAL_SHADER_RULES:
-                if shader_rule.pattern.search(shading_group):
-                    failures.setdefault(shader_rule.message, []).append(shading_group)
-        if failures:
-            failure_messages: list[str] = []
-            for message, items in failures.items():
-                failure_messages.append(f"{message}: {', '.join(items)}")
-            message_string = "\n".join(failure_messages)
+        problems = material_problems(cast(list[str], mc.ls(selection=True) or []))
+        if problems:
             MessageDialog(
                 self._window,
                 "The selected model has material issue(s) that need resolved: \n"
-                f"{message_string}",
+                + "\n".join(problems),
             ).exec_()
             return False
         return True
@@ -1157,26 +1154,6 @@ class AssetPublisher(Publisher):
         if messages:
             return "; ".join(messages)
         return "Unknown error"
-
-
-@dataclass(frozen=True)
-class ShaderRule:
-    pattern: re.Pattern
-    message: str
-
-
-ILLEGAL_SHADER_RULES: set[ShaderRule] = {
-    ShaderRule(re.compile("initialShadingGroup"), "No material set"),
-    ShaderRule(re.compile(r"\d$"), "Material name with a trailing digit"),
-    ShaderRule(re.compile(r"SG$"), 'Material name that ends with "SG"'),
-    ShaderRule(
-        re.compile(
-            r"aiStandardSurface|standardSurface|openPBRSurface|lambert|phong|blinn"
-        ),
-        "Unnamed material (material name has default shader name in it)",
-    ),
-}
-ILLEGAL_SHADER_TYPES = {"aiStandardSurface", "aiAmbientOcclusion"}
 
 
 class ModelChecker(MCUI):

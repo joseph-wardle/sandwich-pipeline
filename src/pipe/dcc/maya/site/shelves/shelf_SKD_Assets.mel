@@ -154,6 +154,111 @@ global proc shelf_SKD_Assets () {
         -manage 1
         -visible 1
         -preventOverride 0
+        -annotation "Split the unsplit groups of an assembly into child assets (Linux only)"
+        -enableBackground 0
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Split Pieces"
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -font "plainLabelFont"
+        -imageOverlayLabel "Split"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "split.png"
+        -image1 "split.png"
+        -style "iconOnly"
+        -marginWidth 0
+        -marginHeight 1
+        -command "from pipe.dcc.maya.assembly.shelf import split_pieces; split_pieces()"
+        -sourceType "python"
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "Edit the selected piece of an assembly in Maya"
+        -enableBackground 0
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Edit Piece"
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -font "plainLabelFont"
+        -imageOverlayLabel "Edit Piece"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "edit_as_Maya.png"
+        -image1 "edit_as_Maya.png"
+        -style "iconOnly"
+        -marginWidth 0
+        -marginHeight 1
+        -command "from pipe.dcc.maya.assembly.shelf import edit_selected_piece; edit_selected_piece()"
+        -sourceType "python"
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
+        -annotation "Save the open piece's edits into its child asset"
+        -enableBackground 0
+        -backgroundColor 0 0 0
+        -highlightColor 0.321569 0.521569 0.65098
+        -align "center"
+        -label "Save Piece"
+        -labelOffset 0
+        -rotation 0
+        -flipX 0
+        -flipY 0
+        -useAlpha 1
+        -font "plainLabelFont"
+        -imageOverlayLabel "Save Piece"
+        -overlayLabelColor 2.624876 0.801436 0.012446
+        -overlayLabelBackColor 0.227129 0.227129 0.227129 0.5
+        -image "merge_to_USD.png"
+        -image1 "merge_to_USD.png"
+        -style "iconOnly"
+        -marginWidth 0
+        -marginHeight 1
+        -command "from pipe.dcc.maya.assembly.shelf import save_open_piece; save_open_piece()"
+        -sourceType "python"
+        -commandRepeatable 1
+        -flat 1
+    ;
+    shelfButton
+        -enableCommandRepeat 1
+        -flexibleWidthType 3
+        -flexibleWidthValue 32
+        -enable 1
+        -width 35
+        -height 34
+        -manage 1
+        -visible 1
+        -preventOverride 0
         -annotation "Tool for L&D asset publishing"
         -enableBackground 0
         -backgroundColor 0 0 0

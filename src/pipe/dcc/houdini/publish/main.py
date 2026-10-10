@@ -18,12 +18,14 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, NotRequired, TypedDict
+from typing import Any, Mapping, NotRequired, TypedDict, cast
 
 import hou
 from Qt import QtWidgets
 
+from pipe.core.assembly.pieces import mark_published_assembly
 from pipe.core.asset import asset_owner_from_metadata
+from pipe.core.asset.paths import AssetPaths
 from pipe.core.ui.progress import progress_scope
 from pipe.dcc.houdini.gallery import SESSION_DB_ENV, production_db_path, thumbnail_path
 from pipe.dcc.houdini.gallery import db as gallery_db
@@ -39,10 +41,12 @@ from pipe.core.versioning import (
 )
 
 from . import hooks as publish_hooks
+from . import nodelayouts
 
 log = logging.getLogger(__name__)
 
 COMPONENT_OUTPUT_TYPE_NAME = "componentoutput"
+EXPORT_ROP_NAME = "rop"
 EXPORT_PARMS = ("execute", "render", "renderbutton")
 REBUILD_COMMAND = "pipe houdini -p -m pipe.dcc.houdini.gallery.rebuild"
 MANIFEST_FILENAME = VERSION_MANIFEST_FILENAME
@@ -194,6 +198,10 @@ def publish_component(
         context = _preflight_context(node_path=node_path, options=opts, result=result)
         if context is None:
             return _finalize_result(result)
+        # The preflight resolved the node, so it exists.
+        wrapper = cast(hou.Node, hou.node(node_path))
+        for problem in nodelayouts.material_warnings(wrapper):
+            _warn(result, "MaterialsOutOfDate", problem)
 
         with progress_scope(
             parent=parent,
@@ -209,6 +217,8 @@ def publish_component(
             export = _export_component(context=context, options=opts, result=result)
             if export is None:
                 return _finalize_result(result)
+            if AssetPaths(context.asset_root).pieces_layer.is_file():
+                mark_published_assembly(context.export_path)
 
             progress.begin_step("Rendering thumbnail")
             thumbnail, thumbnail_bytes = _render_thumbnail(
@@ -620,7 +630,6 @@ def _export_component(
     context.export_path.parent.mkdir(parents=True, exist_ok=True)
 
     node = context.node
-    previous_errors = tuple(node.errors())
     executed = False
     method = "none"
 
@@ -649,21 +658,24 @@ def _export_component(
         )
         return None
 
-    new_errors = [err for err in node.errors() if err not in previous_errors]
-    if new_errors:
+    rop = cast(hou.RopNode, node.node(EXPORT_ROP_NAME))
+    if errors := rop.errors():
         _error(
             result,
             "ExportNodeError",
-            "Component Output reported errors after export: " + "; ".join(new_errors),
+            f"{node.path()} could not write {context.export_path}, so the "
+            "previous publish is still current:\n" + "\n".join(errors),
         )
         return None
 
     if not context.export_path.exists():
-        _warn(
+        _error(
             result,
             "ExportPathMissingAfterExport",
-            f"Export executed, but output file is missing: {context.export_path}",
+            f"{node.path()} reported no errors but wrote no file at "
+            f"{context.export_path}; check the nodes above it.",
         )
+        return None
 
     return {
         "attempted": True,

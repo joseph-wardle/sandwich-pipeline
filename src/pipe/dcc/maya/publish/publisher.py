@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
-import platform
-import shutil
 from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -15,6 +12,7 @@ from pipe.dcc.maya import runtime as maya_runtime
 from pipe.core import telemetry
 from pipe.core.ui import FilteredListDialog, MessageDialog
 from pipe.dcc.maya.util.selection import maintain_selection
+from pipe.dcc.maya.util.usd_export import export_selection
 from pipe.core.shotgrid import Asset, SGEntity, Shot, ShotGrid
 
 if TYPE_CHECKING:
@@ -44,7 +42,6 @@ class Publisher:
     _entity: SGEntity
     _publish_path: Path
     _selected_item: str
-    _system: str
     _use_sg_entity: bool
     _window: QWidget | None
 
@@ -53,7 +50,6 @@ class Publisher:
     ) -> None:
         self._conn = ShotGrid.connect(DB_Config)
         self._window = maya_runtime.get_main_qt_window()
-        self._system = platform.system()
         self._dialog_T = dialog or FilteredListDialog
         self._use_sg_entity = use_sg_entity
 
@@ -74,10 +70,6 @@ class Publisher:
         funcs = (cls._get_entity_from_name, cls._get_save_path)
         for f in funcs:
             setattr(cls, f.__name__, cls._assert_not_none(f))
-
-    @property
-    def _IS_WINDOWS(self) -> bool:
-        return self._system == "Windows"
 
     def _prepublish(self) -> bool:
         """Runs before any other part of the publish function"""
@@ -258,19 +250,10 @@ class Publisher:
         Errors at each stage raise typed exceptions whose `error_code`
         attribute drives the telemetry event written by `record()`.
         """
-        self._publish_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_publish_path = str(Path(os.getenv("TEMP", "")) / self._publish_path.name)
-
-        kwargs = {
-            "file": str(temp_publish_path if self._IS_WINDOWS else self._publish_path),
-            "selection": True,
-            "stripNamespaces": True,
-            # "writeDefaults": True,
-            **self._get_mayausd_kwargs(),
-        }
-
         try:
-            mc.mayaUSDExport(**kwargs)  # type: ignore
+            export_selection(
+                self._publish_path, stripNamespaces=True, **self._get_mayausd_kwargs()
+            )
         except Exception as exc:
             log.exception("Maya USD export failed")
             MessageDialog(
@@ -279,16 +262,6 @@ class Publisher:
                 "Export Failed",
             ).exec_()
             raise USDExportError(str(exc) or exc.__class__.__name__) from exc
-
-        # On Windows, work around https://github.com/PixarAnimationStudios/OpenUSD/issues/849
-        if self._IS_WINDOWS:
-            try:
-                shutil.move(temp_publish_path, self._publish_path)
-            except Exception as exc:
-                raise PublishCopyError(
-                    f"Could not move publish from {temp_publish_path} to "
-                    f"{self._publish_path}: {exc}"
-                ) from exc
 
         try:
             self._postpublish()

@@ -12,7 +12,7 @@ from pipe.core.asset import (
     houdini_asset_builder_stream,
     paths_for_asset,
 )
-from pipe.core.asset.create import new_asset
+from pipe.core.ui.new_asset_dialog import new_asset
 from pipe.core.asset.paths import BACKUP_DIRNAME
 from pipe.core.ui import (
     RESTORE_CANCEL,
@@ -76,7 +76,9 @@ class HAssetFileManager(HFileManager):
             log.warning("Unable to set ASSET context option; asset name missing")
 
         try:
-            nodelayouts.ensure_managed_skd_component_builder()
+            _, warnings = nodelayouts.ensure_managed_skd_component_builder()
+            for warning in warnings:
+                log.warning(warning)
         except Exception:
             log.exception("Failed to ensure SKD Component Builder for %s", asset_name)
 

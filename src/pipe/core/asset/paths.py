@@ -38,9 +38,12 @@ PUBLISH_SOURCE_DIRNAME = "_src"
 PUBLISH_TEXTURES_DIRNAME = "tex"
 PUBLISH_TEXTURES_SOURCE_DIRNAME = "_src"
 PUBLISH_TEXTURES_PREVIEW_DIRNAME = "_preview"
+PUBLISH_ASSEMBLY_DIRNAME = "_asm"
 RIG_DIRNAME = "rig"
 RIG_VERSIONS_DIRNAME = ".versions"
 DEFAULT_GEOMETRY_VARIANT = "main"
+# The variant set a published asset's geometry variants are selected through.
+GEOMETRY_VARIANT_SET = "geo"
 
 # Publish filenames
 PUBLISH_SOURCE_MODEL_FILENAME = "model.usd"
@@ -48,6 +51,7 @@ PUBLISH_ASSET_USD_FILENAME = "asset.usd"
 PUBLISH_GEO_USD_FILENAME = "geo.usd"
 PUBLISH_MTL_USD_FILENAME = "mtl.usd"
 PUBLISH_PAYLOAD_USD_FILENAME = "payload.usd"
+PIECES_LAYER_FILENAME = "pieces.usda"
 
 # Texture naming rule: <material>.<variant>.<map>.<udim>.<ext>
 TEXTURE_NAME_TEMPLATE = "{material}.{variant}.{map}.{udim}"
@@ -106,6 +110,24 @@ class AssetPaths:
     @property
     def publish_textures_dir(self) -> Path:
         return self.publish_dir / PUBLISH_TEXTURES_DIRNAME
+
+    @classmethod
+    def from_entry_layer(cls, entry_layer: Path) -> AssetPaths:
+        return cls(entry_layer.parents[1])
+
+    @classmethod
+    def from_source_layer(cls, source_layer: Path) -> AssetPaths:
+        return cls(source_layer.parents[2])
+
+    @property
+    def entry_layer(self) -> Path:
+        """publish/<name>.usd: the one layer anything outside the asset references."""
+        return self.publish_dir / f"{self.root.name}.usd"
+
+    @property
+    def pieces_layer(self) -> Path:
+        """publish/_asm/pieces.usda; its presence makes the asset an assembly."""
+        return self.publish_dir / PUBLISH_ASSEMBLY_DIRNAME / PIECES_LAYER_FILENAME
 
     def publish_textures_layer_dir(
         self, geo: str, mat: str, material_layer: str
@@ -175,6 +197,10 @@ class AssetPaths:
         """Return the publish/_src USD path for a named variant."""
         return self.publish_source_dir / f"{variant.strip()}.usd"
 
+    def publish_textures_variant_dir(self, variant: str) -> Path:
+        """Return publish/tex/<variant>: the textures published for a geometry variant."""
+        return self.publish_textures_dir / variant.strip()
+
     @property
     def publish_asset_usd(self) -> Path:
         return self.publish_dir / PUBLISH_ASSET_USD_FILENAME
@@ -203,9 +229,24 @@ def paths_for_asset(asset: Asset, production_root: Path | None = None) -> AssetP
     return AssetPaths(asset_root(asset, production_root=production_root))
 
 
+def production_relative_identifier(
+    path: Path, production_root: Path | None = None
+) -> str:
+    """Return `path` as a USD layer identifier resolved through the search path."""
+    prod_root = production_root or get_production_path()
+    try:
+        return path.relative_to(prod_root).as_posix()
+    except ValueError:
+        log.warning(
+            "Layer %s is outside the production root; using its full path", path
+        )
+        return path.as_posix()
+
+
 __all__ = [
     "AssetPaths",
     "DEFAULT_GEOMETRY_VARIANT",
+    "GEOMETRY_VARIANT_SET",
     "DCC_MAYA",
     "DCC_HOUDINI",
     "DCC_SUBSTANCE",
@@ -221,6 +262,8 @@ __all__ = [
     "PUBLISH_TEXTURES_DIRNAME",
     "PUBLISH_TEXTURES_SOURCE_DIRNAME",
     "PUBLISH_TEXTURES_PREVIEW_DIRNAME",
+    "PUBLISH_ASSEMBLY_DIRNAME",
+    "PIECES_LAYER_FILENAME",
     "PUBLISH_SOURCE_MODEL_FILENAME",
     "PUBLISH_ASSET_USD_FILENAME",
     "PUBLISH_GEO_USD_FILENAME",
@@ -230,4 +273,5 @@ __all__ = [
     "asset_root",
     "asset_root_from_path",
     "paths_for_asset",
+    "production_relative_identifier",
 ]

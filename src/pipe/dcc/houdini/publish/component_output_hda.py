@@ -11,9 +11,18 @@ from typing import Any, Mapping
 
 import hou
 
+from pipe.core.assembly.pieces import (
+    child_source_problem,
+    child_variants,
+    placed_variants,
+    published_variants,
+    variant_list,
+)
+from pipe.core.asset.paths import AssetPaths
 from pipe.dcc.houdini.gallery import production_db_path
 
 from . import hooks as publish_hooks
+from . import nodelayouts
 from .main import PublishOptions, publish_component
 
 TURNAROUND_HOOK = "turnaround"
@@ -119,6 +128,12 @@ def preflight(node: hou.Node) -> dict[str, Any]:
                 }
             )
 
+    errors.extend(_empty_piece_problems(node))
+    warnings.extend(
+        {"code": "MaterialsOutOfDate", "message": problem}
+        for problem in nodelayouts.material_warnings(node)
+    )
+
     hook_specs = _collect_hook_specs(node)
     for spec in hook_specs:
         try:
@@ -153,16 +168,73 @@ def publish(node: hou.Node) -> Mapping[str, Any]:
     """Publish using the shared pipe.dcc.houdini.publish.main service."""
     _repair_broken_output_paths(node)
 
-    options = _collect_publish_options(node)
-    try:
-        parent = hou.qt.mainWindow()
-    except Exception:
-        parent = None
-    result = publish_component(node.path(), options, parent=parent)
+    result: Mapping[str, Any]
+    problems = _empty_piece_problems(node)
+    if problems:
+        result = {"status": "failed", "warnings": [], "errors": problems}
+    else:
+        options = _collect_publish_options(node)
+        try:
+            parent = hou.qt.mainWindow()
+        except Exception:
+            parent = None
+        result = publish_component(node.path(), options, parent=parent)
     _write_status(node, title="Publish", payload=result)
     _apply_node_color(node, result)
     _show_ui_message(result, title="SKD Publish")
     return result
+
+
+def _empty_piece_problems(node: hou.Node) -> list[dict[str, str]]:
+    """Why publishing this hip would leave an assembly with an empty piece."""
+    root = _eval_path(node, "asset_root_override") or nodelayouts.hip_asset_root()
+    pieces = AssetPaths(root).pieces_layer
+    if pieces.is_file():
+        return _assembly_problems(root, pieces)
+    return _child_problems(node, root)
+
+
+def _assembly_problems(root: Path, pieces: Path) -> list[dict[str, str]]:
+    """Every child must have, and have published, each variant it is placed as."""
+    problems: list[dict[str, str]] = []
+    for child, placed in child_variants(pieces).items():
+        unbuildable = child_source_problem(child, placed)
+        if unbuildable is not None:
+            problems.append({"code": "ChildSourceMissing", "message": unbuildable})
+            continue
+        missing = placed - published_variants(child)
+        if missing:
+            problems.append(
+                {
+                    "code": "ChildNotPublished",
+                    "message": (
+                        f"'{child.name}' is placed as {variant_list(missing)}, which "
+                        f"its publish does not provide. Publish '{root.name}' "
+                        "from Maya, which publishes every piece first, or "
+                        f"publish '{child.name}' from its own builder."
+                    ),
+                }
+            )
+    return problems
+
+
+def _child_problems(node: hou.Node, root: Path) -> list[dict[str, str]]:
+    """This builder must build every variant the assemblies place of it."""
+    built = nodelayouts.geometry_variants_built(node)
+    unbuilt = placed_variants(root) - built
+    if not unbuilt:
+        return []
+    return [
+        {
+            "code": "VariantNotBuilt",
+            "message": (
+                f"'{root.name}' is placed as {variant_list(unbuilt)} but this "
+                f"builder only builds {variant_list(built)}. Publish the assembly "
+                "from Maya, which regenerates the builder's variants, then publish "
+                "here again."
+            ),
+        }
+    ]
 
 
 def _collect_publish_options(node: hou.Node) -> PublishOptions:
@@ -249,7 +321,7 @@ def _default_asset_name() -> str:
     if context_asset:
         return context_asset
 
-    hip_dir = Path(hou.hscriptStringExpression("$HIP")).name.strip()
+    hip_dir = nodelayouts.hip_asset_root().name.strip()
     if hip_dir:
         return hip_dir
     return "asset"
@@ -431,10 +503,13 @@ def _show_ui_message(payload: Mapping[str, Any], *, title: str) -> None:
     elif warnings:
         severity = hou.severityType.Warning
 
+    # The counts alone send the artist to the node's comment for the reason.
+    reasons = [str(message.get("message", "")) for message in [*errors, *warnings]]
     hou.ui.displayMessage(
         f"Status: {payload.get('status')}\nWarnings: {len(warnings)}\nErrors: {len(errors)}",
         severity=severity,
         title=title,
+        details="\n\n".join(reason for reason in reasons if reason),
     )
 
 

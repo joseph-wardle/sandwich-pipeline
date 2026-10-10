@@ -9,6 +9,9 @@ from typing import Any, cast
 import hou
 import loptoolutils  # type: ignore
 
+from pipe.core.asset.paths import GEOMETRY_VARIANT_SET, AssetPaths
+
+from ..shading import main as shading
 from ..shading import variants
 
 """Node-graph builders for Houdini Solaris tools.
@@ -31,10 +34,13 @@ SKD_BUILDER_NODE_NAME = "skd_component_output"
 SKD_VARIANT_GRAPH_MANAGED_KEY = "pipe_skd_variant_graph_managed"
 SKD_VARIANT_GRAPH_MANAGED_VALUE = "1"
 SKD_VARIANT_GRAPH_OWNER_KEY = "pipe_skd_variant_graph_owner"
+SKD_VARIANT_GRAPH_NAME_KEY = "pipe_skd_variant_graph_name"
 SKD_VARIANT_WARNINGS_KEY = "pipe_skd_variant_graph_warnings"
 SKD_VARIANT_COMMENT_PREFIX = "SKD Variant Graph Warnings"
 SKD_PENDING_COMMENT_PREFIX = "Pending Variant:"
 SKD_VARIANT_BOX_PREFIX = "skd_variant_"
+PIECES_NODE_NAME = "pieces"
+CONFIG_NODE_TYPE = "sdm223::lnd_componentconfig"
 
 log = logging.getLogger(__name__)
 
@@ -98,8 +104,11 @@ def create_skd_lookdev(parent: hou.Node, node_name: str | None = None) -> hou.No
     return parent.createNode(node_type)
 
 
-def ensure_managed_skd_component_builder(parent: hou.Node | None = None) -> hou.Node:
-    """Return exactly one managed SKD builder output, creating one if missing.
+def ensure_managed_skd_component_builder(
+    parent: hou.Node | None = None,
+) -> tuple[hou.Node, tuple[str, ...]]:
+    """Return exactly one managed SKD builder output, creating one if missing,
+    and what the artist should know about its wiring.
 
     This function is intentionally conservative:
     - It never deletes nodes.
@@ -107,7 +116,13 @@ def ensure_managed_skd_component_builder(parent: hou.Node | None = None) -> hou.
     - It only creates a new builder when no managed/recognizable builder exists.
     """
     stage = _resolve_stage_context(parent)
+    output = _find_or_create_builder_output(stage)
+    pieces = _pieces_layer()
+    warnings = _ensure_pieces_sublayer(output, pieces) if pieces is not None else ()
+    return output, warnings
 
+
+def _find_or_create_builder_output(stage: hou.Node) -> hou.Node:
     managed = _find_managed_builder_outputs(stage)
     if managed:
         if len(managed) > 1:
@@ -136,6 +151,65 @@ def ensure_managed_skd_component_builder(parent: hou.Node | None = None) -> hou.
     output = create_skd_component_builder({}, parent=stage)
     _mark_managed_builder(output)
     return output
+
+
+def hip_asset_root() -> Path:
+    """The asset an asset_builder hip belongs to: the folder it is saved in."""
+    return Path(hou.hscriptStringExpression("$HIP"))
+
+
+def _pieces_layer() -> Path | None:
+    """The hip's assembly pieces layer, or None for a component."""
+    pieces = AssetPaths(hip_asset_root()).pieces_layer
+    return pieces if pieces.is_file() else None
+
+
+def _ensure_pieces_sublayer(output: hou.Node, pieces: Path) -> tuple[str, ...]:
+    """Feed the config above `output` from the pieces layer, touching nothing else."""
+    config = output.input(0)
+    if config is None:
+        config = output.parent().createNode(CONFIG_NODE_TYPE, "config")
+        _mark_managed_variant_node(config, owner_path=output.path())
+        config.setPosition(output.position() + hou.Vector2(0.0, 1.6))
+        output.setInput(0, config)
+    if any(_is_pieces_sublayer(node, pieces) for node in config.inputAncestors()):
+        return ()
+
+    previous = config.input(0)
+    sublayer = _create_pieces_sublayer(
+        config.parent(), pieces, owner_path=output.path()
+    )
+    sublayer.setPosition(config.position() + hou.Vector2(0.0, 1.6))
+    config.setInput(0, sublayer)
+    if previous is None:
+        return ()
+    return (
+        f"{output.path()} now publishes the assembly's pieces layer; "
+        f"{previous.path()} is disconnected. An assembly holds no geometry or "
+        "materials of its own: move that work into the children (ADR-0032).",
+    )
+
+
+def _is_pieces_sublayer(node: hou.Node, pieces: Path) -> bool:
+    parm = node.parm("filepath1")
+    return (
+        node.type().name() == "sublayer"
+        and parm is not None
+        and Path(parm.evalAsString()) == pieces
+    )
+
+
+def _create_pieces_sublayer(
+    parent: hou.Node, pieces: Path, *, owner_path: str
+) -> hou.Node:
+    sublayer = parent.createNode("sublayer", PIECES_NODE_NAME)
+    _set_parm_if_exists(
+        sublayer,
+        "filepath1",
+        variants.to_hip_expression(pieces, hip_root=hip_asset_root()),
+    )
+    _mark_managed_variant_node(sublayer, owner_path=owner_path)
+    return sublayer
 
 
 def _resolve_stage_context(parent: hou.Node | None) -> hou.Node:
@@ -277,22 +351,64 @@ def _set_parm_if_exists(node: hou.Node, parm_name: str, value) -> None:
 def _mark_managed_variant_node(node: hou.Node, *, owner_path: str) -> None:
     node.setUserData(SKD_VARIANT_GRAPH_MANAGED_KEY, SKD_VARIANT_GRAPH_MANAGED_VALUE)
     node.setUserData(SKD_VARIANT_GRAPH_OWNER_KEY, owner_path)
+    node.setUserData(SKD_VARIANT_GRAPH_NAME_KEY, node.name())
 
 
 def _clear_managed_variant_nodes(
     parent: hou.Node, *, keep_paths: set[str], owner_path: str
-) -> None:
+) -> list[str]:
+    """Destroy the owner's managed nodes; one it cannot prove it made becomes the artist's."""
+    replaced: list[str] = []
+    released: list[str] = []
     for node in list(parent.children()):
         if node.path() in keep_paths:
             continue
-        if (
-            node.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
-            != SKD_VARIANT_GRAPH_MANAGED_VALUE
-        ):
+        if not _managed_by(node, owner_path=owner_path):
             continue
-        if node.userData(SKD_VARIANT_GRAPH_OWNER_KEY) not in ("", owner_path):
+        if node.userData(SKD_VARIANT_GRAPH_NAME_KEY) != node.name():
+            _release_managed_variant_node(node)
+            released.append(node.name())
             continue
+        replaced.append(node.name())
         node.destroy()
+    warnings: list[str] = []
+    if replaced:
+        warnings.append(
+            f"Regenerating replaced {', '.join(replaced)}, so edits made on them "
+            "are gone. Rename a node to keep it through the next regeneration."
+        )
+    if released:
+        warnings.append(
+            f"Kept {', '.join(released)}, which were renamed, copied or made "
+            "before regeneration tracked names; they no longer feed the output. "
+            "Wire them back in where they belong, or delete them."
+        )
+    return warnings
+
+
+def _managed_by(node: hou.Node, *, owner_path: str) -> bool:
+    managed = node.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
+    owner = node.userData(SKD_VARIANT_GRAPH_OWNER_KEY)
+    return managed == SKD_VARIANT_GRAPH_MANAGED_VALUE and owner in ("", owner_path)
+
+
+def _regeneration_replaces(node: hou.Node, *, owner_path: str) -> bool:
+    """A managed node still carrying the name it was made with; a renamed one is kept."""
+    return (
+        _managed_by(node, owner_path=owner_path)
+        and node.userData(SKD_VARIANT_GRAPH_NAME_KEY) == node.name()
+    )
+
+
+def _release_managed_variant_node(node: hou.Node) -> None:
+    for key in (
+        SKD_VARIANT_GRAPH_MANAGED_KEY,
+        SKD_VARIANT_GRAPH_OWNER_KEY,
+        SKD_VARIANT_GRAPH_NAME_KEY,
+    ):
+        # A node tagged before names were recorded has no name key to destroy.
+        if node.userData(key) is not None:
+            node.destroyUserData(key)
 
 
 def _clear_managed_variant_boxes(parent: hou.Node, *, owner_path: str) -> None:
@@ -466,7 +582,8 @@ def create_skd_component_geometry(
 
     # Configure Component Geometry node
     _set_parm_if_exists(cgeo, "dogeommodelapi", True)
-    _set_parm_if_exists(cgeo, "attribs", "P uv")
+    # Only the proxy has N, so the viewport draws its hard edges.
+    _set_parm_if_exists(cgeo, "attribs", "P uv N")
     _set_parm_if_exists(cgeo, "indexattribs", "texset")
     _set_parm_if_exists(cgeo, "prefixpartitionsubsets", False)
     _set_parm_if_exists(cgeo, "geovariantname", geo_variant or cgeo.name())
@@ -561,7 +678,7 @@ def create_skd_component_material(
 
 
 def _configure_component_output_defaults(out: hou.Node) -> None:
-    asset_name = Path(hou.hscriptStringExpression("$HIP")).name.strip() or "asset"
+    asset_name = hip_asset_root().name.strip() or "asset"
     _set_parm_if_exists(out, "filename", f"{asset_name}.usd")
     _set_parm_if_exists(out, "rootprim", "/" + asset_name)
     _set_parm_if_exists(out, "localize", False)
@@ -659,13 +776,7 @@ def _rebuild_matlib_for_variant(
     if not isinstance(matlib, hou.LopNode):
         return
     try:
-        from ..shading import main as shading_module
-    except Exception as exc:
-        warnings.append(f"MatLib rebuild unavailable for {matlib.path()}: {exc}")
-        return
-
-    try:
-        shading_module.matlib_rebuild(matlib)
+        shading.matlib_rebuild(matlib)
     except Exception as exc:
         warnings.append(
             f"MatLib rebuild failed for geo='{geo_variant}' mat='{mat_variant}': {exc}"
@@ -677,9 +788,8 @@ def _first_managed_geometry_node(
 ) -> hou.Node | None:
     geometry_nodes = [
         node
-        for node in parent.children()
-        if node.type().name() == "componentgeometry"
-        and node.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
+        for node in _geometry_nodes(parent)
+        if node.userData(SKD_VARIANT_GRAPH_MANAGED_KEY)
         == SKD_VARIANT_GRAPH_MANAGED_VALUE
         and (
             owner_path is None
@@ -689,6 +799,54 @@ def _first_managed_geometry_node(
     if not geometry_nodes:
         return None
     return sorted(geometry_nodes, key=lambda node: node.name().casefold())[0]
+
+
+def material_warnings(output: hou.Node) -> list[str]:
+    """Why the materials feeding `output` no longer match the published textures."""
+    return [
+        problem
+        for matlib in _feeding_matlibs(output)
+        for problem in shading.matlib_problems(matlib)
+    ]
+
+
+def materials_regenerable(output: hou.Node) -> bool:
+    """Whether regenerating would rebuild every matlib whose materials are out of date."""
+    return all(
+        _regeneration_replaces(matlib, owner_path=output.path())
+        for matlib in _feeding_matlibs(output)
+        if shading.matlib_problems(matlib)
+    )
+
+
+def _feeding_matlibs(output: hou.Node) -> list[hou.LopNode]:
+    return sorted(
+        (
+            node
+            for node in output.inputAncestors()
+            if isinstance(node, hou.LopNode) and _is_skd_matlib_like(node)
+        ),
+        key=lambda node: node.name(),
+    )
+
+
+def geometry_variants_built(output: hou.Node) -> set[str]:
+    """The geometry variants the builder around `output` builds.
+
+    A branch generated without its source layer is bypassed (pending), and a
+    bypassed branch publishes no geometry for its variant.
+    """
+    return {
+        str(node.evalParm("geovariantname"))
+        for node in _geometry_nodes(output.parent())
+        if not node.isGenericFlagSet(hou.nodeFlag.Bypass)
+    }
+
+
+def _geometry_nodes(parent: hou.Node) -> list[hou.Node]:
+    return [
+        node for node in parent.children() if node.type().name() == "componentgeometry"
+    ]
 
 
 def _set_node_bypass(node: hou.Node, enabled: bool) -> None:
@@ -714,11 +872,17 @@ def _set_pending_state(node: hou.Node, *, pending: bool, reason: str = "") -> No
 
 def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
     """Rebuild a deterministic managed variant graph around an output node."""
+    pieces = _pieces_layer()
+    if pieces is not None:
+        replaced = _rebuild_assembly_graph(output, pieces)
+        _set_variant_generation_warnings(output, replaced)
+        return tuple(replaced)
+
     parent = output.parent()
     out_pos = output.position()
     declared_geo, declared_mat, sg_warnings = _discover_asset_variants_from_shotgrid()
     plan = variants.discover_build_plan(
-        Path(hou.hscriptStringExpression("$HIP")),
+        hip_asset_root(),
         preferred_geo_variants=declared_geo or None,
         preferred_mat_variants=declared_mat or None,
     )
@@ -726,11 +890,13 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
 
     owner_path = output.path()
     _clear_managed_variant_boxes(parent, owner_path=owner_path)
-    _clear_managed_variant_nodes(
-        parent, keep_paths={output.path()}, owner_path=owner_path
+    warnings.extend(
+        _clear_managed_variant_nodes(
+            parent, keep_paths={output.path()}, owner_path=owner_path
+        )
     )
 
-    config = parent.createNode("sdm223::lnd_componentconfig")
+    config = parent.createNode(CONFIG_NODE_TYPE)
     config.setName("config", unique_name=True)
     _mark_managed_variant_node(config, owner_path=owner_path)
 
@@ -866,11 +1032,18 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
         for index, (_, branch) in enumerate(branch_outputs):
             geo_variants.setInput(index, branch)
 
-        _set_parm_if_exists(geo_variants, "variantset", "geo")
-        _set_parm_if_exists(geo_variants, "variantnamesrc", 0)
-        _set_parm_if_exists(geo_variants, "variantcount", len(plan.geometry_variants))
-        for index, (geo_name, _) in enumerate(branch_outputs, start=1):
-            _set_parm_if_exists(geo_variants, f"variantname{index}", geo_name)
+        # Variant names come from the geometry nodes. The working variant is
+        # what the builder shows while editing: main when the asset has one. The
+        # output HDA decides the published default on its own.
+        names = [name for name, _ in branch_outputs]
+        default = (
+            variants.DEFAULT_GEO_VARIANT
+            if variants.DEFAULT_GEO_VARIANT in names
+            else names[0]
+        )
+        _set_parm_if_exists(geo_variants, "variantset", GEOMETRY_VARIANT_SET)
+        _set_parm_if_exists(geo_variants, "setcurrentselection", True)
+        _set_parm_if_exists(geo_variants, "variantname1", default)
 
         upstream = geo_variants
 
@@ -885,6 +1058,31 @@ def rebuild_managed_skd_variant_graph(output: hou.Node) -> tuple[str, ...]:
 
     _set_variant_generation_warnings(output, warnings)
     return tuple(warnings)
+
+
+def _rebuild_assembly_graph(output: hou.Node, pieces: Path) -> list[str]:
+    """An assembly publishes its pieces layer and nothing else (ADR-0032)."""
+    parent = output.parent()
+    out_pos = output.position()
+    owner_path = output.path()
+    _clear_managed_variant_boxes(parent, owner_path=owner_path)
+    replaced = _clear_managed_variant_nodes(
+        parent, keep_paths={owner_path}, owner_path=owner_path
+    )
+
+    sublayer = _create_pieces_sublayer(parent, pieces, owner_path=owner_path)
+    config = parent.createNode(CONFIG_NODE_TYPE, "config")
+    _mark_managed_variant_node(config, owner_path=owner_path)
+    lookdev = create_skd_lookdev(parent, "lookdev")
+    _mark_managed_variant_node(lookdev, owner_path=owner_path)
+
+    config.setInput(0, sublayer)
+    output.setInput(0, config)
+    lookdev.setInput(0, output)
+    sublayer.setPosition(hou.Vector2(out_pos.x(), out_pos.y() + 3.2))
+    config.setPosition(hou.Vector2(out_pos.x(), out_pos.y() + 1.6))
+    lookdev.setPosition(hou.Vector2(out_pos.x(), out_pos.y() - 1.7))
+    return replaced
 
 
 def create_skd_component_builder(
