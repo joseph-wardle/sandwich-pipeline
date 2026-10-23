@@ -9,10 +9,12 @@ from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.render.manager.disk import (
     DeleteFailure,
+    DeleteSkipped,
     RenderLayer,
     RenderVersion,
     ShotRenders,
     delete_version,
+    deletion_order,
     find_renders,
     render_root,
 )
@@ -138,7 +140,8 @@ class RenderManagerWindow(QtWidgets.QWidget):
             ""
             if self._renders.comp_read
             else f"No comp script at {self._renders.comp_script}, so no version "
-            "shows as used and only the latest are kept."
+            "shows as used; only the latest, newest complete, and newest with "
+            "frames are kept."
         )
         layers = self._renders.layers
         if not layers:
@@ -202,8 +205,16 @@ class RenderManagerWindow(QtWidgets.QWidget):
         message = (
             f"Delete {_plural(len(checked), 'version')} of {layer.name}?\n\n{names}"
         )
-        if any(version.is_latest for version in checked):
-            message += "\n\nThis includes the latest version."
+        if kept := [
+            f"{version.name} ({', '.join(version.kept_reasons)})"
+            for version in checked
+            if version.kept_reasons
+        ]:
+            message += (
+                f"\n\nThis includes {', '.join(kept)}, which Delete All Unused "
+                "always keeps: what to read while the latest renders, or after it "
+                "fails."
+            )
         if in_comp := [version.name for version in checked if version.in_comp]:
             script = self._renders.comp_script.name if self._renders else "the comp"
             message += (
@@ -224,13 +235,14 @@ class RenderManagerWindow(QtWidgets.QWidget):
         doomed = [version for layer in layers for version in layer.unused_versions]
         shot_codes = _listed([shot.code or "" for shot in shots])
         kept = (
-            "Versions the comp script reads, the latest version of every layer, "
-            "and FINAL layers are kept."
+            "Versions the comp script reads, each layer's latest, newest complete, "
+            "and newest with frames, and FINAL layers are kept."
         )
         if no_comp:
             kept += (
                 f"\n\n{_listed(no_comp)} {'has' if len(no_comp) == 1 else 'have'} "
-                "no comp script, so only the latest versions are kept there."
+                "no comp script, so only each layer's latest, newest complete, and "
+                "newest with frames are kept there."
             )
         if not doomed:
             MessageDialog(
@@ -261,40 +273,59 @@ class RenderManagerWindow(QtWidgets.QWidget):
     def _delete(self, doomed: list[RenderVersion]) -> None:
         """Deletes folders on disk, then reads it again to show what is left."""
         failures: list[DeleteFailure] = []
+        skipped: list[DeleteSkipped] = []
+        ordered = deletion_order(doomed)
         with progress_scope(
             parent=self, title="Delete Renders", steps=[_DELETE_STEP]
         ) as progress:
             progress.begin_step(_DELETE_STEP)
-            for index, version in enumerate(doomed):
+            for index, version in enumerate(ordered):
                 progress.update_substep(
-                    index, len(doomed), f"{version.path.parent.name}/{version.name}"
+                    index, len(ordered), f"{version.path.parent.name}/{version.name}"
                 )
-                if failure := delete_version(version):
-                    failures.append(failure)
+                outcome = delete_version(version)
+                if isinstance(outcome, DeleteFailure):
+                    failures.append(outcome)
+                elif isinstance(outcome, DeleteSkipped):
+                    skipped.append(outcome)
 
         layer_item = self._layer_list.currentItem()
         layer: RenderLayer | None = layer_item.data(_DATA_ROLE) if layer_item else None
         self._show_layers(keep_layer=layer.name if layer else None)
 
-        deleted = len(doomed) - len(failures)
-        self._status.setText(f"Deleted {_plural(deleted, 'version')}.")
-        if failures:
-            self._report(failures)
+        deleted = len(ordered) - len(failures) - len(skipped)
+        status = f"Deleted {_plural(deleted, 'version')}."
+        if skipped:
+            status += f" Kept {len(skipped)} that changed since you confirmed."
+        self._status.setText(status)
+        if failures or skipped:
+            self._report(failures, skipped)
 
-    def _report(self, failures: list[DeleteFailure]) -> None:
-        listed = "\n".join(
-            f"{failure.path}: {failure.reason}"
-            for failure in failures[:_MAX_LISTED_FAILURES]
-        )
-        more = len(failures) - _MAX_LISTED_FAILURES
-        if more > 0:
-            listed += f"\n…and {more} more."
-        MessageDialog(
-            self,
-            f"Could not delete {_plural(len(failures), 'version')}:\n\n{listed}\n\n"
-            "If the folder belongs to someone else, ask them or a TD to delete it.",
-            "Delete Renders",
-        ).exec_()
+    def _report(
+        self, failures: list[DeleteFailure], skipped: list[DeleteSkipped]
+    ) -> None:
+        sections = []
+        if skipped:
+            sections.append(
+                f"Kept {_plural(len(skipped), 'version')} that changed after you "
+                f"confirmed:\n\n{_listed_outcomes(skipped)}"
+            )
+        if failures:
+            sections.append(
+                f"Could not delete {_plural(len(failures), 'version')}:\n\n"
+                f"{_listed_outcomes(failures)}\n\nIf the folder belongs to someone "
+                "else, ask them or a TD to delete it."
+            )
+        MessageDialog(self, "\n\n".join(sections), "Delete Renders").exec_()
+
+
+def _listed_outcomes(outcomes: Sequence[DeleteFailure | DeleteSkipped]) -> str:
+    listed = "\n".join(
+        f"{outcome.path}: {outcome.reason}"
+        for outcome in outcomes[:_MAX_LISTED_FAILURES]
+    )
+    more = len(outcomes) - _MAX_LISTED_FAILURES
+    return f"{listed}\n…and {more} more." if more > 0 else listed
 
 
 def _layer_item(layer: RenderLayer) -> QtWidgets.QListWidgetItem:
@@ -311,11 +342,16 @@ def _layer_item(layer: RenderLayer) -> QtWidgets.QListWidgetItem:
 
 
 def _version_item(version: RenderVersion, script: str) -> QtWidgets.QTreeWidgetItem:
-    label = f"{version.name}  (latest)" if version.is_latest else version.name
+    tags = version.kept_reasons
+    label = f"{version.name}  ({', '.join(tags)})" if tags else version.name
     item = QtWidgets.QTreeWidgetItem(
         [
             label,
-            "Yes" if version.has_frames else "None yet",
+            "Yes"
+            if version.is_complete
+            else "Incomplete"
+            if version.has_frames
+            else "None yet",
             version.modified.strftime("%Y-%m-%d %H:%M"),
         ]
     )
@@ -324,10 +360,10 @@ def _version_item(version: RenderVersion, script: str) -> QtWidgets.QTreeWidgetI
     if version.in_comp:
         item.setToolTip(_VERSION_COLUMN, f"Read in {script}")
     item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
-    # Everything but the newest starts checked, ready to clean up.
+    # What every cleanup keeps starts unchecked; the rest, ready to clean up.
     item.setCheckState(
         _VERSION_COLUMN,
-        QtCore.Qt.Unchecked if version.is_latest else QtCore.Qt.Checked,
+        QtCore.Qt.Unchecked if version.kept_reasons else QtCore.Qt.Checked,
     )
     return item
 
