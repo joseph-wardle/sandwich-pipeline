@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Sequence, cast
 
 import maya.cmds as mc
-from pipe.core import telemetry
 from pipe.core.announce import DOWNSTREAM, announce_publish
 from pipe.core.asset import (
     AssetPaths,
@@ -58,13 +57,7 @@ from .publisher import PublishCopyError, Publisher, USDExportError
 
 
 class HoudiniBuildError(Exception):
-    """`error_code` is read by `telemetry.record()`"""
-
-    error_code = "HOUDINI_BUILD_FAILED"
-
-    def __init__(self, message: str, *, payload: dict[str, Any] | None = None) -> None:
-        super().__init__(message)
-        self.payload: dict[str, Any] = dict(payload) if payload else {}
+    """Raised when the headless Houdini component build fails."""
 
 
 try:
@@ -353,8 +346,6 @@ class PublishAssetPickerDialog(
 
 
 class AssetPublisher(Publisher):
-    _PUBLISH_KIND = "asset"
-
     _override: bool
     _geo_variant: str
     _component_export_dir: Path | None
@@ -928,39 +919,27 @@ class AssetPublisher(Publisher):
         return True
 
     def _do_publish_export(self) -> None:
-        """The timed export work for an asset publish.
+        """Export USD → run postpublish (Houdini build) → back up the asset.
 
-        Reads as a checklist: export USD → run postpublish (Houdini build) →
-        back up the asset. Each stage raises a typed exception on failure;
-        `record()` reads `error_code` from those typed exceptions.
+        Each stage raises a typed exception on failure.
         """
-        kind = self._publish_kind() or "asset"
+        with progress_scope(
+            parent=self._window,
+            title="Publishing Asset",
+            steps=self._publish_step_labels(),
+        ) as progress:
+            progress.begin_step("Exporting USD", "This may take a moment...")
+            self._export_usd_to_publish_path()
 
-        with telemetry.record(
-            telemetry.EVENT_PUBLISH_USD,
-            payload={
-                "kind": kind,
-                "publish_path": str(self._publish_path),
-            },
-            **self._publish_scope_kwargs(),
-        ):
-            with progress_scope(
-                parent=self._window,
-                title="Publishing Asset",
-                steps=self._publish_step_labels(),
-            ) as progress:
-                progress.begin_step("Exporting USD", "This may take a moment...")
-                self._export_usd_to_publish_path()
+            if ENABLE_HOUDINI_ASSET_BUILD:
+                progress.begin_step(
+                    "Building Houdini component",
+                    "This may take a moment...",
+                )
+            self._run_postpublish_hook()
 
-                if ENABLE_HOUDINI_ASSET_BUILD:
-                    progress.begin_step(
-                        "Building Houdini component",
-                        "This may take a moment...",
-                    )
-                self._run_postpublish_hook()
-
-                progress.begin_step("Backing up asset")
-                self._backup_active_asset()
+            progress.begin_step("Backing up asset")
+            self._backup_active_asset()
 
     @staticmethod
     def _publish_step_labels() -> list[str]:
@@ -1046,16 +1025,6 @@ class AssetPublisher(Publisher):
         except Exception as exc:
             raise PublishCopyError(f"Asset backup failed: {exc}") from exc
 
-    @staticmethod
-    def _component_build_mode(*, ensure_builder: bool, publish_requested: bool) -> str:
-        if ensure_builder and publish_requested:
-            return "ensure_and_publish"
-        if publish_requested:
-            return "publish_only"
-        if ensure_builder:
-            return "ensure_only"
-        return "none"
-
     def _presave(self) -> bool:
         return True
 
@@ -1112,47 +1081,11 @@ class AssetPublisher(Publisher):
         if asset_name == "asset":
             asset_name = asset_paths.root.name
 
-        # `_publish_scope_kwargs` reads the entity's `code`; fall back to the
-        # path-derived asset_name when the entity has no usable code (e.g.
-        # asset built from a scene resolution rather than a SG record).
-        scope_kwargs = self._publish_scope_kwargs()
-        scope_kwargs.setdefault("asset", asset_name.strip())
-
         dcc = HoudiniLauncher(is_python_shell=True)
         env = dcc._get_env_vars()
         env["PIPE_LOG_LEVEL"] = str(log.getEffectiveLevel())
 
-        with telemetry.record(
-            telemetry.EVENT_BUILD_HOUDINI_COMPONENT,
-            payload={
-                "mode": self._component_build_mode(
-                    ensure_builder=True,
-                    publish_requested=True,
-                ),
-                "variant": variant,
-                "warnings_count": 0,
-                "errors_count": 0,
-            },
-            **scope_kwargs,
-        ) as telemetry_event:
-            telemetry_event.attach_to_subprocess(env)
-            try:
-                payload = self._invoke_hython_builder(
-                    asset, asset_paths, asset_name, variant, env=env
-                )
-            except HoudiniBuildError as exc:
-                # Inline update: the error event needs warnings/errors_count
-                # parsed from hython's failed stdout, otherwise the dashboard
-                # has zero diagnostics on every Houdini-build failure.
-                telemetry_event.update(
-                    warnings_count=len(exc.payload.get("warnings") or []),
-                    errors_count=len(exc.payload.get("errors") or []),
-                )
-                raise
-            telemetry_event.update(
-                warnings_count=len(payload.get("warnings") or []),
-                errors_count=len(payload.get("errors") or []),
-            )
+        self._invoke_hython_builder(asset, asset_paths, asset_name, variant, env=env)
 
     def _invoke_hython_builder(
         self,
@@ -1161,8 +1094,8 @@ class AssetPublisher(Publisher):
         asset_name: str,
         variant: str,
         env: dict[str, str],
-    ) -> dict[str, Any]:
-        """Run hython and return its parsed JSON result payload."""
+    ) -> None:
+        """Run hython; its parsed result is stored on `_houdini_result`."""
         command = [
             str(Executables.hython),
             "-m",
@@ -1207,8 +1140,7 @@ class AssetPublisher(Publisher):
             else:
                 self._log_unparseable_hython_output(exc.stdout or "", exc.stderr or "")
             raise HoudiniBuildError(
-                f"Houdini component publish failed with exit code {exc.returncode}",
-                payload=parsed,
+                f"Houdini component publish failed with exit code {exc.returncode}"
             ) from exc
 
         stdout = result.stdout or ""
@@ -1223,10 +1155,8 @@ class AssetPublisher(Publisher):
 
         if payload.get("status") != "success":
             raise HoudiniBuildError(
-                f"Build failed: {self._summarize_houdini_errors(payload)}",
-                payload=payload,
+                f"Build failed: {self._summarize_houdini_errors(payload)}"
             )
-        return payload
 
     @staticmethod
     def _log_unparseable_hython_output(stdout: str, stderr: str) -> None:

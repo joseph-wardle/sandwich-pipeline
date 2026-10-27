@@ -5,7 +5,6 @@ from abc import ABCMeta, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pipe.core import telemetry
 from pipe.core.hud import HudContent
 from pipe.core.playblast.encoding import burn_hud_frames
 from pipe.core.playblast.clip import PreviewClip, padded_frame_number
@@ -19,12 +18,7 @@ DEFAULT_RESOLUTION: tuple[int, int] = (1280, 720)
 
 
 class PlayblastError(Exception):
-    """Raised when playblast image-write or HUD-burn steps fail.
-
-    `error_code` is read by `telemetry.record()` to classify the event.
-    """
-
-    error_code = "PLAYBLAST_FAILED"
+    """Raised when playblast image-write or HUD-burn steps fail."""
 
 
 class Playblaster(metaclass=ABCMeta):
@@ -61,25 +55,14 @@ class Playblaster(metaclass=ABCMeta):
         fps = self._frame_rate()
         hud_content = self._hud_content(shot, frame_start)
 
-        with telemetry.record(
-            telemetry.EVENT_PLAYBLAST_CREATE,
-            payload={
-                "frame_start": frame_start,
-                "frame_end": frame_end,
-                "fps": max(1, fps),
-                "preset": "frames",
-                "output_count": 0,
-            },
-            shot=shot,
-        ):
-            try:
-                self._write_images(shot, str(tempdir / image_basename))
-            except Exception as exc:
-                raise PlayblastError(str(exc) or exc.__class__.__name__) from exc
-            self._normalize_frame_filenames(tempdir, image_basename)
-            frames_basename = self._burn_hud(
-                tempdir, image_basename, hud_content, frame_start
-            )
+        try:
+            self._write_images(shot, str(tempdir / image_basename))
+        except Exception as exc:
+            raise PlayblastError(str(exc) or exc.__class__.__name__) from exc
+        self._normalize_frame_filenames(tempdir, image_basename)
+        frames_basename = self._burn_hud(
+            tempdir, image_basename, hud_content, frame_start
+        )
 
         return PreviewClip(
             label=shot.code or "playblast",

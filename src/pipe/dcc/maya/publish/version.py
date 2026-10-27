@@ -7,13 +7,11 @@ from typing import cast
 
 import maya.cmds as mc
 
-from pipe.core import telemetry
 from pipe.core.publish import (
     SOURCE_DIRNAME,
     Refused,
     Target,
     publish_version,
-    version_layer_path,
 )
 from pipe.core.ui import MessageDialog, PublishChoice
 from pipe.core.util.users import resolve_artist_display_name
@@ -69,22 +67,13 @@ class VersionPublisher(Publisher):
         return "\n\n".join(["\n".join(lines), *self._warnings()])
 
     def _write(self, staged: Path) -> None:
-        target = self._target
         self._publish_path = staged
-        with telemetry.record(
-            telemetry.EVENT_PUBLISH_USD,
-            payload={
-                "kind": self._PUBLISH_KIND,
-                "publish_path": str(version_layer_path(target.current, target.version)),
-            },
-            shot=target.entity,
-        ):
-            try:
-                self._mayausd_export_and_finalize()
-            finally:
-                # The export marks the scene modified and leaves it as it was
-                # saved, so Maya would ask to save a scene that hasn't changed.
-                mc.file(modified=False)
+        try:
+            self._mayausd_export_and_finalize()
+        finally:
+            # The export marks the scene modified and leaves it as it was
+            # saved, so Maya would ask to save a scene that hasn't changed.
+            mc.file(modified=False)
 
     def _choose(self) -> bool:
         """Ask what to publish, select it, and set `_target` and `_choice`.

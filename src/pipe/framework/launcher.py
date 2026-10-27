@@ -6,7 +6,6 @@ import os
 import subprocess
 from typing import TYPE_CHECKING
 
-from pipe.core import telemetry
 from pipe.core.util.branding import ASCII_LOGO
 from pipe.core.util.paths import fix_launcher_metadata
 
@@ -16,19 +15,15 @@ if TYPE_CHECKING:
 
 from .interface import DCCLauncher
 
-"""Concrete launcher base — shared subprocess + env + telemetry machinery."""
+"""Concrete launcher base — shared subprocess + env machinery."""
 
 log = logging.getLogger(__name__)
-
-# DCC launch failures are tagged on the telemetry event but never raised as a typed exception
-_DCC_LAUNCH_FAILED_CODE = "DCC_LAUNCH_FAILED"
 
 
 class Launcher(DCCLauncher):
     """
     Provides shared subprocess launch machinery:
         - env-var snapshot
-        - telemetry instrumentation
         - and pre-launch hooks.
     Per-DCC launchers inherit from this and override `__init__`
     to construct the appropriate command, args, and env vars
@@ -98,22 +93,6 @@ class Launcher(DCCLauncher):
         log.debug(f"PYTHONPATH for launch: {venv[PYTHONPATH]}")
         return venv
 
-    @staticmethod
-    def _command_basename(command: str) -> str:
-        normalized = str(command).strip().replace("\\", "/").rstrip("/")
-        if not normalized:
-            return "<empty>"
-        return normalized.split("/")[-1] or "<empty>"
-
-    def _launch_payload(
-        self, command: str, args: typing.Sequence[str] | None
-    ) -> dict[str, object]:
-        return {
-            "command_basename": self._command_basename(command),
-            "arg_count": len(list(args or [])),
-            "env_keys_set": sorted({str(key) for key in self.env_vars.keys()}),
-        }
-
     def launch(
         self,
         command: str | None = None,
@@ -133,32 +112,15 @@ class Launcher(DCCLauncher):
         if pre_launch_tasks is None:
             pre_launch_tasks = self.pre_launch_tasks
 
-        with telemetry.record(
-            telemetry.EVENT_DCC_LAUNCH,
-            payload=self._launch_payload(command, args),
-        ) as telemetry_event:
-            try:
-                fix_launcher_metadata()
-                pre_launch_tasks()
-                venv = self._get_env_vars()
-                print(ASCII_LOGO)
-                log.info("Launching the software")
-                log.debug(f"Command: {command}, Args: {args}")
-                return_code = subprocess.call([command] + list(args or []), env=venv)
-            except Exception as exc:
-                # Tag the failure on the dashboard, then let the original
-                # exception type propagate to the caller unchanged.
-                telemetry_event.fail(
-                    _DCC_LAUNCH_FAILED_CODE, str(exc) or exc.__class__.__name__
-                )
-                raise
+        fix_launcher_metadata()
+        pre_launch_tasks()
+        venv = self._get_env_vars()
+        print(ASCII_LOGO)
+        log.info("Launching the software")
+        log.debug(f"Command: {command}, Args: {args}")
+        return_code = subprocess.call([command] + list(args or []), env=venv)
 
-            if return_code != 0:
-                # Non-zero DCC exit is recorded as an error event, but is
-                # not raised because DCCs exit non-zero for many recoverable
-                # reasons (artist closed without saving, etc.).
-                telemetry_event.fail(
-                    _DCC_LAUNCH_FAILED_CODE,
-                    f"DCC exited with return code {return_code}",
-                )
-                log.warning("DCC launch returned non-zero exit code: %s", return_code)
+        # Not raised: DCCs exit non-zero for many recoverable reasons
+        # (artist closed without saving, etc.).
+        if return_code != 0:
+            log.warning("DCC launch returned non-zero exit code: %s", return_code)

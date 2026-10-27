@@ -9,7 +9,6 @@ if TYPE_CHECKING:
     import typing
 
 from pipe.core.color import DISPLAY, PICKER_VIEW, ocio_env_vars
-from pipe.core.util.paths import get_shared_telemetry_spool_dir
 from env import Executables
 from pipe.framework.launcher import Launcher
 
@@ -33,7 +32,6 @@ class SubstancePainterLauncher(Launcher):
             "DCC": str(this_path.parent.name),
             **ocio_env_vars(),
             "PIPE_LOG_LEVEL": log.getEffectiveLevel(),
-            "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
             "PYTHONPATH": str(src_path),
             "QT_PLUGIN_PATH": "",
             "SUBSTANCE_PAINTER_COLOR_PICKER_OCIO_DISPLAY": DISPLAY,

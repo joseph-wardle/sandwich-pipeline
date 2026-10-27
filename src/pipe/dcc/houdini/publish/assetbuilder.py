@@ -15,7 +15,6 @@ from typing import Any, Mapping, TypedDict
 
 import hou
 
-from pipe.core import telemetry
 from pipe.core.asset.paths import (
     ASSET_BUILDER_FILENAME,
     DEFAULT_GEOMETRY_VARIANT,
@@ -41,12 +40,6 @@ RESULT_START_MARKER = "--BUILD-RESULT--"
 RESULT_END_MARKER = "--END-BUILD-RESULT--"
 
 TURNAROUND_HOOK = "turnaround"
-
-# Mirrors `HoudiniBuildError.error_code` in `pipe.dcc.maya.publish.asset`. Houdini's
-# parent package (`pipe.dcc.houdini`) eagerly imports `hou`, so Maya cannot import the
-# exception class itself; the two values must stay in sync so the dashboard
-# groups failures from both sides under one bucket.
-_HOUDINI_BUILD_FAILED_CODE = "HOUDINI_BUILD_FAILED"
 
 
 class ResultMessage(TypedDict):
@@ -537,23 +530,6 @@ def _finalize(result: HeadlessPublishResult) -> HeadlessPublishResult:
     return result
 
 
-def _component_build_mode(*, ensure_builder: bool, publish_requested: bool) -> str:
-    if ensure_builder and publish_requested:
-        return "ensure_and_publish"
-    if publish_requested:
-        return "publish_only"
-    if ensure_builder:
-        return "ensure_only"
-    return "none"
-
-
-def _result_message_count(result: HeadlessPublishResult, key: str) -> int:
-    entries = result.get(key)
-    if not isinstance(entries, list):
-        return 0
-    return len(entries)
-
-
 def _first_error_message(result: HeadlessPublishResult) -> str | None:
     entries = result.get("errors")
     if not isinstance(entries, list):
@@ -565,18 +541,6 @@ def _first_error_message(result: HeadlessPublishResult) -> str | None:
         if message:
             return message
     return None
-
-
-def _build_initial_payload(args: argparse.Namespace) -> dict[str, Any]:
-    return {
-        "mode": _component_build_mode(
-            ensure_builder=args.ensure_builder,
-            publish_requested=args.publish,
-        ),
-        "variant": str(args.variant or "main"),
-        "warnings_count": 0,
-        "errors_count": 0,
-    }
 
 
 def _configure_logging(level: str) -> None:
@@ -666,29 +630,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv or sys.argv[1:])
     _configure_logging(args.log_level)
 
-    if telemetry._running_under_parent_event():
-        # The parent (e.g. Maya asset publisher) wraps this subprocess in its
-        # own record() block and emits the build event itself. Stay silent.
-        result = _run_publish(args)
-        _emit_result(result)
-        return 1 if result["errors"] else 0
-
-    with telemetry.record(
-        telemetry.EVENT_BUILD_HOUDINI_COMPONENT,
-        payload=_build_initial_payload(args),
-        asset=args.asset_name,
-    ) as telemetry_event:
-        result = _run_publish(args)
-        _emit_result(result)
-        telemetry_event.update(
-            warnings_count=_result_message_count(result, "warnings"),
-            errors_count=_result_message_count(result, "errors"),
-        )
-        if result["errors"]:
-            telemetry_event.fail(
-                _HOUDINI_BUILD_FAILED_CODE,
-                _first_error_message(result) or "Houdini component build failed",
-            )
+    result = _run_publish(args)
+    _emit_result(result)
     return 1 if result["errors"] else 0
 
 

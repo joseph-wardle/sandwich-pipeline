@@ -8,7 +8,6 @@ from pathlib import Path
 from pipe.core.color import ocio_env_vars
 from pipe.core.util.paths import (
     get_production_path,
-    get_shared_telemetry_spool_dir,
     resolve_mapped_path,
 )
 from env import Executables
@@ -47,7 +46,6 @@ class NukeLauncher(Launcher):
                     str(get_production_path()),
                 ]
             ),
-            "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
             "PYTHONPATH": str(src_path),
             "QT_SCALE_FACTOR": os.getenv("NUKE_SCALE_FACTOR")
             if system == "Linux"

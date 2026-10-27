@@ -39,8 +39,6 @@ _HOUDINI_CANCELLED_STATUS = (
 class PublishCancelled(Exception):
     """Raised at a progress update once the artist has pressed Cancel."""
 
-    error_code = "PUBLISH_CANCELLED"
-
     def __init__(self, stage: PublishStage) -> None:
         super().__init__(f"Cancelled at: {stage.value}")
         self.stage = stage

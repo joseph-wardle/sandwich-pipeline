@@ -9,11 +9,10 @@ import maya.cmds as mc
 from env_sg import DB_Config
 
 from pipe.dcc.maya import runtime as maya_runtime
-from pipe.core import telemetry
 from pipe.core.ui import FilteredListDialog, MessageDialog
 from pipe.dcc.maya.util.selection import maintain_selection
 from pipe.dcc.maya.util.usd_export import export_selection
-from pipe.core.shotgrid import Asset, SGEntity, Shot, ShotGrid
+from pipe.core.shotgrid import SGEntity, ShotGrid
 
 if TYPE_CHECKING:
     from Qt.QtWidgets import QWidget
@@ -22,15 +21,11 @@ log = logging.getLogger(__name__)
 
 
 class USDExportError(Exception):
-    """`error_code` is read by `telemetry.record()`"""
-
-    error_code = "USD_EXPORT_FAILED"
+    """Raised when the Maya USD export fails."""
 
 
 class PublishCopyError(Exception):
     """Raised when copying a published file into its final publish location fails."""
-
-    error_code = "PUBLISH_COPY_FAILED"
 
 
 class Publisher:
@@ -102,38 +97,6 @@ class Publisher:
     def _get_confirm_message(self) -> str:
         return f"The selected objects have been exported to {self._publish_path}"
 
-    # Subclasses opt in to `publish.usd` telemetry by setting this to a short
-    # stable token (e.g. "asset", "anim", "camera"). The value becomes the
-    # `kind` payload field on the emitted event, which is what the Grafana
-    # dashboards group by. Leave as None (the default) for internal helpers
-    # or one-off flows the show doesn't need to track
-    _PUBLISH_KIND: str | None = None
-
-    def _publish_kind(self) -> str | None:
-        return self._PUBLISH_KIND
-
-    def _publish_scope_kwargs(self) -> dict[str, object]:
-        """Return entity kwargs for `telemetry.record()` describing this publish."""
-        entity = getattr(self, "_entity", None)
-        shot = getattr(self, "_shot", None)
-        scene_asset = getattr(self, "_scene_asset", None)
-
-        kwargs: dict[str, object] = {}
-
-        asset_obj: object | None = scene_asset
-        if asset_obj is None and isinstance(entity, Asset):
-            asset_obj = entity
-        if asset_obj is not None:
-            kwargs["asset"] = asset_obj
-
-        shot_obj: object | None = shot
-        if shot_obj is None and isinstance(entity, Shot):
-            shot_obj = entity
-        if shot_obj is not None:
-            kwargs["shot"] = shot_obj
-
-        return kwargs
-
     def publish(self) -> None:
         """Generic publishing function.
         `Exporter().publish()` will publish the selected geometry to the place
@@ -164,7 +127,7 @@ class Publisher:
             if not self._presave():
                 return
 
-            self._do_publish_export()
+            self._mayausd_export_and_finalize()
 
             MessageDialog(
                 self._window, self._get_confirm_message(), "Export Complete"
@@ -224,32 +187,8 @@ class Publisher:
 
         return True
 
-    def _do_publish_export(self) -> None:
-        """Run the timed export, wrapped in a telemetry event.
-
-        Subclasses with `_PUBLISH_KIND = None` publish without telemetry.
-        """
-        kind = self._publish_kind()
-        if kind is None:
-            self._mayausd_export_and_finalize()
-            return
-
-        with telemetry.record(
-            telemetry.EVENT_PUBLISH_USD,
-            payload={
-                "kind": kind,
-                "publish_path": str(self._publish_path),
-            },
-            **self._publish_scope_kwargs(),
-        ):
-            self._mayausd_export_and_finalize()
-
     def _mayausd_export_and_finalize(self) -> None:
-        """The export → Windows fix-up → postpublish chain.
-
-        Errors at each stage raise typed exceptions whose `error_code`
-        attribute drives the telemetry event written by `record()`.
-        """
+        """The export → Windows fix-up → postpublish chain."""
         try:
             export_selection(
                 self._publish_path,

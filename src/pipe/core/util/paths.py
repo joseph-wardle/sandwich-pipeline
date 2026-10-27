@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import getpass
 import inspect
 import os
 import platform
-import re
-import socket
 import subprocess
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
@@ -152,39 +149,6 @@ def get_legacy_previs_path() -> Path:
     Future capstones should remove this logic.
     """
     return get_production_path().parent / "00_pre-production" / "previs"
-
-
-def _sanitize_path_segment(value: str, *, fallback: str) -> str:
-    normalized = str(value).strip()
-    if not normalized:
-        return fallback
-    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", normalized)
-    sanitized = sanitized.strip("._-")
-    return sanitized or fallback
-
-
-def get_shared_telemetry_backend_dir() -> Path:
-    """Return the shared production root for telemetry backend state.
-
-    Holds the JSONL spool, the Postgres data directory, the Grafana data
-    directory, and the orchestrator lock. Lives next to the show production
-    path so any lab machine that mounts the share can boot the local stack.
-    """
-
-    return resolve_mapped_path(get_production_path() / ".telemetry")
-
-
-def get_shared_telemetry_spool_dir() -> Path:
-    """Return the shared production telemetry spool directory for this user/host."""
-
-    try:
-        username = getpass.getuser()
-    except Exception:
-        username = os.getenv("USER") or os.getenv("USERNAME") or ""
-    host = socket.gethostname() or platform.node()
-    safe_user = _sanitize_path_segment(username, fallback="unknown_user")
-    safe_host = _sanitize_path_segment(host, fallback="unknown_host")
-    return get_shared_telemetry_backend_dir() / "raw" / safe_host / safe_user
 
 
 def get_rigging_path() -> Path:

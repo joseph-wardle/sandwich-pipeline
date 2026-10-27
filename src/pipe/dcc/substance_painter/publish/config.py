@@ -7,7 +7,6 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 import substance_painter as sp
-from substance_painter.exception import ProjectError, ServiceNotFoundError
 
 from pipe.core.struct.material import DisplacementSource, NormalSource
 from pipe.dcc.substance_painter.publish.types import (
@@ -66,17 +65,6 @@ def resolve_export_targets(
             )
         )
     return targets
-
-
-def count_udim_sets(export_settings_arr: Iterable[TexSetExportSettings]) -> int:
-    count = 0
-    for export_settings in export_settings_arr:
-        try:
-            if export_settings.tex_set.has_uv_tiles():
-                count += 1
-        except (ProjectError, ServiceNotFoundError):
-            continue
-    return count
 
 
 def generate_export_config(

@@ -117,8 +117,6 @@ class PublishCameraDialog(FilteredListDialog):
 
 
 class CameraPublisher(VersionPublisher):
-    _PUBLISH_KIND = "camera"
-
     def _choose(self) -> bool:
         if not _publishable_cameras():
             MessageDialog(

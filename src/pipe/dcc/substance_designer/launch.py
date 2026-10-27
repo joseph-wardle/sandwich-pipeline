@@ -5,7 +5,6 @@ import platform
 from pathlib import Path
 
 from pipe.core.color import ocio_env_vars
-from pipe.core.util.paths import get_shared_telemetry_spool_dir
 from env import Executables
 from pipe.framework.launcher import Launcher
 
@@ -27,7 +26,6 @@ class SubstanceDesignerLauncher(Launcher):
         env_vars = {
             "DCC": str(this_path.parent.name),
             **ocio_env_vars(),
-            "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
             "PYTHONPATH": str(src_path),
             "QT_PLUGIN_PATH": "",
         }

@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import typing
 
-from pipe.core import telemetry
 from pipe.core.util import silent_startupinfo
 from env import Executables
 
@@ -40,8 +39,6 @@ def _process_qt_events() -> None:
 class TexConversionError(ChildProcessError):
     """Raised when one of the tex conversion subprocesses fails."""
 
-    error_code = "TEXTURE_CONVERSION_FAILED"
-
 
 def _failure_reason(returncode: int, stderr: str) -> str:
     if returncode == 0:
@@ -65,10 +62,6 @@ def _source_colorspace(img: str) -> str:
 class TexConverter:
     tex_path: Path
     imgs_by_tex_set: list[list[str]]
-    asset_name: str | None
-    geo_variant: str | None
-    material_variant: str | None
-    renderman_variant: str | None
     batch_size: int
     progress_callback: typing.Callable[[int, int], None] | None
 
@@ -77,50 +70,13 @@ class TexConverter:
         tex_path: Path,
         imgs_by_tex_set: typing.Iterable[list[str]],
         *,
-        asset_name: str | None = None,
-        geo_variant: str | None = None,
-        material_variant: str | None = None,
-        renderman_variant: str | None = None,
         batch_size: int = 18,
         progress_callback: typing.Callable[[int, int], None] | None = None,
     ) -> None:
         self.tex_path = tex_path
         self.imgs_by_tex_set = [list(imgs) for imgs in imgs_by_tex_set]
-        self.asset_name = asset_name
-        self.geo_variant = geo_variant
-        self.material_variant = material_variant
-        self.renderman_variant = renderman_variant
         self.batch_size = max(1, int(batch_size))
         self.progress_callback = progress_callback
-
-    def _source_count(self) -> int:
-        return sum(len(imgs) for imgs in self.imgs_by_tex_set)
-
-    def convert_all(self) -> list[Path]:
-        payload: dict[str, object] = {
-            "source_count": self._source_count(),
-            "converted_tex_count": 0,
-            "batch_size": self.batch_size,
-        }
-        if self.geo_variant:
-            payload["geo_variant"] = str(self.geo_variant)
-        if self.material_variant:
-            payload["material_variant"] = str(self.material_variant)
-        if self.renderman_variant:
-            payload["renderman_variant"] = str(self.renderman_variant)
-
-        converted_tex: list[Path] = []
-        with telemetry.record(
-            telemetry.EVENT_TEXTURE_CONVERT_TEX,
-            payload=payload,
-            asset=self.asset_name,
-        ) as telemetry_event:
-            try:
-                converted_tex = self.convert_tex()
-            finally:
-                telemetry_event.update(converted_tex_count=len(converted_tex))
-
-        return converted_tex
 
     def convert_tex(self) -> list[Path]:
         """Convert all .png textures in the most recent export to .tex"""

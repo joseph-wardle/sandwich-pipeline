@@ -90,9 +90,9 @@ def __getattr__(name: str) -> object:
     `FileManager` pulls in Qt, ShotGrid, and the glui dialog suite — none of
     which are needed by callers that only want `silent_startupinfo`,
     `log_errors`, etc. Resolving it through `__getattr__` keeps `pipe.core.util`
-    importable in Qt-less contexts (the outer launcher venv, telemetry
-    backend tools) while still letting `from pipe.core.util import FileManager`
-    work where the heavy stack is available.
+    importable in Qt-less contexts (the outer launcher venv) while still
+    letting `from pipe.core.util import FileManager` work where the heavy stack
+    is available.
     """
     if name == "FileManager":
         from .filemanager import FileManager as _fm

@@ -20,7 +20,6 @@ from substance_painter.exception import ProjectError
 from pipe.core.asset import paths_for_asset
 from pipe.core.shotgrid import Asset
 from pipe.dcc.substance_painter.publish.config import (
-    count_udim_sets,
     generate_export_config,
     resolve_export_targets,
 )
@@ -34,7 +33,6 @@ from pipe.dcc.substance_painter.publish.progress import (
     PublishProgressUpdate,
     PublishStage,
 )
-from pipe.core import telemetry
 from pipe.core.texture import TexConversionError, TexConverter
 
 log = logging.getLogger(__name__)
@@ -60,8 +58,6 @@ _NOT_OCIO_MESSAGE = (
 
 class TextureExportError(Exception):
     """An export step failed; the message is shown to the artist as is."""
-
-    error_code = "TEXTURE_EXPORT_FAILED"
 
 
 def _cap_preview_size(path: Path) -> None:
@@ -374,15 +370,11 @@ class Exporter:
         tex_converter = TexConverter(
             self._out_path,
             render_sources,
-            asset_name=self._texture_export_asset_name(),
-            geo_variant=geo_var,
-            material_variant=mat_var,
-            renderman_variant=material_layer,
             progress_callback=report_conversion,
         )
 
         try:
-            tex_converter.convert_all()
+            tex_converter.convert_tex()
         except TexConversionError as exc:
             log.exception("Texture conversion failed.")
             sp.logging.warning(
@@ -440,92 +432,53 @@ class Exporter:
         material_layer: str,
         progress_callback: PublishProgressCallback | None,
     ) -> dict[tuple[str, str], list[str]]:
-        """Run the SP export. Emits one `texture.export.substance` event.
-
-        Raises `TextureExportError` on any failure so the surrounding
-        `record()` block records the right error code and message.
-        """
-        initial_payload = {
-            "geo_variant": geo_var,
-            "material_variant": mat_var,
-            "renderman_variant": material_layer,
-            "texture_set_count": len(exp_setting_arr),
-            "udim_set_count": count_udim_sets(exp_setting_arr),
-        }
-
-        # Counts populated as work proceeds. The finally block at the bottom
-        # emits one update() with whatever has been reached when the block
-        # exits — success or failure both report partial progress, which the
-        # dashboard needs to diagnose where in the export pipeline a failure
-        # occurred.
-        resolved_target_count = len(exp_setting_arr)
-        udim_target_count = count_udim_sets(exp_setting_arr)
-        planned_texture_count = 0
+        """Run the SP export. Raises `TextureExportError` on any failure."""
         all_exported_textures: dict[tuple[str, str], list[str]] = {}
         staging_dir: Path | None = None
+        try:
+            self._init_paths(mat_var, geo_var, material_layer)
+            log.info(f"Exporting textures to {self._out_path}")
 
-        with telemetry.record(
-            telemetry.EVENT_TEXTURE_EXPORT_SUBSTANCE,
-            payload=initial_payload,
-            asset=self._asset,
-        ) as telemetry_event:
+            self._cleanup_export_lock(context="before export")
+
             try:
-                self._init_paths(mat_var, geo_var, material_layer)
-                log.info(f"Exporting textures to {self._out_path}")
+                resolved_targets = resolve_export_targets(exp_setting_arr)
+            except ValueError as exc:
+                raise TextureExportError(str(exc)) from exc
 
-                self._cleanup_export_lock(context="before export")
+            try:
+                planned_by_target = self._preflight_exports(
+                    resolved_targets, progress_callback=progress_callback
+                )
+            except ValueError as exc:
+                raise TextureExportError(str(exc)) from exc
 
+            staging_dir = Path(tempfile.mkdtemp(prefix=_STAGING_PREFIX))
+            log.info(f"Staging Painter exports in {staging_dir}")
+            for target_index, target in enumerate(resolved_targets, start=1):
+                self._cleanup_export_lock(
+                    context=f'before export for "{target.texture_set_name}"'
+                )
+                planned_exports = planned_by_target.get(target.texture_set_name, {})
                 try:
-                    resolved_targets = resolve_export_targets(exp_setting_arr)
-                except ValueError as exc:
+                    exported_textures = self._export_target(
+                        target,
+                        planned_exports=planned_exports,
+                        target_index=target_index,
+                        target_count=len(resolved_targets),
+                        staging_dir=staging_dir,
+                        progress_callback=progress_callback,
+                    )
+                except RuntimeError as exc:
+                    log.error(
+                        f'Texture export failed while processing texture set "{target.texture_set_name}".'
+                    )
                     raise TextureExportError(str(exc)) from exc
 
-                resolved_target_count = len(resolved_targets)
-                udim_target_count = count_udim_sets(
-                    [target.settings for target in resolved_targets]
-                )
+                all_exported_textures.update(exported_textures)
+                QtWidgets.QApplication.processEvents()
 
-                try:
-                    planned_by_target = self._preflight_exports(
-                        resolved_targets, progress_callback=progress_callback
-                    )
-                except ValueError as exc:
-                    raise TextureExportError(str(exc)) from exc
-
-                staging_dir = Path(tempfile.mkdtemp(prefix=_STAGING_PREFIX))
-                log.info(f"Staging Painter exports in {staging_dir}")
-                for target_index, target in enumerate(resolved_targets, start=1):
-                    self._cleanup_export_lock(
-                        context=f'before export for "{target.texture_set_name}"'
-                    )
-                    planned_exports = planned_by_target.get(target.texture_set_name, {})
-                    try:
-                        exported_textures = self._export_target(
-                            target,
-                            planned_exports=planned_exports,
-                            target_index=target_index,
-                            target_count=len(resolved_targets),
-                            staging_dir=staging_dir,
-                            progress_callback=progress_callback,
-                        )
-                    except RuntimeError as exc:
-                        log.error(
-                            f'Texture export failed while processing texture set "{target.texture_set_name}".'
-                        )
-                        raise TextureExportError(str(exc)) from exc
-
-                    planned_texture_count += _file_count(planned_exports)
-                    all_exported_textures.update(exported_textures)
-                    QtWidgets.QApplication.processEvents()
-
-                return all_exported_textures
-            finally:
-                if staging_dir is not None:
-                    shutil.rmtree(staging_dir, ignore_errors=True)
-                telemetry_event.update(
-                    texture_set_count=resolved_target_count,
-                    udim_set_count=udim_target_count,
-                    planned_texture_count=planned_texture_count,
-                    exported_texture_count=_file_count(all_exported_textures),
-                )
-        return all_exported_textures
+            return all_exported_textures
+        finally:
+            if staging_dir is not None:
+                shutil.rmtree(staging_dir, ignore_errors=True)

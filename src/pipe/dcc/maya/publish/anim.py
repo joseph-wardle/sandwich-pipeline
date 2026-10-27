@@ -46,8 +46,6 @@ _TRS_DEFAULTS: dict[str, float] = {
 
 
 class AnimPublisher(VersionPublisher):
-    _PUBLISH_KIND = "anim"
-
     _shot: Shot
     _shot_code: str
     _timeline: Timeline

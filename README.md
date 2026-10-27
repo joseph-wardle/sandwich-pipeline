@@ -16,9 +16,8 @@ sandwich-pipeline/
 │   ├── __main__.py       # Entry point; dispatches to dcc.<name>.launch.<Dcc>Launcher
 │   ├── sitecustomize.py
 │   ├── framework         # DCCLauncher / DCCRuntime ABCs + dispatch + concrete launcher base
-│   ├── core              # Cross-DCC platform code (asset, shot, versioning, telemetry, etc.)
+│   ├── core              # Cross-DCC platform code (asset, shot, versioning, etc.)
 │   └── dcc               # Per-DCC integrations (launch.py + runtime.py + site/ + third_party/)
-├── telemetry-backend     # Postgres/Grafana configuration
 ├── pyproject.toml
 └── README.md
 ```

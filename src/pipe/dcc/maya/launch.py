@@ -16,7 +16,6 @@ from pipe.core.color import ocio_env_vars
 from pipe.core.util.paths import (
     get_production_path,
     get_rig_build_path,
-    get_shared_telemetry_spool_dir,
 )
 from pipe.framework.launcher import Launcher
 
@@ -68,7 +67,6 @@ class MayaLauncher(Launcher):
             "MAYAUSD_IMPORT_PRIMARY_UV_SET_AS_MAP1": 1,
             "MAYA_MODULE_PATH": os.pathsep.join(module_paths),
             "MAYA_PLUG_IN_PATH": str(site_path / "plugins"),
-            "PIPE_TELEMETRY_SPOOL_DIR": str(get_shared_telemetry_spool_dir()),
             # PYTHONPATH:
             #   1. src/ — so framework, core, dcc, env, env_sg are importable
             #   2. site/ — Maya scans sys.path literally for `userSetup.py`
