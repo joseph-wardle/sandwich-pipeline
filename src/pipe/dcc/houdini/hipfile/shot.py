@@ -78,8 +78,6 @@ class HShotFileManager(HFileManager):
 
     def open_file(self) -> None:
         if self._department is None:
-            self._department = self._prompt_department()
-        if self._department is None:
             return
         super().open_file()
 
