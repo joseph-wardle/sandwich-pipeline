@@ -35,6 +35,9 @@ from pipe.dcc.houdini.tractor.commands import (
 
 # The Flipbook ROP's Source menu.
 LOP_SOURCE = 1
+# Its Lighting menu's Work Lights, a headlight by default. The viewport draws
+# the shot's lights, set for RenderMan, far too bright.
+WORK_LIGHTS = 1
 RAW = "raw"
 SCRATCH = f"{wedges.FLIPBOOK}.tmp"
 
@@ -206,6 +209,7 @@ def _flipbook_rop(run: wedges.Run) -> hou.RopNode | None:
             "opsource": LOP_SOURCE,
             "loppath": drawn.path(),
             "cameraprim": wedges.SHOT_CAMERA,
+            "lighting": WORK_LIGHTS,
             "trange": 1,
             "f3": 1,
         }
@@ -230,14 +234,14 @@ def _cache_only(publish: hou.LopNode, node: str) -> hou.LopNode:
         }
     )
     # SOP Import draws the geometry where the SOP has it, without any transform
-    # of the object around it. Sims are made in world space.
+    # of the object around it. Sims are made in world space. It is wired after
+    # the Prune, not merged with it: a Merge flattens its inputs, which drops
+    # what sits above a Layer Break, as the camera does in an fx hip.
     geometry = stage.createNode("sopimport")
+    geometry.setInput(0, camera)
     geometry.setParms({"soppath": node})
-    merge = stage.createNode("merge")
-    merge.setInput(0, camera)
-    merge.setInput(1, geometry)
     # createNode is typed as returning any node; this one is a LOP.
-    return merge  # ty: ignore[invalid-return-type]
+    return geometry  # ty: ignore[invalid-return-type]
 
 
 def _hud(run: wedges.Run, wedge: wedges.Wedge, start: int) -> HudContent:

@@ -24,7 +24,7 @@ Titled = Callable[[hou.Node], str]
 
 # One wedge is just a farm sim.
 MINIMUM = 2
-# The Draw menu, the default first.
+# The Draw menu.
 DRAWS = {"Shot": wedges.SHOT, "Cache only": wedges.CACHE}
 DRAW_HELP = (
     "Shot draws the stage at the publish node, through the shot camera.\n"
@@ -67,6 +67,7 @@ def show(
     node: hou.Node,
     titled: Titled,
     frames: tuple[int, int],
+    draw: str,
     rows: list[Row],
     rebuilds: Rebuilds,
     send: Callable[[WedgeChoice], None],
@@ -82,7 +83,7 @@ def show(
         return
     if old is not None:
         old.deleteLater()
-    dialog = _WedgeDialog(parent, node, titled, frames, rows, rebuilds, send)
+    dialog = _WedgeDialog(parent, node, titled, frames, draw, rows, rebuilds, send)
     _dialogs[key] = dialog
     dialog.show()
 
@@ -145,6 +146,7 @@ class _WedgeDialog(QtWidgets.QDialog, DialogButtons):
         node: hou.Node,
         titled: Titled,
         frames: tuple[int, int],
+        draw: str,
         rows: list[Row],
         rebuilds: Rebuilds,
         send: Callable[[WedgeChoice], None],
@@ -184,6 +186,7 @@ class _WedgeDialog(QtWidgets.QDialog, DialogButtons):
 
         self._draw = QtWidgets.QComboBox()
         self._draw.addItems(list(DRAWS))
+        self._draw.setCurrentIndex(list(DRAWS.values()).index(draw))
         self._draw.setToolTip(DRAW_HELP)
         self._draw.currentTextChanged.connect(self._update_rebuilds)
 

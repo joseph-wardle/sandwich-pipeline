@@ -57,11 +57,14 @@ def send(node: hou.Node) -> None:
     # The stubs say sessionId() returns None. It returns the node's id.
     key: int = node.sessionId()  # ty: ignore[invalid-assignment]
     start, end = (int(v) for v in node.evalParmTuple("f")[:2])
+    # A cache wedged for the first time is often not wired to the shot yet.
+    default_draw = wedges.SHOT if node in caches.reached(publish) else wedges.CACHE
     wedge_dialog.show(
         runtime.get_main_qt_window(),
         node,
         lambda current: title(current, " wedges"),
         (start, end),
+        default_draw,
         _last_rows.get(key, []),
         lambda parms, draw: _written(_node(key), publish, parms, draw),
         lambda choice: _submit(key, choice),
