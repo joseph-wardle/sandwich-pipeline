@@ -18,8 +18,34 @@ from pipe.core.render import (
 )
 
 LICENSE_SERVER = "animlic.cs.byu.edu"
+# XPU keeps its buffers as /dev/shm/pixartmp-* files and never removes them when it
+# is killed (out of memory, segfault, a stopped job). This makes it dont
+SHM_CLEANUP = "\n".join(
+    [
+        "shm_cleanup() {",
+        "    set +x",
+        "    local n=0 f",
+        "    for f in /dev/shm/pixartmp-*; do",
+        '        [ -O "$f" ] || continue',
+        '        /usr/sbin/fuser -s "$f" 2>/dev/null || { rm -f "$f"; n=$((n + 1)); }',
+        "    done",
+        '    echo "Removed $n leaked XPU buffers from /dev/shm; now $(df -h --output=pcent,avail /dev/shm | tail -1 | xargs) used, free"',
+        "    set -x",
+        "}",
+    ]
+)
 # husk exits 3 without a license; point hserver at the license server before Tractor retries.
-LICENSE_TRAP = rf'trap "test \$? -eq 3 && hserver -S {LICENSE_SERVER} && exit 3" EXIT'
+EXIT_TRAP = "\n".join(
+    [
+        "on_exit() {",
+        "    local rc=$?",
+        "    shm_cleanup",
+        f"    test $rc -eq 3 && hserver -S {LICENSE_SERVER}",
+        "    exit $rc",
+        "}",
+        "trap on_exit EXIT",
+    ]
+)
 # This catches jobs that segfault then keep running instead of failing
 HUSK_SEGFAULT = "Fatal error: Segmentation fault"
 SEGFAULT_EXIT = 139
@@ -132,7 +158,9 @@ def render(layer: Layer, frames: list[int]) -> str:
     husk.append(str(layer.folder / RENDER_USD))
     return "\n".join(
         [
-            LICENSE_TRAP,
+            SHM_CLEANUP,
+            EXIT_TRAP,
+            "shm_cleanup",
             # husk makes no output folders.
             f"mkdir -p {folders}",
             f'for d in {folders}; do for f in {names}; do rm -f "$d/$f"; done; done',

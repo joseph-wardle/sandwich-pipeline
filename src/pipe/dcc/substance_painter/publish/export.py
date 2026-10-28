@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -45,6 +47,9 @@ _PREVIEW_SUFFIX = ".jpeg"
 _PREVIEW_MAX_SIZE = 1024
 _PREVIEW_JPEG_QUALITY = 95
 
+_STAGING_PREFIX = "skd_painter_export_"
+_EXPORT_LOCK_NAME = ".lock"
+
 _NOT_OCIO_MESSAGE = (
     "This project uses Painter's Legacy or Adobe ACE color management, which "
     "the pipeline can't publish.\n\n"
@@ -83,6 +88,22 @@ def _preview_shares_render_name(planned: list[str]) -> bool:
     previews = {path.stem for path in paths if path.suffix.lower() == _PREVIEW_SUFFIX}
     renders = {path.stem for path in paths if path.suffix.lower() != _PREVIEW_SUFFIX}
     return not previews.isdisjoint(renders)
+
+
+def _move_staged_files(
+    staging_dir: Path,
+    src_dir: Path,
+    exported_textures: dict[tuple[str, str], list[str]],
+) -> dict[tuple[str, str], list[str]]:
+    """Move what Painter wrote into *staging_dir* to *src_dir*; return the new paths."""
+    for staged in staging_dir.iterdir():
+        if staged.is_file() and staged.name != _EXPORT_LOCK_NAME:
+            shutil.copyfile(staged, src_dir / staged.name)
+            staged.unlink()
+    return {
+        stack_key: [str(src_dir / Path(path).name) for path in paths]
+        for stack_key, paths in exported_textures.items()
+    }
 
 
 def _file_count(files_by_stack: dict[tuple[str, str], list[str]]) -> int:
@@ -149,7 +170,7 @@ class Exporter:
         return "unknown_asset"
 
     def _src_lock_path(self) -> Path:
-        return self._src_path / ".lock"
+        return self._src_path / _EXPORT_LOCK_NAME
 
     def _cleanup_export_lock(self, *, context: str) -> None:
         lock_path = self._src_lock_path()
@@ -217,10 +238,11 @@ class Exporter:
         planned_exports: dict[tuple[str, str], list[str]],
         target_index: int,
         target_count: int,
+        staging_dir: Path,
         progress_callback: PublishProgressCallback | None = None,
     ) -> dict[tuple[str, str], list[str]]:
-        """Export a single texture set and return the files Painter wrote."""
-        config = generate_export_config(self._src_path, [target])
+        """Export a single texture set via *staging_dir*; return its files in `_src`."""
+        config = generate_export_config(staging_dir, [target])
         target_planned_count = _file_count(planned_exports)
 
         if progress_callback is not None:
@@ -283,6 +305,20 @@ class Exporter:
                 "Substance Painter reported no exported files for texture set "
                 f'"{target.texture_set_name}". Try publishing again.'
             )
+
+        try:
+            exported_textures = _move_staged_files(
+                staging_dir, self._src_path, exported_textures
+            )
+        except OSError as exc:
+            log.exception(
+                f"Failed to move staged textures from {staging_dir} to {self._src_path}."
+            )
+            raise RuntimeError(
+                f'Texture set "{target.texture_set_name}" exported, but copying '
+                f"its textures into {self._src_path} failed.\n"
+                f"Details: {exc}"
+            ) from exc
 
         if progress_callback is not None:
             progress_callback(
@@ -426,6 +462,7 @@ class Exporter:
         udim_target_count = count_udim_sets(exp_setting_arr)
         planned_texture_count = 0
         all_exported_textures: dict[tuple[str, str], list[str]] = {}
+        staging_dir: Path | None = None
 
         with telemetry.record(
             telemetry.EVENT_TEXTURE_EXPORT_SUBSTANCE,
@@ -455,6 +492,8 @@ class Exporter:
                 except ValueError as exc:
                     raise TextureExportError(str(exc)) from exc
 
+                staging_dir = Path(tempfile.mkdtemp(prefix=_STAGING_PREFIX))
+                log.info(f"Staging Painter exports in {staging_dir}")
                 for target_index, target in enumerate(resolved_targets, start=1):
                     self._cleanup_export_lock(
                         context=f'before export for "{target.texture_set_name}"'
@@ -466,6 +505,7 @@ class Exporter:
                             planned_exports=planned_exports,
                             target_index=target_index,
                             target_count=len(resolved_targets),
+                            staging_dir=staging_dir,
                             progress_callback=progress_callback,
                         )
                     except RuntimeError as exc:
@@ -480,6 +520,8 @@ class Exporter:
 
                 return all_exported_textures
             finally:
+                if staging_dir is not None:
+                    shutil.rmtree(staging_dir, ignore_errors=True)
                 telemetry_event.update(
                     texture_set_count=resolved_target_count,
                     udim_set_count=udim_target_count,
