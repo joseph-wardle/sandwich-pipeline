@@ -63,6 +63,7 @@ RENDER_RETRIES = [
 DENOISE_RETRIES = [
     139,  # Segmentation fault
 ]
+WEDGE_CHUNK = 10
 
 
 def build(title: str, priority: int, envkey: str, layers: list[Layer]) -> author.Job:
@@ -89,27 +90,41 @@ def layer_task(layer: Layer) -> author.Task:
     return task
 
 
-def _render_title(layer: Layer, frame: int) -> str:
-    return f"Render {layer.name} {frame}"
+def _chunks(layer: Layer, size: int) -> list[list[int]]:
+    return [layer.frames[i : i + size] for i in range(0, len(layer.frames), size)]
 
 
-def _render_task(layer: Layer, service: str = SERVICE) -> author.Task:
+def _render_title(layer: Layer, frames: list[int]) -> str:
+    span = f"{frames[0]}" if len(frames) == 1 else f"{frames[0]}-{frames[-1]}"
+    return f"Render {layer.name} {span}"
+
+
+def _render_task(layer: Layer, service: str = SERVICE, chunk: int = 1) -> author.Task:
     task = author.Task(title=f"Render {layer.name}")
-    for frame in layer.frames:
-        script = commands.render(layer, frame)
-        title = _render_title(layer, frame)
+    for frames in _chunks(layer, chunk):
+        script = commands.render(layer, frames)
+        title = _render_title(layer, frames)
         task.addChild(_task(title, script, RENDER_RETRIES, service))
     return task
 
 
-def _denoise_task(layer: Layer, product: str, service: str = SERVICE) -> author.Task:
+def _denoise_task(
+    layer: Layer, product: str, service: str = SERVICE, chunk: int = 1
+) -> author.Task:
+    rendered_by = {
+        frame: _render_title(layer, frames)
+        for frames in _chunks(layer, chunk)
+        for frame in frames
+    }
     task = author.Task(title=f"Denoise {layer.name}")
     for frame in layer.frames:
         script = commands.denoise(layer, product, frame)
         title = f"Denoise {layer.name} {frame}"
         frame_task = _task(title, script, DENOISE_RETRIES, service)
-        for neighbour in commands.denoise_window(frame, layer.frames):
-            frame_task.addChild(author.Instance(title=_render_title(layer, neighbour)))
+        window = commands.denoise_window(frame, layer.frames)
+        # Neighbours in one chunk wait on the same Render task.
+        for render in dict.fromkeys(rendered_by[neighbour] for neighbour in window):
+            frame_task.addChild(author.Instance(title=render))
         task.addChild(frame_task)
     return task
 
@@ -185,9 +200,10 @@ def _wedge_render(spec: Wedges, layer: Layer, service: str) -> author.Task:
     for path in spec.rebuilds:
         prepare_task.addChild(author.Instance(title=_sim_title(name, path)))
     task.addChild(prepare_task)
-    task.addChild(_render_task(layer, service))
+    task.addChild(_render_task(layer, service, WEDGE_CHUNK))
     if layer.denoise:
-        task.addChild(_denoise_task(layer, layer.denoise.product, service))
+        product = layer.denoise.product
+        task.addChild(_denoise_task(layer, product, service, WEDGE_CHUNK))
     return task
 
 

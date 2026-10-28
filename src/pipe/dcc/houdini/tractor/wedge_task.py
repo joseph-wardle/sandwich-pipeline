@@ -337,6 +337,7 @@ def prepare(run: wedges.Run, wedge: wedges.Wedge) -> int:
         {
             parms.LAYER: wedge.name,
             parms.OUTPUT: str(expected.folder),
+            parms.RENDERER: wedges.RENDERER,
             "trange": "normal",
             "f1": run.start,
             "f2": run.end,
