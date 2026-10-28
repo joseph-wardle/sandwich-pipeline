@@ -19,7 +19,9 @@ from pipe.core.render import (
 
 LICENSE_SERVER = "animlic.cs.byu.edu"
 # XPU keeps its buffers as /dev/shm/pixartmp-* files and never removes them when it
-# is killed (out of memory, segfault, a stopped job). This makes it dont
+# is killed (out of memory, segfault, a stopped job). Once /dev/shm fills, every XPU
+# CPU render on that blade bus-errors. Only the owner's files that no process holds
+# open are removed, so other tasks on the blade are untouched.
 SHM_CLEANUP = "\n".join(
     [
         "shm_cleanup() {",
@@ -49,6 +51,28 @@ EXIT_TRAP = "\n".join(
 # This catches jobs that segfault then keep running instead of failing
 HUSK_SEGFAULT = "Fatal error: Segmentation fault"
 SEGFAULT_EXIT = 139
+# The kernel kills husk when a blade runs out of memory, and the blade service
+# (OOMPolicy=stop) then stops with it, orphaning every task on the blade. A
+# watchdog kills husk first, with the same exit code (137), so only that task's
+# frames are lost and `job.RENDER_RETRIES` runs it again elsewhere.
+MIN_FREE_GB = 6
+MEM_WATCH = "\n".join(
+    [
+        "mem_watch() {",
+        "    local pid=$1 free",
+        '    while kill -0 "$pid" 2>/dev/null; do',
+        "        free=$(awk '/MemAvailable/ { print int($2 / 1048576) }' /proc/meminfo)",
+        f'        if [ "$free" -lt {MIN_FREE_GB} ]; then',
+        '            echo "husk was killed with $free GB of memory left on $(hostname), before'
+        ' the kernel killed it and took the blade service down" >&2',
+        '            kill -9 "$pid"',
+        "            return",
+        "        fi",
+        "        sleep 1",
+        "    done",
+        "}",
+    ]
+)
 # Run by hython on the blade: writes one File Cache from a Send's snapshot.
 CACHE_MODULE = "pipe.dcc.houdini.tractor.cache_task"
 # Run by hython on the blade: one step of one wedge of a Wedge Send.
@@ -148,7 +172,8 @@ def render(layer: Layer, frames: list[int]) -> str:
 
     husk can segfault at startup and then hang, holding the blade. The crash is
     transient, so the script reads husk's output, kills it at the crash line and
-    exits as a segfault, which Tractor retries.
+    exits as a segfault, which Tractor retries. A watchdog likewise kills husk
+    when the blade is about to run out of memory, which Tractor also retries.
     """
     q = shlex.quote
     folders = " ".join(q(str(folder)) for folder in layer.render.folders)
@@ -159,6 +184,7 @@ def render(layer: Layer, frames: list[int]) -> str:
     return "\n".join(
         [
             SHM_CLEANUP,
+            MEM_WATCH,
             EXIT_TRAP,
             "shm_cleanup",
             # husk makes no output folders.
@@ -168,6 +194,7 @@ def render(layer: Layer, frames: list[int]) -> str:
             "husk=$!",
             # Not traced, or -x would log three lines for each line of husk's.
             "set +x",
+            'mem_watch "$husk" &',
             "while IFS= read -r line <&3; do",
             '    echo "$line"',
             f'    if [[ "$line" == *"{HUSK_SEGFAULT}"* ]]; then',

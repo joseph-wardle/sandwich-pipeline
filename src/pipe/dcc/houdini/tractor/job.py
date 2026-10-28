@@ -57,6 +57,7 @@ RENDER_RETRIES = [
     3,  # Can't get license
     134,  # Abort
     135,  # Bus error
+    137,  # Killed: out of memory on that blade
     139,  # Segmentation fault
 ]
 DENOISE_RETRIES = [
