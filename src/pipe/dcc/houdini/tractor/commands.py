@@ -88,7 +88,6 @@ class Cache:
     node: str
     # The start and end frame of each task that writes the node.
     chunks: list[tuple[float, float]]
-    # The session's variables, which hython needs to load the hip as it did.
     env: dict[str, str]
 
 

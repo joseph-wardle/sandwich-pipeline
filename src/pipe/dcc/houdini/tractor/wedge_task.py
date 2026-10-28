@@ -200,8 +200,6 @@ def _flipbook_rop(run: wedges.Run) -> hou.RopNode | None:
             file=sys.stderr,
         )
         return None
-    # The viewport's renderer. The OpenGL ROP reloads every texture each frame,
-    # which made a textured set minutes per frame.
     # hou.node may return None, but /out is always there.
     rop = hou.node("/out").createNode("flipbook")  # ty: ignore[unresolved-attribute]
     rop.setParms(
