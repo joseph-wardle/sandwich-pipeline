@@ -1,3 +1,3 @@
-from pipe.dcc.houdini.tractor import caches
+from pipe.dcc.houdini.tractor import buttons
 
-caches.add_buttons(kwargs["node"])  # type: ignore[name-defined] # noqa: F821
+buttons.add_buttons(kwargs["node"])  # type: ignore[name-defined] # noqa: F821

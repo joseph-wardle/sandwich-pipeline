@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-FILE_CACHE = "filecache::2.0"
+# The stock File Caches the farm writes, by hou.NodeType.nameWithCategory().
+FILE_CACHES = ("Sop/filecache::2.0", "Lop/filecache")
 IMPORT_CAMERA = "skd::main::import_camera::1.0"
 LOAD_LAYERS = "skd::main::load_layers::2.0"
 LOAD_LAYERS_1 = "skd::main::load_layers::1.0"

@@ -137,7 +137,7 @@ def wedge_job(
         task = _task(f"Flipbook {name}", finish, service=service)
         # Each cache reads the ones written before it, and the flipbook all of them.
         task.serialsubtasks = True
-        for path in spec.caches:
+        for path in spec.rebuilds:
             sim = commands.wedge(spec, name, commands.WEDGE_SIM, (path,))
             node = path.rpartition("/")[2]
             task.addChild(_task(f"Sim {name} {node}", sim, service=service))

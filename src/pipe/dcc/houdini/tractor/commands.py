@@ -98,8 +98,8 @@ class Wedges:
     env: dict[str, str]
     # The start and end frame of each flipbook task.
     chunks: list[tuple[int, int]]
-    # The paths of the caches each wedge writes, in cook order.
-    caches: list[str]
+    # The paths of the caches each wedge rebuilds, in cook order.
+    rebuilds: list[str]
 
 
 @dataclass(frozen=True)

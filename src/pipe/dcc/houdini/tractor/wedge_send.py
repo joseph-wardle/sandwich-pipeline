@@ -58,7 +58,7 @@ def send(node: hou.Node) -> None:
     key: int = node.sessionId()  # ty: ignore[invalid-assignment]
     start, end = (int(v) for v in node.evalParmTuple("f")[:2])
     # A cache wedged for the first time is often not wired to the shot yet.
-    default_draw = wedges.SHOT if node in caches.reached(publish) else wedges.CACHE
+    default_draw = wedges.SHOT if node in caches.Walk(publish) else wedges.CACHE
     wedge_dialog.show(
         runtime.get_main_qt_window(),
         node,
@@ -66,7 +66,7 @@ def send(node: hou.Node) -> None:
         (start, end),
         default_draw,
         _last_rows.get(key, []),
-        lambda parms, draw: _written(_node(key), publish, parms, draw),
+        lambda parms, draw: _rebuilds(_node(key), publish, parms, draw),
         lambda choice: _submit(key, choice),
     )
 
@@ -80,9 +80,9 @@ def _submit(key: int, choice: wedge_dialog.WedgeChoice) -> None:
     publish = _publish()
     found = _wedges(choice.rows)
     parms = [_parm(path) for path in found[0].values]
-    written = _written(node, publish, parms, choice.draw)
+    rebuilds = _rebuilds(node, publish, parms, choice.draw)
     try:
-        built, run = _build(node, publish, choice, found, written)
+        built, run = _build(node, publish, choice, found, rebuilds)
     except SendRefused:
         # The dialog says why and stays open.
         raise
@@ -98,10 +98,10 @@ def _submit(key: int, choice: wedge_dialog.WedgeChoice) -> None:
     # Review asks Tractor whether the job still runs before offering to delete it.
     (run.folder / wedges.JOB).write_text(f"{job_id}\n")
     what = f"flipbooks {len(run.wedges)} wedges of {node.name()}"
-    if written == [node]:
+    if rebuilds == [node]:
         what = f"sims {len(run.wedges)} wedges of {node.name()}"
-    elif written:
-        names = ", ".join(cache.name() for cache in written)
+    elif rebuilds:
+        names = ", ".join(cache.name() for cache in rebuilds)
         what = f"writes {names} for each of {len(run.wedges)} wedges of {node.name()}"
     hou.ui.displayMessage(
         f"Job {job_id} {what} into\n{run.folder}\n\n"
@@ -123,30 +123,25 @@ def _node(key: int) -> hou.Node:
     return node
 
 
-def _written(
+def _rebuilds(
     node: hou.Node, publish: hou.LopNode, parms: list[hou.Parm], draw: str
 ) -> list[hou.Node]:
-    """What each wedge writes, in cook order: every cache loading from disk
+    """What each wedge rebuilds, in cook order: every cache loading from disk
     between a wedged parm and what the flipbook draws, whose files would hide
     the change, and the node itself once a wedged parm reaches it. Raises
     SendRefused when no flipbook would show a wedge's change."""
     if not parms:
         return []
     owners = [parm.node() for parm in parms]
-    reached = caches.reached(node)
-    drawn = publish if draw == wedges.SHOT else node
-    seen = reached if drawn == node else caches.reached(drawn)
-    if (
-        draw == wedges.SHOT
-        and node not in seen
-        and any(owner in reached for owner in owners)
-    ):
+    drawn = caches.Walk(publish if draw == wedges.SHOT else node)
+    # Only Shot can leave the node out of what is drawn.
+    if node not in drawn and any(owner in caches.Walk(node) for owner in owners):
         raise SendRefused(
             f"{publish.path()} doesn't read {node.name()}, so the shot's "
             f"flipbooks wouldn't show its sims. Set Draw to Cache only, or "
             f"connect {node.name()} to the shot, then Send again."
         )
-    if not any(owner in seen for owner in owners):
+    if not any(owner in drawn for owner in owners):
         names = ", ".join(wedges.label(parm.path()) for parm in parms)
         raise SendRefused(
             f"Nothing the flipbook draws reads {names}, so every wedge would "
@@ -155,13 +150,13 @@ def _written(
             f'expression is ch("{parms[0].path()}"), read that spare parm in '
             "the VEX, then Send again."
         )
-    written = caches.between(owners, drawn)
-    if node in written or not any(owner in reached for owner in owners):
-        return written
-    # Before the first cache that reads it, which keeps the cook order.
-    readers = [i for i, cache in enumerate(written) if node in caches.reached(cache)]
-    written.insert(readers[0] if readers else len(written), node)
-    return written
+    # A cache loading from disk stands in for everything behind it, so a
+    # change behind it is drawn only once the cache is written again.
+    return [
+        reader
+        for reader in drawn.readers(owners)
+        if reader == node or (reader not in owners and caches.loads_from_disk(reader))
+    ]
 
 
 def _build(
@@ -169,7 +164,7 @@ def _build(
     publish: hou.LopNode,
     choice: wedge_dialog.WedgeChoice,
     found: list[wedges.Wedge],
-    written: list[hou.Node],
+    rebuilds: list[hou.Node],
 ) -> tuple[author.Job, wedges.Run]:
     folder = snapshot.claim(node)
     try:
@@ -184,10 +179,10 @@ def _build(
             fps=hou.fps(),
             publish=publish.path(),
             draw=choice.draw,
-            caches=[_cache(cache, choice.end) for cache in written],
+            rebuilds=[_rebuild(cache, choice.end) for cache in rebuilds],
             wedges=found,
         )
-        paths = [cache.path for cache in run.caches]
+        paths = [rebuild.path for rebuild in run.rebuilds]
         spec = commands.Wedges(
             wedges.write_record(run), environment(), wedges.chunks(run), paths
         )
@@ -206,10 +201,10 @@ def _build(
     return built, run
 
 
-def _cache(node: hou.Node, end: int) -> wedges.Cache:
+def _rebuild(node: hou.Node, end: int) -> wedges.Rebuild:
     """The cache's own frames, up to the run's last."""
     chunks = caches.chunks(node)
-    return wedges.Cache(node.path(), chunks[0][0], min(chunks[-1][1], float(end)))
+    return wedges.Rebuild(node.path(), chunks[0][0], min(chunks[-1][1], float(end)))
 
 
 def _publish() -> hou.LopNode:

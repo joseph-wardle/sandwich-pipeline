@@ -55,7 +55,9 @@ class Wedge:
 
 
 @dataclass(frozen=True)
-class Cache:
+class Rebuild:
+    """A cache a wedge writes into its own folder."""
+
     path: str
     # A sim cooks each frame from the last, so every cache writes from its own
     # first frame, and none past the run's last, which no flipbook draws.
@@ -75,9 +77,9 @@ class Run:
     # The hip's publish node, whose stage holds the shot camera.
     publish: str
     draw: str
-    # What each wedge writes, in cook order: the caches loading from disk
-    # between a wedged parm and what is drawn, and the node if a parm reaches it.
-    caches: list[Cache]
+    # In cook order: the caches loading from disk between a wedged parm and
+    # what is drawn, and the node if a parm reaches it.
+    rebuilds: list[Rebuild]
     wedges: list[Wedge]
 
     @property
@@ -109,7 +111,8 @@ def write_record(run: Run) -> Path:
         "fps": run.fps,
         "publish": run.publish,
         "draw": run.draw,
-        "caches": [{"path": c.path, "frames": [c.start, c.end]} for c in run.caches],
+        # The key keeps its first name, so runs already on disk still read.
+        "caches": [{"path": r.path, "frames": [r.start, r.end]} for r in run.rebuilds],
         "wedges": [{"name": w.name, "values": w.values} for w in run.wedges],
     }
     path.write_text(json.dumps(data, indent=2))
@@ -132,7 +135,7 @@ def read_record(path: Path) -> Run:
         fps=data["fps"],
         publish=data["publish"],
         draw=data["draw"],
-        caches=[Cache(c["path"], *c["frames"]) for c in data["caches"]],
+        rebuilds=[Rebuild(r["path"], *r["frames"]) for r in data["caches"]],
         wedges=[Wedge(w["name"], w["values"]) for w in data["wedges"]],
     )
 

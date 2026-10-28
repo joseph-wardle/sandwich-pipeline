@@ -38,9 +38,12 @@ def _alias(category: hou.NodeTypeCategory, new_name: str, old_name: str) -> None
         )
 
 
+def _keep_cache_buttons_out_of_saves() -> None:
+    # Imported here for the same reason as above.
+    from pipe.dcc.houdini.tractor import buttons
+
+    hou.hipFile.addEventCallback(buttons.on_save)
+
+
 _register_renamed_type_aliases()
-
-from pipe.dcc.houdini.tractor import caches  # noqa: E402
-
-# Leaves the File Cache buttons out of every saved hip.
-hou.hipFile.addEventCallback(caches.on_save)
+_keep_cache_buttons_out_of_saves()

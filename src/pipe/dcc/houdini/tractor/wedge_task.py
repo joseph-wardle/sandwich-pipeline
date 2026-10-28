@@ -54,18 +54,18 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         print(f"The snapshot has no parm {', '.join(missing)}.", file=sys.stderr)
         return 1
-    written: list[hou.Node] = []
-    for index, path in enumerate((c.path for c in run.caches), start=1):
+    rebuilt: list[hou.Node] = []
+    for index, path in enumerate((r.path for r in run.rebuilds), start=1):
         node = hou.node(path)
         if node is None:
             print(f"The snapshot has no node {path}.", file=sys.stderr)
             return 1
         wedges.redirect(node, folder, index)
-        written.append(node)
+        rebuilt.append(node)
     if args.step == WEDGE_SIM:
-        return sim(run, written, args.args[0])
+        return sim(run, rebuilt, args.args[0])
     # The flipbook reads what the sims wrote, as the artist's viewport would.
-    for node in written:
+    for node in rebuilt:
         node.setParms({LOAD_FROM_DISK: 1})
     start, end = (int(frame) for frame in args.args)
     return flipbook(run, wedge, folder, start, end)
@@ -86,17 +86,18 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     return args
 
 
-def sim(run: wedges.Run, written: list[hou.Node], path: str) -> int:
+def sim(run: wedges.Run, rebuilt: list[hou.Node], path: str) -> int:
     """Write one of the wedge's caches over the frames the record gives it,
     reading those written before it from the wedge's folder. The exit code."""
-    paths = [c.path for c in run.caches]
+    paths = [r.path for r in run.rebuilds]
     if path not in paths:
         print(f"The run doesn't write {path}.", file=sys.stderr)
         return 1
     index = paths.index(path)
-    for node in written[:index]:
+    for node in rebuilt[:index]:
         node.setParms({LOAD_FROM_DISK: 1})
-    return cache_task.write(path, run.caches[index].start, run.caches[index].end)
+    rebuild = run.rebuilds[index]
+    return cache_task.write(path, rebuild.start, rebuild.end)
 
 
 def flipbook(
@@ -231,10 +232,20 @@ def _cache_only(publish: hou.LopNode, node: str) -> hou.LopNode:
             "method": "deactivate",
         }
     )
+    # A Merge that flattens its inputs drops what sits above a Layer Break, as
+    # the camera does in an fx hip, so a SOP is wired after the Prune, and a LOP
+    # cache's layers are kept apart. A Fetch reaches a cache in another network.
+    if isinstance(hou.node(node), hou.LopNode):
+        fetch = stage.createNode("fetch")
+        fetch.setParms({"loppath": node})
+        merge = stage.createNode("merge")
+        merge.setInput(0, camera)
+        merge.setInput(1, fetch)
+        merge.setParms({"mergestyle": "separatelayers"})
+        # createNode is typed as returning any node; this one is a LOP.
+        return merge  # ty: ignore[invalid-return-type]
     # SOP Import draws the geometry where the SOP has it, without any transform
-    # of the object around it. Sims are made in world space. It is wired after
-    # the Prune, not merged with it: a Merge flattens its inputs, which drops
-    # what sits above a Layer Break, as the camera does in an fx hip.
+    # of the object around it. Sims are made in world space.
     geometry = stage.createNode("sopimport")
     geometry.setInput(0, camera)
     geometry.setParms({"soppath": node})
