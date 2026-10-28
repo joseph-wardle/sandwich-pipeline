@@ -32,25 +32,28 @@ def review(node: hou.Node) -> None:
         )
         return
     clips: list[PreviewClip] = []
+    # The clips of each run, which the grid plays side by side.
+    grids: list[list[PreviewClip]] = []
     # The run and wedge of each clip, by its frames folder.
     shown: dict[Path, tuple[wedges.Run, wedges.Wedge]] = {}
     for run in runs:
+        grids.append([])
         for wedge in run.wedges:
             frames = run.folder / wedge.name / wedges.FLIPBOOK
             # The blade renames the folder into place once every frame is burned.
             if not frames.is_dir():
                 continue
-            clips.append(
-                PreviewClip(
-                    label=f"{run.folder.name} {wedge.name}: "
-                    + ", ".join(wedges.describe(wedge)),
-                    frames_dir=frames,
-                    frames_basename=wedges.FRAMES,
-                    frame_start=run.start,
-                    frame_end=run.end,
-                    fps=round(run.fps),
-                )
+            clip = PreviewClip(
+                label=f"{run.folder.name} {wedge.name}: "
+                + ", ".join(wedges.describe(wedge)),
+                frames_dir=frames,
+                frames_basename=wedges.FRAMES,
+                frame_start=run.start,
+                frame_end=run.end,
+                fps=round(run.fps),
             )
+            clips.append(clip)
+            grids[-1].append(clip)
             shown[frames] = (run, wedge)
     finished = {run.folder for run, _ in shown.values()}
     unfinished = [run for run in runs if run.folder not in finished]
@@ -76,6 +79,7 @@ def review(node: hou.Node) -> None:
         runtime.get_main_qt_window(),
         actions=actions,
         missing_frames=MISSING_FRAMES,
+        runs=grids,
     )
 
 

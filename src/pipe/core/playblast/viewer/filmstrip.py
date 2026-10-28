@@ -1,4 +1,4 @@
-"""The clip sidebar's filmstrip rows: thumbnails, labels, confirm status."""
+"""The clip sidebar: a filmstrip of thumbnails, labels and confirm status."""
 
 from __future__ import annotations
 
@@ -6,12 +6,25 @@ from typing import cast
 
 from Qt.QtCore import QModelIndex, QRect, QRectF, QSize, Qt
 from Qt.QtGui import QColor, QPainter, QPalette, QPixmap
-from Qt.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
+from Qt.QtWidgets import (
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from pipe.core.playblast.clip import PreviewClip
-from pipe.core.playblast.viewer.confirm_panel import PanelStatus
+from pipe.core.playblast.viewer import style
+from pipe.core.playblast.viewer.confirm_column import UNCONFIRMED
+from pipe.core.playblast.viewer.confirm_panel import ConfirmPanel, PanelStatus
 from pipe.core.ui import FAIL, OK
 
+SIDEBAR_WIDTH = 200
 # Filmstrip thumbnail width; row height follows from the clip aspect ratio.
 THUMB_W = 80
 
@@ -169,4 +182,86 @@ class ClipDelegate(QStyledItemDelegate):
         painter.drawText(status_x, baseline, _STATUS_TEXT.get(status, ""))
 
 
-__all__ = ["ClipDelegate", "STATUS_ROLE", "THUMB_ROLE", "THUMB_W", "thumbnail"]
+class Sidebar(QWidget):
+    """The clip list, with Confirm remaining under it."""
+
+    clips: QListWidget
+    confirm_remaining: QPushButton
+    _statuses: bool
+
+    def __init__(
+        self,
+        clips: list[PreviewClip],
+        resolution: tuple[int, int],
+        *,
+        statuses: bool,
+    ) -> None:
+        """Clips without `statuses` are acted on, not delivered, and their
+        labels are long."""
+        super().__init__()
+        self._statuses = statuses
+        self.clips = QListWidget()
+        self.clips.setFixedWidth(SIDEBAR_WIDTH)
+        self.clips.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.clips.setMouseTracking(True)  # so rows repaint on hover
+        self.clips.setToolTip("Up and Down move between clips.")
+        width, height = resolution
+        thumb_h = round(THUMB_W * height / width) if width else THUMB_W
+        self.clips.setItemDelegate(ClipDelegate(THUMB_W, thumb_h))
+        thumb_size = QSize(THUMB_W, thumb_h)
+        for clip in clips:
+            item = QListWidgetItem(clip.label)
+            item.setData(THUMB_ROLE, thumbnail(clip, thumb_size))
+            if statuses:
+                item.setData(STATUS_ROLE, PanelStatus.PENDING)
+            else:
+                item.setToolTip(clip.label)
+            self.clips.addItem(item)
+
+        header = QLabel("Clips")
+        header.setStyleSheet("font-weight: 600; padding: 0 2px;")
+        self.confirm_remaining = QPushButton("Confirm remaining")
+        self.confirm_remaining.setToolTip(
+            "Deliver every clip that still has work to do — including retrying "
+            "failures — using the choices already made on each one."
+        )
+        self.confirm_remaining.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        sidebar = QVBoxLayout(self)
+        sidebar.setContentsMargins(0, 0, 0, 0)
+        sidebar.setSpacing(style.PAD_S)
+        sidebar.addWidget(header)
+        sidebar.addWidget(self.clips)
+        sidebar.addWidget(self.confirm_remaining)
+        self.setVisible(len(clips) > 1)
+
+    def select(self, index: int) -> None:
+        if self.clips.currentRow() != index:
+            self.clips.setCurrentRow(index)
+
+    def remove(self, index: int) -> None:
+        # Taking the row would select its neighbour and load a stale index.
+        self.clips.blockSignals(True)
+        self.clips.takeItem(index)
+        self.clips.blockSignals(False)
+
+    def refresh(self, panels: list[ConfirmPanel]) -> None:
+        if self._statuses:
+            for index, panel in enumerate(panels):
+                self.clips.item(index).setData(STATUS_ROLE, panel.status)
+        self.clips.viewport().update()
+        confirmable = [panel for panel in panels if panel.is_confirmable]
+        self.confirm_remaining.setVisible(len(confirmable) > 1)
+        self.confirm_remaining.setEnabled(
+            any(panel.status in UNCONFIRMED for panel in confirmable)
+        )
+
+
+__all__ = [
+    "SIDEBAR_WIDTH",
+    "STATUS_ROLE",
+    "THUMB_ROLE",
+    "THUMB_W",
+    "ClipDelegate",
+    "Sidebar",
+    "thumbnail",
+]
