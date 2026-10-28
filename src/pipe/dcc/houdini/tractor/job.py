@@ -51,8 +51,7 @@ SERVICE = "EL9"
 # student logs in. The New Monsters have their own profile.
 MONSTERS = "Monster_EL9 || New_Monster_EL9"
 BLADES = {"Monsters only": MONSTERS, "Any blade": SERVICE}
-# The range and default of Tractor Submit's Priority.
-PRIORITY = (0, 50, 10)
+PRIORITY = (0, 50, 30)
 
 RENDER_RETRIES = [
     3,  # Can't get license
