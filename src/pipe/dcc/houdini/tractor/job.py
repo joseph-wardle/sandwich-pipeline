@@ -47,9 +47,9 @@ from pipe.dcc.houdini.tractor.commands import Cache, Layer, Wedges
 # Tractor runs a command only on blades that offer its service. Every blade
 # offers EL9, and each offers the name of its profile.
 SERVICE = "EL9"
-MONSTERS = "Monster_EL9"
 # Monsters are blades nobody sits at, so a sim of hours is not killed when a
-# student logs in.
+# student logs in. The New Monsters have their own profile.
+MONSTERS = "Monster_EL9 || New_Monster_EL9"
 BLADES = {"Monsters only": MONSTERS, "Any blade": SERVICE}
 # The range and default of Tractor Submit's Priority.
 PRIORITY = (0, 50, 10)
