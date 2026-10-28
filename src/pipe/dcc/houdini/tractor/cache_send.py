@@ -19,16 +19,20 @@ from pipe.dcc.houdini.tractor import (
     job,
     snapshot,
 )
-from pipe.dcc.houdini.tractor.send import environment
+from pipe.dcc.houdini.tractor.send import (
+    BUILD_FAILED,
+    check,
+    environment,
+    note,
+    refuse,
+    spool,
+    title,
+)
 
 # The line of a node's comment that names its last job.
 COMMENT = "Tractor job"
 # File Cache's file name before the version, which Save to Disk hardens.
 BASE_NAME = "basename"
-BUILD_FAILED = (
-    "The job could not be built, so nothing was sent to Tractor. The details "
-    "below say what went wrong."
-)
 
 log = logging.getLogger(__name__)
 
@@ -84,26 +88,6 @@ def send(node: hou.Node) -> None:
     )
 
 
-def spool(built: author.Job, title: str, unconfirmed: str = "") -> int | None:
-    """The job's id, or None after warning that Tractor did not confirm it,
-    ending with `unconfirmed`."""
-    try:
-        return built.spool(block=True)
-    except Exception:
-        # A lost reply looks the same as a refusal, and the job may already be
-        # queued and reading its snapshot, so its folder stays.
-        log.exception("Tractor did not confirm the job %s", title)
-        hou.ui.displayMessage(
-            "Tractor did not confirm the job, but it may still have been queued. "
-            f'Look for "{title}" in Tractor before sending again.\n\n'
-            f"{unconfirmed}".strip(),
-            title="Tractor did not confirm the job",
-            severity=hou.severityType.Warning,
-            details=traceback.format_exc(),
-        )
-        return None
-
-
 def _job_line(job_id: int | None) -> str:
     if job_id is None:
         return f"{COMMENT} not confirmed"
@@ -139,41 +123,6 @@ def _prepare(node: hou.Node) -> tuple[author.Job, str, list[hou.Node]] | None:
         shutil.rmtree(folder)
         raise
     return built, choice.title, sent
-
-
-def refuse(message: str, details: str | None = None) -> None:
-    hou.ui.displayMessage(
-        message,
-        title="Nothing was sent to Tractor",
-        severity=hou.severityType.Error,
-        details=details,
-    )
-
-
-def check(node: hou.Node) -> None:
-    """Refuse a node no Send can write."""
-    if hou.hipFile.isNewFile():
-        raise SendRefused("Save the hip file first. Its caches are written beside it.")
-    # A cache saved into an asset keeps its buttons there.
-    if node.isInsideLockedHDA():
-        raise SendRefused(
-            f"{node.path()} is inside the locked asset {_locked_asset(node).path()}, "
-            "so Send can't change its parms. Choose Allow Editing of Contents on "
-            "the asset, then Send again."
-        )
-
-
-def _locked_asset(node: hou.Node) -> hou.Node:
-    asset = node.parent()
-    while not asset.isLockedHDA():
-        asset = asset.parent()
-    return asset
-
-
-def title(node: hou.Node, what: str = "") -> str:
-    # The last folders of a shot's fx hip are <shot>/fx.
-    hip = Path(hou.text.expandString("$HIP"))
-    return f"{hip.parent.name} {hip.name}: {node.name()}{what}"
 
 
 def _frames(node: hou.Node) -> str:
@@ -214,11 +163,3 @@ def _load_from_disk(sent: list[hou.Node]) -> None:
     for cache in sent[:-1]:
         cache.setParms({caches.LOAD_FROM_DISK: 1})
     sent[-1].hdaModule().enableLoadFromDisk(sent[-1])
-
-
-def note(node: hou.Node, prefix: str, line: str) -> None:
-    """Replace the line of the node's comment that starts with `prefix`,
-    keeping the artist's own lines."""
-    kept = [text for text in node.comment().splitlines() if not text.startswith(prefix)]
-    node.setComment("\n".join([*kept, line]))
-    node.setGenericFlag(hou.nodeFlag.DisplayComment, True)

@@ -25,11 +25,13 @@ HUSK_SEGFAULT = "Fatal error: Segmentation fault"
 SEGFAULT_EXIT = 139
 # Run by hython on the blade: writes one File Cache from a Send's snapshot.
 CACHE_MODULE = "pipe.dcc.houdini.tractor.cache_task"
-# Run by hython on the blade: sims, flipbooks or finishes one wedge of a Wedge Send.
+# Run by hython on the blade: one step of one wedge of a Wedge Send.
 WEDGE_MODULE = "pipe.dcc.houdini.tractor.wedge_task"
 WEDGE_SIM = "sim"
 WEDGE_FLIPBOOK = "flipbook"
 WEDGE_FINISH = "finish"
+WEDGE_PREPARE = "prepare"
+WEDGE_BURN = "burn"
 # A flipbook's exit code when it couldn't draw, as when other tasks on the blade
 # have filled the GPU's memory. Tractor retries it.
 WEDGE_DRAW_FAILED = 75

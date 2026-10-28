@@ -18,7 +18,7 @@ from Qt.QtWidgets import (
 
 from pipe.core.playblast.clip import PreviewClip
 from pipe.core.playblast.playblaster import DEFAULT_RESOLUTION
-from pipe.core.playblast.viewer import confirm_column, filmstrip, grid, style
+from pipe.core.playblast.viewer import confirm_column, filmstrip, grid, style, views
 from pipe.core.playblast.viewer.confirm_column import UNCONFIRMED, ConfirmColumn
 from pipe.core.playblast.viewer.transport import ClipAction, Transport
 
@@ -55,6 +55,7 @@ class ViewerWindow(QMainWindow):
     _canvas: grid.Canvas
     _sidebar: filmstrip.Sidebar
     _transport: Transport
+    _views: views.ViewToggle
     _confirm: ConfirmColumn
     _actions: Sequence[ClipAction]
     _missing_frames: str
@@ -145,8 +146,10 @@ class ViewerWindow(QMainWindow):
         self._canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._canvas.setFocus()
 
+        self._views = views.ViewToggle(views.names(self._clips))
+        self._views.changed.connect(lambda: self._show_frame(self._frame))
         self._transport = Transport(
-            self._actions, self._run_action, grid=bool(self._runs)
+            self._actions, self._run_action, grid=bool(self._runs), views=self._views
         )
         self._transport.scrub.sliderMoved.connect(self._on_scrub_moved)
         self._transport.scrub.sliderPressed.connect(self._on_scrub_pressed)
@@ -228,6 +231,7 @@ class ViewerWindow(QMainWindow):
         self._sidebar.select(index)
         self._confirm.show_clip(index)
         self._transport.set_range(clip.frame_start, clip.frame_end)
+        self._views.setEnabled(bool(clip.views))
         if not keep_frame:
             self._frame = clip.frame_start
         self._refresh_view()
@@ -237,16 +241,17 @@ class ViewerWindow(QMainWindow):
     def _show_frame(self, frame: int) -> None:
         clip = self._clip()
         frame = min(max(frame, clip.frame_start), clip.frame_end)
-        images = grid.load([shown.frame_path(frame) for shown in self._shown])
+        paths, notes = self._views.frames(self._shown, frame)
+        images = grid.load(paths)
         missing = [
             shown
-            for shown, image in zip(self._shown, images, strict=True)
-            if image.isNull() and shown not in self._missing_frames_warned
+            for shown, image, note in zip(self._shown, images, notes, strict=True)
+            if image.isNull() and not note and shown not in self._missing_frames_warned
         ]
         if missing:
             self._warn_missing_frames(missing, frame)
         self._frame = frame
-        self._canvas.show_frames(images)
+        self._canvas.show_frames(images, notes)
         # The slider repaints its handle readout from this value.
         self._transport.scrub.setValue(frame)
 
@@ -466,6 +471,8 @@ class ViewerWindow(QMainWindow):
             self._go_to_clip(self._current_index - 1)
         elif key == Qt.Key.Key_Down:
             self._go_to_clip(self._current_index + 1)
+        elif key == Qt.Key.Key_R and self._views.isEnabled():
+            self._views.cycle()
         elif self._runs and key == Qt.Key.Key_G:
             self._on_grid()
         elif self._entered and key == Qt.Key.Key_Escape:

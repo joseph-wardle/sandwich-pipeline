@@ -15,6 +15,9 @@ from pipe.dcc.houdini import runtime
 from pipe.dcc.houdini.tractor import engine, snapshot, wedges
 
 TITLE = "Review Wedges"
+# The toggle's names for a wedge's flipbook and its render.
+FLIPBOOK_VIEW = "Flipbook"
+RENDER_VIEW = "Render"
 MISSING_FRAMES = (
     "The wedge may have been deleted, or its Draw retried in Tractor, since "
     "Review Wedges opened. Close it and press Review Wedges again."
@@ -43,6 +46,8 @@ def review(node: hou.Node) -> None:
             # The blade renames the folder into place once every frame is burned.
             if not frames.is_dir():
                 continue
+            rendered = run.folder / wedge.name / wedges.RENDER
+            views = ((FLIPBOOK_VIEW, frames), (RENDER_VIEW, rendered))
             clip = PreviewClip(
                 label=f"{run.folder.name} {wedge.name}: "
                 + ", ".join(wedges.describe(wedge)),
@@ -51,6 +56,7 @@ def review(node: hou.Node) -> None:
                 frame_start=run.start,
                 frame_end=run.end,
                 fps=round(run.fps),
+                views=views if run.render else (),
             )
             clips.append(clip)
             grids[-1].append(clip)
@@ -71,7 +77,7 @@ def review(node: hou.Node) -> None:
         ClipAction(
             "Delete",
             lambda clip: _delete(*shown[clip.frames_dir]),
-            "Delete this wedge's cache and flipbook from disk.",
+            "Delete this wedge's cache, flipbook and render from disk.",
         ),
     ]
     open_viewer(
@@ -242,8 +248,19 @@ def _delete(run: wedges.Run, wedge: wedges.Wedge) -> bool:
     if not (run.folder / wedge.name).exists():
         hou.ui.setStatusMessage(f"{name} was already deleted")
         return True
+    # Its flipbook is finished, but its render may not be, and deleting it
+    # would fail the job's render tasks.
+    rendering = run.render and not (run.folder / wedge.name / wedges.RENDER).is_dir()
+    if rendering and run.folder in _running([run.folder])[0]:
+        hou.ui.displayMessage(
+            f"{name} is still rendering in Tractor. Delete it once its render "
+            "plays, or its job ends.",
+            title=TITLE,
+        )
+        return False
+    files = "cache, flipbook and render" if run.render else "cache and flipbook"
     pressed = hou.ui.displayMessage(
-        f"Delete {name}? Its cache and flipbook can't be recovered.",
+        f"Delete {name}? Its {files} can't be recovered.",
         buttons=("Delete", "Cancel"),
         default_choice=1,
         close_choice=1,

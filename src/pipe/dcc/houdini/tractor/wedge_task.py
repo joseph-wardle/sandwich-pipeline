@@ -1,36 +1,61 @@
 """What a Wedge Send task runs on a blade: hython sims one wedge of a run,
-flipbooks some of its frames, or finishes its flipbook once every frame is drawn.
+flipbooks some of its frames, finishes its flipbook once every frame is drawn,
+or prepares and burns its render.
 
     hython -m pipe.dcc.houdini.tractor.wedge_task <wedge.json> <wedge> sim <cache>
     hython -m pipe.dcc.houdini.tractor.wedge_task <wedge.json> <wedge> flipbook <start> <end>
     hython -m pipe.dcc.houdini.tractor.wedge_task <wedge.json> <wedge> finish
+    hython -m pipe.dcc.houdini.tractor.wedge_task <wedge.json> <wedge> prepare
+    hython -m pipe.dcc.houdini.tractor.wedge_task <wedge.json> <wedge> burn
 
-Sim and flipbook set the wedge's values and point every cache the wedge writes
-into its own folder in the wedge's. A sim writes one of them over the frames the
-record gives it, reading those written before it, and the flipbook reads them
-all, drawing the scene as the sims saw it. It looks through the shot camera at
-the stage of the hip's publish node, or at only the wedged cache's output under
-that camera.
+Sim, flipbook and prepare set the wedge's values and point every cache the
+wedge writes into its own folder in the wedge's. A sim writes one of them over
+the frames the record gives it, reading those written before it, and the
+flipbook reads them all, drawing the scene as the sims saw it. It looks through
+the shot camera at the stage of the hip's publish node, or at only the wedged
+cache's output under that camera and the shot's lights.
+
+Prepare writes what the flipbook draws as a shot layer's render.usd, with the
+show's RenderMan settings at daily quality, for the layer's Render and Denoise
+tasks. Burn turns the denoised frames into HUD-burned frames in the show's view.
 """
 
 from __future__ import annotations
 
 import argparse
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 import hou
+from pxr import Sdf, Usd
 
+from pipe.core import color
 from pipe.core.hud import HudContent
 from pipe.core.playblast.encoding import burn_hud_frames
-from pipe.dcc.houdini.tractor import cache_task, snapshot, wedges
+from pipe.core.render import RENDER_USD
+from pipe.dcc.houdini.tractor import (
+    SendRefused,
+    cache_task,
+    parms,
+    render_send,
+    snapshot,
+    wedges,
+)
 from pipe.dcc.houdini.tractor.caches import LOAD_FROM_DISK
 from pipe.dcc.houdini.tractor.commands import (
+    WEDGE_BURN,
     WEDGE_DRAW_FAILED,
     WEDGE_FINISH,
     WEDGE_FLIPBOOK,
+    WEDGE_PREPARE,
     WEDGE_SIM,
+)
+from pipe.dcc.houdini.util.nodetypes import (
+    RENDERMAN_SETTINGS,
+    TRACTOR_CONFIGURE,
+    TRACTOR_DENOISE,
 )
 
 # The Flipbook ROP's Source menu.
@@ -40,6 +65,25 @@ LOP_SOURCE = 1
 WORK_LIGHTS = 1
 RAW = "raw"
 SCRATCH = f"{wedges.FLIPBOOK}.tmp"
+BURNED = "burn"
+# The lights of every published shot. Cache only keeps them, so a render of the
+# cache alone is lit as the shot is.
+LIGHTS = "/lights"
+# The set that hides a shot's dome from the camera isn't drawn in Cache only,
+# so the dome's picture would fill the frame behind the cache.
+CAMERA_VISIBILITY = "primvars:ri:attributes:visibility:camera"
+DOME_LIGHTS = ("DomeLight", "DomeLight_1")
+# Daily quality: the most samples a pixel takes. Denoise cleans up the rest.
+DAILY_SAMPLES = 64
+MAX_SAMPLES = "xn__rihidermaxsamples_n3af"
+MAX_SAMPLES_CONTROL = "xn__rihidermaxsamples_control_ohbf"
+STEPS = {
+    WEDGE_SIM: 1,
+    WEDGE_FLIPBOOK: 2,
+    WEDGE_FINISH: 0,
+    WEDGE_PREPARE: 0,
+    WEDGE_BURN: 0,
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,6 +93,8 @@ def main(argv: list[str] | None = None) -> int:
     folder = run.folder / wedge.name
     if args.step == WEDGE_FINISH:
         return finish(run, folder)
+    if args.step == WEDGE_BURN:
+        return burn(run, wedge, folder)
     snapshot.load(run.snapshot, run.hip)
     missing = wedges.set_values(wedge)
     if missing:
@@ -67,6 +113,8 @@ def main(argv: list[str] | None = None) -> int:
     # The flipbook reads what the sims wrote, as the artist's viewport would.
     for node in rebuilt:
         node.setParms({LOAD_FROM_DISK: 1})
+    if args.step == WEDGE_PREPARE:
+        return prepare(run, wedge)
     start, end = (int(frame) for frame in args.args)
     return flipbook(run, wedge, folder, start, end)
 
@@ -75,12 +123,12 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("record", type=Path, help="the run's wedge.json")
     parser.add_argument("wedge", help="the wedge's name in the record")
-    parser.add_argument("step", choices=(WEDGE_SIM, WEDGE_FLIPBOOK, WEDGE_FINISH))
+    parser.add_argument("step", choices=tuple(STEPS))
     parser.add_argument(
         "args", nargs="*", help="the cache a sim writes, or a flipbook's start and end"
     )
     args = parser.parse_args(argv)
-    wanted = {WEDGE_SIM: 1, WEDGE_FLIPBOOK: 2, WEDGE_FINISH: 0}[args.step]
+    wanted = STEPS[args.step]
     if len(args.args) != wanted:
         parser.error(f"{args.step} takes {wanted} arguments, not {len(args.args)}")
     return args
@@ -180,6 +228,27 @@ def _missing(folder: Path, frames: range) -> int | None:
 def _flipbook_rop(run: wedges.Run) -> hou.RopNode | None:
     """A Flipbook ROP that draws what the run chose, or None after saying why it
     can't."""
+    drawn = _drawn(run)
+    if drawn is None:
+        return None
+    # hou.node may return None, but /out is always there.
+    rop = hou.node("/out").createNode("flipbook")  # ty: ignore[unresolved-attribute]
+    rop.setParms(
+        {
+            "opsource": LOP_SOURCE,
+            "loppath": drawn.path(),
+            "cameraprim": wedges.SHOT_CAMERA,
+            "lighting": WORK_LIGHTS,
+            "trange": 1,
+            "f3": 1,
+        }
+    )
+    # createNode is typed as returning any node; this one is a ROP.
+    return rop  # ty: ignore[invalid-return-type]
+
+
+def _drawn(run: wedges.Run) -> hou.LopNode | None:
+    """What the run chose to draw, or None after saying why it can't be drawn."""
     publish = hou.node(run.publish)
     if not isinstance(publish, hou.LopNode):
         print(f"The snapshot has no publish node {run.publish}.", file=sys.stderr)
@@ -201,24 +270,12 @@ def _flipbook_rop(run: wedges.Run) -> hou.RopNode | None:
             file=sys.stderr,
         )
         return None
-    # hou.node may return None, but /out is always there.
-    rop = hou.node("/out").createNode("flipbook")  # ty: ignore[unresolved-attribute]
-    rop.setParms(
-        {
-            "opsource": LOP_SOURCE,
-            "loppath": drawn.path(),
-            "cameraprim": wedges.SHOT_CAMERA,
-            "lighting": WORK_LIGHTS,
-            "trange": 1,
-            "f3": 1,
-        }
-    )
-    # createNode is typed as returning any node; this one is a ROP.
-    return rop  # ty: ignore[invalid-return-type]
+    return drawn
 
 
 def _cache_only(publish: hou.LopNode, node: str) -> hou.LopNode:
-    """A stage of the cache's output alone, under the publish node's shot camera.
+    """A stage of the cache's output alone, under the publish node's shot camera
+    and lights.
 
     The publish node has no output, so the camera is kept from its input.
     """
@@ -227,7 +284,7 @@ def _cache_only(publish: hou.LopNode, node: str) -> hou.LopNode:
     camera.setInput(0, publish.input(0))
     camera.setParms(
         {
-            "primpattern1": wedges.SHOT_CAMERA,
+            "primpattern1": f"{wedges.SHOT_CAMERA} {LIGHTS} {LIGHTS}/**",
             "pruneunselected": 1,
             "method": "deactivate",
         }
@@ -251,6 +308,132 @@ def _cache_only(publish: hou.LopNode, node: str) -> hou.LopNode:
     geometry.setParms({"soppath": node})
     # createNode is typed as returning any node; this one is a LOP.
     return geometry  # ty: ignore[invalid-return-type]
+
+
+def prepare(run: wedges.Run, wedge: wedges.Wedge) -> int:
+    """Write the wedge's render.usd and denoise.json as a shot layer's, with
+    the show's RenderMan settings at daily quality. The exit code."""
+    drawn = _drawn(run)
+    if drawn is None:
+        return 1
+    if run.render is None:
+        print(f"{run.folder} doesn't render its wedges.", file=sys.stderr)
+        return 1
+    expected = wedges.render_layer(run, wedge.name)
+    network = drawn.parent()
+    # The publish node has no output to wire from.
+    fetch = network.createNode("fetch")
+    fetch.setParms({"loppath": drawn.path()})
+    settings = network.createNode(RENDERMAN_SETTINGS)
+    settings.setInput(0, fetch)
+    settings.setParms({MAX_SAMPLES_CONTROL: "set", MAX_SAMPLES: DAILY_SAMPLES})
+    # createNode is typed as returning any node; this one is a LOP.
+    configure: hou.LopNode
+    configure = network.createNode(TRACTOR_CONFIGURE)  # ty: ignore[invalid-assignment]
+    configure.setInput(0, settings)
+    width, height = run.render
+    _set(
+        configure,
+        {
+            parms.LAYER: wedge.name,
+            parms.OUTPUT: str(expected.folder),
+            "trange": "normal",
+            "f1": run.start,
+            "f2": run.end,
+            "f3": 1,
+            parms.RESOLUTION: "specific",
+            "res_user1": width,
+            "res_user2": height,
+        },
+    )
+    denoise = network.createNode(TRACTOR_DENOISE)
+    denoise.setInput(0, configure)
+    # A retry starts again from an empty folder.
+    shutil.rmtree(expected.folder, ignore_errors=True)
+    expected.folder.mkdir(parents=True)
+    chain = render_send.Chain(configure, denoise, None, denoise)
+    try:
+        # The snapshot's publishes are already the versions the artist saw.
+        written = render_send.layer(chain, lambda _current: None)
+    except SendRefused as refusal:
+        print(refusal, file=sys.stderr)
+        return 1
+    # The job's Render and Denoise tasks were built from `expected` at Send.
+    if written != expected:
+        print(f"render.usd renders {written}, not {expected}.", file=sys.stderr)
+        return 1
+    if run.draw == wedges.CACHE:
+        _hide_domes(expected.folder / RENDER_USD)
+    print(f"Wrote {expected.folder / RENDER_USD}.")
+    return 0
+
+
+def _set(node: hou.Node, values: dict[str, str | int | float]) -> None:
+    """Set parms whose defaults are expressions, which setParms alone would keep."""
+    for name in values:
+        node.parm(name).deleteAllKeyframes()  # ty: ignore[unresolved-attribute]
+    node.setParms(values)
+
+
+def _hide_domes(path: Path) -> None:
+    stage = Usd.Stage.Open(str(path))
+    for prim in stage.Traverse():
+        if any(prim.IsA(name) for name in DOME_LIGHTS):
+            prim.CreateAttribute(CAMERA_VISIBILITY, Sdf.ValueTypeNames.Int).Set(0)
+    stage.GetRootLayer().Save()
+
+
+def burn(run: wedges.Run, wedge: wedges.Wedge, folder: Path) -> int:
+    """Turn the denoised frames into the show's view, burn the wedge's values
+    on, and move them into place. The exit code.
+
+    Each frame's EXR holds every pass Denoise read, so the render's folder is
+    deleted once the frames are burned.
+    """
+    if run.render is None:
+        print(f"{run.folder} doesn't render its wedges.", file=sys.stderr)
+        return 1
+    layer = wedges.render_layer(run, wedge.name)
+    final = folder / wedges.RENDER
+    frames = range(run.start, run.end + 1)
+    # Burned already, and left alone, since review may be playing it.
+    if not layer.folder.exists() and _missing(final, frames) is None:
+        print(f"{final} already has all {len(frames)} frames.")
+        return 0
+    scratch = layer.folder / BURNED
+    raw = scratch / RAW
+    shutil.rmtree(scratch, ignore_errors=True)
+    raw.mkdir(parents=True)
+    # A static method the stubs declare as an instance one.
+    config = hou.Color.ocio_configPath()  # ty: ignore[missing-argument]
+    for frame in frames:
+        image = layer.folder / wedges.PRODUCT / f"{frame:04}.exr"
+        png = raw / f"{RAW}.{frame:04}.png"
+        converted = subprocess.run(
+            ["hoiiotool", "--colorconfig", config, str(image), "--ch", "R,G,B"]
+            + ["--ociodisplay:from=scene_linear", color.DISPLAY, color.DEFAULT_VIEW]
+            + ["-d", "uint8", "-o", str(png)]
+        )
+        if converted.returncode != 0:
+            print(f"hoiiotool couldn't convert {image}.", file=sys.stderr)
+            return 1
+    burn_hud_frames(
+        str(raw / f"{RAW}.%04d.png"),
+        str(scratch / f"{wedges.FRAMES}.%04d.png"),
+        _hud(run, wedge, run.start),
+        run.render,
+        start_frame=run.start,
+    )
+    shutil.rmtree(raw)
+    missing = _missing(scratch, frames)
+    if missing is not None:
+        print(f"The render has no burned frame {missing}.", file=sys.stderr)
+        return 1
+    shutil.rmtree(final, ignore_errors=True)
+    scratch.rename(final)
+    shutil.rmtree(layer.folder)
+    print(f"Burned {len(frames)} rendered frames into {final}.")
+    return 0
 
 
 def _hud(run: wedges.Run, wedge: wedges.Wedge, start: int) -> HudContent:

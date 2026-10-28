@@ -1,6 +1,6 @@
 """A wedge run's record, `wedge.json`, and what the Send, the blade and review
-each do with it: read wedged values, set them, and point the cache at a wedge's
-folder.
+each do with it: set wedged values, point the cache at a wedge's folder, and
+lay out a wedge's render.
 
     <hip>/geo/.tractor/<node>/v003/
     ├── scene.hipnc         the snapshot every task loads
@@ -9,19 +9,23 @@ folder.
     ├── w01/                the first wedge
     │   ├── 01_upstream/    each cache it writes, numbered in cook order, since
     │   ├── 02_sim/         two caches may share a file name
-    │   └── flipbook/       its HUD-burned frames, there once they are all written
+    │   ├── flipbook/       its HUD-burned frames, there once they are all written
+    │   ├── render.tmp/     its render as a shot layer's version folder, while it renders
+    │   └── render/         its HUD-burned render, there once it is all burned
     └── w02/
 """
 
 from __future__ import annotations
 
-import itertools
 import json
-import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 import hou
+
+from pipe.core.render import TMP
+from pipe.dcc.houdini.tractor import commands, parms
+from pipe.dcc.houdini.util.nodetypes import TRACTOR_CONFIGURE
 
 RECORD = "wedge.json"
 JOB = "job"
@@ -30,6 +34,10 @@ JOB = "job"
 # runs on disk, keep the record they were sent with.
 SCHEMA = 1
 FLIPBOOK = "flipbook"
+RENDER = "render"
+RENDERING = f"{RENDER}.tmp"
+# The product of the stock RenderMan settings node, which Denoise denoises.
+PRODUCT = "renderproduct"
 # The frames' file name before the frame number, as the viewer reads them.
 FRAMES = "flipbook"
 # The shot camera prim of every published shot, which every flipbook looks through.
@@ -81,6 +89,8 @@ class Run:
     # what is drawn, and the node if a parm reaches it.
     rebuilds: list[Rebuild]
     wedges: list[Wedge]
+    # The width and height each wedge also renders at, or None for flipbooks only.
+    render: tuple[int, int] | None = None
 
     @property
     def folder(self) -> Path:
@@ -114,6 +124,7 @@ def write_record(run: Run) -> Path:
         # The key keeps its first name, so runs already on disk still read.
         "caches": [{"path": r.path, "frames": [r.start, r.end]} for r in run.rebuilds],
         "wedges": [{"name": w.name, "values": w.values} for w in run.wedges],
+        "render": list(run.render) if run.render else None,
     }
     path.write_text(json.dumps(data, indent=2))
     return path
@@ -137,74 +148,31 @@ def read_record(path: Path) -> Run:
         draw=data["draw"],
         rebuilds=[Rebuild(r["path"], *r["frames"]) for r in data["caches"]],
         wedges=[Wedge(w["name"], w["values"]) for w in data["wedges"]],
+        # Runs sent before wedges could render have no key, and read as flipbooks.
+        render=tuple(data["render"]) if data.get("render") else None,
     )
 
 
-def parse(parm: hou.Parm, text: str) -> list[Value]:
-    """The values typed for `parm`, separated by spaces. Raises ValueError,
-    worded for the artist."""
-    tokens = shlex.split(text)
-    if not tokens:
-        raise ValueError(f"Type the values to wedge {label(parm.path())} with.")
-    return [_value(parm, token) for token in tokens]
-
-
-def _value(parm: hou.Parm, token: str) -> Value:
-    template = parm.parmTemplate()
-    kind = template.type()
-    menu = _menu(parm)
-    try:
-        if token in menu:
-            if kind != hou.parmTemplateType.Int:
-                # Kept as the token, which the burn-in shows and set() takes.
-                return token
-            # An int parm holds the item's index, unless its menu's tokens are
-            # the values. The base ParmTemplate doesn't declare this method.
-            use_token = template.menuUseToken()  # ty: ignore[unresolved-attribute]
-            return int(token) if use_token else menu.index(token)
-        if kind == hou.parmTemplateType.Float:
-            return float(token)
-        if kind in (hou.parmTemplateType.Int, hou.parmTemplateType.Toggle):
-            return int(token)
-        if kind == hou.parmTemplateType.String:
-            return token
-    except ValueError:
-        pass
-    expected = f"one of {', '.join(menu)}" if menu else _EXPECTED.get(kind, "")
-    if not expected:
-        raise ValueError(f"{label(parm.path())} is not a parm that can be wedged.")
-    raise ValueError(f"{token} is not a value of {label(parm.path())}: use {expected}.")
-
-
-def _menu(parm: hou.Parm) -> tuple[str, ...]:
-    """The tokens of the parm's menu, if its type can have one."""
-    template = parm.parmTemplate()
-    if template.type() not in _MENUS:
-        return ()
-    # The base ParmTemplate doesn't declare what these subtypes have.
-    return tuple(template.menuItems())  # ty: ignore[unresolved-attribute]
-
-
-_MENUS = (
-    hou.parmTemplateType.Int,
-    hou.parmTemplateType.Menu,
-    hou.parmTemplateType.String,
-)
-_EXPECTED = {
-    hou.parmTemplateType.Float: "numbers",
-    hou.parmTemplateType.Int: "whole numbers",
-    hou.parmTemplateType.Toggle: "0 or 1",
-}
-
-
-def combine(rows: list[tuple[str, list[Value]]]) -> list[Wedge]:
-    """One wedge for each combination of the rows' values."""
-    paths = [path for path, _ in rows]
-    combos = itertools.product(*(values for _, values in rows))
-    return [
-        Wedge(f"w{index:02}", dict(zip(paths, combo, strict=True)))
-        for index, combo in enumerate(combos, start=1)
-    ]
+def render_layer(run: Run, name: str) -> commands.Layer:
+    """A wedge's render, which runs as a shot layer's Render and Denoise tasks."""
+    folder = run.folder / name / RENDERING
+    # What a new Configure renders with, as the blade's Configure does. The
+    # Tractor HDAs load with the pipeline, on blades too, and every Configure
+    # has a Renderer.
+    configure = hou.lopNodeTypeCategory().nodeType(TRACTOR_CONFIGURE)
+    template = configure.parmTemplateGroup()  # ty: ignore[unresolved-attribute]
+    renderer_parm = template.find(parms.RENDERER)
+    renderer = renderer_parm.defaultValue()[0]  # ty: ignore[unresolved-attribute]
+    return commands.Layer(
+        name,
+        folder,
+        list(range(run.start, run.end + 1)),
+        commands.Render(
+            husk=parms.husk_options(renderer, SHOT_CAMERA),
+            folders=[folder / TMP / PRODUCT],
+        ),
+        commands.Denoise(PRODUCT),
+    )
 
 
 def set_values(wedge: Wedge) -> list[str]:

@@ -40,6 +40,7 @@ class Canvas(QWidget):
     clicked = Signal(int)
 
     _images: list[QImage]
+    _notes: Sequence[str]
     _captions: list[str]
     _outlined: int | None
     _cells: int
@@ -47,6 +48,7 @@ class Canvas(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self._images = []
+        self._notes = []
         self._captions = []
         self._outlined = None
         self._cells = 1
@@ -63,8 +65,10 @@ class Canvas(QWidget):
         self._cells = cells
         self._outlined = outlined
 
-    def show_frames(self, images: list[QImage]) -> None:
+    def show_frames(self, images: list[QImage], notes: Sequence[str] = ()) -> None:
+        """`notes` are shown in place of the frames that are null."""
         self._images = images
+        self._notes = notes
         self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:
@@ -73,6 +77,12 @@ class Canvas(QWidget):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         for index, image in enumerate(self._images):
             if image.isNull():
+                if index < len(self._notes):
+                    painter.setPen(Qt.GlobalColor.white)
+                    cell = self._cell_rect(index)
+                    painter.drawText(
+                        cell, Qt.AlignmentFlag.AlignCenter, self._notes[index]
+                    )
                 continue
             target = _fit(image, self._cell_rect(index))
             painter.drawImage(target, image)

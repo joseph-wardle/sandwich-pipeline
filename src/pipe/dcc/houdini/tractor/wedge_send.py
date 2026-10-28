@@ -6,7 +6,9 @@ wedge chooses values, and Review Wedges applies the chosen ones.
 
 from __future__ import annotations
 
+import itertools
 import logging
+import shlex
 import shutil
 import traceback
 from pathlib import Path
@@ -26,15 +28,16 @@ from pipe.dcc.houdini.tractor import (
     wedge_dialog,
     wedges,
 )
-from pipe.dcc.houdini.tractor.cache_send import (
+from pipe.dcc.houdini.tractor.send import (
     BUILD_FAILED,
     check,
+    environment,
     note,
     refuse,
+    setenv,
     spool,
     title,
 )
-from pipe.dcc.houdini.tractor.send import environment
 
 # The line of a node's comment that names its last wedge run.
 COMMENT = "Tractor wedges"
@@ -103,6 +106,8 @@ def _submit(key: int, choice: wedge_dialog.WedgeChoice) -> None:
     elif rebuilds:
         names = ", ".join(cache.name() for cache in rebuilds)
         what = f"writes {names} for each of {len(run.wedges)} wedges of {node.name()}"
+    if run.render:
+        what += ", renders each"
     hou.ui.displayMessage(
         f"Job {job_id} {what} into\n{run.folder}\n\n"
         "Press Review Wedges to play the finished ones.",
@@ -181,6 +186,7 @@ def _build(
             draw=choice.draw,
             rebuilds=[_rebuild(cache, choice.end) for cache in rebuilds],
             wedges=found,
+            render=choice.render,
         )
         paths = [rebuild.path for rebuild in run.rebuilds]
         spec = commands.Wedges(
@@ -190,8 +196,19 @@ def _build(
         # Made now, so Review's Delete tells a wedge yet to run from a deleted one.
         for name in names:
             (folder / name).mkdir()
+        renders = (
+            {name: wedges.render_layer(run, name) for name in names}
+            if run.render
+            else {}
+        )
         built = job.wedge_job(
-            choice.title, choice.priority, choice.service, spec, names
+            choice.title,
+            choice.priority,
+            choice.service,
+            spec,
+            names,
+            renders,
+            setenv(),
         )
         snapshot.write(run.snapshot)
     except BaseException:
@@ -237,11 +254,11 @@ def _wedges(rows: list[wedge_dialog.Row]) -> list[wedges.Wedge]:
         if parm.path() in (done for done, _ in parsed):
             raise SendRefused(f"{wedges.label(parm.path())} is wedged twice.")
         try:
-            values = wedges.parse(parm, text)
+            values = parse(parm, text)
         except ValueError as error:
             raise SendRefused(str(error)) from None
         parsed.append((parm.path(), values))
-    return wedges.combine(parsed)
+    return combine(parsed)
 
 
 def _parm(path: str) -> hou.Parm:
@@ -261,3 +278,74 @@ def _parm(path: str) -> hou.Parm:
             f"{parms[0].name()}."
         )
     raise SendRefused(f"There is no parm {path}.")
+
+
+def parse(parm: hou.Parm, text: str) -> list[wedges.Value]:
+    """The values typed for `parm`, separated by spaces. Raises ValueError,
+    worded for the artist."""
+    tokens = shlex.split(text)
+    if not tokens:
+        raise ValueError(f"Type the values to wedge {wedges.label(parm.path())} with.")
+    return [_value(parm, token) for token in tokens]
+
+
+def _value(parm: hou.Parm, token: str) -> wedges.Value:
+    template = parm.parmTemplate()
+    kind = template.type()
+    menu = _menu(parm)
+    try:
+        if token in menu:
+            if kind != hou.parmTemplateType.Int:
+                # Kept as the token, which the burn-in shows and set() takes.
+                return token
+            # An int parm holds the item's index, unless its menu's tokens are
+            # the values. The base ParmTemplate doesn't declare this method.
+            use_token = template.menuUseToken()  # ty: ignore[unresolved-attribute]
+            return int(token) if use_token else menu.index(token)
+        if kind == hou.parmTemplateType.Float:
+            return float(token)
+        if kind in (hou.parmTemplateType.Int, hou.parmTemplateType.Toggle):
+            return int(token)
+        if kind == hou.parmTemplateType.String:
+            return token
+    except ValueError:
+        pass
+    expected = f"one of {', '.join(menu)}" if menu else _EXPECTED.get(kind, "")
+    if not expected:
+        raise ValueError(
+            f"{wedges.label(parm.path())} is not a parm that can be wedged."
+        )
+    raise ValueError(
+        f"{token} is not a value of {wedges.label(parm.path())}: use {expected}."
+    )
+
+
+def _menu(parm: hou.Parm) -> tuple[str, ...]:
+    """The tokens of the parm's menu, if its type can have one."""
+    template = parm.parmTemplate()
+    if template.type() not in _MENUS:
+        return ()
+    # The base ParmTemplate doesn't declare what these subtypes have.
+    return tuple(template.menuItems())  # ty: ignore[unresolved-attribute]
+
+
+_MENUS = (
+    hou.parmTemplateType.Int,
+    hou.parmTemplateType.Menu,
+    hou.parmTemplateType.String,
+)
+_EXPECTED = {
+    hou.parmTemplateType.Float: "numbers",
+    hou.parmTemplateType.Int: "whole numbers",
+    hou.parmTemplateType.Toggle: "0 or 1",
+}
+
+
+def combine(rows: list[tuple[str, list[wedges.Value]]]) -> list[wedges.Wedge]:
+    """One wedge for each combination of the rows' values."""
+    paths = [path for path, _ in rows]
+    combos = itertools.product(*(values for _, values in rows))
+    return [
+        wedges.Wedge(f"w{index:02}", dict(zip(paths, combo, strict=True)))
+        for index, combo in enumerate(combos, start=1)
+    ]

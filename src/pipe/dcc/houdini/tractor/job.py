@@ -25,6 +25,14 @@ then finishes the flipbook:
         ├── Draw w01 1001-1030
         └── Draw w01 1031-1060
 
+When the wedges also render, each renders and denoises as a layer does once
+its sims are written, then burns its frames:
+
+    Burn w01                after all of its children, in order
+    ├── Prepare w01         writes render.usd, after the wedge's sims
+    ├── Render w01
+    └── Denoise w01
+
 Every task is one command from `commands.py`. Titles carry the layer, so they
 are unique within the job, which Instances rely on.
 """
@@ -85,19 +93,21 @@ def _render_title(layer: Layer, frame: int) -> str:
     return f"Render {layer.name} {frame}"
 
 
-def _render_task(layer: Layer) -> author.Task:
+def _render_task(layer: Layer, service: str = SERVICE) -> author.Task:
     task = author.Task(title=f"Render {layer.name}")
     for frame in layer.frames:
         script = commands.render(layer, frame)
-        task.addChild(_task(_render_title(layer, frame), script, RENDER_RETRIES))
+        title = _render_title(layer, frame)
+        task.addChild(_task(title, script, RENDER_RETRIES, service))
     return task
 
 
-def _denoise_task(layer: Layer, product: str) -> author.Task:
+def _denoise_task(layer: Layer, product: str, service: str = SERVICE) -> author.Task:
     task = author.Task(title=f"Denoise {layer.name}")
     for frame in layer.frames:
         script = commands.denoise(layer, product, frame)
-        frame_task = _task(f"Denoise {layer.name} {frame}", script, DENOISE_RETRIES)
+        title = f"Denoise {layer.name} {frame}"
+        frame_task = _task(title, script, DENOISE_RETRIES, service)
         for neighbour in commands.denoise_window(frame, layer.frames):
             frame_task.addChild(author.Instance(title=_render_title(layer, neighbour)))
         task.addChild(frame_task)
@@ -127,11 +137,19 @@ def cache_job(
 
 
 def wedge_job(
-    title: str, priority: int, service: str, spec: Wedges, names: list[str]
+    title: str,
+    priority: int,
+    service: str,
+    spec: Wedges,
+    names: list[str],
+    renders: dict[str, Layer],
+    envkey: str,
 ) -> author.Job:
     """A sim is never retried, as in `cache_job`. A flipbook is, when it
-    couldn't draw."""
-    job = author.Job(title=title, priority=priority)
+    couldn't draw. `renders` holds the layer of each wedge that renders, whose
+    Render and Denoise tasks take their environment from `envkey`, as a render
+    Send's do."""
+    job = author.Job(title=title, priority=priority, envkey=[envkey])
     for name in names:
         finish = commands.wedge(spec, name, commands.WEDGE_FINISH)
         task = _task(f"Flipbook {name}", finish, service=service)
@@ -139,8 +157,7 @@ def wedge_job(
         task.serialsubtasks = True
         for path in spec.rebuilds:
             sim = commands.wedge(spec, name, commands.WEDGE_SIM, (path,))
-            node = path.rpartition("/")[2]
-            task.addChild(_task(f"Sim {name} {node}", sim, service=service))
+            task.addChild(_task(_sim_title(name, path), sim, service=service))
         draw = author.Task(title=f"Draw {name}")
         for start, end in spec.chunks:
             frames = (str(start), str(end))
@@ -149,7 +166,29 @@ def wedge_job(
             draw.addChild(_task(label, script, [commands.WEDGE_DRAW_FAILED], service))
         task.addChild(draw)
         job.addChild(task)
+        if name in renders:
+            job.addChild(_wedge_render(spec, renders[name], service))
     return job
+
+
+def _sim_title(name: str, path: str) -> str:
+    return f"Sim {name} {path.rpartition('/')[2]}"
+
+
+def _wedge_render(spec: Wedges, layer: Layer, service: str) -> author.Task:
+    name = layer.name
+    burn = commands.wedge(spec, name, commands.WEDGE_BURN)
+    task = _task(f"Burn {name}", burn, service=service)
+    task.serialsubtasks = True
+    prepare = commands.wedge(spec, name, commands.WEDGE_PREPARE)
+    prepare_task = _task(f"Prepare {name}", prepare, service=service)
+    for path in spec.rebuilds:
+        prepare_task.addChild(author.Instance(title=_sim_title(name, path)))
+    task.addChild(prepare_task)
+    task.addChild(_render_task(layer, service))
+    if layer.denoise:
+        task.addChild(_denoise_task(layer, layer.denoise.product, service))
+    return task
 
 
 def _task(

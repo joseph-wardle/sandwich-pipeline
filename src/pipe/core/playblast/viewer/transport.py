@@ -60,6 +60,7 @@ class Transport(QWidget):
         run_action: Callable[[ClipAction], None],
         *,
         grid: bool,
+        views: QWidget,
     ) -> None:
         super().__init__()
         transport = QVBoxLayout(self)
@@ -130,6 +131,7 @@ class Transport(QWidget):
         for widget in (self.page_back, self.page_label, self.page_forward):
             widget.setVisible(False)
             right.addWidget(widget)
+        right.addWidget(views)
         right.addWidget(self.grid)
         self.loop = QCheckBox("Loop")
         self.loop.setChecked(True)
