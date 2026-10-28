@@ -12,7 +12,7 @@ import hou
 from pipe.core.playblast import PreviewClip
 from pipe.core.playblast.viewer import ClipAction, open_viewer
 from pipe.dcc.houdini import runtime
-from pipe.dcc.houdini.tractor import snapshot, wedges
+from pipe.dcc.houdini.tractor import engine, snapshot, wedges
 
 TITLE = "Review Wedges"
 MISSING_FRAMES = (
@@ -100,33 +100,81 @@ def _runs(node: hou.Node) -> tuple[list[wedges.Run], list[tuple[Path, str]]]:
 def _offer_delete(
     node: hou.Node, unfinished: list[wedges.Run], unread: list[tuple[Path, str]]
 ) -> None:
+    """Offer to delete the runs that won't finish. A run whose job is still in
+    Tractor is only listed, since deleting it fails the job."""
+    folders = [run.folder for run in unfinished] + [folder for folder, _ in unread]
+    running, unknown, unreachable = _running(folders)
     groups = []
-    if unfinished:
+    stopped = [run for run in unfinished if run.folder not in running]
+    if stopped:
         groups.append(
             [f"These runs of {node.path()} have no finished wedge:"]
-            + [f'{run.folder}, job "{run.title}"' for run in unfinished]
+            + [f'{run.folder}, job "{run.title}"' for run in stopped]
         )
+    unread = [(folder, why) for folder, why in unread if folder not in running]
     if unread:
         groups.append(
             ["Review Wedges leaves out the runs it can't read:"]
             + [f"{folder}: {why}" for folder, why in unread]
         )
+    if running:
+        groups.append(
+            ["These runs' jobs are still in Tractor, so they are kept:"]
+            + [f"{folder}: job {job_id}" for folder, job_id in running.items()]
+        )
+    text = "\n\n".join("\n".join(group) for group in groups)
+    folders = [folder for folder in folders if folder not in running]
+    if not folders:
+        hou.ui.displayMessage(text, title=TITLE)
+        return
+    if unreachable:
+        text += (
+            f"\n\nTractor can't be reached ({unreachable}), so Review Wedges "
+            "can't tell whether their jobs still run, and deleting a run whose "
+            "job runs fails the job. Check Tractor before deleting."
+        )
+    elif unknown:
+        text += (
+            "\n\nA run whose job is still in Tractor may yet finish, and deleting "
+            "it fails the job. Check Tractor before deleting."
+        )
     pressed = hou.ui.displayMessage(
-        "\n\n".join("\n".join(group) for group in groups)
-        + "\n\nA run whose job is still in Tractor may yet finish, and deleting "
-        "it fails the job. Check Tractor before deleting.",
+        text,
         buttons=("Delete", "Keep"),
         default_choice=1,
         close_choice=1,
         title=TITLE,
-        severity=hou.severityType.Warning,
+        severity=hou.severityType.Warning if unknown else hou.severityType.Message,
     )
     if pressed != 0:
         return
-    folders = [run.folder for run in unfinished] + [folder for folder, _ in unread]
     for folder in folders:
         shutil.rmtree(folder)
     hou.ui.setStatusMessage(f"Deleted {', '.join(f.name for f in folders)}")
+
+
+def _running(folders: list[Path]) -> tuple[dict[Path, int], list[Path], str]:
+    """The job of each folder that is still in Tractor, the folders whose job
+    can't be told, and why Tractor couldn't be asked, if it couldn't."""
+    running: dict[Path, int] = {}
+    unknown: list[Path] = []
+    unreachable = ""
+    for folder in folders:
+        path = folder / wedges.JOB
+        # Runs sent before Send wrote it, and jobs Tractor didn't confirm, have
+        # none. Once Tractor can't be reached, it isn't asked again.
+        if not path.is_file() or unreachable:
+            unknown.append(folder)
+            continue
+        job_id = int(path.read_text())
+        try:
+            if not engine.ended(job_id):
+                running[folder] = job_id
+        except (OSError, ValueError) as error:
+            # A URLError wraps what went wrong in <urlopen error ...>.
+            unreachable = str(getattr(error, "reason", error))
+            unknown.append(folder)
+    return running, unknown, unreachable
 
 
 def _apply(run: wedges.Run, wedge: wedges.Wedge) -> bool:

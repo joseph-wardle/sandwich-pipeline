@@ -95,6 +95,8 @@ def _submit(key: int, choice: wedge_dialog.WedgeChoice) -> None:
     if job_id is None:
         note(node, COMMENT, f"{COMMENT} {run.folder.name}: not confirmed")
         return
+    # Review asks Tractor whether the job still runs before offering to delete it.
+    (run.folder / wedges.JOB).write_text(f"{job_id}\n")
     what = f"flipbooks {len(run.wedges)} wedges of {node.name()}"
     if written == [node]:
         what = f"sims {len(run.wedges)} wedges of {node.name()}"

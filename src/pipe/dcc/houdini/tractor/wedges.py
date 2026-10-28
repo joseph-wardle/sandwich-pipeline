@@ -5,6 +5,7 @@ folder.
     <hip>/geo/.tractor/<node>/v003/
     ├── scene.hipnc         the snapshot every task loads
     ├── wedge.json          the record: what was wedged, over which frames
+    ├── job                 the Tractor job's id, there once Tractor confirmed it
     ├── w01/                the first wedge
     │   ├── 01_upstream/    each cache it writes, numbered in cook order, since
     │   ├── 02_sim/         two caches may share a file name
@@ -23,6 +24,7 @@ from pathlib import Path, PurePosixPath
 import hou
 
 RECORD = "wedge.json"
+JOB = "job"
 # Bumped when the record's keys change, so a blade or review running other code
 # refuses a record it would misread. Tasks of a job sent before a change, and
 # runs on disk, keep the record they were sent with.
