@@ -86,7 +86,7 @@ class ViewerWindow(QMainWindow):
         self._current_index = 0
         self._frame = clips[0].frame_start
         self._shown = []
-        self._grid_on = False
+        self._grid_on = bool(self._runs)
         self._entered = False
         self._playing = False
         self._was_playing_before_scrub = False

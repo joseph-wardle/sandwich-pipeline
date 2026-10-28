@@ -23,7 +23,7 @@ def open_viewer(
 ) -> None:
     """Open a viewer window on `clips`. `missing_frames` replaces the playblast
     advice given when a clip's frames can't be read. `runs` groups the clips
-    whose frames match, and shows the Grid that plays a group side by side."""
+    whose frames match, and opens on the Grid that plays a group side by side."""
     ViewerWindow(
         clips,
         parent,
