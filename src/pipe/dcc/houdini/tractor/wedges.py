@@ -27,6 +27,7 @@ import hou
 
 from pipe.core.render import TMP
 from pipe.dcc.houdini.tractor import caches, commands, parms
+from pipe.dcc.houdini.util.nodetypes import TRACTOR_CONFIGURE
 
 RECORD = "wedge.json"
 JOB = "job"
@@ -42,9 +43,6 @@ BURN_TMP = "burn"
 # The frames' file name before the frame number, as the viewer reads them.
 FRAME_BASENAME = "flipbook"
 PRODUCT = "renderproduct"
-# XPU on GPU and CPU, not the show's XPU CPU: the New Monsters render on their
-# GPUs, and the other blades fall back to CPU.
-RENDERER = "HdPrmanXpuLoaderRendererPlugin"
 
 SHOT_CAMERA = "/cameras/shotCam"
 # What a flipbook draws: the stage at the hip's publish node, which is the shot
@@ -159,12 +157,18 @@ def read_record(path: Path) -> Run:
 def render_layer(run: Run, name: str) -> commands.Layer:
     """A wedge's render, which runs as a shot layer's Render and Denoise tasks."""
     folder = run.folder / name / RENDER_TMP
+    # What a new Configure renders with, as the blade's Configure does: the
+    # show's XPU CPU. The Tractor HDAs load with the pipeline, on blades too.
+    configure = hou.lopNodeTypeCategory().nodeType(TRACTOR_CONFIGURE)
+    template = configure.parmTemplateGroup()  # ty: ignore[unresolved-attribute]
+    renderer_parm = template.find(parms.RENDERER)
+    renderer = renderer_parm.defaultValue()[0]  # ty: ignore[unresolved-attribute]
     return commands.Layer(
         name,
         folder,
         list(range(run.start, run.end + 1)),
         commands.Render(
-            husk=parms.husk_options(RENDERER, SHOT_CAMERA),
+            husk=parms.husk_options(renderer, SHOT_CAMERA),
             folders=[folder / TMP / PRODUCT],
         ),
         commands.Denoise(PRODUCT),

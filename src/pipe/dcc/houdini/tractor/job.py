@@ -16,7 +16,7 @@ one per chunk of frames otherwise:
     Cache <node>            the cache that was sent
 
 A wedge Send's job sims each wedge, flipbooks it a chunk of frames per task,
-then finishes the flipbook:
+then finishes the flipbook, on the blades the artist chose:
 
     Flipbook w01            after all of its children, in order
     ├── Sim w01 <node>      one per cache the wedge writes, upstream first
@@ -26,7 +26,7 @@ then finishes the flipbook:
         └── Draw w01 1031-1060
 
 When the wedges also render, each renders and denoises as a layer does once
-its sims are written, then burns its frames:
+its sims are written, then burns its frames, on any blade:
 
     Burn w01                after all of its children, in order
     ├── Prepare w01         writes render.usd, after the wedge's sims
@@ -65,7 +65,6 @@ RENDER_RETRIES = [
 DENOISE_RETRIES = [
     139,  # Segmentation fault
 ]
-WEDGE_CHUNK = 10
 
 
 def render_job(
@@ -94,39 +93,26 @@ def _layer_task(layer: Layer) -> author.Task:
     return task
 
 
-def _chunks(layer: Layer, size: int) -> list[list[int]]:
-    return [layer.frames[i : i + size] for i in range(0, len(layer.frames), size)]
+def _render_title(layer: Layer, frame: int) -> str:
+    return f"Render {layer.name} {frame}"
 
 
-def _render_title(layer: Layer, frames: list[int]) -> str:
-    span = f"{frames[0]}" if len(frames) == 1 else f"{frames[0]}-{frames[-1]}"
-    return f"Render {layer.name} {span}"
-
-
-def _render_task(layer: Layer, service: str = SERVICE, chunk: int = 1) -> author.Task:
+def _render_task(layer: Layer) -> author.Task:
     task = author.Task(title=f"Render {layer.name}")
-    for frames in _chunks(layer, chunk):
-        script = commands.render(layer, frames)
-        title = _render_title(layer, frames)
-        task.addChild(_task(title, script, RENDER_RETRIES, service))
+    for frame in layer.frames:
+        script = commands.render(layer, frame)
+        task.addChild(_task(_render_title(layer, frame), script, RENDER_RETRIES))
     return task
 
 
-def _denoise_task(layer: Layer, service: str = SERVICE, chunk: int = 1) -> author.Task:
-    rendered_by = {
-        frame: _render_title(layer, frames)
-        for frames in _chunks(layer, chunk)
-        for frame in frames
-    }
+def _denoise_task(layer: Layer) -> author.Task:
     task = author.Task(title=f"Denoise {layer.name}")
     for frame in layer.frames:
         script = commands.denoise(layer, frame)
         title = f"Denoise {layer.name} {frame}"
-        frame_task = _task(title, script, DENOISE_RETRIES, service)
-        window = commands.denoise_window(frame, layer.frames)
-        # Neighbours in one chunk wait on the same Render task.
-        for render in dict.fromkeys(rendered_by[neighbour] for neighbour in window):
-            frame_task.addChild(author.Instance(title=render))
+        frame_task = _task(title, script, DENOISE_RETRIES)
+        for neighbour in commands.denoise_window(frame, layer.frames):
+            frame_task.addChild(author.Instance(title=_render_title(layer, neighbour)))
         task.addChild(frame_task)
     return task
 
@@ -165,7 +151,11 @@ def wedge_job(
     """A sim is never retried, as in `cache_job`. A flipbook is, when it
     couldn't draw. `renders` holds the layer of each wedge that renders, whose
     Render and Denoise tasks take their environment from `envkey`, as a render
-    Send's do."""
+    Send's do.
+
+    Only the sims and flipbooks run on `service`. A render's frames run on any
+    blade: there are about ten times as many lab blades as Monsters, and a frame
+    takes a few minutes, so a student logging in costs little."""
     job = author.Job(title=title, priority=priority, envkey=[envkey])
     for name in names:
         finish = commands.wedge(spec, name, commands.WEDGE_FINISH)
@@ -184,7 +174,7 @@ def wedge_job(
         task.addChild(draw)
         job.addChild(task)
         if name in renders:
-            job.addChild(_wedge_render(spec, renders[name], service))
+            job.addChild(_wedge_render(spec, renders[name]))
     return job
 
 
@@ -192,19 +182,19 @@ def _sim_title(name: str, path: str) -> str:
     return f"Sim {name} {path.rpartition('/')[2]}"
 
 
-def _wedge_render(spec: Wedges, layer: Layer, service: str) -> author.Task:
+def _wedge_render(spec: Wedges, layer: Layer) -> author.Task:
     name = layer.name
     burn = commands.wedge(spec, name, commands.WEDGE_BURN)
-    task = _task(f"Burn {name}", burn, service=service)
+    task = _task(f"Burn {name}", burn)
     task.serialsubtasks = True
     prepare = commands.wedge(spec, name, commands.WEDGE_PREPARE)
-    prepare_task = _task(f"Prepare {name}", prepare, service=service)
+    prepare_task = _task(f"Prepare {name}", prepare)
     for path in spec.rebuilds:
         prepare_task.addChild(author.Instance(title=_sim_title(name, path)))
     task.addChild(prepare_task)
-    task.addChild(_render_task(layer, service, WEDGE_CHUNK))
+    task.addChild(_render_task(layer))
     if layer.denoise:
-        task.addChild(_denoise_task(layer, service, WEDGE_CHUNK))
+        task.addChild(_denoise_task(layer))
     return task
 
 
