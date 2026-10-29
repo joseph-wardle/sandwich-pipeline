@@ -1,7 +1,7 @@
 """What publishing a cut would change in ShotGrid. Reads only.
 
-python -m pipe.core.edit.diff                      the latest saved cut
-python -m pipe.core.edit.diff cut.otio --since published.otio
+python -m pipe.core.edit.diff                   the latest saved cut
+python -m pipe.core.edit.diff cut.otio --since old_cut.otio
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import attrs
 
-from pipe.core.edit.cut import Cut, read_cut, saved_cuts, shot_spans
+from pipe.core.edit.cut import Cut, published_cut, read_cut, saved_cuts, shot_spans
 from pipe.core.shotgrid import Shot, ShotGrid
 
 # A clip can show handle frames past ShotGrid's range. Frames further out mean
@@ -95,7 +95,9 @@ def _codes(cut: Cut) -> list[str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare a cut with ShotGrid.")
     parser.add_argument("cut", nargs="?", type=Path, help="latest saved cut if none")
-    parser.add_argument("--since", type=Path, help="the last published cut")
+    parser.add_argument(
+        "--since", type=Path, help="the last published cut if not given"
+    )
     args = parser.parse_args()
 
     from env_sg import DB_Config
@@ -103,12 +105,13 @@ def main() -> None:
     path = args.cut or (saved_cuts() or [None])[-1]
     if path is None:
         raise SystemExit("No saved cuts. Name an OTIO file.")
+    since = args.since or published_cut()
     sg = ShotGrid.connect(DB_Config)
     diff = compare(
         read_cut(path),
         sg.find_shots(),
         sg.find_shots(out_of_picture=True),
-        read_cut(args.since) if args.since else None,
+        read_cut(since) if since else None,
     )
     print(f"{path.name} against ShotGrid")
     _section(
@@ -121,13 +124,13 @@ def main() -> None:
     )
     _section("Can't read the range", [f"{k:<12} {v}" for k, v in diff.unread.items()])
     _section("Out of Picture, back in the cut", [str(s.code) for s in diff.reinstated])
-    if args.since:
+    if since:
         _section(
-            f"Gone since {args.since.stem}, still active",
+            f"Gone since {since.stem}, still active",
             [str(s.code) for s in diff.dropped],
         )
     else:
-        print("\nNo --since cut, so dropped shots weren't checked.")
+        print("\nNo cut is published yet, so dropped shots weren't checked.")
     _section("Not in ShotGrid", diff.unknown)
 
 

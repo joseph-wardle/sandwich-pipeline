@@ -14,15 +14,18 @@ def root_bin(media_pool: Any, name: str) -> Any:
 def message(fusion: Any, bmd: Any, title: str, text: str) -> None:
     ui = fusion.UIManager
     dispatcher = bmd.UIDispatcher(ui)
+    # UIManager windows don't fit their content, so size to the wrapped text,
+    # and past the cap the box scrolls, as a list of ShotGrid refusals can.
+    lines = sum(1 + len(line) // 60 for line in text.split("\n"))
     window = dispatcher.AddWindow(
         {
             "ID": "SKDMessage",
             "WindowTitle": title,
-            "Geometry": [300, 300, 480, 160],
+            "Geometry": [300, 300, 520, min(100 + 20 * lines, 600)],
         },
         ui.VGroup(
             [
-                ui.Label({"Text": text, "WordWrap": True}),
+                ui.TextEdit({"Text": text, "ReadOnly": True}),
                 ui.HGroup(
                     {"Weight": 0}, [ui.HGap(), ui.Button({"ID": "OK", "Text": "OK"})]
                 ),

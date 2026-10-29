@@ -15,6 +15,7 @@ from pipe.core.edit.delivery import Delivery, delivery_at, legacy_shot_code
 from pipe.core.util.paths import get_cuts_path
 
 _CUT_PADDING = 3
+_PUBLISHED = "published"
 
 
 @attrs.frozen
@@ -62,6 +63,20 @@ def next_cut_path() -> Path:
     cuts = saved_cuts()
     number = int(cuts[-1].stem.split("_")[1]) + 1 if cuts else 1
     return get_cuts_path() / f"cut_{number:0{_CUT_PADDING}d}.otio"
+
+
+def published_cut() -> Path | None:
+    """The cut ShotGrid's ranges were last published from."""
+    record = get_cuts_path() / _PUBLISHED
+    return (
+        get_cuts_path() / f"{record.read_text().strip()}.otio"
+        if record.is_file()
+        else None
+    )
+
+
+def record_published(cut: Path) -> None:
+    (get_cuts_path() / _PUBLISHED).write_text(f"{cut.stem}\n")
 
 
 def read_cut(path: Path) -> Cut:
