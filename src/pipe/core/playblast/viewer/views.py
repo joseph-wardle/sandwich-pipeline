@@ -4,7 +4,6 @@ clips on screen play. Switching keeps the clip, the frame and the play state."""
 from __future__ import annotations
 
 from collections.abc import Sequence
-from pathlib import Path
 
 from Qt.QtCore import Qt, Signal
 from Qt.QtWidgets import QButtonGroup, QHBoxLayout, QPushButton, QWidget
@@ -70,18 +69,6 @@ class ViewToggle(QWidget):
             following = (self._buttons.checkedId() + 1) % len(self._names)
             self._buttons.button(following).setChecked(True)
             self._chosen()
-
-    def frames(
-        self, clips: Sequence[PreviewClip], frame: int
-    ) -> tuple[list[Path], list[str]]:
-        """Each clip's frame in the view, and the note shown in its place when
-        the view isn't on disk yet."""
-        paths = [clip.frame_path(frame, self.view) for clip in clips]
-        notes = [
-            NOT_YET if clip.views and not path.parent.is_dir() else ""
-            for clip, path in zip(clips, paths, strict=True)
-        ]
-        return paths, notes
 
     def _chosen(self) -> None:
         self._chosen_id = self._buttons.checkedId()

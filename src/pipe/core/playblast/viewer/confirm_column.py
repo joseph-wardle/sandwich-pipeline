@@ -109,6 +109,25 @@ class ConfirmColumn(QWidget):
         )
         return reply == QMessageBox.StandardButton.Discard
 
+    def statuses(self) -> list[PanelStatus | None]:
+        """Each clip's status, or None for a clip with nothing to deliver."""
+        return [p.status if p.is_confirmable else None for p in self.panels]
+
+    def next_unconfirmed(self, index: int) -> int | None:
+        """The first clip after `index` with something left to deliver,
+        wrapping round."""
+        count = len(self.panels)
+        for offset in range(1, count):
+            candidate = (index + offset) % count
+            if self.panels[candidate].status in UNCONFIRMED:
+                return candidate
+        return None
+
+    def confirm_remaining(self) -> None:
+        for panel in self.panels:
+            if panel.status in UNCONFIRMED:
+                panel.request_confirm()
+
     def show_clip(self, index: int) -> None:
         self._stack.setCurrentIndex(index)
 

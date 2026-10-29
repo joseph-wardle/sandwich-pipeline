@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 
 from Qt.QtCore import QElapsedTimer, Qt, QTimer
 from Qt.QtGui import QCloseEvent, QImageReader, QKeyEvent, QKeySequence
@@ -19,10 +20,11 @@ from Qt.QtWidgets import (
 from pipe.core.playblast.clip import PreviewClip
 from pipe.core.playblast.playblaster import DEFAULT_RESOLUTION
 from pipe.core.playblast.viewer import confirm_column, filmstrip, grid, style, views
-from pipe.core.playblast.viewer.confirm_column import UNCONFIRMED, ConfirmColumn
+from pipe.core.playblast.viewer.confirm_column import ConfirmColumn
 from pipe.core.playblast.viewer.transport import ClipAction, Transport
 
-_TRANSPORT_HEIGHT = 112
+# One clip alone, a page of its run's grid, or one wedge entered from the grid.
+Mode = Literal["single", "grid", "entered"]
 
 # The number keys that enter the cells of a page, in order.
 _CELL_KEYS = [getattr(Qt.Key, f"Key_{number}") for number in range(1, grid.PAGE + 1)]
@@ -44,8 +46,7 @@ class ViewerWindow(QMainWindow):
     _current_index: int
     _frame: int
     _shown: list[PreviewClip]
-    _grid_on: bool
-    _entered: bool
+    _mode: Mode
     _playing: bool
     _was_playing_before_scrub: bool
     _missing_frames_warned: set[PreviewClip]
@@ -86,8 +87,7 @@ class ViewerWindow(QMainWindow):
         self._current_index = 0
         self._frame = clips[0].frame_start
         self._shown = []
-        self._grid_on = bool(self._runs)
-        self._entered = False
+        self._mode = "grid" if self._runs else "single"
         self._playing = False
         self._was_playing_before_scrub = False
         self._missing_frames_warned = set()
@@ -131,11 +131,9 @@ class ViewerWindow(QMainWindow):
         layout.setContentsMargins(style.PAD_M, style.PAD_M, style.PAD_M, style.PAD_M)
         layout.setSpacing(style.PAD_M)
 
-        self._sidebar = filmstrip.Sidebar(
-            self._clips, self._resolution, statuses=not self._actions
-        )
+        self._sidebar = filmstrip.Sidebar(self._clips, self._resolution)
         self._sidebar.clips.currentRowChanged.connect(self._go_to_clip)
-        self._sidebar.confirm_remaining.clicked.connect(self._confirm_remaining)
+        self._sidebar.confirm_remaining.clicked.connect(self._confirm.confirm_remaining)
         layout.addWidget(self._sidebar)
 
         self._canvas = grid.Canvas()
@@ -207,12 +205,15 @@ class ViewerWindow(QMainWindow):
         self._load_clip(min(index, len(self._clips) - 1), keep_frame=bool(neighbour))
 
     def _size_to_video(self) -> None:
+        """Sized so the canvas shows a frame at its own resolution. The
+        window's sizeHint can't say, since the canvas ignores its own."""
         width, height = self._resolution
+        width += style.PAD_M * 2
         if len(self._clips) > 1:
-            width += filmstrip.SIDEBAR_WIDTH
+            width += filmstrip.SIDEBAR_WIDTH + style.PAD_M
         if not self._confirm.isHidden():
-            width += confirm_column.WIDTH
-        height += _TRANSPORT_HEIGHT
+            width += confirm_column.WIDTH + style.PAD_M
+        height += style.PAD_M * 2 + style.GAP + self._transport.sizeHint().height()
         screen = self.screen().availableGeometry()
         self.resize(min(width, screen.width() - 80), min(height, screen.height() - 80))
 
@@ -246,7 +247,12 @@ class ViewerWindow(QMainWindow):
     def _show_frame(self, frame: int) -> None:
         clip = self._clip()
         frame = min(max(frame, clip.frame_start), clip.frame_end)
-        paths, notes = self._views.frames(self._shown, frame)
+        paths = [clip.frame_path(frame, self._views.view) for clip in self._shown]
+        # A view that isn't on disk yet, as a wedge still rendering.
+        notes = [
+            views.NOT_YET if clip.views and not path.parent.is_dir() else ""
+            for clip, path in zip(self._shown, paths, strict=True)
+        ]
         images = grid.load(paths)
         missing = [
             shown
@@ -317,9 +323,6 @@ class ViewerWindow(QMainWindow):
     # Grid
     # ------------------------------------------------------------------
 
-    def _grid_shown(self) -> bool:
-        return self._grid_on and not self._entered
-
     def _run(self) -> list[PreviewClip]:
         """The clips still in the window of the current clip's run."""
         clip = self._clip()
@@ -333,15 +336,15 @@ class ViewerWindow(QMainWindow):
 
     def _refresh_view(self) -> None:
         """Shows the grid or the current clip alone, at the current frame."""
-        self._shown = self._page() if self._grid_shown() else [self._clip()]
-        self._transport.grid.setChecked(self._grid_on)
+        self._shown = self._page() if self._mode == "grid" else [self._clip()]
+        self._transport.grid.setChecked(self._mode != "single")
         run = self._run()
         page = ""
-        if self._grid_shown() and len(run) > grid.PAGE:
+        if self._mode == "grid" and len(run) > grid.PAGE:
             first = run.index(self._shown[0]) + 1
             page = f"{first}–{first + len(self._shown) - 1} of {len(run)}"
         self._transport.set_page(page)
-        if self._grid_shown():
+        if self._mode == "grid":
             self._canvas.set_cells(
                 [f"{n}  {clip.label}" for n, clip in enumerate(self._shown, 1)],
                 cells=min(len(run), grid.PAGE),
@@ -354,18 +357,14 @@ class ViewerWindow(QMainWindow):
     def _on_grid(self) -> None:
         """The Grid button and G. While a wedge is entered, they return to
         the grid rather than leave it."""
-        if self._entered:
-            self._entered = False
-        else:
-            self._grid_on = not self._grid_on
+        self._mode = "single" if self._mode == "grid" else "grid"
         self._refresh_view()
 
     def _enter(self, cell: int) -> None:
         page = self._page()
         if cell >= len(page):
             return
-        self._grid_on = True
-        self._entered = True
+        self._mode = "entered"
         index = self._clips.index(page[cell])
         if index == self._current_index:
             self._refresh_view()
@@ -373,11 +372,11 @@ class ViewerWindow(QMainWindow):
             self._go_to_clip(index)
 
     def _on_canvas_clicked(self, cell: int) -> None:
-        if self._grid_shown():
+        if self._mode == "grid":
             if cell >= 0:
                 self._enter(cell)
-        elif self._entered:
-            self._entered = False
+        elif self._mode == "entered":
+            self._mode = "grid"
             self._refresh_view()
 
     def _turn_page(self, step: int) -> None:
@@ -408,29 +407,19 @@ class ViewerWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_clip_delivered(self, index: int) -> None:
-        if index == self._current_index:
-            self._advance_to_next_unconfirmed()
+        if index != self._current_index:
+            return
+        following = self._confirm.next_unconfirmed(index)
+        if following is not None:
+            self._load_clip(following)
 
     def _refresh_sidebar(self) -> None:
-        self._sidebar.refresh(self._confirm.panels)
-
-    def _advance_to_next_unconfirmed(self) -> None:
-        count = len(self._confirm.panels)
-        for offset in range(1, count):
-            candidate = (self._current_index + offset) % count
-            if self._confirm.panels[candidate].status in UNCONFIRMED:
-                self._load_clip(candidate)
-                return
+        self._sidebar.refresh(self._confirm.statuses())
 
     def _confirm_current(self) -> None:
         """The keyboard's route to Confirm — the button never takes focus.
         Inert on a panel with nothing to deliver, exactly as the button is."""
         self._confirm.panels[self._current_index].request_confirm()
-
-    def _confirm_remaining(self) -> None:
-        for panel in self._confirm.panels:
-            if panel.status in UNCONFIRMED:
-                panel.request_confirm()
 
     # ------------------------------------------------------------------
     # Window events and failure reporting
@@ -482,13 +471,13 @@ class ViewerWindow(QMainWindow):
             self._views.cycle()
         elif self._runs and key == Qt.Key.Key_G:
             self._on_grid()
-        elif self._entered and key == Qt.Key.Key_Escape:
+        elif self._mode == "entered" and key == Qt.Key.Key_Escape:
             self._on_grid()
-        elif self._grid_on and key in _CELL_KEYS:
+        elif self._mode != "single" and key in _CELL_KEYS:
             self._enter(_CELL_KEYS.index(key))
-        elif self._grid_shown() and key == Qt.Key.Key_PageUp:
+        elif self._mode == "grid" and key == Qt.Key.Key_PageUp:
             self._turn_page(-1)
-        elif self._grid_shown() and key == Qt.Key.Key_PageDown:
+        elif self._mode == "grid" and key == Qt.Key.Key_PageDown:
             self._turn_page(1)
         else:
             super().keyPressEvent(event)

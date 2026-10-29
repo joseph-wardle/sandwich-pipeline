@@ -21,7 +21,7 @@ from Qt.QtWidgets import (
 from pipe.core.playblast.clip import PreviewClip
 from pipe.core.playblast.viewer import style
 from pipe.core.playblast.viewer.confirm_column import UNCONFIRMED
-from pipe.core.playblast.viewer.confirm_panel import ConfirmPanel, PanelStatus
+from pipe.core.playblast.viewer.confirm_panel import PanelStatus
 from pipe.core.ui import FAIL, OK
 
 SIDEBAR_WIDTH = 200
@@ -187,19 +187,9 @@ class Sidebar(QWidget):
 
     clips: QListWidget
     confirm_remaining: QPushButton
-    _statuses: bool
 
-    def __init__(
-        self,
-        clips: list[PreviewClip],
-        resolution: tuple[int, int],
-        *,
-        statuses: bool,
-    ) -> None:
-        """Clips without `statuses` are acted on, not delivered, and their
-        labels are long."""
+    def __init__(self, clips: list[PreviewClip], resolution: tuple[int, int]) -> None:
         super().__init__()
-        self._statuses = statuses
         self.clips = QListWidget()
         self.clips.setFixedWidth(SIDEBAR_WIDTH)
         self.clips.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -212,10 +202,8 @@ class Sidebar(QWidget):
         for clip in clips:
             item = QListWidgetItem(clip.label)
             item.setData(THUMB_ROLE, thumbnail(clip, thumb_size))
-            if statuses:
-                item.setData(STATUS_ROLE, PanelStatus.PENDING)
-            else:
-                item.setToolTip(clip.label)
+            # A wedge's label lists its values, so it is often elided.
+            item.setToolTip(clip.label)
             self.clips.addItem(item)
 
         header = QLabel("Clips")
@@ -244,16 +232,14 @@ class Sidebar(QWidget):
         self.clips.takeItem(index)
         self.clips.blockSignals(False)
 
-    def refresh(self, panels: list[ConfirmPanel]) -> None:
-        if self._statuses:
-            for index, panel in enumerate(panels):
-                self.clips.item(index).setData(STATUS_ROLE, panel.status)
+    def refresh(self, statuses: list[PanelStatus | None]) -> None:
+        """Each clip's status, or None for a clip with nothing to deliver,
+        which shows its label alone."""
+        for index, status in enumerate(statuses):
+            self.clips.item(index).setData(STATUS_ROLE, status)
         self.clips.viewport().update()
-        confirmable = [panel for panel in panels if panel.is_confirmable]
-        self.confirm_remaining.setVisible(len(confirmable) > 1)
-        self.confirm_remaining.setEnabled(
-            any(panel.status in UNCONFIRMED for panel in confirmable)
-        )
+        self.confirm_remaining.setVisible(sum(s is not None for s in statuses) > 1)
+        self.confirm_remaining.setEnabled(any(s in UNCONFIRMED for s in statuses))
 
 
 __all__ = [
