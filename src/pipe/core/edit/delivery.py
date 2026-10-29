@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import functools
 import re
+from fractions import Fraction
 from pathlib import Path
 
 import attrs
+import ffmpeg  # type: ignore[import-untyped]
 
 from pipe.core.util.paths import get_edit_path
 
@@ -55,6 +58,32 @@ def parse_delivery(path: Path, shot_code: str) -> Delivery | None:
     return Delivery(
         shot_code, int(match.group("version")), match.group("department"), path
     )
+
+
+def delivery_at(path: Path) -> Delivery | None:
+    """The delivery a movie is, if it sits in its shot's folder under its own name."""
+    return parse_delivery(path, path.parent.name)
+
+
+def legacy_shot_code(path: Path) -> str | None:
+    """The shot a movie from before deliveries shows (`B_010.mov`,
+    `A_230_2026-09-23.v001.mov`). Its timecode isn't a shot frame."""
+    match = re.match(r"[A-Z]_\d{3}(?=[._ ])", path.name)
+    return match.group() if match else None
+
+
+@functools.cache
+def shot_frames(path: Path) -> range | None:
+    """The shot frames a movie holds, read from its timecode. None without one."""
+    streams = ffmpeg.probe(str(path))["streams"]
+    video = next(s for s in streams if s["codec_type"] == "video")
+    timecode = video.get("tags", {}).get("timecode")
+    if timecode is None:
+        return None
+    rate = round(Fraction(video["r_frame_rate"]))
+    hours, minutes, seconds, frames = map(int, re.split("[:;]", timecode))
+    start = ((hours * 60 + minutes) * 60 + seconds) * rate + frames
+    return range(start, start + int(video["nb_frames"]))
 
 
 def next_delivery_name(directory: Path, shot_code: str, department: str) -> str:
