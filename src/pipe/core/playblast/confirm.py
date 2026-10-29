@@ -8,6 +8,7 @@ from pathlib import Path
 
 import attrs
 
+from pipe.core.edit import next_delivery_name
 from pipe.core.playblast.clip import (
     Destination,
     DestinationId,
@@ -18,11 +19,7 @@ from pipe.core.playblast.clip import (
 )
 from pipe.core.playblast.encoding import build_image_input_chain, encode_movie
 from pipe.core.playblast.errors import artist_reason
-from pipe.core.playblast.naming import (
-    existing_filenames,
-    next_delivery_name,
-    next_versioned_basename,
-)
+from pipe.core.playblast.naming import existing_filenames, next_versioned_basename
 from pipe.core.playblast.presets import FFmpegPreset
 from pipe.core.playblast.review.versions import (
     PlayblastVersionUploadRequest,

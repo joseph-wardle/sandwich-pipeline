@@ -7,7 +7,7 @@ from typing import Any, ClassVar, NewType
 
 import attrs
 
-from pipe.core.playblast.naming import edit_shot_directory
+from pipe.core.edit import edit_shot_directory
 from pipe.core.playblast.presets import FFmpegPreset
 from pipe.core.playblast.tempdir import resolve_playblast_tempdir
 
