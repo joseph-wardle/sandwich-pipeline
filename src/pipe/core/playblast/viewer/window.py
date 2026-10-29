@@ -1,76 +1,33 @@
-"""The viewer window: frame playback, transport controls, clip list."""
+"""The viewer window: frame playback, clip list, and the run grid."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from pathlib import Path
+from collections.abc import Sequence
+from typing import Literal
 
-import attrs
-
-from Qt.QtCore import (
-    QElapsedTimer,
-    QSize,
-    Qt,
-    QThreadPool,
-    QTimer,
-)
-from Qt.QtGui import (
-    QCloseEvent,
-    QFontDatabase,
-    QIcon,
-    QImageReader,
-    QKeyEvent,
-    QKeySequence,
-    QPalette,
-    QPixmap,
-    QResizeEvent,
-)
+from Qt.QtCore import QElapsedTimer, Qt, QTimer
+from Qt.QtGui import QCloseEvent, QImageReader, QKeyEvent, QKeySequence
 from Qt.QtWidgets import (
-    QCheckBox,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMessageBox,
-    QPushButton,
     QShortcut,
-    QSizePolicy,
-    QStackedWidget,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from pipe.core.playblast.clip import PreviewClip
 from pipe.core.playblast.playblaster import DEFAULT_RESOLUTION
-from pipe.core.playblast.viewer import filmstrip, icons, style
-from pipe.core.playblast.viewer.confirm_panel import ConfirmPanel, PanelStatus
-from pipe.core.playblast.viewer.cut_panel import CutSection
-from pipe.core.playblast.viewer.playlists import ReviewPlaylists
-from pipe.core.playblast.viewer.scrub import TimelineSlider
+from pipe.core.playblast.viewer import confirm_column, filmstrip, grid, style, views
+from pipe.core.playblast.viewer.confirm_column import ConfirmColumn
+from pipe.core.playblast.viewer.transport import ClipAction, Transport
 
-_SIDEBAR_WIDTH = 200
-_TRANSPORT_HEIGHT = 112
-_CONFIRM_PANEL_WIDTH = 300
+# One clip alone, a page of its run's grid, or one wedge entered from the grid.
+Mode = Literal["single", "grid", "entered"]
 
-_STEP_BUTTON = 34
-_STEP_ICON = 16
-_PLAY_ICON = 26
-
-# Clips that still have something to deliver.
-_UNCONFIRMED = (PanelStatus.PENDING, PanelStatus.FAILED)
-
-
-@attrs.frozen
-class ClipAction:
-    """A button that acts on the clip on screen. `run` returns whether the
-    clip is gone, such as deleted from disk, so the viewer drops it."""
-
-    label: str
-    run: Callable[[PreviewClip], bool]
-    tooltip: str = ""
+# The number keys that enter the cells of a page, in order.
+_CELL_KEYS = [getattr(Qt.Key, f"Key_{number}") for number in range(1, grid.PAGE + 1)]
 
 
 def _frame_size(clip: PreviewClip) -> tuple[int, int] | None:
@@ -84,33 +41,23 @@ def _frame_size(clip: PreviewClip) -> tuple[int, int] | None:
 
 class ViewerWindow(QMainWindow):
     _clips: list[PreviewClip]
+    _runs: list[list[PreviewClip]]
     _resolution: tuple[int, int]
     _current_index: int
     _frame: int
-    _pixmap: QPixmap
+    _shown: list[PreviewClip]
+    _mode: Mode
     _playing: bool
     _was_playing_before_scrub: bool
     _missing_frames_warned: set[PreviewClip]
     _clock: QElapsedTimer
     _clock_frame: int
     _ticker: QTimer
-    _canvas: QLabel
-    _clip_list: QListWidget
-    _play_button: QToolButton
-    _play_icon: QIcon
-    _pause_icon: QIcon
-    _loop_checkbox: QCheckBox
-    _scrub: TimelineSlider
-    _start_label: QLabel
-    _end_label: QLabel
-    _confirm_pool: QThreadPool
-    _playlists: ReviewPlaylists
-    _panels: list[ConfirmPanel]
-    _panel_stack: QStackedWidget
-    _cut: PreviewClip | None
-    _cut_unavailable: str
-    _cut_section: CutSection
-    _confirm_remaining_button: QPushButton
+    _canvas: grid.Canvas
+    _sidebar: filmstrip.Sidebar
+    _transport: Transport
+    _views: views.ViewToggle
+    _confirm: ConfirmColumn
     _actions: Sequence[ClipAction]
     _missing_frames: str
 
@@ -123,6 +70,7 @@ class ViewerWindow(QMainWindow):
         cut_unavailable: str = "",
         actions: Sequence[ClipAction] = (),
         missing_frames: str = "",
+        runs: Sequence[Sequence[PreviewClip]] = (),
     ) -> None:
         # The parent (the DCC main window) owns the viewer's lifetime; a
         # QMainWindow always carries Qt.Window, so it stays a real window
@@ -132,12 +80,14 @@ class ViewerWindow(QMainWindow):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         # Copied, since an action can remove a clip.
         self._clips = list(clips)
+        self._runs = [list(run) for run in runs]
         # Sizing only — an unreadable first frame (reported per clip on
         # playback) still deserves a sanely sized window.
         self._resolution = _frame_size(clips[0]) or DEFAULT_RESOLUTION
         self._current_index = 0
         self._frame = clips[0].frame_start
-        self._pixmap = QPixmap()
+        self._shown = []
+        self._mode = "grid" if self._runs else "single"
         self._playing = False
         self._was_playing_before_scrub = False
         self._missing_frames_warned = set()
@@ -155,17 +105,15 @@ class ViewerWindow(QMainWindow):
         self._ticker.setTimerType(Qt.TimerType.PreciseTimer)
         self._ticker.timeout.connect(self._on_tick)
 
-        # Confirm jobs run here, one at a time — parallel deliveries would
-        # race on encode CPU and previs take numbering. The window owns the
-        # pool (not the DCC-global one) so viewer work never mixes with the
-        # host application's.
-        self._confirm_pool = QThreadPool(self)
-        self._confirm_pool.setMaxThreadCount(1)
-        self._playlists = ReviewPlaylists(self)
         # A cut of one clip is that clip, so the section only earns its space
         # once the window holds a batch.
-        self._cut = cut if len(clips) > 1 else None
-        self._cut_unavailable = cut_unavailable if len(clips) > 1 else ""
+        self._confirm = ConfirmColumn(
+            self._clips,
+            cut=cut if len(clips) > 1 else None,
+            cut_unavailable=cut_unavailable if len(clips) > 1 else "",
+        )
+        self._confirm.state_changed.connect(self._refresh_sidebar)
+        self._confirm.delivered.connect(self._on_clip_delivered)
 
         self._build_ui()
         self._size_to_video()
@@ -183,70 +131,46 @@ class ViewerWindow(QMainWindow):
         layout.setContentsMargins(style.PAD_M, style.PAD_M, style.PAD_M, style.PAD_M)
         layout.setSpacing(style.PAD_M)
 
-        self._clip_list = QListWidget()
-        self._clip_list.setFixedWidth(_SIDEBAR_WIDTH)
-        self._clip_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._clip_list.setMouseTracking(True)  # so rows repaint on hover
-        self._clip_list.setToolTip("Up and Down move between clips.")
-        width, height = self._resolution
-        thumb_w = filmstrip.THUMB_W
-        thumb_h = round(thumb_w * height / width) if width else thumb_w
-        self._clip_list.setItemDelegate(filmstrip.ClipDelegate(thumb_w, thumb_h))
-        thumb_size = QSize(thumb_w, thumb_h)
-        for clip in self._clips:
-            item = QListWidgetItem(clip.label)
-            item.setData(filmstrip.THUMB_ROLE, filmstrip.thumbnail(clip, thumb_size))
-            # Clips that are acted on, not delivered, have no status, and their
-            # labels are long.
-            if self._actions:
-                item.setToolTip(clip.label)
-            else:
-                item.setData(filmstrip.STATUS_ROLE, PanelStatus.PENDING)
-            self._clip_list.addItem(item)
-        self._clip_list.currentRowChanged.connect(self._go_to_clip)
+        self._sidebar = filmstrip.Sidebar(self._clips, self._resolution)
+        self._sidebar.clips.currentRowChanged.connect(self._go_to_clip)
+        self._sidebar.confirm_remaining.clicked.connect(self._confirm.confirm_remaining)
+        layout.addWidget(self._sidebar)
 
-        header = QLabel("Clips")
-        header.setStyleSheet("font-weight: 600; padding: 0 2px;")
-        sidebar = QVBoxLayout()
-        sidebar.setContentsMargins(0, 0, 0, 0)
-        sidebar.setSpacing(style.PAD_S)
-        sidebar.addWidget(header)
-        sidebar.addWidget(self._clip_list)
-        self._confirm_remaining_button = QPushButton("Confirm remaining")
-        self._confirm_remaining_button.setToolTip(
-            "Deliver every clip that still has work to do — including retrying "
-            "failures — using the choices already made on each one."
-        )
-        self._confirm_remaining_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._confirm_remaining_button.clicked.connect(self._confirm_remaining)
-        sidebar.addWidget(self._confirm_remaining_button)
-        sidebar_widget = QWidget()
-        sidebar_widget.setLayout(sidebar)
-        sidebar_widget.setVisible(len(self._clips) > 1)
-        layout.addWidget(sidebar_widget)
-
-        self._canvas = QLabel()
-        self._canvas.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._canvas.setStyleSheet("background-color: black;")
+        self._canvas = grid.Canvas()
+        self._canvas.clicked.connect(self._on_canvas_clicked)
         # The video holds focus, so the transport keys work the moment the
         # window opens and clicking the video takes them back from a text
         # field. Left to itself Qt would focus the first field instead.
         self._canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._canvas.setFocus()
-        # Ignored: the layout owns the label's size — otherwise each painted
-        # pixmap would raise the minimum size and block shrinking the window.
-        self._canvas.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
+
+        self._views = views.ViewToggle(views.names(self._clips))
+        self._views.changed.connect(lambda: self._show_frame(self._frame))
+        self._transport = Transport(
+            self._actions, self._run_action, grid=bool(self._runs), views=self._views
         )
+        self._transport.scrub.sliderMoved.connect(self._on_scrub_moved)
+        self._transport.scrub.sliderPressed.connect(self._on_scrub_pressed)
+        self._transport.scrub.sliderReleased.connect(self._on_scrub_released)
+        self._transport.step_back.clicked.connect(
+            lambda: self._go_to_frame(self._frame - 1)
+        )
+        self._transport.play.clicked.connect(self._toggle_playback)
+        self._transport.step_forward.clicked.connect(
+            lambda: self._go_to_frame(self._frame + 1)
+        )
+        self._transport.grid.clicked.connect(self._on_grid)
+        self._transport.page_back.clicked.connect(lambda: self._turn_page(-1))
+        self._transport.page_forward.clicked.connect(lambda: self._turn_page(1))
 
         player_column = QVBoxLayout()
         player_column.setSpacing(style.GAP)
         player_column.addWidget(self._canvas, stretch=1)
-        player_column.addLayout(self._build_transport())
+        player_column.addWidget(self._transport)
         layout.addLayout(player_column, stretch=1)
 
-        self._build_confirm_panels()
-        layout.addWidget(self._build_confirm_column())
+        layout.addWidget(self._confirm)
+        self._refresh_sidebar()
 
         # Confirm is a shortcut rather than a keyPressEvent branch: a focused
         # QLineEdit ignores Return, so the window would confirm *and* the field
@@ -254,124 +178,6 @@ class ViewerWindow(QMainWindow):
         # Key_Enter is the keypad's, and needs its own sequence to match.
         for sequence in ("Ctrl+Return", "Ctrl+Enter"):
             QShortcut(QKeySequence(sequence), self, self._confirm_current)
-
-    def _build_confirm_column(self) -> QWidget:
-        """Per-clip Confirm above, the whole batch as one cut below it."""
-        self._cut_section = CutSection(
-            self._cut,
-            self._confirm_pool,
-            self._playlists,
-            clip_count=len(self._clips),
-            unavailable=self._cut_unavailable,
-        )
-        column = QVBoxLayout()
-        column.setContentsMargins(0, 0, 0, 0)
-        column.setSpacing(style.PAD_M)
-        column.addWidget(self._panel_stack, stretch=1)
-        column.addWidget(self._cut_section)
-        widget = QWidget()
-        widget.setLayout(column)
-        widget.setFixedWidth(_CONFIRM_PANEL_WIDTH)
-        widget.setVisible(self._has_confirmables() or self._cut_section.isVisible())
-        return widget
-
-    def _build_confirm_panels(self) -> None:
-        self._panels = []
-        self._panel_stack = QStackedWidget()
-        for clip in self._clips:
-            panel = ConfirmPanel(clip, self._confirm_pool, self._playlists)
-            panel.state_changed.connect(self._refresh_sidebar)
-            # Looked up on delivery, since an action can remove an earlier clip.
-            panel.delivered.connect(
-                lambda p=panel: self._on_clip_delivered(self._panels.index(p))
-            )
-            self._panels.append(panel)
-            self._panel_stack.addWidget(panel)
-        # A batch with nothing to confirm (unmigrated DCC flows) keeps the
-        # plain view-only window.
-        self._panel_stack.setVisible(self._has_confirmables())
-        self._refresh_sidebar()
-
-    def _build_transport(self) -> QVBoxLayout:
-        transport = QVBoxLayout()
-        transport.setSpacing(style.GAP)
-
-        self._scrub = TimelineSlider()
-        self._scrub.setToolTip("Home and End jump to the first and last frame.")
-        self._scrub.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._scrub.sliderMoved.connect(self._on_scrub_moved)
-        self._scrub.sliderPressed.connect(self._on_scrub_pressed)
-        self._scrub.sliderReleased.connect(self._on_scrub_released)
-
-        # Start/end frames flank the bar so its ends read as the clip's
-        # range; the current frame is drawn on the handle by the slider itself.
-        fixed = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
-        self._start_label = QLabel("")
-        self._end_label = QLabel("")
-        for label in (self._start_label, self._end_label):
-            label.setFont(fixed)
-        scrub_row = QHBoxLayout()
-        scrub_row.setSpacing(style.PAD_S)
-        scrub_row.addWidget(self._start_label)
-        scrub_row.addWidget(self._scrub, stretch=1)
-        scrub_row.addWidget(self._end_label)
-        transport.addLayout(scrub_row)
-
-        icon_color = self.palette().color(QPalette.ColorRole.ButtonText).name()
-        self._play_icon = icons.play(icon_color, _PLAY_ICON)
-        self._pause_icon = icons.pause(icon_color, _PLAY_ICON)
-
-        row = QHBoxLayout()
-        row.setSpacing(style.GAP)
-
-        # Equal-stretch side sections keep the play cluster dead-center; the
-        # left one balances the loop toggle on the right.
-        left = QHBoxLayout()
-        for action in self._actions:
-            left.addWidget(self._action_button(action))
-        left.addStretch(1)
-        row.addLayout(left, stretch=1)
-
-        row.addWidget(
-            self._transport_button(
-                icons.step_back(icon_color, _STEP_ICON),
-                "Step one frame back (Left)",
-                lambda: self._go_to_frame(self._frame - 1),
-            )
-        )
-        self._play_button = self._transport_button(
-            self._play_icon,
-            "Play/pause (Space)",
-            self._toggle_playback,
-            primary=True,
-        )
-        row.addWidget(self._play_button)
-        row.addWidget(
-            self._transport_button(
-                icons.step_forward(icon_color, _STEP_ICON),
-                "Step one frame forward (Right)",
-                lambda: self._go_to_frame(self._frame + 1),
-            )
-        )
-
-        self._loop_checkbox = QCheckBox("Loop")
-        self._loop_checkbox.setChecked(True)
-        self._loop_checkbox.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        right = QHBoxLayout()
-        right.addStretch(1)
-        right.addWidget(self._loop_checkbox)
-        row.addLayout(right, stretch=1)
-
-        transport.addLayout(row)
-        return transport
-
-    def _action_button(self, action: ClipAction) -> QPushButton:
-        button = QPushButton(action.label)
-        button.setToolTip(action.tooltip)
-        # As with the transport buttons, Space must keep playing.
-        button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        button.clicked.connect(lambda: self._run_action(action))
-        return button
 
     def _run_action(self, action: ClipAction) -> None:
         index = self._current_index
@@ -383,54 +189,31 @@ class ViewerWindow(QMainWindow):
         self.activateWindow()
         if not removed:
             return
-        self._pause()
         if len(self._clips) == 1:
             self.close()
             return
+        # Its run's next wedge, or the one before the last, keeps the frame.
+        run = self._run()
+        position = run.index(self._clips[index])
+        neighbour = run[position + 1 : position + 2] or run[position - 1 : position]
         self._clips.pop(index)
-        panel = self._panels.pop(index)
-        self._panel_stack.removeWidget(panel)
-        panel.deleteLater()
-        # Taking the row would select its neighbour and load a stale index.
-        self._clip_list.blockSignals(True)
-        self._clip_list.takeItem(index)
-        self._clip_list.blockSignals(False)
+        self._confirm.remove(index)
+        self._sidebar.remove(index)
         self._refresh_sidebar()
-        self._load_clip(min(index, len(self._clips) - 1))
-
-    def _transport_button(
-        self,
-        icon: QIcon,
-        tooltip: str,
-        on_click: Callable[[], None],
-        *,
-        primary: bool = False,
-    ) -> QToolButton:
-        button = QToolButton()
-        button.setIcon(icon)
-        if primary:
-            # The play button keeps the native raised look (the flat step
-            # buttons flank it) and a bigger hit area.
-            button.setIconSize(QSize(_PLAY_ICON, _PLAY_ICON))
-            button.setFixedSize(style.TRANSPORT_PLAY_SIZE, style.TRANSPORT_PLAY_SIZE)
-        else:
-            button.setAutoRaise(True)
-            button.setIconSize(QSize(_STEP_ICON, _STEP_ICON))
-            button.setFixedSize(_STEP_BUTTON, _STEP_BUTTON)
-        # Clicking a focusable button would leave focus on it, and the next
-        # Space would press it again instead of playing.
-        button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        button.setToolTip(tooltip)
-        button.clicked.connect(on_click)
-        return button
+        if neighbour:
+            index = self._clips.index(neighbour[0])
+        self._load_clip(min(index, len(self._clips) - 1), keep_frame=bool(neighbour))
 
     def _size_to_video(self) -> None:
+        """Sized so the canvas shows a frame at its own resolution. The
+        window's sizeHint can't say, since the canvas ignores its own."""
         width, height = self._resolution
+        width += style.PAD_M * 2
         if len(self._clips) > 1:
-            width += _SIDEBAR_WIDTH
-        if self._has_confirmables() or self._cut_section.isVisible():
-            width += _CONFIRM_PANEL_WIDTH
-        height += _TRANSPORT_HEIGHT
+            width += filmstrip.SIDEBAR_WIDTH + style.PAD_M
+        if not self._confirm.isHidden():
+            width += confirm_column.WIDTH + style.PAD_M
+        height += style.PAD_M * 2 + style.GAP + self._transport.sizeHint().height()
         screen = self.screen().availableGeometry()
         self.resize(min(width, screen.width() - 80), min(height, screen.height() - 80))
 
@@ -444,43 +227,44 @@ class ViewerWindow(QMainWindow):
     def _clip(self) -> PreviewClip:
         return self._clips[self._current_index]
 
-    def _load_clip(self, index: int) -> None:
+    def _load_clip(self, index: int, *, keep_frame: bool = False) -> None:
+        """`keep_frame` keeps the frame and play state, for a clip of the
+        same run, whose frame range is the same."""
         self._current_index = index
         clip = self._clip()
         self._ticker.setInterval(max(1, round(1000 / self._fps())))
         self.setWindowTitle(f"Playblast Viewer — {clip.label}")
-        if self._clip_list.currentRow() != index:
-            self._clip_list.setCurrentRow(index)
-        self._panel_stack.setCurrentIndex(index)
-        self._scrub.setRange(clip.frame_start, clip.frame_end)
-        self._start_label.setText(str(clip.frame_start))
-        self._end_label.setText(str(clip.frame_end))
-        self._show_frame(clip.frame_start)
-        self._play()
+        self._sidebar.select(index)
+        self._confirm.show_clip(index)
+        self._transport.set_range(clip.frame_start, clip.frame_end)
+        self._views.offer(bool(clip.views))
+        if not keep_frame:
+            self._frame = clip.frame_start
+        self._refresh_view()
+        if not keep_frame:
+            self._play()
 
     def _show_frame(self, frame: int) -> None:
         clip = self._clip()
         frame = min(max(frame, clip.frame_start), clip.frame_end)
-        pixmap = QPixmap(str(clip.frame_path(frame)))
-        if pixmap.isNull():
-            self._warn_missing_frames(clip.frame_path(frame))
-            return
+        paths = [clip.frame_path(frame, self._views.view) for clip in self._shown]
+        # A view that isn't on disk yet, as a wedge still rendering.
+        notes = [
+            views.NOT_YET if clip.views and not path.parent.is_dir() else ""
+            for clip, path in zip(self._shown, paths, strict=True)
+        ]
+        images = grid.load(paths)
+        missing = [
+            shown
+            for shown, image, note in zip(self._shown, images, notes, strict=True)
+            if image.isNull() and not note and shown not in self._missing_frames_warned
+        ]
+        if missing:
+            self._warn_missing_frames(missing, frame)
         self._frame = frame
-        self._pixmap = pixmap
-        self._paint_canvas()
+        self._canvas.show_frames(images, notes)
         # The slider repaints its handle readout from this value.
-        self._scrub.setValue(frame)
-
-    def _paint_canvas(self) -> None:
-        if self._pixmap.isNull():
-            return
-        self._canvas.setPixmap(
-            self._pixmap.scaled(
-                self._canvas.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        )
+        self._transport.scrub.setValue(frame)
 
     def _toggle_playback(self) -> None:
         if self._playing:
@@ -496,12 +280,12 @@ class ViewerWindow(QMainWindow):
         self._clock_frame = self._frame
         self._clock.start()
         self._ticker.start()
-        self._set_play_icon(playing=True)
+        self._transport.set_playing(True)
 
     def _pause(self) -> None:
         self._playing = False
         self._ticker.stop()
-        self._set_play_icon(playing=False)
+        self._transport.set_playing(False)
 
     def _on_tick(self) -> None:
         clip = self._clip()
@@ -512,11 +296,12 @@ class ViewerWindow(QMainWindow):
             self._show_frame(frame)
 
     def _on_clip_end(self) -> None:
-        if self._loop_checkbox.isChecked():
+        if self._transport.loop.isChecked():
             self._show_frame(self._clip().frame_start)
             self._clock_frame = self._frame
             self._clock.restart()
-        elif self._current_index + 1 < len(self._clips):
+        # A run's wedges are compared, not played one after another.
+        elif not self._runs and self._current_index + 1 < len(self._clips):
             self._load_clip(self._current_index + 1)
         else:
             self._show_frame(self._clip().frame_end)
@@ -532,7 +317,74 @@ class ViewerWindow(QMainWindow):
         """Also the clip list's selection handler. Out-of-range does nothing —
         wrapping would make the two arrows indistinguishable on the last clip."""
         if 0 <= index < len(self._clips) and index != self._current_index:
-            self._load_clip(index)
+            self._load_clip(index, keep_frame=self._clips[index] in self._run())
+
+    # ------------------------------------------------------------------
+    # Grid
+    # ------------------------------------------------------------------
+
+    def _run(self) -> list[PreviewClip]:
+        """The clips still in the window of the current clip's run."""
+        clip = self._clip()
+        run = next((run for run in self._runs if clip in run), [clip])
+        return [other for other in run if other in self._clips]
+
+    def _page(self) -> list[PreviewClip]:
+        run = self._run()
+        first = run.index(self._clip()) // grid.PAGE * grid.PAGE
+        return run[first : first + grid.PAGE]
+
+    def _refresh_view(self) -> None:
+        """Shows the grid or the current clip alone, at the current frame."""
+        self._shown = self._page() if self._mode == "grid" else [self._clip()]
+        self._transport.grid.setChecked(self._mode != "single")
+        run = self._run()
+        page = ""
+        if self._mode == "grid" and len(run) > grid.PAGE:
+            first = run.index(self._shown[0]) + 1
+            page = f"{first}–{first + len(self._shown) - 1} of {len(run)}"
+        self._transport.set_page(page)
+        if self._mode == "grid":
+            self._canvas.set_cells(
+                [f"{n}  {clip.label}" for n, clip in enumerate(self._shown, 1)],
+                cells=min(len(run), grid.PAGE),
+                outlined=self._shown.index(self._clip()),
+            )
+        else:
+            self._canvas.set_cells([], cells=1, outlined=None)
+        self._show_frame(self._frame)
+
+    def _on_grid(self) -> None:
+        """The Grid button and G. While a wedge is entered, they return to
+        the grid rather than leave it."""
+        self._mode = "single" if self._mode == "grid" else "grid"
+        self._refresh_view()
+
+    def _enter(self, cell: int) -> None:
+        page = self._page()
+        if cell >= len(page):
+            return
+        self._mode = "entered"
+        index = self._clips.index(page[cell])
+        if index == self._current_index:
+            self._refresh_view()
+        else:
+            self._go_to_clip(index)
+
+    def _on_canvas_clicked(self, cell: int) -> None:
+        if self._mode == "grid":
+            if cell >= 0:
+                self._enter(cell)
+        elif self._mode == "entered":
+            self._mode = "grid"
+            self._refresh_view()
+
+    def _turn_page(self, step: int) -> None:
+        """Pages move the current clip to the first wedge of the page."""
+        run = self._run()
+        first = (run.index(self._clip()) // grid.PAGE + step) * grid.PAGE
+        if 0 <= first < len(run):
+            self._go_to_clip(self._clips.index(run[first]))
 
     # ------------------------------------------------------------------
     # Scrubbing
@@ -541,7 +393,7 @@ class ViewerWindow(QMainWindow):
     def _on_scrub_pressed(self) -> None:
         self._was_playing_before_scrub = self._playing
         self._pause()
-        self._show_frame(self._scrub.value())
+        self._show_frame(self._transport.scrub.value())
 
     def _on_scrub_moved(self, frame: int) -> None:
         self._show_frame(frame)
@@ -554,69 +406,41 @@ class ViewerWindow(QMainWindow):
     # Confirm state
     # ------------------------------------------------------------------
 
-    def _has_confirmables(self) -> bool:
-        return any(panel.is_confirmable for panel in self._panels)
-
-    def _all_panels(self) -> list[ConfirmPanel]:
-        """Every panel that can be mid-delivery"""
-        return [*self._panels, *self._cut_section.panels()]
-
     def _on_clip_delivered(self, index: int) -> None:
-        if index == self._current_index:
-            self._advance_to_next_unconfirmed()
+        if index != self._current_index:
+            return
+        following = self._confirm.next_unconfirmed(index)
+        if following is not None:
+            self._load_clip(following)
 
     def _refresh_sidebar(self) -> None:
-        if not self._actions:
-            for index, panel in enumerate(self._panels):
-                self._clip_list.item(index).setData(filmstrip.STATUS_ROLE, panel.status)
-        self._clip_list.viewport().update()
-        confirmable = [panel for panel in self._panels if panel.is_confirmable]
-        self._confirm_remaining_button.setVisible(len(confirmable) > 1)
-        self._confirm_remaining_button.setEnabled(
-            any(panel.status in _UNCONFIRMED for panel in confirmable)
-        )
-
-    def _advance_to_next_unconfirmed(self) -> None:
-        count = len(self._panels)
-        for offset in range(1, count):
-            candidate = (self._current_index + offset) % count
-            if self._panels[candidate].status in _UNCONFIRMED:
-                self._load_clip(candidate)
-                return
+        self._sidebar.refresh(self._confirm.statuses())
 
     def _confirm_current(self) -> None:
         """The keyboard's route to Confirm — the button never takes focus.
         Inert on a panel with nothing to deliver, exactly as the button is."""
-        self._panels[self._current_index].request_confirm()
-
-    def _confirm_remaining(self) -> None:
-        for panel in self._panels:
-            if panel.status in _UNCONFIRMED:
-                panel.request_confirm()
+        self._confirm.panels[self._current_index].request_confirm()
 
     # ------------------------------------------------------------------
     # Window events and failure reporting
     # ------------------------------------------------------------------
 
-    def _set_play_icon(self, *, playing: bool) -> None:
-        self._play_button.setIcon(self._pause_icon if playing else self._play_icon)
-
-    def _warn_missing_frames(self, path: Path) -> None:
-        """Explain an unreadable frame once per clip, then go quiet — a
-        modal for every frame of a broken clip would be unusable."""
-        if self._clip() in self._missing_frames_warned:
-            return
-        self._missing_frames_warned.add(self._clip())
+    def _warn_missing_frames(self, clips: list[PreviewClip], frame: int) -> None:
+        """Explain unreadable frames once per clip, then go quiet — a modal
+        for every frame of a broken clip would be unusable."""
+        self._missing_frames_warned.update(clips)
         self._pause()
+        labels = ", ".join(clip.label for clip in clips)
         QMessageBox.warning(
             self,
             "Playblast Viewer",
-            f"Could not load the preview frames for {self._clip().label}.\n\n"
-            f"Missing: {path}\n\n{self._missing_frames}",
+            f"Could not load the preview frames for {labels}.\n\n"
+            f"Missing: {clips[0].frame_path(frame, self._views.view)}\n\n"
+            f"{self._missing_frames}",
         )
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        """Transport and clip navigation."""
+        """Transport, clip and grid navigation."""
         if isinstance(self.focusWidget(), QLineEdit):
             super().keyPressEvent(event)
             return
@@ -643,45 +467,26 @@ class ViewerWindow(QMainWindow):
             self._go_to_clip(self._current_index - 1)
         elif key == Qt.Key.Key_Down:
             self._go_to_clip(self._current_index + 1)
+        elif key == Qt.Key.Key_R and self._views.isEnabled():
+            self._views.cycle()
+        elif self._runs and key == Qt.Key.Key_G:
+            self._on_grid()
+        elif self._mode == "entered" and key == Qt.Key.Key_Escape:
+            self._on_grid()
+        elif self._mode != "single" and key in _CELL_KEYS:
+            self._enter(_CELL_KEYS.index(key))
+        elif self._mode == "grid" and key == Qt.Key.Key_PageUp:
+            self._turn_page(-1)
+        elif self._mode == "grid" and key == Qt.Key.Key_PageDown:
+            self._turn_page(1)
         else:
             super().keyPressEvent(event)
 
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        super().resizeEvent(event)
-        self._paint_canvas()
-
     def closeEvent(self, event: QCloseEvent) -> None:
-        # A running delivery is already writing files and pipeline records;
-        # closing mid-flight would abandon it half-done, so it can't be
-        # discarded — only waited out.
-        if any(panel.status is PanelStatus.RUNNING for panel in self._all_panels()):
-            QMessageBox.information(
-                self,
-                "Playblast Viewer",
-                "A delivery is still running. Wait for it to finish, then close.",
-            )
-            event.ignore()
-            return
-        unconfirmed = [panel for panel in self._panels if panel.status in _UNCONFIRMED]
-        if not unconfirmed:
-            event.accept()
-            return
-        count = len(unconfirmed)
-        message = (
-            "1 preview hasn't been confirmed and will be discarded."
-            if count == 1
-            else f"{count} previews haven't been confirmed and will be discarded."
-        )
-        reply = QMessageBox.question(
-            self,
-            "Playblast Viewer",
-            f"{message}\nClose anyway?",
-            QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
-        )
-        if reply == QMessageBox.StandardButton.Discard:
+        if self._confirm.ask_to_close():
             event.accept()
         else:
             event.ignore()
 
 
-__all__ = ["ClipAction", "ViewerWindow"]
+__all__ = ["ViewerWindow"]

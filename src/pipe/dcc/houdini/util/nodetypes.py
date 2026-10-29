@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-FILE_CACHE = "filecache::2.0"
+# The stock File Caches the farm writes, by hou.NodeType.nameWithCategory().
+FILE_CACHES = ("Sop/filecache::2.0", "Lop/filecache")
 IMPORT_CAMERA = "skd::main::import_camera::1.0"
 LOAD_LAYERS = "skd::main::load_layers::2.0"
 LOAD_LAYERS_1 = "skd::main::load_layers::1.0"
 PUBLISH = "skd::main::publish::1.0"
+RENDERMAN_SETTINGS = "rendermanrendersettings"
 RIG_MATERIAL_CONFIG = "skd::main::rig_material_config::1.0"
+TRACTOR_CONFIGURE = "tlops::tractor_configure::1.0"
+TRACTOR_DENOISE = "tlops::tractor_denoise::1.0"
 
 RENAMED_FROM: dict[str, str] = {
     IMPORT_CAMERA: "dbclark::Bobo_Import_Camera",

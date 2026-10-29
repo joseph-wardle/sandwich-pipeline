@@ -19,7 +19,9 @@ from pipe.core.render import (
 
 LICENSE_SERVER = "animlic.cs.byu.edu"
 # XPU keeps its buffers as /dev/shm/pixartmp-* files and never removes them when it
-# is killed (out of memory, segfault, a stopped job). This makes it dont
+# is killed (out of memory, segfault, a stopped job). Once /dev/shm fills, every XPU
+# CPU render on that blade bus-errors. Only the owner's files that no process holds
+# open are removed, so other tasks on the blade are untouched.
 SHM_CLEANUP = "\n".join(
     [
         "shm_cleanup() {",
@@ -49,13 +51,37 @@ EXIT_TRAP = "\n".join(
 # This catches jobs that segfault then keep running instead of failing
 HUSK_SEGFAULT = "Fatal error: Segmentation fault"
 SEGFAULT_EXIT = 139
+# The kernel kills husk when a blade runs out of memory, and the blade service
+# (OOMPolicy=stop) then stops with it, orphaning every task on the blade. A
+# watchdog kills husk first, with the same exit code (137), so only that task's
+# frames are lost and `job.RENDER_RETRIES` runs it again elsewhere.
+MIN_FREE_GB = 6
+MEM_WATCH = "\n".join(
+    [
+        "mem_watch() {",
+        "    local pid=$1 free",
+        '    while kill -0 "$pid" 2>/dev/null; do',
+        "        free=$(awk '/MemAvailable/ { print int($2 / 1048576) }' /proc/meminfo)",
+        f'        if [ "$free" -lt {MIN_FREE_GB} ]; then',
+        '            echo "husk was killed with $free GB of memory left on $(hostname), before'
+        ' the kernel killed it and took the blade service down" >&2',
+        '            kill -9 "$pid"',
+        "            return",
+        "        fi",
+        "        sleep 1",
+        "    done",
+        "}",
+    ]
+)
 # Run by hython on the blade: writes one File Cache from a Send's snapshot.
 CACHE_MODULE = "pipe.dcc.houdini.tractor.cache_task"
-# Run by hython on the blade: sims, flipbooks or finishes one wedge of a Wedge Send.
+# Run by hython on the blade: one step of one wedge of a Wedge Send.
 WEDGE_MODULE = "pipe.dcc.houdini.tractor.wedge_task"
 WEDGE_SIM = "sim"
 WEDGE_FLIPBOOK = "flipbook"
 WEDGE_FINISH = "finish"
+WEDGE_PREPARE = "prepare"
+WEDGE_BURN = "burn"
 # A flipbook's exit code when it couldn't draw, as when other tasks on the blade
 # have filled the GPU's memory. Tractor retries it.
 WEDGE_DRAW_FAILED = 75
@@ -114,7 +140,6 @@ class Cache:
     node: str
     # The start and end frame of each task that writes the node.
     chunks: list[tuple[float, float]]
-    # The session's variables, which hython needs to load the hip as it did.
     env: dict[str, str]
 
 
@@ -125,8 +150,8 @@ class Wedges:
     env: dict[str, str]
     # The start and end frame of each flipbook task.
     chunks: list[tuple[int, int]]
-    # The paths of the caches each wedge writes, in cook order.
-    caches: list[str]
+    # The paths of the caches each wedge rebuilds, in cook order.
+    rebuilds: list[str]
 
 
 @dataclass(frozen=True)
@@ -139,30 +164,37 @@ class Layer:
     encode: Encode | None = None
 
 
-def render(layer: Layer, frame: int) -> str:
-    """husk exits 0 even when it writes nothing, so the frame's old files are
+def render(layer: Layer, frames: list[int]) -> str:
+    """One husk renders `frames`, which are consecutive.
+
+    husk exits 0 even when it writes nothing, so the frames' old files are
     deleted first and checked for after.
 
     husk can segfault at startup and then hang, holding the blade. The crash is
     transient, so the script reads husk's output, kills it at the crash line and
-    exits as a segfault, which Tractor retries.
+    exits as a segfault, which Tractor retries. A watchdog likewise kills husk
+    when the blade is about to run out of memory, which Tractor also retries.
     """
     q = shlex.quote
     folders = " ".join(q(str(folder)) for folder in layer.render.folders)
-    husk = ["husk", "--frame", str(frame), *layer.render.husk]
+    names = " ".join(f"{frame:04}.exr" for frame in frames)
+    husk = ["husk", "--frame", str(frames[0]), "--frame-count", str(len(frames))]
+    husk += layer.render.husk
     husk.append(str(layer.folder / RENDER_USD))
     return "\n".join(
         [
             SHM_CLEANUP,
+            MEM_WATCH,
             EXIT_TRAP,
             "shm_cleanup",
             # husk makes no output folders.
             f"mkdir -p {folders}",
-            f'for d in {folders}; do rm -f "$d/{frame:04}.exr"; done',
+            f'for d in {folders}; do for f in {names}; do rm -f "$d/$f"; done; done',
             f"exec 3< <(exec {shlex.join(husk)} 2>&1)",
             "husk=$!",
             # Not traced, or -x would log three lines for each line of husk's.
             "set +x",
+            'mem_watch "$husk" &',
             "while IFS= read -r line <&3; do",
             '    echo "$line"',
             f'    if [[ "$line" == *"{HUSK_SEGFAULT}"* ]]; then',
@@ -174,10 +206,9 @@ def render(layer: Layer, frame: int) -> str:
             "set -x",
             # Fails with husk's own exit code, which stops the script under -e.
             'wait "$husk"',
-            f"for d in {folders}; do",
-            f'    f="$d/{frame:04}.exr"',
-            '    [ -f "$f" ] || { echo "husk exited without writing $f" >&2; exit 1; }',
-            "done",
+            f"for d in {folders}; do for f in {names}; do",
+            '    [ -f "$d/$f" ] || { echo "husk exited without writing $d/$f" >&2; exit 1; }',
+            "done; done",
         ]
     )
 
@@ -221,10 +252,13 @@ def denoise_window(frame: int, frames: list[int]) -> list[int]:
     return list(range(start, end + 1))
 
 
-def denoise(layer: Layer, product: str, frame: int) -> str:
+def denoise(layer: Layer, frame: int) -> str:
     """denoise_batch exits 0 even when it writes nothing, so the output check
     shares its command: a Tractor retry then re-runs both, never the check alone.
     """
+    # Only a layer that denoises has Denoise tasks.
+    assert layer.denoise is not None
+    product = layer.denoise.product
     folder = layer.folder
     window = denoise_window(frame, layer.frames)
     raw = folder / TMP / product

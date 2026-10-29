@@ -49,13 +49,18 @@ def frames(configure: hou.LopNode) -> list[int]:
 
 def husk(configure: hou.Node) -> list[str]:
     """husk's options besides the frame and the file it renders."""
-    words = [
-        *("--renderer", text(configure, RENDERER)),
-        *("--verbose", "acet"),
-    ]
-    if camera := toggled(configure, CAMERA):
+    return husk_options(
+        text(configure, RENDERER),
+        toggled(configure, CAMERA),
+        toggled(configure, SETTINGS),
+    )
+
+
+def husk_options(renderer: str, camera: str = "", settings: str = "") -> list[str]:
+    words = [*("--renderer", renderer), *("--verbose", "acet")]
+    if camera:
         words += ["--camera", camera]
-    if settings := toggled(configure, SETTINGS):
+    if settings:
         words += ["--settings", settings]
     words.append("--disable-dummy-raster-product")
     return words

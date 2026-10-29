@@ -1,5 +1,6 @@
 """The Wedge Send dialog: the parms to wedge and their values, the frames, what
-the flipbook draws, what each wedge rebuilds, and how the job is named and run."""
+the flipbook draws, whether it also renders, what each wedge rebuilds, and how
+the job is named and run."""
 
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.ui.dialogs import DialogButtons
 from pipe.dcc.houdini.tractor import SendRefused, wedges
-from pipe.dcc.houdini.tractor.job import BLADES, PRIORITY
+from pipe.dcc.houdini.tractor.job import BLADES, DIALOG_PRIORITY, PRIORITY_RANGE
 
 # A parm path and the values typed for it.
 Row = tuple[str, str]
@@ -24,12 +25,22 @@ Titled = Callable[[hou.Node], str]
 
 # One wedge is just a farm sim.
 MINIMUM = 2
-# The Draw menu, the default first.
+# The Draw menu.
 DRAWS = {"Shot": wedges.SHOT, "Cache only": wedges.CACHE}
 DRAW_HELP = (
     "Shot draws the stage at the publish node, through the shot camera.\n"
-    "Cache only draws just this cache, through the same camera."
+    "Cache only draws just this cache, through the same camera, and renders\n"
+    "it under the shot's lights."
 )
+FLIPBOOK = "Flipbook"
+# Each wedge also renders in RenderMan at daily quality, denoised.
+RENDER = "Flipbook + Render"
+OUTPUT_HELP = (
+    "Render also renders each wedge in RenderMan with the shot's lights and\n"
+    "materials, at daily quality, and denoises it. It costs farm time per wedge."
+)
+# The resolution menu, by height, as artists name them.
+RESOLUTIONS = {"720p": (1280, 720), "1080p": (1920, 1080)}
 REBUILDS_HELP = (
     "The caches each wedge writes into its own folder: every cache loading\n"
     "from disk between a wedged parm and what the flipbook draws, and this\n"
@@ -54,6 +65,8 @@ class WedgeChoice:
     draw: str
     # As typed, so the next dialog for this node starts from them.
     rows: list[Row]
+    # The width and height each wedge also renders at, or None for flipbooks only.
+    render: tuple[int, int] | None
 
 
 # The last dialog of each node by its session id, raised when its button is
@@ -67,6 +80,7 @@ def show(
     node: hou.Node,
     titled: Titled,
     frames: tuple[int, int],
+    draw: str,
     rows: list[Row],
     rebuilds: Rebuilds,
     send: Callable[[WedgeChoice], None],
@@ -82,7 +96,7 @@ def show(
         return
     if old is not None:
         old.deleteLater()
-    dialog = _WedgeDialog(parent, node, titled, frames, rows, rebuilds, send)
+    dialog = _WedgeDialog(parent, node, titled, frames, draw, rows, rebuilds, send)
     _dialogs[key] = dialog
     dialog.show()
 
@@ -145,6 +159,7 @@ class _WedgeDialog(QtWidgets.QDialog, DialogButtons):
         node: hou.Node,
         titled: Titled,
         frames: tuple[int, int],
+        draw: str,
         rows: list[Row],
         rebuilds: Rebuilds,
         send: Callable[[WedgeChoice], None],
@@ -164,10 +179,9 @@ class _WedgeDialog(QtWidgets.QDialog, DialogButtons):
 
         self._title = QtWidgets.QLineEdit()
 
-        low, high, default = PRIORITY
         self._priority = QtWidgets.QSpinBox()
-        self._priority.setRange(low, high)
-        self._priority.setValue(default)
+        self._priority.setRange(*PRIORITY_RANGE)
+        self._priority.setValue(DIALOG_PRIORITY)
 
         self._blades = QtWidgets.QComboBox()
         self._blades.addItems(list(BLADES))
@@ -184,8 +198,16 @@ class _WedgeDialog(QtWidgets.QDialog, DialogButtons):
 
         self._draw = QtWidgets.QComboBox()
         self._draw.addItems(list(DRAWS))
+        self._draw.setCurrentIndex(list(DRAWS.values()).index(draw))
         self._draw.setToolTip(DRAW_HELP)
         self._draw.currentTextChanged.connect(self._update_rebuilds)
+
+        self._output = QtWidgets.QComboBox()
+        self._output.addItems([FLIPBOOK, RENDER])
+        self._output.setToolTip(OUTPUT_HELP)
+        self._output.currentTextChanged.connect(self._update_output)
+        self._resolution = QtWidgets.QComboBox()
+        self._resolution.addItems(list(RESOLUTIONS))
 
         self._rebuilt = QtWidgets.QLabel()
         self._rebuilt.setWordWrap(True)
@@ -202,12 +224,14 @@ class _WedgeDialog(QtWidgets.QDialog, DialogButtons):
         wedge_column.addWidget(add)
         self._count = QtWidgets.QLabel()
 
-        form = QtWidgets.QFormLayout()
+        self._form = form = QtWidgets.QFormLayout()
         form.addRow("Title", self._title)
         form.addRow("Priority", self._priority)
         form.addRow("Blades", self._blades)
         form.addRow("Frames", frame_row)
         form.addRow("Draw", self._draw)
+        form.addRow("Output", self._output)
+        form.addRow("Resolution", self._resolution)
         form.addRow("Wedge", wedge_column)
         form.addRow("", self._count)
         form.addRow("Rebuilds per wedge", self._rebuilt)
@@ -217,6 +241,7 @@ class _WedgeDialog(QtWidgets.QDialog, DialogButtons):
         layout.addLayout(form)
         layout.addWidget(self.buttons)
         self._update_count()
+        self._update_output()
         self._refresh()
 
     def _add_row(self, path: str, values: str) -> None:
@@ -294,6 +319,11 @@ class _WedgeDialog(QtWidgets.QDialog, DialogButtons):
         if self.isVisible() and grow > 0:
             self.resize(self.width(), self.height() + grow)
 
+    def _update_output(self) -> None:
+        rendered = self._output.currentText() == RENDER
+        self._resolution.setVisible(rendered)
+        self._form.labelForField(self._resolution).setVisible(rendered)
+
     def _update_count(self) -> None:
         total = count(self.rows())
         self._count.setText(f"{total} wedge" if total == 1 else f"{total} wedges")
@@ -318,4 +348,9 @@ class _WedgeDialog(QtWidgets.QDialog, DialogButtons):
             end=self._end.value(),
             draw=DRAWS[self._draw.currentText()],
             rows=self.rows(),
+            render=(
+                RESOLUTIONS[self._resolution.currentText()]
+                if self._output.currentText() == RENDER
+                else None
+            ),
         )

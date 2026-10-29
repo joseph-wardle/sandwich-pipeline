@@ -173,11 +173,14 @@ class PreviewClip:
     destinations: tuple[Destination, ...] = attrs.field(
         default=(), validator=_validate_destinations
     )
+    # The folders of the same frames drawn other ways, by the name the viewer's
+    # toggle shows, such as a wedge's flipbook and its render.
+    views: tuple[tuple[str, Path], ...] = ()
 
-    def frame_path(self, frame: int) -> Path:
-        return self.frames_dir / (
-            f"{self.frames_basename}.{padded_frame_number(frame)}.png"
-        )
+    def frame_path(self, frame: int, view: str = "") -> Path:
+        """The frame in `view`'s folder, or in `frames_dir` for no view."""
+        folder = dict(self.views).get(view, self.frames_dir)
+        return folder / f"{self.frames_basename}.{padded_frame_number(frame)}.png"
 
 
 __all__ = [

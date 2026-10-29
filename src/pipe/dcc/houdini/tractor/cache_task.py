@@ -18,14 +18,10 @@ import sys
 from pathlib import Path
 
 import hou
+from pxr import Sdf
 
-from pipe.dcc.houdini.tractor import snapshot
-from pipe.dcc.houdini.util.nodetypes import FILE_CACHE
+from pipe.dcc.houdini.tractor import caches, snapshot
 
-# The ROP inside File Cache 2.0 that its Save to Disk button presses.
-ROP = "render"
-# A step is a float; this keeps the last frame in when float steps fall just short of it.
-STEP_TOLERANCE = 1e-6
 # Touched before the ROP writes; a frame older than it is an earlier save's.
 MARKER = ".tractor_writing"
 
@@ -39,7 +35,8 @@ def main(argv: list[str] | None = None) -> int:
 def write(path: str, start: float, end: float) -> int:
     """Write the File Cache at `path` from `start` to `end`. The exit code."""
     rop = _rop(path)
-    files = [_output(rop, frame) for frame in _frames(rop, start, end)]
+    # A LOP cache writes every frame into one file.
+    files = list(dict.fromkeys(_output(rop, f) for f in _frames(rop, start, end)))
     # Beside the frames, so the file server stamps both and blade clocks don't
     # matter. Named by the range, since a cache's chunks write the same folder.
     marker = files[0].parent / f"{MARKER}.{start:g}-{end:g}"
@@ -49,7 +46,7 @@ def write(path: str, start: float, end: float) -> int:
     marker.touch()
     started = marker.stat().st_mtime_ns
     try:
-        if rop.evalParm("trange"):
+        if rop.evalParm(caches.VALID_RANGE):
             rop.render(frame_range=(start, end), output_progress=True)
         else:
             rop.render(output_progress=True)
@@ -80,10 +77,10 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
 
 def _rop(path: str) -> hou.RopNode:
     node = hou.node(path)
-    if node is None or node.type().name() != FILE_CACHE:
-        raise SystemExit(f"{path} is not a File Cache 2.0 node in the snapshot.")
-    # Every File Cache 2.0 holds this ROP; hou types the child as any node.
-    return node.node(ROP)  # ty: ignore[invalid-return-type]
+    if node is None or not caches.is_file_cache(node):
+        raise SystemExit(f"{path} is not a File Cache node in the snapshot.")
+    # Every File Cache holds this ROP; hou types the child as any node.
+    return node.node(caches.ROP)  # ty: ignore[invalid-return-type]
 
 
 def _parm(rop: hou.RopNode, name: str) -> hou.Parm:
@@ -92,17 +89,15 @@ def _parm(rop: hou.RopNode, name: str) -> hou.Parm:
 
 
 def _frames(rop: hou.RopNode, start: float, end: float) -> list[float]:
-    """Every time the ROP writes a file for, substeps included."""
-    if not rop.evalParm("trange"):
+    """Every time the ROP writes, substeps included."""
+    if not rop.evalParm(caches.VALID_RANGE):
         return [hou.frame()]
-    # The ROP's own increment: the node's step divided by its substeps.
-    step = _parm(rop, "f3").evalAsFloat()
-    count = int((end - start) / step + STEP_TOLERANCE)
-    return [start + i * step for i in range(count + 1)]
+    return caches.times(start, end, _parm(rop, caches.INCREMENT).evalAsFloat())
 
 
 def _output(rop: hou.RopNode, frame: float) -> Path:
-    return Path(_parm(rop, "sopoutput").evalAsStringAtFrame(frame))
+    name = caches.OUTPUTS[rop.type().category().name()]
+    return Path(_parm(rop, name).evalAsStringAtFrame(frame))
 
 
 def _fresh(file: Path, started: int) -> bool:
@@ -110,6 +105,9 @@ def _fresh(file: Path, started: int) -> bool:
     seconds older than the marker at least, so a tie is a frame just written."""
     if not file.is_file() or file.stat().st_mtime_ns < started:
         return False
+    if file.suffix.startswith(".usd"):
+        # None for a file USD can't read.
+        return Sdf.Layer.OpenAsAnonymous(str(file)) is not None
     try:
         hou.Geometry().loadFromFile(str(file))
     except hou.OperationFailed:

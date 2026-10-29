@@ -12,9 +12,12 @@ import hou
 from pipe.core.playblast import PreviewClip
 from pipe.core.playblast.viewer import ClipAction, open_viewer
 from pipe.dcc.houdini import runtime
-from pipe.dcc.houdini.tractor import snapshot, wedges
+from pipe.dcc.houdini.tractor import engine, snapshot, wedges
 
 TITLE = "Review Wedges"
+# The toggle's names for a wedge's flipbook and its render.
+FLIPBOOK_VIEW = "Flipbook"
+RENDER_VIEW = "Render"
 MISSING_FRAMES = (
     "The wedge may have been deleted, or its Draw retried in Tractor, since "
     "Review Wedges opened. Close it and press Review Wedges again."
@@ -32,25 +35,31 @@ def review(node: hou.Node) -> None:
         )
         return
     clips: list[PreviewClip] = []
+    # The clips of each run, which the grid plays side by side.
+    grids: list[list[PreviewClip]] = []
     # The run and wedge of each clip, by its frames folder.
     shown: dict[Path, tuple[wedges.Run, wedges.Wedge]] = {}
     for run in runs:
+        grids.append([])
         for wedge in run.wedges:
             frames = run.folder / wedge.name / wedges.FLIPBOOK
             # The blade renames the folder into place once every frame is burned.
             if not frames.is_dir():
                 continue
-            clips.append(
-                PreviewClip(
-                    label=f"{run.folder.name} {wedge.name}: "
-                    + ", ".join(wedges.describe(wedge)),
-                    frames_dir=frames,
-                    frames_basename=wedges.FRAMES,
-                    frame_start=run.start,
-                    frame_end=run.end,
-                    fps=round(run.fps),
-                )
+            rendered = run.folder / wedge.name / wedges.RENDER
+            views = ((FLIPBOOK_VIEW, frames), (RENDER_VIEW, rendered))
+            clip = PreviewClip(
+                label=f"{run.folder.name} {wedge.name}: "
+                + ", ".join(wedges.describe(wedge)),
+                frames_dir=frames,
+                frames_basename=wedges.FRAME_BASENAME,
+                frame_start=run.start,
+                frame_end=run.end,
+                fps=round(run.fps),
+                views=views if run.render else (),
             )
+            clips.append(clip)
+            grids[-1].append(clip)
             shown[frames] = (run, wedge)
     finished = {run.folder for run, _ in shown.values()}
     unfinished = [run for run in runs if run.folder not in finished]
@@ -68,7 +77,7 @@ def review(node: hou.Node) -> None:
         ClipAction(
             "Delete",
             lambda clip: _delete(*shown[clip.frames_dir]),
-            "Delete this wedge's cache and flipbook from disk.",
+            "Delete this wedge's cache, flipbook and render from disk.",
         ),
     ]
     open_viewer(
@@ -76,6 +85,7 @@ def review(node: hou.Node) -> None:
         runtime.get_main_qt_window(),
         actions=actions,
         missing_frames=MISSING_FRAMES,
+        runs=grids,
     )
 
 
@@ -100,33 +110,86 @@ def _runs(node: hou.Node) -> tuple[list[wedges.Run], list[tuple[Path, str]]]:
 def _offer_delete(
     node: hou.Node, unfinished: list[wedges.Run], unread: list[tuple[Path, str]]
 ) -> None:
+    """Offer to delete the runs that won't finish. A run whose job is still in
+    Tractor is only listed, since deleting it fails the job."""
+    folders = [run.folder for run in unfinished] + [folder for folder, _ in unread]
+    running, unknown, unreachable = _running(folders)
     groups = []
-    if unfinished:
+    stopped = [run for run in unfinished if run.folder not in running]
+    if stopped:
         groups.append(
             [f"These runs of {node.path()} have no finished wedge:"]
-            + [f'{run.folder}, job "{run.title}"' for run in unfinished]
+            + [f'{run.folder}, job "{run.title}"' for run in stopped]
         )
+    unread = [(folder, why) for folder, why in unread if folder not in running]
     if unread:
         groups.append(
             ["Review Wedges leaves out the runs it can't read:"]
             + [f"{folder}: {why}" for folder, why in unread]
         )
+    if running:
+        groups.append(
+            ["These runs' jobs are still in Tractor, so they are kept:"]
+            + [f"{folder}: job {job_id}" for folder, job_id in running.items()]
+        )
+    text = "\n\n".join("\n".join(group) for group in groups)
+    folders = [folder for folder in folders if folder not in running]
+    if not folders:
+        hou.ui.displayMessage(text, title=TITLE)
+        return
+    if unreachable:
+        text += (
+            f"\n\nTractor can't be reached ({unreachable}), so Review Wedges "
+            "can't tell whether their jobs still run, and deleting a run whose "
+            "job runs fails the job. Check Tractor before deleting."
+        )
+    elif unknown:
+        text += (
+            "\n\nA run whose job is still in Tractor may yet finish, and deleting "
+            "it fails the job. Check Tractor before deleting."
+        )
     pressed = hou.ui.displayMessage(
-        "\n\n".join("\n".join(group) for group in groups)
-        + "\n\nA run whose job is still in Tractor may yet finish, and deleting "
-        "it fails the job. Check Tractor before deleting.",
+        text,
         buttons=("Delete", "Keep"),
         default_choice=1,
         close_choice=1,
         title=TITLE,
-        severity=hou.severityType.Warning,
+        severity=hou.severityType.Warning if unknown else hou.severityType.Message,
     )
     if pressed != 0:
         return
-    folders = [run.folder for run in unfinished] + [folder for folder, _ in unread]
     for folder in folders:
         shutil.rmtree(folder)
     hou.ui.setStatusMessage(f"Deleted {', '.join(f.name for f in folders)}")
+
+
+def _running(folders: list[Path]) -> tuple[dict[Path, int], list[Path], str]:
+    """The job of each folder that is still in Tractor, the folders whose job
+    can't be told, and why Tractor couldn't be asked, if it couldn't."""
+    running: dict[Path, int] = {}
+    unknown: list[Path] = []
+    unreachable = ""
+    for folder in folders:
+        path = folder / wedges.JOB
+        # Runs sent before Send wrote it, and jobs Tractor didn't confirm, have
+        # none. Once Tractor can't be reached, it isn't asked again.
+        if not path.is_file() or unreachable:
+            unknown.append(folder)
+            continue
+        try:
+            job_id = int(path.read_text())
+        except ValueError:
+            # Send stopped while writing it, as a full disk stops it.
+            unknown.append(folder)
+            continue
+        try:
+            if not engine.ended(job_id):
+                running[folder] = job_id
+        except (OSError, ValueError) as error:
+            # A URLError wraps what went wrong in <urlopen error ...>.
+            unreachable = str(getattr(error, "reason", error))
+            unknown.append(folder)
+    return running, unknown, unreachable
 
 
 def _apply(run: wedges.Run, wedge: wedges.Wedge) -> bool:
@@ -190,8 +253,33 @@ def _delete(run: wedges.Run, wedge: wedges.Wedge) -> bool:
     if not (run.folder / wedge.name).exists():
         hou.ui.setStatusMessage(f"{name} was already deleted")
         return True
+    # Its flipbook is finished, but its render may not be, and deleting it
+    # would fail the job's render tasks.
+    rendering = run.render and not (run.folder / wedge.name / wedges.RENDER).is_dir()
+    running, unknown, unreachable = (
+        _running([run.folder]) if rendering else ({}, [], "")
+    )
+    if running:
+        hou.ui.displayMessage(
+            f"{name} is still rendering in Tractor. Delete it once its render "
+            "plays, or its job ends.",
+            title=TITLE,
+        )
+        return False
+    files = "cache, flipbook and render" if run.render else "cache and flipbook"
+    text = f"Delete {name}? Its {files} can't be recovered."
+    if unknown:
+        why = (
+            f"Tractor can't be reached ({unreachable})"
+            if unreachable
+            else "Its job isn't recorded"
+        )
+        text += (
+            f"\n\n{why}, so Review Wedges can't tell whether it is still "
+            "rendering, and deleting it fails the job. Check Tractor before deleting."
+        )
     pressed = hou.ui.displayMessage(
-        f"Delete {name}? Its cache and flipbook can't be recovered.",
+        text,
         buttons=("Delete", "Cancel"),
         default_choice=1,
         close_choice=1,

@@ -25,11 +25,6 @@ from pipe.framework.launcher import Launcher
 
 log = logging.getLogger(__name__)
 
-_TMPDIR = Path(os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))).resolve() / str(
-    os.getpid()
-)
-_TMPDIR.mkdir(0o755, exist_ok=True)
-
 
 def environment() -> dict[str, int | str | None]:
     """What every Houdini session is launched with"""
@@ -86,13 +81,9 @@ def environment() -> dict[str, int | str | None]:
                 str(get_production_path()),
             ]
         ),
-        # USD Plugins
-        "PXR_PLUGINPATH_NAME": os.pathsep.join(
-            [
-                str(repo_root / "resources/usd/kinds"),
-                os.environ.get("PXR_PLUGINPATH_NAME", ""),
-            ]
-        ),
+        # USD Plugins. Not appended to the caller's value: a Send calls this
+        # from inside a session, whose value already holds the kinds.
+        "PXR_PLUGINPATH_NAME": str(repo_root / "resources/usd/kinds"),
         # Add pipeline modules to Python path
         "PYTHONPATH": os.pathsep.join(
             [
@@ -110,12 +101,18 @@ def environment() -> dict[str, int | str | None]:
 class HoudiniLauncher(Launcher):
     """Houdini outer-process launcher."""
 
+    _tmpdir: Path
     _assetdb_path: str
 
     def __init__(
         self, is_python_shell: bool = False, extra_args: list[str] | None = None
     ) -> None:
-        self._assetdb_path = str(_TMPDIR / DB_FILENAME)
+        # Made here, not on import: a Send imports this module in a session.
+        self._tmpdir = Path(
+            os.getenv("TMPDIR", os.getenv("TEMP", "tmp"))
+        ).resolve() / str(os.getpid())
+        self._tmpdir.mkdir(0o755, exist_ok=True)
+        self._assetdb_path = str(self._tmpdir / DB_FILENAME)
 
         env_vars: typing.Mapping[str, int | str | None] | None
         env_vars = {
@@ -141,7 +138,7 @@ class HoudiniLauncher(Launcher):
         )
 
     def _set_up_asset_gallery(self) -> None:
-        for stale in _TMPDIR.glob(f"{DB_FILENAME}*"):
+        for stale in self._tmpdir.glob(f"{DB_FILENAME}*"):
             stale.unlink()
         if production_db_path().is_file():
             copy_db(production_db_path(), Path(self._assetdb_path))

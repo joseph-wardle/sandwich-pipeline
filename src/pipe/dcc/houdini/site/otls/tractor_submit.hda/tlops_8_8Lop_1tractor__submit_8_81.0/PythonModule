@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import hou
 
-from pipe.dcc.houdini.tractor import send
+from pipe.dcc.houdini.tractor import render_send
 
 
 def sendToTractor(node: hou.LopNode, inputs: list[hou.LopNode] | None = None) -> None:
     """Lookdev and render_network call this too; render_network sends only its enabled layers."""
-    send.send(node, inputs)
+    render_send.send(node, inputs)

@@ -14,6 +14,7 @@ _SETTINGS_ORG = "sandwich-pipeline"
 _SETTINGS_APP = "playblast"
 _LAST_CUSTOM_FOLDER_KEY = "last_custom_folder"
 _CHECKED_KEY_PREFIX = "confirm_checked_v4"
+_VIEW_KEY = "view"
 
 
 def _settings() -> QSettings:
@@ -59,9 +60,22 @@ def save_last_custom_folder(folder: Path) -> None:
     settings.sync()
 
 
+def load_view() -> str:
+    """The view last chosen with the viewer's toggle, or empty."""
+    return str(_settings().value(_VIEW_KEY, "") or "")
+
+
+def save_view(view: str) -> None:
+    settings = _settings()
+    settings.setValue(_VIEW_KEY, view)
+    settings.sync()
+
+
 __all__ = [
     "load_checked_destinations",
     "load_last_custom_folder",
+    "load_view",
     "save_checked_destinations",
     "save_last_custom_folder",
+    "save_view",
 ]
