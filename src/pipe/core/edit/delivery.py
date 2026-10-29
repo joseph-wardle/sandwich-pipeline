@@ -50,7 +50,7 @@ def parse_delivery(path: Path, shot_code: str) -> Delivery | None:
     # The shot code is given, not parsed: codes like `A_240_PiP` contain
     # underscores of their own.
     match = re.fullmatch(
-        rf"{re.escape(shot_code)}_v(?P<version>\d+)_(?P<department>[a-z0-9]+)\.\w+",
+        rf"{re.escape(shot_code)}_v(?P<version>\d+)_(?P<department>[a-z0-9]+)\.mov",
         path.name,
     )
     if match is None:

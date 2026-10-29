@@ -9,17 +9,15 @@ from typing import Any
 import attrs
 
 from pipe.core.edit import (
-    Kind,
     Offer,
     delivery_at,
     legacy_shot_code,
     offers,
+    rank,
     shot_deliveries,
 )
 
 IMPORT_BIN = "Deliveries"
-
-_GREY = {"R": 0.5, "G": 0.5, "B": 0.5, "A": 1.0}
 
 
 @attrs.define
@@ -47,7 +45,9 @@ def main(resolve: Any, bmd: Any) -> None:
         )
         return
     chosen = _choose(fusion, bmd, timeline.GetName(), rows)
-    if chosen:
+    if chosen == []:
+        _message(fusion, bmd, "Nothing ticked, no takes added.")
+    elif chosen:
         _message(fusion, bmd, _add_takes(project.GetMediaPool(), chosen))
 
 
@@ -65,9 +65,6 @@ def _rows(timeline: Any) -> list[_Row]:
         for offer in offers(current, used):
             if offer.delivery.path.name in held:
                 continue
-            # An older department that can't even stand in is only noise.
-            if offer.kind is Kind.OTHER and offer.take is None:
-                continue
             key = (path.name, offer.delivery.path.name)
             row = rows.get(key)
             if row is None:
@@ -75,7 +72,7 @@ def _rows(timeline: Any) -> list[_Row]:
                     current.shot_code,
                     path.name,
                     offer.delivery.path.name,
-                    offer.kind.value,
+                    "",
                     offer,
                 )
             if offer.take is None:
@@ -124,7 +121,10 @@ def _take_paths(item: Any) -> set[str]:
     }
 
 
-def _choose(fusion: Any, bmd: Any, timeline_name: str, rows: list[_Row]) -> list[_Row]:
+def _choose(
+    fusion: Any, bmd: Any, timeline_name: str, rows: list[_Row]
+) -> list[_Row] | None:
+    """The ticked rows, or None if the editor cancelled."""
     ui = fusion.UIManager
     dispatcher = bmd.UIDispatcher(ui)
     window = dispatcher.AddWindow(
@@ -162,11 +162,8 @@ def _choose(fusion: Any, bmd: Any, timeline_name: str, rows: list[_Row]) -> list
         for column, text in enumerate((row.shot_code, row.in_cut, row.newer, note)):
             item.Text[column] = text
         if row.takes and row.offer and row.offer.take is not None:
-            ticked = row.offer.kind is Kind.UPDATE
+            ticked = row.offer.preferred
             item.CheckState[0] = "Checked" if ticked else "Unchecked"
-            if row.offer.kind is Kind.OTHER:
-                for column in range(4):
-                    item.TextColor[column] = _GREY
         else:
             item.Disabled = True
         tree.AddTopLevelItem(item)
@@ -174,10 +171,11 @@ def _choose(fusion: Any, bmd: Any, timeline_name: str, rows: list[_Row]) -> list
     for column in range(3):
         tree.ColumnWidth[column] = 220 if column else 110
 
-    chosen: list[_Row] = []
+    chosen: list[_Row] | None = None
 
     def add(_event: Any) -> None:
-        chosen.extend(
+        nonlocal chosen
+        chosen = list(
             row
             for row, item in zip(rows, items, strict=True)
             if not item.Disabled and item.CheckState[0] == "Checked"
@@ -197,12 +195,15 @@ def _choose(fusion: Any, bmd: Any, timeline_name: str, rows: list[_Row]) -> list
 
 
 def _add_takes(media_pool: Any, rows: list[_Row]) -> str:
-    pool_items = _pool_items(
-        media_pool, [row.offer.delivery.path for row in rows if row.offer]
+    # Highest rank last, so its take is the one left selected.
+    offered = sorted(
+        ((row, row.offer) for row in rows if row.offer),
+        key=lambda pair: rank(pair[1].delivery.department),
     )
+    pool_items = _pool_items(media_pool, [offer.delivery.path for _, offer in offered])
     added = 0
     failed: list[str] = []
-    for row in rows:
+    for row, _ in offered:
         pool_item = pool_items.get(row.newer)
         for item, take in row.takes:
             if pool_item and item.AddTake(pool_item, take.start, take.stop - 1):

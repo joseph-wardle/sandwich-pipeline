@@ -10,11 +10,10 @@ from pipe.core.edit.delivery import (
     shot_deliveries,
     shot_frames,
 )
-from pipe.core.edit.updates import Kind, Offer, offers
+from pipe.core.edit.updates import Offer, offers, rank
 
 __all__ = [
     "Delivery",
-    "Kind",
     "Offer",
     "delivery_at",
     "edit_shot_directory",
@@ -22,6 +21,7 @@ __all__ = [
     "next_delivery_name",
     "offers",
     "parse_delivery",
+    "rank",
     "shot_deliveries",
     "shot_frames",
 ]
