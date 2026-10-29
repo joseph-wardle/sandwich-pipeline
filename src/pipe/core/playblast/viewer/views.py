@@ -28,6 +28,7 @@ class ViewToggle(QWidget):
 
     _names: list[str]
     _buttons: QButtonGroup
+    _chosen_id: int
 
     def __init__(self, view_names: list[str]) -> None:
         super().__init__()
@@ -45,15 +46,24 @@ class ViewToggle(QWidget):
             self._buttons.addButton(button, index)
             row.addWidget(button)
         remembered = settings.load_view()
-        start = view_names.index(remembered) if remembered in view_names else 0
+        self._chosen_id = (
+            view_names.index(remembered) if remembered in view_names else 0
+        )
         if view_names:
-            self._buttons.button(start).setChecked(True)
+            self._buttons.button(self._chosen_id).setChecked(True)
         self._buttons.idClicked.connect(lambda _index: self._chosen())
         self.setVisible(bool(view_names))
 
     @property
     def view(self) -> str:
         return self._names[self._buttons.checkedId()] if self._names else ""
+
+    def offer(self, offered: bool) -> None:
+        """A clip without views plays its own frames, shown as the first view.
+        The chosen view comes back with the next clip that has views."""
+        self.setEnabled(offered)
+        if self._names:
+            self._buttons.button(self._chosen_id if offered else 0).setChecked(True)
 
     def cycle(self) -> None:
         if self._names:
@@ -74,6 +84,7 @@ class ViewToggle(QWidget):
         return paths, notes
 
     def _chosen(self) -> None:
+        self._chosen_id = self._buttons.checkedId()
         settings.save_view(self.view)
         self.changed.emit()
 

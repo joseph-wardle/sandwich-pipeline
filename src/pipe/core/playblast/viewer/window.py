@@ -191,15 +191,20 @@ class ViewerWindow(QMainWindow):
         self.activateWindow()
         if not removed:
             return
-        self._pause()
         if len(self._clips) == 1:
             self.close()
             return
+        # Its run's next wedge, or the one before the last, keeps the frame.
+        run = self._run()
+        position = run.index(self._clips[index])
+        neighbour = run[position + 1 : position + 2] or run[position - 1 : position]
         self._clips.pop(index)
         self._confirm.remove(index)
         self._sidebar.remove(index)
         self._refresh_sidebar()
-        self._load_clip(min(index, len(self._clips) - 1))
+        if neighbour:
+            index = self._clips.index(neighbour[0])
+        self._load_clip(min(index, len(self._clips) - 1), keep_frame=bool(neighbour))
 
     def _size_to_video(self) -> None:
         width, height = self._resolution
@@ -231,7 +236,7 @@ class ViewerWindow(QMainWindow):
         self._sidebar.select(index)
         self._confirm.show_clip(index)
         self._transport.set_range(clip.frame_start, clip.frame_end)
-        self._views.setEnabled(bool(clip.views))
+        self._views.offer(bool(clip.views))
         if not keep_frame:
             self._frame = clip.frame_start
         self._refresh_view()
@@ -289,7 +294,8 @@ class ViewerWindow(QMainWindow):
             self._show_frame(self._clip().frame_start)
             self._clock_frame = self._frame
             self._clock.restart()
-        elif self._current_index + 1 < len(self._clips):
+        # A run's wedges are compared, not played one after another.
+        elif not self._runs and self._current_index + 1 < len(self._clips):
             self._load_clip(self._current_index + 1)
         else:
             self._show_frame(self._clip().frame_end)
@@ -440,7 +446,8 @@ class ViewerWindow(QMainWindow):
             self,
             "Playblast Viewer",
             f"Could not load the preview frames for {labels}.\n\n"
-            f"Missing: {clips[0].frame_path(frame)}\n\n{self._missing_frames}",
+            f"Missing: {clips[0].frame_path(frame, self._views.view)}\n\n"
+            f"{self._missing_frames}",
         )
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -477,7 +484,7 @@ class ViewerWindow(QMainWindow):
             self._on_grid()
         elif self._entered and key == Qt.Key.Key_Escape:
             self._on_grid()
-        elif self._runs and key in _CELL_KEYS:
+        elif self._grid_on and key in _CELL_KEYS:
             self._enter(_CELL_KEYS.index(key))
         elif self._grid_shown() and key == Qt.Key.Key_PageUp:
             self._turn_page(-1)

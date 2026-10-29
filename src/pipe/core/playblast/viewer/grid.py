@@ -76,16 +76,17 @@ class Canvas(QWidget):
         painter.fillRect(self.rect(), Qt.GlobalColor.black)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         for index, image in enumerate(self._images):
+            target = self._cell_rect(index)
+            # A frame not on disk yet keeps its cell's caption and outline.
             if image.isNull():
                 if index < len(self._notes):
                     painter.setPen(Qt.GlobalColor.white)
-                    cell = self._cell_rect(index)
                     painter.drawText(
-                        cell, Qt.AlignmentFlag.AlignCenter, self._notes[index]
+                        target, Qt.AlignmentFlag.AlignCenter, self._notes[index]
                     )
-                continue
-            target = _fit(image, self._cell_rect(index))
-            painter.drawImage(target, image)
+            else:
+                target = _fit(image, target)
+                painter.drawImage(target, image)
             if index < len(self._captions):
                 _caption(painter, target, self._captions[index])
             if index == self._outlined:
