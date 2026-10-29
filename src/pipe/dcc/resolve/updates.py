@@ -16,8 +16,10 @@ from pipe.core.edit import (
     rank,
     shot_deliveries,
 )
+from pipe.dcc.resolve.util import message, root_bin
 
 IMPORT_BIN = "Deliveries"
+TITLE = "Updates"
 
 
 @attrs.define
@@ -36,19 +38,22 @@ def main(resolve: Any, bmd: Any) -> None:
     project = resolve.GetProjectManager().GetCurrentProject()
     timeline = project and project.GetCurrentTimeline()
     if not timeline:
-        _message(fusion, bmd, "Open a timeline first.")
+        message(fusion, bmd, TITLE, "Open a timeline first.")
         return
     rows = _rows(timeline)
     if not rows:
-        _message(
-            fusion, bmd, f"Every shot on {timeline.GetName()} uses its newest delivery."
+        message(
+            fusion,
+            bmd,
+            TITLE,
+            f"Every shot on {timeline.GetName()} uses its newest delivery.",
         )
         return
     chosen = _choose(fusion, bmd, timeline.GetName(), rows)
     if chosen == []:
-        _message(fusion, bmd, "Nothing ticked, no takes added.")
+        message(fusion, bmd, TITLE, "Nothing ticked, no takes added.")
     elif chosen:
-        _message(fusion, bmd, _add_takes(project.GetMediaPool(), chosen))
+        message(fusion, bmd, TITLE, _add_takes(project.GetMediaPool(), chosen))
 
 
 def _rows(timeline: Any) -> list[_Row]:
@@ -232,42 +237,9 @@ def _pool_items(media_pool: Any, paths: list[Path]) -> dict[str, Any]:
                 found[name] = clip
     missing = [str(path) for path in paths if path.name not in found]
     if missing:
-        root = media_pool.GetRootFolder()
-        target = next(
-            (f for f in root.GetSubFolderList() if f.GetName() == IMPORT_BIN), None
-        ) or media_pool.AddSubFolder(root, IMPORT_BIN)
         previous = media_pool.GetCurrentFolder()
-        media_pool.SetCurrentFolder(target)
+        media_pool.SetCurrentFolder(root_bin(media_pool, IMPORT_BIN))
         for clip in media_pool.ImportMedia(missing) or []:
             found[Path(clip.GetClipProperty("File Path")).name] = clip
         media_pool.SetCurrentFolder(previous)
     return found
-
-
-def _message(fusion: Any, bmd: Any, text: str) -> None:
-    ui = fusion.UIManager
-    dispatcher = bmd.UIDispatcher(ui)
-    window = dispatcher.AddWindow(
-        {
-            "ID": "SKDMessage",
-            "WindowTitle": "Updates",
-            "Geometry": [300, 300, 480, 160],
-        },
-        ui.VGroup(
-            [
-                ui.Label({"Text": text, "WordWrap": True}),
-                ui.HGroup(
-                    {"Weight": 0}, [ui.HGap(), ui.Button({"ID": "OK", "Text": "OK"})]
-                ),
-            ]
-        ),
-    )
-
-    def close(_event: Any) -> None:
-        dispatcher.ExitLoop()
-
-    window.On.OK.Clicked = close
-    window.On.SKDMessage.Close = close
-    window.Show()
-    dispatcher.RunLoop()
-    window.Hide()
