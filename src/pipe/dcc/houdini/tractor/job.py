@@ -51,7 +51,9 @@ SERVICE = "EL9"
 # student logs in. The New Monsters have their own profile.
 MONSTERS = "Monster_EL9 || New_Monster_EL9"
 BLADES = {"Monsters only": MONSTERS, "Any blade": SERVICE}
-PRIORITY = (0, 50, 30)
+# The range of Tractor Submit's Priority. Render Send takes its own default.
+PRIORITY_RANGE = (0, 50)
+DIALOG_PRIORITY = 30
 
 RENDER_RETRIES = [
     3,  # Can't get license
@@ -66,18 +68,20 @@ DENOISE_RETRIES = [
 WEDGE_CHUNK = 10
 
 
-def build(title: str, priority: int, envkey: str, layers: list[Layer]) -> author.Job:
+def render_job(
+    title: str, priority: int, envkey: str, layers: list[Layer]
+) -> author.Job:
     job = author.Job(title=title, priority=priority, envkey=[envkey])
     for layer in layers:
-        job.addChild(layer_task(layer))
+        job.addChild(_layer_task(layer))
     return job
 
 
-def layer_task(layer: Layer) -> author.Task:
+def _layer_task(layer: Layer) -> author.Task:
     task = author.Task(title=layer.name)
     steps = [_render_task(layer)]
     if layer.denoise:
-        steps.append(_denoise_task(layer, layer.denoise.product))
+        steps.append(_denoise_task(layer))
     if layer.encode:
         encode = _task(f"Encode {layer.name}", commands.encode(layer, layer.encode))
         encode.addChild(author.Instance(title=steps[-1].title))
@@ -108,9 +112,7 @@ def _render_task(layer: Layer, service: str = SERVICE, chunk: int = 1) -> author
     return task
 
 
-def _denoise_task(
-    layer: Layer, product: str, service: str = SERVICE, chunk: int = 1
-) -> author.Task:
+def _denoise_task(layer: Layer, service: str = SERVICE, chunk: int = 1) -> author.Task:
     rendered_by = {
         frame: _render_title(layer, frames)
         for frames in _chunks(layer, chunk)
@@ -118,7 +120,7 @@ def _denoise_task(
     }
     task = author.Task(title=f"Denoise {layer.name}")
     for frame in layer.frames:
-        script = commands.denoise(layer, product, frame)
+        script = commands.denoise(layer, frame)
         title = f"Denoise {layer.name} {frame}"
         frame_task = _task(title, script, DENOISE_RETRIES, service)
         window = commands.denoise_window(frame, layer.frames)
@@ -202,8 +204,7 @@ def _wedge_render(spec: Wedges, layer: Layer, service: str) -> author.Task:
     task.addChild(prepare_task)
     task.addChild(_render_task(layer, service, WEDGE_CHUNK))
     if layer.denoise:
-        product = layer.denoise.product
-        task.addChild(_denoise_task(layer, product, service, WEDGE_CHUNK))
+        task.addChild(_denoise_task(layer, service, WEDGE_CHUNK))
     return task
 
 

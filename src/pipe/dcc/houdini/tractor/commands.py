@@ -252,10 +252,13 @@ def denoise_window(frame: int, frames: list[int]) -> list[int]:
     return list(range(start, end + 1))
 
 
-def denoise(layer: Layer, product: str, frame: int) -> str:
+def denoise(layer: Layer, frame: int) -> str:
     """denoise_batch exits 0 even when it writes nothing, so the output check
     shares its command: a Tractor retry then re-runs both, never the check alone.
     """
+    # Only a layer that denoises has Denoise tasks.
+    assert layer.denoise is not None
+    product = layer.denoise.product
     folder = layer.folder
     window = denoise_window(frame, layer.frames)
     raw = folder / TMP / product

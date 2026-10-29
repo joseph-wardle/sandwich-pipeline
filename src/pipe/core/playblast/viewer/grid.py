@@ -18,9 +18,9 @@ _OUTLINE = 2
 _CAPTION_PAD = 4
 _CAPTION_BACKDROP = QColor(0, 0, 0, 160)
 
-# One 720p PNG takes about 14 ms to decode, so a page of 9 read one after
-# another misses 24 fps. QImage drops the GIL while it decodes, so a page
-# read in parallel takes about one frame's time.
+# A page of 9 720p PNGs decoded one after another misses 24 fps. QImage drops
+# the GIL while it decodes, so a page read in parallel takes about one frame's
+# time.
 _DECODER = ThreadPoolExecutor(PAGE, thread_name_prefix="viewer-decode")
 
 
@@ -65,7 +65,7 @@ class Canvas(QWidget):
         self._cells = cells
         self._outlined = outlined
 
-    def show_frames(self, images: list[QImage], notes: Sequence[str] = ()) -> None:
+    def show_frames(self, images: list[QImage], notes: Sequence[str]) -> None:
         """`notes` are shown in place of the frames that are null."""
         self._images = images
         self._notes = notes

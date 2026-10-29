@@ -23,10 +23,10 @@ from pipe.dcc.houdini.tractor.send import (
     BUILD_FAILED,
     check,
     environment,
+    job_title,
     note,
     refuse,
     spool,
-    title,
 )
 
 # The line of a node's comment that names its last job.
@@ -99,8 +99,8 @@ def _prepare(node: hou.Node) -> tuple[author.Job, str, list[hou.Node]] | None:
         runtime.get_main_qt_window(),
         node,
         caches.upstream(node),
-        title(node),
-        _frames(node),
+        job_title(node),
+        _frame_label(node),
     )
     if choice is None:
         return None
@@ -123,7 +123,7 @@ def _prepare(node: hou.Node) -> tuple[author.Job, str, list[hou.Node]] | None:
     return built, choice.title, sent
 
 
-def _frames(node: hou.Node) -> str:
+def _frame_label(node: hou.Node) -> str:
     chunks = caches.chunks(node)
     start, end = chunks[0][0], chunks[-1][1]
     return f"{start:g}" if start == end else f"{start:g} to {end:g}"

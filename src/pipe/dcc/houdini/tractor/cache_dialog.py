@@ -56,10 +56,9 @@ class _CacheDialog(QtWidgets.QDialog, DialogButtons):
         self._title = QtWidgets.QLineEdit()
         self._title.setPlaceholderText(title)
 
-        low, high, default = job.PRIORITY
         self._priority = QtWidgets.QSpinBox()
-        self._priority.setRange(low, high)
-        self._priority.setValue(default)
+        self._priority.setRange(*job.PRIORITY_RANGE)
+        self._priority.setValue(job.DIALOG_PRIORITY)
 
         self._blades = QtWidgets.QComboBox()
         self._blades.addItems(list(job.BLADES))

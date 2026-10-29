@@ -146,8 +146,9 @@ def chunks(node: hou.Node) -> list[tuple[float, float]]:
     a LOP cache, which writes every frame into one file. A cache that is not
     time dependent writes the scene's current frame.
     """
-    rop = node.node(ROP)
-    if rop is None or not rop.evalParm(VALID_RANGE):
+    # Every File Cache holds this ROP; hou types the child as optional.
+    rop: hou.Node = node.node(ROP)  # ty: ignore[invalid-assignment]
+    if not rop.evalParm(VALID_RANGE):
         return [(hou.frame(), hou.frame())]
     start, end, step = (float(v) for v in node.evalParmTuple(RANGE))
     if isinstance(node, hou.LopNode) or node.evalParm(SIMULATION):

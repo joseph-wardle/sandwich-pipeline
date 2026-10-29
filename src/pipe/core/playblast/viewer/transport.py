@@ -48,7 +48,7 @@ class Transport(QWidget):
     grid: QPushButton
     page_back: QToolButton
     page_forward: QToolButton
-    page_label: QLabel
+    _page_label: QLabel
     _start_label: QLabel
     _end_label: QLabel
     _play_icon: QIcon
@@ -116,7 +116,7 @@ class Transport(QWidget):
         self.page_back = _button(
             icons.step_back(icon_color, _STEP_ICON), "Previous page (Page Up)"
         )
-        self.page_label = QLabel("")
+        self._page_label = QLabel("")
         self.page_forward = _button(
             icons.step_forward(icon_color, _STEP_ICON), "Next page (Page Down)"
         )
@@ -128,7 +128,7 @@ class Transport(QWidget):
         )
         self.grid.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.grid.setVisible(grid)
-        for widget in (self.page_back, self.page_label, self.page_forward):
+        for widget in (self.page_back, self._page_label, self.page_forward):
             widget.setVisible(False)
             right.addWidget(widget)
         right.addWidget(views)
@@ -151,8 +151,8 @@ class Transport(QWidget):
 
     def set_page(self, text: str) -> None:
         """Shows the page controls with `text`, or hides them when empty."""
-        self.page_label.setText(text)
-        for widget in (self.page_back, self.page_label, self.page_forward):
+        self._page_label.setText(text)
+        for widget in (self.page_back, self._page_label, self.page_forward):
             widget.setVisible(bool(text))
 
 

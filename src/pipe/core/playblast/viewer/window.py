@@ -489,4 +489,4 @@ class ViewerWindow(QMainWindow):
             event.ignore()
 
 
-__all__ = ["ClipAction", "ViewerWindow"]
+__all__ = ["ViewerWindow"]

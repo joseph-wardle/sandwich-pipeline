@@ -52,7 +52,7 @@ def review(node: hou.Node) -> None:
                 label=f"{run.folder.name} {wedge.name}: "
                 + ", ".join(wedges.describe(wedge)),
                 frames_dir=frames,
-                frames_basename=wedges.FRAMES,
+                frames_basename=wedges.FRAME_BASENAME,
                 frame_start=run.start,
                 frame_end=run.end,
                 fps=round(run.fps),

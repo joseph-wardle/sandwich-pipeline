@@ -14,7 +14,7 @@ from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.ui.dialogs import DialogButtons
 from pipe.dcc.houdini.tractor import SendRefused, wedges
-from pipe.dcc.houdini.tractor.job import BLADES, PRIORITY
+from pipe.dcc.houdini.tractor.job import BLADES, DIALOG_PRIORITY, PRIORITY_RANGE
 
 # A parm path and the values typed for it.
 Row = tuple[str, str]
@@ -179,10 +179,9 @@ class _WedgeDialog(QtWidgets.QDialog, DialogButtons):
 
         self._title = QtWidgets.QLineEdit()
 
-        low, high, default = PRIORITY
         self._priority = QtWidgets.QSpinBox()
-        self._priority.setRange(low, high)
-        self._priority.setValue(default)
+        self._priority.setRange(*PRIORITY_RANGE)
+        self._priority.setValue(DIALOG_PRIORITY)
 
         self._blades = QtWidgets.QComboBox()
         self._blades.addItems(list(BLADES))

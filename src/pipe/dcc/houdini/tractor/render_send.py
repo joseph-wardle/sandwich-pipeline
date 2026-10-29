@@ -167,7 +167,7 @@ def build(submit: hou.Node, title: str, chains: list[Chain]) -> author.Job:
     # Each current layer is read once, so every layer of the job renders the
     # same versions even when someone publishes during the Send.
     version_of = functools.cache(_sent_version)
-    return job.build(
+    return job.render_job(
         title,
         int(submit.evalParm("priority")),
         setenv(),

@@ -39,7 +39,7 @@ class ConfirmColumn(QWidget):
     ) -> None:
         super().__init__()
         # Confirm jobs run here, one at a time — parallel deliveries would
-        # race on encode CPU and previs take numbering. The window owns the
+        # race on encode CPU and version numbering. The window owns the
         # pool (not the DCC-global one) so viewer work never mixes with the
         # host application's.
         self._pool = QThreadPool(self)

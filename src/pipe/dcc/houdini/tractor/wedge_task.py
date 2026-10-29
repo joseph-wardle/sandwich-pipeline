@@ -64,8 +64,6 @@ LOP_SOURCE = 1
 # the shot's lights, set for RenderMan, far too bright.
 WORK_LIGHTS = 1
 RAW = "raw"
-SCRATCH = f"{wedges.FLIPBOOK}.tmp"
-BURNED = "burn"
 # The lights of every published shot. Cache only keeps them, so a render of the
 # cache alone is lit as the shot is.
 LIGHTS = "/lights"
@@ -137,11 +135,7 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
 def sim(run: wedges.Run, rebuilt: list[hou.Node], path: str) -> int:
     """Write one of the wedge's caches over the frames the record gives it,
     reading those written before it from the wedge's folder. The exit code."""
-    paths = [r.path for r in run.rebuilds]
-    if path not in paths:
-        print(f"The run doesn't write {path}.", file=sys.stderr)
-        return 1
-    index = paths.index(path)
+    index = [r.path for r in run.rebuilds].index(path)
     for node in rebuilt[:index]:
         node.setParms({LOAD_FROM_DISK: 1})
     rebuild = run.rebuilds[index]
@@ -156,7 +150,7 @@ def flipbook(
     The frames are written aside, for `finish` to rename into place, so review
     never lists a wedge whose flipbook is half written.
     """
-    scratch = folder / SCRATCH
+    scratch = folder / wedges.FLIPBOOK_TMP
     # Its own folder, since ffmpeg would also burn the frames of other tasks.
     raw = scratch / f"{RAW}.{start}-{end}"
     shutil.rmtree(raw, ignore_errors=True)
@@ -179,7 +173,7 @@ def flipbook(
     width, height = hou.imageResolution(str(raw / f"{RAW}.{start:04}.png"))
     burn_hud_frames(
         str(raw / f"{RAW}.%04d.png"),
-        str(scratch / f"{wedges.FRAMES}.%04d.png"),
+        str(scratch / f"{wedges.FRAME_BASENAME}.%04d.png"),
         _hud(run, wedge, start),
         (width, height),
         start_frame=start,
@@ -195,7 +189,7 @@ def finish(run: wedges.Run, folder: Path) -> int:
     A retried Draw writes into scratch again, after the flipbook is in place,
     so finishing again keeps the flipbook's frames that Draw didn't redraw.
     """
-    scratch = folder / SCRATCH
+    scratch = folder / wedges.FLIPBOOK_TMP
     final = folder / wedges.FLIPBOOK
     frames = range(run.start, run.end + 1)
     # Finished already, and left alone, since review may be playing it.
@@ -221,7 +215,7 @@ def finish(run: wedges.Run, folder: Path) -> int:
 def _missing(frames: range, *folders: Path) -> int | None:
     """The first of `frames` none of the folders has a burned frame of."""
     for frame in frames:
-        name = f"{wedges.FRAMES}.{frame:04}.png"
+        name = f"{wedges.FRAME_BASENAME}.{frame:04}.png"
         if not any((folder / name).is_file() for folder in folders):
             return frame
     return None
@@ -318,9 +312,8 @@ def prepare(run: wedges.Run, wedge: wedges.Wedge) -> int:
     drawn = _drawn(run)
     if drawn is None:
         return 1
-    if run.render is None:
-        print(f"{run.folder} doesn't render its wedges.", file=sys.stderr)
-        return 1
+    # Only a run that renders has Prepare tasks.
+    assert run.render is not None
     expected = wedges.render_layer(run, wedge.name)
     network = drawn.parent()
     # The publish node has no output to wire from.
@@ -392,9 +385,8 @@ def burn(run: wedges.Run, wedge: wedges.Wedge, folder: Path) -> int:
     Each frame's EXR holds every pass Denoise read, so the render's folder is
     deleted once the frames are burned.
     """
-    if run.render is None:
-        print(f"{run.folder} doesn't render its wedges.", file=sys.stderr)
-        return 1
+    # Only a run that renders has Burn tasks.
+    assert run.render is not None
     layer = wedges.render_layer(run, wedge.name)
     final = folder / wedges.RENDER
     frames = range(run.start, run.end + 1)
@@ -402,7 +394,7 @@ def burn(run: wedges.Run, wedge: wedges.Wedge, folder: Path) -> int:
     if not layer.folder.exists() and _missing(frames, final) is None:
         print(f"{final} already has all {len(frames)} frames.")
         return 0
-    scratch = layer.folder / BURNED
+    scratch = layer.folder / wedges.BURN_TMP
     raw = scratch / RAW
     shutil.rmtree(scratch, ignore_errors=True)
     raw.mkdir(parents=True)
@@ -421,7 +413,7 @@ def burn(run: wedges.Run, wedge: wedges.Wedge, folder: Path) -> int:
             return 1
     burn_hud_frames(
         str(raw / f"{RAW}.%04d.png"),
-        str(scratch / f"{wedges.FRAMES}.%04d.png"),
+        str(scratch / f"{wedges.FRAME_BASENAME}.%04d.png"),
         _hud(run, wedge, run.start),
         run.render,
         start_frame=run.start,

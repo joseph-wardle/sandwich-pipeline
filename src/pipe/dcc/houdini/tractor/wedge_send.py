@@ -32,11 +32,11 @@ from pipe.dcc.houdini.tractor.send import (
     BUILD_FAILED,
     check,
     environment,
+    job_title,
     note,
     refuse,
     setenv,
     spool,
-    title,
 )
 
 # The line of a node's comment that names its last wedge run.
@@ -65,7 +65,7 @@ def send(node: hou.Node) -> None:
     wedge_dialog.show(
         runtime.get_main_qt_window(),
         node,
-        lambda current: title(current, " wedges"),
+        lambda current: job_title(current, " wedges"),
         (start, end),
         default_draw,
         _last_rows.get(key, []),

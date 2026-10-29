@@ -65,10 +65,9 @@ class ViewToggle(QWidget):
             self._buttons.button(self._chosen_id if offered else 0).setChecked(True)
 
     def cycle(self) -> None:
-        if self._names:
-            following = (self._buttons.checkedId() + 1) % len(self._names)
-            self._buttons.button(following).setChecked(True)
-            self._chosen()
+        following = (self._buttons.checkedId() + 1) % len(self._names)
+        self._buttons.button(following).setChecked(True)
+        self._chosen()
 
     def _chosen(self) -> None:
         self._chosen_id = self._buttons.checkedId()

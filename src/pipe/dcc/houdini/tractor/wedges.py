@@ -9,8 +9,10 @@ lay out a wedge's render.
     ├── w01/                the first wedge
     │   ├── 01_upstream/    each cache it writes, numbered in cook order, since
     │   ├── 02_sim/         two caches may share a file name
+    │   ├── flipbook.tmp/   its HUD-burned frames, while they are drawn
     │   ├── flipbook/       its HUD-burned frames, there once they are all written
     │   ├── render.tmp/     its render as a shot layer's version folder, while it renders
+    │   │   └── burn/       its HUD-burned render, while it burns
     │   └── render/         its HUD-burned render, there once it is all burned
     └── w02/
 """
@@ -33,11 +35,16 @@ JOB = "job"
 # runs on disk, keep the record they were sent with.
 SCHEMA = 1
 FLIPBOOK = "flipbook"
+FLIPBOOK_TMP = f"{FLIPBOOK}.tmp"
 RENDER = "render"
-RENDERING = f"{RENDER}.tmp"
+RENDER_TMP = f"{RENDER}.tmp"
+BURN_TMP = "burn"
+# The frames' file name before the frame number, as the viewer reads them.
+FRAME_BASENAME = "flipbook"
 PRODUCT = "renderproduct"
+# XPU on GPU and CPU, not the show's XPU CPU: the New Monsters render on their
+# GPUs, and the other blades fall back to CPU.
 RENDERER = "HdPrmanXpuLoaderRendererPlugin"
-FRAMES = "flipbook"
 
 SHOT_CAMERA = "/cameras/shotCam"
 # What a flipbook draws: the stage at the hip's publish node, which is the shot
@@ -151,7 +158,7 @@ def read_record(path: Path) -> Run:
 
 def render_layer(run: Run, name: str) -> commands.Layer:
     """A wedge's render, which runs as a shot layer's Render and Denoise tasks."""
-    folder = run.folder / name / RENDERING
+    folder = run.folder / name / RENDER_TMP
     return commands.Layer(
         name,
         folder,

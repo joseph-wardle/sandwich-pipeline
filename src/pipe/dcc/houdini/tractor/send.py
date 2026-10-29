@@ -95,7 +95,7 @@ def setenv() -> str:
     return " ".join(["setenv", *found])
 
 
-def title(node: hou.Node, what: str = "") -> str:
+def job_title(node: hou.Node, what: str = "") -> str:
     # The last folders of a shot's fx hip are <shot>/fx.
     hip = Path(hou.text.expandString("$HIP"))
     return f"{hip.parent.name} {hip.name}: {node.name()}{what}"
