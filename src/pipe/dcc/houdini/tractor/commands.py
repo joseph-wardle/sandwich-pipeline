@@ -164,10 +164,8 @@ class Layer:
     encode: Encode | None = None
 
 
-def render(layer: Layer, frames: list[int]) -> str:
-    """One husk renders `frames`, which are consecutive.
-
-    husk exits 0 even when it writes nothing, so the frames' old files are
+def render(layer: Layer, frame: int) -> str:
+    """husk exits 0 even when it writes nothing, so the frame's old files are
     deleted first and checked for after.
 
     husk can segfault at startup and then hang, holding the blade. The crash is
@@ -177,9 +175,7 @@ def render(layer: Layer, frames: list[int]) -> str:
     """
     q = shlex.quote
     folders = " ".join(q(str(folder)) for folder in layer.render.folders)
-    names = " ".join(f"{frame:04}.exr" for frame in frames)
-    husk = ["husk", "--frame", str(frames[0]), "--frame-count", str(len(frames))]
-    husk += layer.render.husk
+    husk = ["husk", "--frame", str(frame), *layer.render.husk]
     husk.append(str(layer.folder / RENDER_USD))
     return "\n".join(
         [
@@ -189,7 +185,7 @@ def render(layer: Layer, frames: list[int]) -> str:
             "shm_cleanup",
             # husk makes no output folders.
             f"mkdir -p {folders}",
-            f'for d in {folders}; do for f in {names}; do rm -f "$d/$f"; done; done',
+            f'for d in {folders}; do rm -f "$d/{frame:04}.exr"; done',
             f"exec 3< <(exec {shlex.join(husk)} 2>&1)",
             "husk=$!",
             # Not traced, or -x would log three lines for each line of husk's.
@@ -206,9 +202,10 @@ def render(layer: Layer, frames: list[int]) -> str:
             "set -x",
             # Fails with husk's own exit code, which stops the script under -e.
             'wait "$husk"',
-            f"for d in {folders}; do for f in {names}; do",
-            '    [ -f "$d/$f" ] || { echo "husk exited without writing $d/$f" >&2; exit 1; }',
-            "done; done",
+            f"for d in {folders}; do",
+            f'    f="$d/{frame:04}.exr"',
+            '    [ -f "$f" ] || { echo "husk exited without writing $f" >&2; exit 1; }',
+            "done",
         ]
     )
 

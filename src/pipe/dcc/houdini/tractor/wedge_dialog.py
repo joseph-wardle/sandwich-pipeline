@@ -39,8 +39,13 @@ OUTPUT_HELP = (
     "Render also renders each wedge in RenderMan with the shot's lights and\n"
     "materials, at daily quality, and denoises it. It costs farm time per wedge."
 )
-# The resolution menu, by height, as artists name them.
-RESOLUTIONS = {"720p": (1280, 720), "1080p": (1920, 1080)}
+BLADES_HELP = (
+    "Where the sims and flipbooks run. Renders run on any blade, since\n"
+    "each frame is its own short task."
+)
+# The resolution menu, by height, as artists name them. The first is the
+# default: a wedge is rendered to compare it, and 480p takes about half as long.
+RESOLUTIONS = {"480p": (854, 480), "720p": (1280, 720), "1080p": (1920, 1080)}
 REBUILDS_HELP = (
     "The caches each wedge writes into its own folder: every cache loading\n"
     "from disk between a wedged parm and what the flipbook draws, and this\n"
@@ -185,6 +190,7 @@ class _WedgeDialog(QtWidgets.QDialog, DialogButtons):
 
         self._blades = QtWidgets.QComboBox()
         self._blades.addItems(list(BLADES))
+        self._blades.setToolTip(BLADES_HELP)
 
         self._start = QtWidgets.QSpinBox()
         self._end = QtWidgets.QSpinBox()
