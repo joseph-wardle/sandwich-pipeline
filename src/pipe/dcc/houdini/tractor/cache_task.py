@@ -20,15 +20,8 @@ from pathlib import Path
 import hou
 from pxr import Sdf
 
-from pipe.dcc.houdini.tractor import snapshot
-from pipe.dcc.houdini.util.nodetypes import FILE_CACHES
+from pipe.dcc.houdini.tractor import caches, snapshot
 
-# The ROP inside every File Cache that its Save to Disk button presses.
-ROP = "render"
-# The file parm of that ROP, by its network type.
-OUTPUTS = {"Sop": "sopoutput", "Lop": "lopoutput"}
-# A step is a float; this keeps the last frame in when float steps fall just short of it.
-STEP_TOLERANCE = 1e-6
 # Touched before the ROP writes; a frame older than it is an earlier save's.
 MARKER = ".tractor_writing"
 
@@ -53,7 +46,7 @@ def write(path: str, start: float, end: float) -> int:
     marker.touch()
     started = marker.stat().st_mtime_ns
     try:
-        if rop.evalParm("trange"):
+        if rop.evalParm(caches.VALID_RANGE):
             rop.render(frame_range=(start, end), output_progress=True)
         else:
             rop.render(output_progress=True)
@@ -84,10 +77,10 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
 
 def _rop(path: str) -> hou.RopNode:
     node = hou.node(path)
-    if node is None or node.type().nameWithCategory() not in FILE_CACHES:
+    if node is None or not caches.is_file_cache(node):
         raise SystemExit(f"{path} is not a File Cache node in the snapshot.")
     # Every File Cache holds this ROP; hou types the child as any node.
-    return node.node(ROP)  # ty: ignore[invalid-return-type]
+    return node.node(caches.ROP)  # ty: ignore[invalid-return-type]
 
 
 def _parm(rop: hou.RopNode, name: str) -> hou.Parm:
@@ -97,16 +90,13 @@ def _parm(rop: hou.RopNode, name: str) -> hou.Parm:
 
 def _frames(rop: hou.RopNode, start: float, end: float) -> list[float]:
     """Every time the ROP writes, substeps included."""
-    if not rop.evalParm("trange"):
+    if not rop.evalParm(caches.VALID_RANGE):
         return [hou.frame()]
-    # The ROP's own increment: the node's step divided by its substeps.
-    step = _parm(rop, "f3").evalAsFloat()
-    count = int((end - start) / step + STEP_TOLERANCE)
-    return [start + i * step for i in range(count + 1)]
+    return caches.times(start, end, _parm(rop, caches.INCREMENT).evalAsFloat())
 
 
 def _output(rop: hou.RopNode, frame: float) -> Path:
-    name = OUTPUTS[rop.type().category().name()]
+    name = caches.OUTPUTS[rop.type().category().name()]
     return Path(_parm(rop, name).evalAsStringAtFrame(frame))
 
 

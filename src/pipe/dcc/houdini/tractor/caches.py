@@ -5,11 +5,29 @@ from __future__ import annotations
 
 import hou
 
-from pipe.dcc.houdini.tractor.cache_task import ROP, STEP_TOLERANCE
 from pipe.dcc.houdini.util.nodetypes import FILE_CACHES
 
 LOAD_FROM_DISK = "loadfromdisk"
 SIMULATION = "cachesim"
+# The file name before the version, which Save to Disk hardens.
+BASE_NAME = "basename"
+# A File Cache builds its path from a base folder, unless it is given a file.
+FILE_METHOD = "filemethod"
+CONSTRUCTED = 0
+BASE_FOLDER = "basedir"
+FILE = "file"
+# Start, end and increment, on the File Cache and on its ROP.
+RANGE = "f"
+# The ROP inside every File Cache that its Save to Disk button presses.
+ROP = "render"
+# The ROP's file parm, by its network type.
+OUTPUTS = {"Sop": "sopoutput", "Lop": "lopoutput"}
+# Whether the ROP writes a frame range, or only the current frame.
+VALID_RANGE = "trange"
+# The ROP's increment: the node's divided by its substeps.
+INCREMENT = "f3"
+# A step is a float; this keeps the last frame in when float steps fall just short of it.
+STEP_TOLERANCE = 1e-6
 # The networks whose output is their display node. A VOP or ROP network has
 # none, and the /stage network's is the whole stage.
 DISPLAYED = (hou.ObjNode, hou.SopNode, hou.DopNode, hou.LopNode)
@@ -129,18 +147,22 @@ def chunks(node: hou.Node) -> list[tuple[float, float]]:
     time dependent writes the scene's current frame.
     """
     rop = node.node(ROP)
-    if rop is None or not rop.evalParm("trange"):
+    if rop is None or not rop.evalParm(VALID_RANGE):
         return [(hou.frame(), hou.frame())]
-    start, end, step = (float(v) for v in node.evalParmTuple("f"))
+    start, end, step = (float(v) for v in node.evalParmTuple(RANGE))
     if isinstance(node, hou.LopNode) or node.evalParm(SIMULATION):
         return [(start, end)]
-    # The ROP's own increment, which is smaller than the node's with substeps.
-    increment = float(rop.evalParm("f3"))
-    count = int((end - start) / step + STEP_TOLERANCE) + 1
-    frames = [start + i * step for i in range(count)]
+    increment = float(rop.evalParm(INCREMENT))
+    frames = times(start, end, step)
     found = []
     for i in range(0, len(frames), CHUNK):
         first, last = frames[i], frames[min(i + CHUNK, len(frames)) - 1]
         # A chunk also writes the substeps up to the next chunk's first frame.
         found.append((first, end if last == frames[-1] else last + step - increment))
     return found
+
+
+def times(start: float, end: float, step: float) -> list[float]:
+    """Every `step` from `start` to `end`, both included."""
+    count = int((end - start) / step + STEP_TOLERANCE)
+    return [start + i * step for i in range(count + 1)]

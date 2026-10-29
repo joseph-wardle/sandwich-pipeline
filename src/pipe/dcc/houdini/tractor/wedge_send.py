@@ -59,7 +59,7 @@ def send(node: hou.Node) -> None:
         return
     # The stubs say sessionId() returns None. It returns the node's id.
     key: int = node.sessionId()  # ty: ignore[invalid-assignment]
-    start, end = (int(v) for v in node.evalParmTuple("f")[:2])
+    start, end = (int(v) for v in node.evalParmTuple(caches.RANGE)[:2])
     # A cache wedged for the first time is often not wired to the shot yet.
     default_draw = wedges.SHOT if node in caches.Walk(publish) else wedges.CACHE
     wedge_dialog.show(

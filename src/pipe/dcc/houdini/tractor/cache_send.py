@@ -31,8 +31,6 @@ from pipe.dcc.houdini.tractor.send import (
 
 # The line of a node's comment that names its last job.
 COMMENT = "Tractor job"
-# File Cache's file name before the version, which Save to Disk hardens.
-BASE_NAME = "basename"
 
 log = logging.getLogger(__name__)
 
@@ -139,7 +137,7 @@ def _write_loading(scene: Path, sent: list[hou.Node]) -> None:
     parms: list[hou.Parm] = [  # ty: ignore[invalid-assignment]
         cache.parm(name)
         for cache in sent
-        for name in (BASE_NAME, caches.LOAD_FROM_DISK)
+        for name in (caches.BASE_NAME, caches.LOAD_FROM_DISK)
     ]
     # Keyframes and expressions included. The stubs leave out asData and
     # setFromData.

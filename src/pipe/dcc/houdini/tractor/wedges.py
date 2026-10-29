@@ -24,7 +24,7 @@ from pathlib import Path, PurePosixPath
 import hou
 
 from pipe.core.render import TMP
-from pipe.dcc.houdini.tractor import commands, parms
+from pipe.dcc.houdini.tractor import caches, commands, parms
 
 RECORD = "wedge.json"
 JOB = "job"
@@ -44,8 +44,6 @@ SHOT_CAMERA = "/cameras/shotCam"
 # as the department would publish it, or only the sent cache's output.
 SHOT = "shot"
 CACHE = "cache"
-# File Cache 2.0 builds its path from a base folder, unless it is given a file.
-CONSTRUCTED = 0
 # The most frames a flipbook task draws. Each task loads the scene and its
 # textures again, which takes about a minute on a dressed set.
 FLIPBOOK_CHUNK = 30
@@ -184,13 +182,13 @@ def redirect(node: hou.Node, folder: Path, index: int) -> None:
     """Point the File Cache's output into its numbered folder in the wedge's
     `folder`, keeping its own file names."""
     folder = folder / f"{index:02}_{node.name()}"
-    if node.evalParm("filemethod") == CONSTRUCTED:
-        node.setParms({"basedir": str(folder)})
+    if node.evalParm(caches.FILE_METHOD) == caches.CONSTRUCTED:
+        node.setParms({caches.BASE_FOLDER: str(folder)})
         return
     # Unexpanded, so the name keeps its $OS and $F. node.parm may return None,
     # but every File Cache has a file parm.
-    file = node.parm("file").unexpandedString()  # ty: ignore[unresolved-attribute]
-    node.setParms({"file": str(folder / PurePosixPath(file).name)})
+    file = node.parm(caches.FILE).unexpandedString()  # ty: ignore[unresolved-attribute]
+    node.setParms({caches.FILE: str(folder / PurePosixPath(file).name)})
 
 
 def label(path: str) -> str:
