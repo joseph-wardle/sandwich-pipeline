@@ -188,6 +188,7 @@ SHOT_TASK_TEMPLATE = "SKD_shot"
 
 # Active-record filters: skip records that are marked out-of-project / disabled.
 _SG_STATUS_ACTIVE_FILTER: tuple[str, str, str] = ("sg_status_list", "is_not", "oop")
+_SG_STATUS_OOP_FILTER: tuple[str, str, str] = ("sg_status_list", "is", "oop")
 _SG_STATUS_ACTIVE_USER_FILTER: tuple[str, str, str] = (
     "sg_status_list",
     "is_not",
@@ -438,13 +439,16 @@ class ShotGrid:
         self,
         *,
         sequence: Sequence | None = None,
+        out_of_picture: bool = False,
     ) -> list[Shot]:
         """Return every shot, optionally restricted to one sequence.
 
         Args:
             sequence: If given, restrict to shots in this sequence.
+            out_of_picture: Return only the Out of Picture shots instead.
         """
-        filters: list[Any] = [self._project_filter(), _SG_STATUS_ACTIVE_FILTER]
+        status = _SG_STATUS_OOP_FILTER if out_of_picture else _SG_STATUS_ACTIVE_FILTER
+        filters: list[Any] = [self._project_filter(), status]
         if sequence is not None:
             filters.append(("sg_sequence", "is", _entity_ref("Sequence", sequence)))
         rows = _read_or_raise(
