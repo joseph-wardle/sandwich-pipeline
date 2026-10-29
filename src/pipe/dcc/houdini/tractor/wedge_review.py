@@ -176,7 +176,12 @@ def _running(folders: list[Path]) -> tuple[dict[Path, int], list[Path], str]:
         if not path.is_file() or unreachable:
             unknown.append(folder)
             continue
-        job_id = int(path.read_text())
+        try:
+            job_id = int(path.read_text())
+        except ValueError:
+            # Send stopped while writing it, as a full disk stops it.
+            unknown.append(folder)
+            continue
         try:
             if not engine.ended(job_id):
                 running[folder] = job_id
@@ -251,7 +256,10 @@ def _delete(run: wedges.Run, wedge: wedges.Wedge) -> bool:
     # Its flipbook is finished, but its render may not be, and deleting it
     # would fail the job's render tasks.
     rendering = run.render and not (run.folder / wedge.name / wedges.RENDER).is_dir()
-    if rendering and run.folder in _running([run.folder])[0]:
+    running, unknown, unreachable = (
+        _running([run.folder]) if rendering else ({}, [], "")
+    )
+    if running:
         hou.ui.displayMessage(
             f"{name} is still rendering in Tractor. Delete it once its render "
             "plays, or its job ends.",
@@ -259,8 +267,19 @@ def _delete(run: wedges.Run, wedge: wedges.Wedge) -> bool:
         )
         return False
     files = "cache, flipbook and render" if run.render else "cache and flipbook"
+    text = f"Delete {name}? Its {files} can't be recovered."
+    if unknown:
+        why = (
+            f"Tractor can't be reached ({unreachable})"
+            if unreachable
+            else "Its job isn't recorded"
+        )
+        text += (
+            f"\n\n{why}, so Review Wedges can't tell whether it is still "
+            "rendering, and deleting it fails the job. Check Tractor before deleting."
+        )
     pressed = hou.ui.displayMessage(
-        f"Delete {name}? Its {files} can't be recovered.",
+        text,
         buttons=("Delete", "Cancel"),
         default_choice=1,
         close_choice=1,

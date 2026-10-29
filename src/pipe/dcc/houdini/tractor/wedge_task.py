@@ -199,28 +199,30 @@ def finish(run: wedges.Run, folder: Path) -> int:
     final = folder / wedges.FLIPBOOK
     frames = range(run.start, run.end + 1)
     # Finished already, and left alone, since review may be playing it.
-    if not scratch.exists() and _missing(final, frames) is None:
+    if not scratch.exists() and _missing(frames, final) is None:
         print(f"{final} already has all {len(frames)} frames.")
         return 0
+    # Checked before moving anything, so a failure leaves review its frames.
+    missing = _missing(frames, scratch, final)
+    if missing is not None:
+        print(f"The flipbook has no frame {missing}.", file=sys.stderr)
+        return 1
     if final.is_dir():
         scratch.mkdir(exist_ok=True)
         for file in final.iterdir():
             if not (scratch / file.name).exists():
                 file.rename(scratch / file.name)
-    missing = _missing(scratch, frames)
-    if missing is not None:
-        print(f"The flipbook has no frame {missing}.", file=sys.stderr)
-        return 1
     shutil.rmtree(final, ignore_errors=True)
     scratch.rename(final)
     print(f"Flipbooked {len(frames)} frames into {final}.")
     return 0
 
 
-def _missing(folder: Path, frames: range) -> int | None:
-    """The first of `frames` the folder has no burned frame of."""
+def _missing(frames: range, *folders: Path) -> int | None:
+    """The first of `frames` none of the folders has a burned frame of."""
     for frame in frames:
-        if not (folder / f"{wedges.FRAMES}.{frame:04}.png").is_file():
+        name = f"{wedges.FRAMES}.{frame:04}.png"
+        if not any((folder / name).is_file() for folder in folders):
             return frame
     return None
 
@@ -349,9 +351,8 @@ def prepare(run: wedges.Run, wedge: wedges.Wedge) -> int:
     )
     denoise = network.createNode(TRACTOR_DENOISE)
     denoise.setInput(0, configure)
-    # A retry starts again from an empty folder.
-    shutil.rmtree(expected.folder, ignore_errors=True)
-    expected.folder.mkdir(parents=True)
+    # A retry after Render keeps its frames, which Denoise and Burn still read.
+    expected.folder.mkdir(parents=True, exist_ok=True)
     chain = render_send.Chain(configure, denoise, None, denoise)
     try:
         # The snapshot's publishes are already the versions the artist saw.
@@ -398,7 +399,7 @@ def burn(run: wedges.Run, wedge: wedges.Wedge, folder: Path) -> int:
     final = folder / wedges.RENDER
     frames = range(run.start, run.end + 1)
     # Burned already, and left alone, since review may be playing it.
-    if not layer.folder.exists() and _missing(final, frames) is None:
+    if not layer.folder.exists() and _missing(frames, final) is None:
         print(f"{final} already has all {len(frames)} frames.")
         return 0
     scratch = layer.folder / BURNED
@@ -426,7 +427,7 @@ def burn(run: wedges.Run, wedge: wedges.Wedge, folder: Path) -> int:
         start_frame=run.start,
     )
     shutil.rmtree(raw)
-    missing = _missing(scratch, frames)
+    missing = _missing(frames, scratch)
     if missing is not None:
         print(f"The render has no burned frame {missing}.", file=sys.stderr)
         return 1

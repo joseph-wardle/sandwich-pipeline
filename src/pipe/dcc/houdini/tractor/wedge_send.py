@@ -69,7 +69,8 @@ def send(node: hou.Node) -> None:
         (start, end),
         default_draw,
         _last_rows.get(key, []),
-        lambda parms, draw: _rebuilds(_node(key), publish, parms, draw),
+        # Found again each time, since the artist may delete it meanwhile.
+        lambda parms, draw: _rebuilds(_node(key), _publish(), parms, draw),
         lambda choice: _submit(key, choice),
     )
 
