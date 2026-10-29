@@ -188,6 +188,7 @@ SHOT_TASK_TEMPLATE = "SKD_shot"
 
 # Active-record filters: skip records that are marked out-of-project / disabled.
 _SG_STATUS_ACTIVE_FILTER: tuple[str, str, str] = ("sg_status_list", "is_not", "oop")
+_SG_STATUS_OOP_FILTER: tuple[str, str, str] = ("sg_status_list", "is", "oop")
 _SG_STATUS_ACTIVE_USER_FILTER: tuple[str, str, str] = (
     "sg_status_list",
     "is_not",
@@ -417,8 +418,13 @@ class ShotGrid:
         """
         _require_exactly_one_selector(id=id, code=code)
         selector, value = _selected(id=id, code=code)
-        sg_filter = ("id", "is", value) if selector == "id" else ("code", "is", value)
-        filters = [self._project_filter(), _SG_STATUS_ACTIVE_FILTER, sg_filter]
+        filters: list[Any] = [self._project_filter()]
+        if selector == "id":
+            # An id names one shot exactly, so Out of Picture shots count too:
+            # reloading one after a write must find it.
+            filters.append(("id", "is", value))
+        else:
+            filters += [_SG_STATUS_ACTIVE_FILTER, ("code", "is", value)]
         rows = _read_or_raise(
             lambda: self._sg.find("Shot", filters, list(_SG_FIELDS_SHOT)),
             entity_type="Shot",
@@ -438,13 +444,16 @@ class ShotGrid:
         self,
         *,
         sequence: Sequence | None = None,
+        out_of_picture: bool = False,
     ) -> list[Shot]:
         """Return every shot, optionally restricted to one sequence.
 
         Args:
             sequence: If given, restrict to shots in this sequence.
+            out_of_picture: Return only the Out of Picture shots instead.
         """
-        filters: list[Any] = [self._project_filter(), _SG_STATUS_ACTIVE_FILTER]
+        status = _SG_STATUS_OOP_FILTER if out_of_picture else _SG_STATUS_ACTIVE_FILTER
+        filters: list[Any] = [self._project_filter(), status]
         if sequence is not None:
             filters.append(("sg_sequence", "is", _entity_ref("Sequence", sequence)))
         rows = _read_or_raise(
@@ -1137,6 +1146,22 @@ class ShotGrid:
         invalidate(self)
         return self.reload(shot)
 
+    def set_shot_out_of_picture(self, shot: Shot) -> Shot:
+        """Mark `shot` Out of Picture, which hides it from `find_shots` and
+        from `get_shot(code=...)`.
+
+        Raises:
+            ShotGridWriteError: ShotGrid rejected the update.
+        """
+        _write_or_raise(
+            lambda: self._sg.update("Shot", shot.id, {"sg_status_list": "oop"}),
+            entity_type="Shot",
+            entity_id=shot.id,
+            field="sg_status_list",
+        )
+        invalidate(self)
+        return self.reload(shot)
+
     # ---- versions ----------------------------------------------------------
 
     def find_version_codes(self, *, code_starts_with: str) -> list[str]:
@@ -1258,6 +1283,24 @@ class ShotGrid:
             field=_SG_VERSION_UPLOADED_MOVIE,
             cause=last_exc,
         ) from last_exc
+
+    # ---- writes: playlists -------------------------------------------------
+
+    def create_playlist(self, code: str) -> Playlist:
+        """Create an empty playlist named `code`.
+
+        Raises:
+            ShotGridWriteError: ShotGrid rejected the create.
+        """
+        payload = {"code": code, _SG_PROJECT: self._project_ref()}
+        row = _write_or_raise(
+            lambda: self._sg.create("Playlist", payload, list(_SG_FIELDS_PLAYLIST)),
+            entity_type="Playlist",
+            entity_id=None,
+            field=None,
+        )
+        invalidate(self)
+        return self._created(row, Playlist)
 
     # ---- playlist links ----------------------------------------------------
 

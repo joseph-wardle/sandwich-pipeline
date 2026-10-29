@@ -29,6 +29,7 @@ class Executables:
     nukedir: Path             # absolute path to the Nuke installation dir (ie /opt/Nuke14.0v5)
     nuke: Path                # absolute path to the Nuke executable
     nuke_python: Path         # absolute path to the Nuke python executable
+    resolve: Path             # absolute path to the DaVinci Resolve executable (ie /opt/resolve/bin/resolve)
     oiiotool: Path            # absolute path to the oiiotool executable (such as the one bundled with Houdini)
     substance_designer: Path  # absolute path to the Substance Designer executable
     substance_painter: Path   # absolute path to the Substance Painter executable
