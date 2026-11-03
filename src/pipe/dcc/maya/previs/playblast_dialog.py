@@ -29,6 +29,7 @@ from pipe.dcc.maya.playblast.viewport import ViewportQuality, query_viewport_qua
 _QUALITY_OPTIONS: tuple[tuple[str, str, str], ...] = (
     ("Anti-aliasing", "anti_alias", "Smooth edges instead of stair-stepping them."),
     ("Lighting", "lighting", "Light the shot with the scene's lights."),
+    ("Textures", "textures", "Draw the scene's textures."),
     ("Shadows", "shadows", "Cast viewport shadows from those lights."),
     (
         "Ambient Occlusion",
@@ -124,6 +125,7 @@ class _PlayblastDialog(QDialog, DialogButtons):
             lighting=checked["lighting"],
             shadows=checked["shadows"],
             ssao=checked["ssao"],
+            textures=checked["textures"],
         )
 
     def _chosen_ids(self) -> list[str]:

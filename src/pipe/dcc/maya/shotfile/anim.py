@@ -24,16 +24,6 @@ from .upgrade import upgrade
 log = logging.getLogger(__name__)
 
 SHOT_CAMERA_NAME = "shotCam"
-VIEWPORT_TEXTURE_MAX_RESOLUTION = 256
-
-
-def _clamp_viewport_textures() -> None:
-    mc.setAttr("hardwareRenderingGlobals.enableTextureMaxRes", True)  # type: ignore
-    mc.setAttr("hardwareRenderingGlobals.textureMaxResMode", 0)  # type: ignore
-    mc.setAttr(
-        "hardwareRenderingGlobals.textureMaxResolution",
-        VIEWPORT_TEXTURE_MAX_RESOLUTION,  # type: ignore
-    )
 
 
 def _find_camera_prim(stage: Usd.Stage) -> Usd.Prim | None:
@@ -111,7 +101,6 @@ def _lock_camera_chain(cam_transform: str) -> None:
 class MAnimShotFileManager(MShotFileManager):
     @classmethod
     def run_on_open(cls):
-        _clamp_viewport_textures()
         super().run_on_open()
 
         stage = get_stage()

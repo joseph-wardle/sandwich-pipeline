@@ -50,5 +50,10 @@ def main():
 mc.optionVar(intValue=("mayaUsd_SerializedUsdEditsLocationPrompt", 0))
 mc.optionVar(intValue=("mayaUsd_SerializedUsdEditsLocation", 2))
 
+# Batch too: batch opens ran the scene's hook back when it was a script node.
+from pipe.dcc.maya.util.on_open import install_on_open_callback  # noqa: E402
+
+install_on_open_callback()
+
 if not mc.about(batch=True):
     mc.evalDeferred(main)

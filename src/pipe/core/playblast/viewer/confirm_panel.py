@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from enum import Enum, auto
 from pathlib import Path
 from typing import assert_never
 
-from Qt.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
+from Qt.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
 from Qt.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -34,6 +35,9 @@ from pipe.core.playblast.confirm import (
     ChosenDisk,
     ChosenShotGrid,
     ConfirmResult,
+    DestinationOutcome,
+    OutcomeReporter,
+    StepReporter,
     confirm_clip,
     failure_summary,
 )
@@ -69,15 +73,19 @@ class PanelStatus(Enum):
 class _JobSignals(QObject):
     finished = Signal(object)  # ConfirmResult
     failed = Signal(str)
+    step = Signal(object, str)  # DestinationId, step label
+    outcome = Signal(object)  # DestinationOutcome
 
 
 class _ConfirmJob(QRunnable):
     """Runs one `confirm_clip` call off the GUI thread."""
 
     signals: _JobSignals
-    _work: Callable[[], ConfirmResult]
+    _work: Callable[[StepReporter, OutcomeReporter], ConfirmResult]
 
-    def __init__(self, work: Callable[[], ConfirmResult]) -> None:
+    def __init__(
+        self, work: Callable[[StepReporter, OutcomeReporter], ConfirmResult]
+    ) -> None:
         super().__init__()
         # The panel holds a reference until the job reports back, so Python
         # keeps ownership of the C++ runnable.
@@ -87,7 +95,8 @@ class _ConfirmJob(QRunnable):
 
     def run(self) -> None:
         try:
-            self.signals.finished.emit(self._work())
+            result = self._work(self.signals.step.emit, self.signals.outcome.emit)
+            self.signals.finished.emit(result)
         except Exception as exc:
             log.exception("Confirm failed before any delivery")
             self.signals.failed.emit(artist_reason(exc))
@@ -99,6 +108,8 @@ class _Row(QWidget):
     destination_id: DestinationId
     default_on: bool
     _state: RowState
+    _step: str
+    _step_started: float
     _unavailable: str
     _checkbox: QCheckBox
     _status: QLabel
@@ -115,6 +126,8 @@ class _Row(QWidget):
         # A row nobody can deliver to never starts checked, whatever it declared.
         self.default_on = destination.default_on and not unavailable
         self._state = RowState.IDLE
+        self._step = ""
+        self._step_started = 0.0
         self._unavailable = unavailable
         self._options = None
         self._collapse_options = True
@@ -214,9 +227,20 @@ class _Row(QWidget):
 
     def set_running(self) -> None:
         self._state = RowState.RUNNING
+        self._step = ""
         self._set_status("…", "")
         self._set_detail("", "")
         self._checkbox.setEnabled(False)
+
+    def show_step(self, step: str) -> None:
+        self._step = step
+        self._step_started = time.monotonic()
+        self.show_elapsed()
+
+    def show_elapsed(self) -> None:
+        if self._state is RowState.RUNNING and self._step:
+            elapsed = _elapsed_text(time.monotonic() - self._step_started)
+            self._set_detail(f"{self._step} {elapsed}", "")
 
     def set_idle(self) -> None:
         self._state = RowState.IDLE
@@ -238,6 +262,13 @@ class _Row(QWidget):
         self._set_status("✗", FAIL_STYLE)
         self._set_detail(detail, FAIL_STYLE)
         self._checkbox.setEnabled(not self._unavailable)
+
+
+def _elapsed_text(seconds: float) -> str:
+    whole = int(seconds)
+    if whole < 60:
+        return f"{whole} s"
+    return f"{whole // 60} min {whole % 60:02d} s"
 
 
 class _FolderRow(_Row):
@@ -493,6 +524,7 @@ class ConfirmPanel(QWidget):
     _pool: QThreadPool
     _basename: str | None
     _job: _ConfirmJob | None
+    _elapsed_timer: QTimer
     _rows: list[_Row]
     _blocked: list[str]
     _error_label: QLabel
@@ -507,6 +539,9 @@ class ConfirmPanel(QWidget):
         self._basename = None
         self._job = None
         self._blocked = []
+        self._elapsed_timer = QTimer(self)
+        self._elapsed_timer.setInterval(1000)
+        self._elapsed_timer.timeout.connect(self._show_elapsed)
         self._error_label = QLabel("")
         self._error_label.setWordWrap(True)
         self._error_label.setTextFormat(Qt.TextFormat.PlainText)
@@ -602,27 +637,49 @@ class ConfirmPanel(QWidget):
             row.set_running()
 
         job = _ConfirmJob(
-            lambda: confirm_clip(self._clip, chosen, folders, basename=self._basename)
+            lambda on_step, on_outcome: confirm_clip(
+                self._clip,
+                chosen,
+                folders,
+                basename=self._basename,
+                on_step=on_step,
+                on_outcome=on_outcome,
+            )
         )
         job.signals.finished.connect(self._on_confirm_finished)
         job.signals.failed.connect(self._on_confirm_error)
+        job.signals.step.connect(self._on_step)
+        job.signals.outcome.connect(self._show_outcome)
         self._job = job
+        self._elapsed_timer.start()
         self._refresh_confirm_button()
         self.state_changed.emit()
         self._pool.start(job)
 
-    def _on_confirm_finished(self, result: ConfirmResult) -> None:
-        self._job = None
-        self._basename = result.basename
-        rows_by_id = {row.destination_id: row for row in self._rows}
-        for outcome in result.outcomes:
-            row = rows_by_id.get(outcome.id)
-            if row is None:
+    def _on_step(self, destination_id: DestinationId, step: str) -> None:
+        for row in self._rows:
+            if row.destination_id == destination_id:
+                row.show_step(step)
+
+    def _show_outcome(self, outcome: DestinationOutcome) -> None:
+        for row in self._rows:
+            if row.destination_id != outcome.id:
                 continue
             if outcome.ok:
                 row.set_delivered(outcome.detail, outcome.path)
             else:
                 row.set_failed(outcome.detail)
+
+    def _show_elapsed(self) -> None:
+        for row in self._rows:
+            row.show_elapsed()
+
+    def _on_confirm_finished(self, result: ConfirmResult) -> None:
+        self._job = None
+        self._elapsed_timer.stop()
+        self._basename = result.basename
+        for outcome in result.outcomes:
+            self._show_outcome(outcome)
         self._report(failure_summary(result))
         self._refresh_confirm_button()
         self.state_changed.emit()
@@ -633,6 +690,7 @@ class ConfirmPanel(QWidget):
         # `confirm_clip` reports each destination's own failure, so an
         # exception escaping it means nothing was attempted.
         self._job = None
+        self._elapsed_timer.stop()
         for row in self._rows:
             if row.state is RowState.RUNNING:
                 row.set_idle()

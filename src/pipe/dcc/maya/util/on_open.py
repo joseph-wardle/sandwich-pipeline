@@ -1,51 +1,74 @@
-"""The `skdOnOpen` script node: re-runs a file manager's `run_on_open` on each open.
+"""Re-runs a scene's file manager `run_on_open` after every open.
 
-Files carrying the prior project's node names (`lndOnOpen`, `boboOnOpen`) are
-migrated to `skdOnOpen` when they next pass through a manager's open flow.
+The scene names its manager in `fileInfo`, and `userSetup` registers the
+callback. A Python script node in the scene would do the same job, but Maya's
+Safe Mode prompts for every module such a node imports.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Protocol
 
+import maya.api.OpenMaya as om
 from maya import cmds as mc
 
-ON_OPEN_NODE_NAME = "skdOnOpen"
-_LEGACY_NODE_NAMES = ("lndOnOpen", "boboOnOpen")
+from pipe.dcc.maya.util.legacy_on_open import adopt_legacy_on_open_node
+
+log = logging.getLogger(__name__)
+
+MANAGER_FILE_INFO_KEY = "skdOnOpenManager"
 
 
 class _OnOpenManager(Protocol):
-    def run_on_open(self) -> None: ...
+    @classmethod
+    def run_on_open(cls) -> None: ...
 
 
-def install_on_open_node(manager: _OnOpenManager) -> None:
-    cls = type(manager)
-    package = cls.__module__.rsplit(".", 1)[0]  # package that re-exports cls
-
-    had_node = mc.objExists(ON_OPEN_NODE_NAME) or any(
-        mc.objExists(name) for name in _LEGACY_NODE_NAMES
-    )
-    for name in _LEGACY_NODE_NAMES:
-        if mc.objExists(name):
-            mc.delete(name)  # legacy nodes have no afterScript
-
-    if not mc.objExists(ON_OPEN_NODE_NAME):
-        mc.scriptNode(
-            beforeScript=(
-                f"from {package} import {cls.__name__}; {cls.__name__}.run_on_open()"
-            ),
-            name=ON_OPEN_NODE_NAME,
-            scriptType=1,
-            sourceType="python",
-        )
-
-    if not had_node:  # nothing fired on load, so install hooks now
-        manager.run_on_open()
+def install_on_open_callback() -> None:
+    om.MSceneMessage.addCallback(om.MSceneMessage.kAfterOpen, _run_scene_manager)
 
 
-def remove_on_open_node() -> None:
-    """Drop the scene's open hook, so the next manager to open the file installs
+def tag_on_open_manager(manager: _OnOpenManager) -> None:
+    """Name `manager` as the scene's open hook, unless the scene already has one."""
+    if _scene_manager_name():
+        return
+    mc.fileInfo(MANAGER_FILE_INFO_KEY, type(manager).__name__)
+    manager.run_on_open()  # nothing named it on open, so nothing ran
+
+
+def remove_on_open_manager() -> None:
+    """Drop the scene's open hook, so the next manager to open the file names
     its own."""
-    for name in (ON_OPEN_NODE_NAME, *_LEGACY_NODE_NAMES):
-        if mc.objExists(name):
-            mc.delete(name)
+    mc.fileInfo(remove=MANAGER_FILE_INFO_KEY)
+
+
+def _scene_manager_name() -> str | None:
+    values = mc.fileInfo(MANAGER_FILE_INFO_KEY, query=True)
+    return values[0] if values else None
+
+
+def _run_scene_manager(*_: object) -> None:
+    name = _scene_manager_name()
+    if name is None:
+        name = adopt_legacy_on_open_node()
+        if name is None:
+            return
+        mc.fileInfo(MANAGER_FILE_INFO_KEY, name)
+    manager = _managers().get(name)
+    if manager is None:
+        log.warning("Scene names an unknown open hook %r; nothing ran.", name)
+        return
+    manager.run_on_open()
+
+
+def _managers() -> dict[str, type[_OnOpenManager]]:
+    # Imported here: the managers import this module to tag their scenes.
+    from pipe.dcc.maya.previs.file_manager import MPrevisFileManager
+    from pipe.dcc.maya.shotfile.anim import MAnimShotFileManager
+    from pipe.dcc.maya.shotfile.rlo import MRLOShotFileManager
+
+    return {
+        cls.__name__: cls
+        for cls in (MAnimShotFileManager, MRLOShotFileManager, MPrevisFileManager)
+    }

@@ -9,7 +9,7 @@ import maya.cmds as mc
 from env_sg import DB_Config
 
 from pipe.dcc.maya.runtime import get_main_qt_window
-from pipe.dcc.maya.util.on_open import install_on_open_node
+from pipe.dcc.maya.util.on_open import tag_on_open_manager
 from pipe.core.shotgrid import (
     SGEntity,
     Shot,
@@ -23,6 +23,21 @@ from .stage import build_shot_stage
 from .timeline import sync_shot_timeline
 
 log = logging.getLogger(__name__)
+
+# Shot scenes carry dozens of 4K textures; uncapped they fill an 11 GB card
+# and the NVIDIA driver crashes Maya mid-playblast.
+VIEWPORT_TEXTURE_MAX_RESOLUTION = 1024
+
+
+def show_viewport_textures() -> None:
+    mc.setAttr("hardwareRenderingGlobals.enableTextureMaxRes", True)  # type: ignore
+    mc.setAttr("hardwareRenderingGlobals.textureMaxResMode", 0)  # type: ignore
+    mc.setAttr(
+        "hardwareRenderingGlobals.textureMaxResolution",
+        VIEWPORT_TEXTURE_MAX_RESOLUTION,  # type: ignore
+    )
+    for panel in mc.getPanel(type="modelPanel") or []:
+        mc.modelEditor(panel, edit=True, displayTextures=True)
 
 
 def _set_hd_render_resolution() -> None:
@@ -88,8 +103,9 @@ class MShotFileManager(FileManager):
     @classmethod
     @log_errors
     def run_on_open(cls) -> None:
-        """Called by the scene's `skdOnOpen` script node on every open."""
+        """Called after every open of a scene this manager tagged."""
         _set_hd_render_resolution()
+        show_viewport_textures()
         if mc.about(batch=True):
             return
 
@@ -140,7 +156,7 @@ class MShotFileManager(FileManager):
         mc.file(str(path), open=True, force=True)
 
     def _post_open_file(self, entity: SGEntity) -> None:
-        install_on_open_node(self)
+        tag_on_open_manager(self)
 
     @abstractmethod
     def _setup_scene(self) -> None:
