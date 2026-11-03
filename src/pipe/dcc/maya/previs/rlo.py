@@ -25,7 +25,7 @@ from pipe.core.util.paths import get_production_path
 from pipe.core.versioning import save_version
 from pipe.dcc.maya.shotfile.sets import sync_sets
 from pipe.dcc.maya.shotfile.stage import build_shot_stage
-from pipe.dcc.maya.util.on_open import remove_on_open_node
+from pipe.dcc.maya.util.on_open import remove_on_open_manager
 
 from . import cameras
 from .state import FRAME_START, PrevisShot, PrevisState, delete_state
@@ -407,7 +407,7 @@ def _strip_previs_scaffold() -> None:
     """Drop what makes this a previs file: the state node, the previs open hook
     and the sequence stage."""
     delete_state()
-    remove_on_open_node()
+    remove_on_open_manager()
     for shape in mc.ls(type="mayaUsdProxyShape", long=True) or []:
         if mc.referenceQuery(shape, isNodeReferenced=True):
             log.info("Leaving the referenced USD stage %s in the RLO scene.", shape)

@@ -9,7 +9,7 @@ import maya.cmds as mc
 from env_sg import DB_Config
 
 from pipe.dcc.maya.runtime import get_main_qt_window
-from pipe.dcc.maya.util.on_open import install_on_open_node
+from pipe.dcc.maya.util.on_open import tag_on_open_manager
 from pipe.core.shotgrid import (
     SGEntity,
     Shot,
@@ -103,7 +103,7 @@ class MShotFileManager(FileManager):
     @classmethod
     @log_errors
     def run_on_open(cls) -> None:
-        """Called by the scene's `skdOnOpen` script node on every open."""
+        """Called after every open of a scene this manager tagged."""
         _set_hd_render_resolution()
         show_viewport_textures()
         if mc.about(batch=True):
@@ -156,7 +156,7 @@ class MShotFileManager(FileManager):
         mc.file(str(path), open=True, force=True)
 
     def _post_open_file(self, entity: SGEntity) -> None:
-        install_on_open_node(self)
+        tag_on_open_manager(self)
 
     @abstractmethod
     def _setup_scene(self) -> None:
