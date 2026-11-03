@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 # Shot scenes carry dozens of 4K textures; uncapped they fill an 11 GB card
 # and the NVIDIA driver crashes Maya mid-playblast.
-VIEWPORT_TEXTURE_MAX_RESOLUTION = 256
+VIEWPORT_TEXTURE_MAX_RESOLUTION = 1024
 
 
 def show_viewport_textures() -> None:
