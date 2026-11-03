@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 import attrs
@@ -51,6 +53,8 @@ class ChosenShotGrid:
 
 ChosenDestination = ChosenDisk | ChosenShotGrid
 
+StepReporter = Callable[[DestinationId, str], None]
+
 
 @attrs.frozen
 class DestinationOutcome:
@@ -61,6 +65,9 @@ class DestinationOutcome:
     ok: bool
     detail: str
     path: Path | None = None
+
+
+OutcomeReporter = Callable[[DestinationOutcome], None]
 
 
 @attrs.frozen
@@ -86,10 +93,23 @@ def confirm_clip(
     folders: tuple[Path, ...],
     *,
     basename: str | None = None,
+    on_step: StepReporter | None = None,
+    on_outcome: OutcomeReporter | None = None,
 ) -> ConfirmResult:
     """Deliver one clip to every checked destination."""
 
+    def report(destination: Destination, step: str) -> None:
+        # Logged too, so a Confirm that never finishes leaves its last step behind.
+        log.info("Confirm '%s': %s", destination.name, step)
+        if on_step is not None:
+            on_step(destination.id, step)
+
     outcomes: list[DestinationOutcome] = []
+
+    def land(outcome: DestinationOutcome) -> None:
+        outcomes.append(outcome)
+        if on_outcome is not None:
+            on_outcome(outcome)
 
     if basename is None:
         basename = next_versioned_basename(
@@ -102,12 +122,12 @@ def confirm_clip(
 
     for choice in chosen:
         if isinstance(choice, ChosenDisk):
-            outcomes.append(_deliver_to_folder(clip, choice, basename))
+            land(_deliver_to_folder(clip, choice, basename, report))
 
     kept = next((outcome.path for outcome in outcomes if outcome.path), None)
     for choice in chosen:
         if isinstance(choice, ChosenShotGrid):
-            outcomes.append(_upload_to_shotgrid(clip, choice, basename, kept))
+            land(_upload_to_shotgrid(clip, choice, basename, kept, report))
 
     return ConfirmResult(basename=basename, outcomes=tuple(outcomes))
 
@@ -129,12 +149,20 @@ def _shotgrid_version_codes(
 
 
 def _deliver_to_folder(
-    clip: PreviewClip, chosen: ChosenDisk, basename: str
+    clip: PreviewClip,
+    chosen: ChosenDisk,
+    basename: str,
+    report: Callable[[Destination, str], None],
 ) -> DestinationOutcome:
     destination = chosen.destination
     try:
-        final_path = _encode_and_copy(
-            clip, chosen.directory, destination.preset, basename, destination.delivery
+        report(destination, "Encoding…")
+        movie = _encoded_movie(clip, destination.preset, basename)
+        report(destination, f"Copying to {chosen.directory.name}…")
+        final_path = _copy_into(
+            movie,
+            chosen.directory,
+            _delivered_name(movie, chosen.directory, destination.delivery),
         )
     except Exception as exc:
         log.exception("Confirm delivery to '%s' failed", destination.name)
@@ -142,21 +170,24 @@ def _deliver_to_folder(
     return _delivered(destination, final_path)
 
 
-def _encode_and_copy(
-    clip: PreviewClip,
-    directory: Path,
-    preset: FFmpegPreset,
-    basename: str,
-    delivery: EditDelivery | None,
-) -> Path:
-    movie = _encoded_movie(clip, preset, basename)
+def _delivered_name(movie: Path, directory: Path, delivery: EditDelivery | None) -> str:
+    if delivery is None:
+        return movie.name
+    stem = next_delivery_name(directory, delivery.shot_code, delivery.department)
+    return stem + movie.suffix
+
+
+def _copy_into(movie: Path, directory: Path, name: str) -> Path:
+    """Copy under a hidden name, then rename, so an interrupted copy never
+    leaves a half-written movie that looks delivered."""
     directory.mkdir(mode=0o770, parents=True, exist_ok=True)
-    name = movie.name
-    if delivery is not None:
-        stem = next_delivery_name(directory, delivery.shot_code, delivery.department)
-        name = stem + movie.suffix
     final_path = directory / name
-    shutil.copyfile(movie, final_path)
+    partial = directory / f".{name}.partial"
+    try:
+        shutil.copyfile(movie, partial)
+        os.replace(partial, final_path)
+    finally:
+        partial.unlink(missing_ok=True)
     return final_path
 
 
@@ -165,13 +196,17 @@ def _upload_to_shotgrid(
     chosen: ChosenShotGrid,
     basename: str,
     disk_path: Path | None,
+    report: Callable[[Destination, str], None],
 ) -> DestinationOutcome:
     destination = chosen.destination
     try:
+        report(destination, "Encoding…")
+        movie = _encoded_movie(clip, destination.preset, basename)
+        report(destination, "Uploading to ShotGrid…")
         result = upload_playblast_version(
             PlayblastVersionUploadRequest(
                 entity=destination.entity,
-                movie_path=_encoded_movie(clip, destination.preset, basename),
+                movie_path=movie,
                 version_name=basename,
                 description=chosen.description,
                 artist_display_name=resolve_artist_display_name().strip() or None,
@@ -226,6 +261,8 @@ __all__ = [
     "ChosenShotGrid",
     "ConfirmResult",
     "DestinationOutcome",
+    "OutcomeReporter",
+    "StepReporter",
     "confirm_clip",
     "failure_summary",
 ]
