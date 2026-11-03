@@ -21,6 +21,11 @@ _HW_FOG_ATTRS: tuple[str, ...] = (
     "hwFogStart",
 )
 
+_HW_TEXTURE_CLAMP_ATTRS: tuple[str, ...] = (
+    "enableTextureMaxRes",
+    "textureMaxResolution",
+)
+
 _MAX_HARDWARE_LIGHTS = 16
 
 
@@ -34,6 +39,7 @@ class ViewportQuality:
     lighting: bool
     shadows: bool
     ssao: bool
+    textures: bool
 
 
 def resolve_active_model_panel() -> str:
@@ -57,12 +63,14 @@ def query_viewport_quality() -> ViewportQuality:
         lighting=_query_lighting(editor),
         shadows=_query_shadows(editor),
         ssao=_query_global_flag("ssaoEnable"),
+        textures=_query_textures(editor),
     )
 
 
 def capture_kwargs(quality: ViewportQuality) -> dict[str, Any]:
     """`mayacapture` kwargs for `quality`."""
     viewport_options: dict[str, Any] = {
+        "displayTextures": quality.textures,
         "fogging": quality.hardware_fog,
         "shadows": quality.shadows,
     }
@@ -79,11 +87,11 @@ def capture_kwargs(quality: ViewportQuality) -> dict[str, Any]:
             pass
 
     viewport2_options: dict[str, Any] = {
-        attr: mc.getAttr(f"hardwareRenderingGlobals.{attr}") for attr in _HW_FOG_ATTRS
+        attr: mc.getAttr(f"hardwareRenderingGlobals.{attr}")
+        for attr in (*_HW_FOG_ATTRS, *_HW_TEXTURE_CLAMP_ATTRS)
     }
     viewport2_options.update(
         {
-            "enableTextureMaxRes": True,
             "hwFogEnable": quality.hardware_fog,
             "maxHardwareLights": _MAX_HARDWARE_LIGHTS,
             "multiSampleEnable": quality.anti_alias,
@@ -128,6 +136,15 @@ def _query_lighting(panel: str) -> bool:
         return False
     try:
         return mc.modelEditor(panel, query=True, displayLights=True) == "all"
+    except Exception:
+        return False
+
+
+def _query_textures(panel: str) -> bool:
+    if not panel:
+        return False
+    try:
+        return bool(mc.modelEditor(panel, query=True, displayTextures=True))
     except Exception:
         return False
 

@@ -80,6 +80,7 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
     _use_lighting: QCheckBox
     _use_shadows: QCheckBox
     _use_ssao: QCheckBox
+    _use_textures: QCheckBox
 
     SHOT_TAB_INDEX = 0
     CUSTOM_TAB_INDEX: int
@@ -237,6 +238,11 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             current.lighting,
             "Use viewport lighting for playblast capture.",
         )
+        self._use_textures = self._build_option_checkbox(
+            "Use Textures",
+            current.textures,
+            "Draw the scene's textures in playblast.",
+        )
         self._use_shadows = self._build_option_checkbox(
             "Use Shadows",
             current.shadows,
@@ -259,6 +265,7 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
         )
         for checkbox in (
             self._use_lighting,
+            self._use_textures,
             self._use_shadows,
             self._use_ssao,
             self._use_hardware_fog,
@@ -459,6 +466,7 @@ class MPlayblastDialog(ButtonPair, QtWidgets.QMainWindow):
             lighting=self._use_lighting.isChecked(),
             shadows=self._use_shadows.isChecked(),
             ssao=self._use_ssao.isChecked(),
+            textures=self._use_textures.isChecked(),
         )
 
     # ------------------------------------------------------------------
