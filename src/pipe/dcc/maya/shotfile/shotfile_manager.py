@@ -24,6 +24,21 @@ from .timeline import sync_shot_timeline
 
 log = logging.getLogger(__name__)
 
+# Shot scenes carry dozens of 4K textures; uncapped they fill an 11 GB card
+# and the NVIDIA driver crashes Maya mid-playblast.
+VIEWPORT_TEXTURE_MAX_RESOLUTION = 256
+
+
+def show_viewport_textures() -> None:
+    mc.setAttr("hardwareRenderingGlobals.enableTextureMaxRes", True)  # type: ignore
+    mc.setAttr("hardwareRenderingGlobals.textureMaxResMode", 0)  # type: ignore
+    mc.setAttr(
+        "hardwareRenderingGlobals.textureMaxResolution",
+        VIEWPORT_TEXTURE_MAX_RESOLUTION,  # type: ignore
+    )
+    for panel in mc.getPanel(type="modelPanel") or []:
+        mc.modelEditor(panel, edit=True, displayTextures=True)
+
 
 def _set_hd_render_resolution() -> None:
     mc.setAttr("defaultResolution.width", 1920)  # type: ignore
@@ -90,6 +105,7 @@ class MShotFileManager(FileManager):
     def run_on_open(cls) -> None:
         """Called by the scene's `skdOnOpen` script node on every open."""
         _set_hd_render_resolution()
+        show_viewport_textures()
         if mc.about(batch=True):
             return
 

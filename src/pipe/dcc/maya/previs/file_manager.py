@@ -17,7 +17,10 @@ from pipe.core.util.paths import get_legacy_previs_path, get_previs_path
 
 from pipe.dcc.maya.shotfile.stage import build_shot_stage
 from pipe.dcc.maya.shotfile.sets import sync_shot_sets
-from pipe.dcc.maya.shotfile.shotfile_manager import MShotFileManager
+from pipe.dcc.maya.shotfile.shotfile_manager import (
+    MShotFileManager,
+    show_viewport_textures,
+)
 
 from . import active, dialogs, file_ops, state
 from .state import PrevisState
@@ -158,6 +161,7 @@ class MPrevisFileManager(MShotFileManager):
         mc.setAttr("defaultResolution.height", 1080)  # type: ignore
         mc.setAttr("defaultResolution.pixelAspect", 1.0)  # type: ignore
         mc.setAttr("defaultResolution.deviceAspectRatio", 1920 / 1080)  # type: ignore
+        show_viewport_textures()
         active.install_camera_callback()
         # Last, so a ShotGrid failure can't cost the scene its camera callback.
         if not mc.about(batch=True):
