@@ -62,7 +62,8 @@ class HShotFileManager(HFileManager):
             include_filter_field=False,
             accept_button_name="Select",
         )
-        department_dialog.exec_()
+        if not department_dialog.exec_():
+            return None
         return cls._normalize_department(department_dialog.get_selected_item())
 
     def __init__(
