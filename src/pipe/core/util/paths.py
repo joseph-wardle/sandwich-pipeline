@@ -70,6 +70,10 @@ def get_edit_path() -> Path:
     return get_production_path().parent / "edit/shots"
 
 
+def get_cuts_path() -> Path:
+    return get_production_path().parent / "edit/cuts"
+
+
 def get_src_path() -> Path:
     # __file__ is `src/pipe/core/util/paths.py`; parents[3] is `src/`.
     return Path(__file__).resolve().parents[3]

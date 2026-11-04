@@ -9,7 +9,7 @@ from typing import Any, Generator
 import nuke
 from env_sg import DB_Config
 from pipe.core.playblast import ShotEntity
-from pipe.core.playblast.naming import edit_shot_directory, next_delivery_name
+from pipe.core.edit import edit_shot_directory, next_delivery_name
 from pipe.core.playblast.review import (
     PlayblastVersionUploadRequest,
     upload_playblast_version,

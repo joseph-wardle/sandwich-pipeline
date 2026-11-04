@@ -25,6 +25,8 @@ dependencies = [
     "jedi>=0.20.0",
     # aperture deps
     "gitpython>=3.1.45,<4",
+    # editorial deps
+    "opentimelineio>=0.18.1,<0.19",
 ]
 
 [project.scripts]
