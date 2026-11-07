@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from env import discord_publish_webhook, discord_role_ids
+from env import discord_publish_webhooks, discord_role_ids
 
 from pipe.core.shotgrid import Asset, Shot, ShotGrid, User
 from pipe.core.util.text import and_list as _and
@@ -66,7 +66,7 @@ def announce_publish(
         sentence += f" ({detail})"
     results: list[str] = []
     if discord:
-        results.append(_announce_on_discord(sentence, steps))
+        results.append(_announce_on_discord(department, sentence, steps))
     if shotgrid:
         results.append(
             _announce_on_shotgrid(
@@ -81,14 +81,17 @@ def announce_publish(
     return results
 
 
-def _announce_on_discord(sentence: str, steps: list[str]) -> str:
-    if discord_publish_webhook is None:
-        log.debug("Discord announcements are not configured in env.py")
-        return "Discord: not configured, nothing posted."
+def _announce_on_discord(department: str, sentence: str, steps: list[str]) -> str:
+    webhook = discord_publish_webhooks.get(department)
+    if webhook is None:
+        log.debug("env.py has no Discord webhook for %s publishes", department)
+        return (
+            f"Discord: no channel is set up for {department} publishes, nothing posted."
+        )
     tagged = [step for step in steps if step in discord_role_ids]
     try:
         post_message(
-            discord_publish_webhook,
+            webhook,
             sentence,
             [discord_role_ids[step] for step in tagged],
         )

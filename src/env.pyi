@@ -30,5 +30,5 @@ class Executables:
     txinfo: Path = ...
     rman_oiiotool: Path = ...
 
-discord_publish_webhook: str | None
+discord_publish_webhooks: dict[str, str]  # department → webhook URL of its channel
 discord_role_ids: dict[str, str]
