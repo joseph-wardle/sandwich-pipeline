@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Generator
 
 import nuke
+
 from env_sg import DB_Config
 from pipe.core.playblast import ShotEntity
 from pipe.core.playblast.naming import edit_shot_directory, next_delivery_name
@@ -15,7 +16,7 @@ from pipe.core.playblast.review import (
     upload_playblast_version,
 )
 from pipe.core.shotgrid import Playlist, ShotGrid, ShotGridError, Task
-from pipe.core.util.users import resolve_artist_display_name
+from pipe.core.util.users import current_shotgrid_id, resolve_artist_display_name
 
 TAILS = 5
 # The last movie this node wrote, which is what Send to ShotGrid uploads.
@@ -346,9 +347,13 @@ def getDepartment(group) -> str:
 def find_my_tasks() -> list[Task]:
     """This shot's tasks assigned to the artist running Nuke."""
     connection = ShotGrid.connect(DB_Config)
+    user_id = current_shotgrid_id()
+    if user_id is None:
+        raise ShotGridError(
+            "you have no ShotGrid account in people.json. Ask a TD to add you."
+        )
     shot = connection.get_shot(code=get_shot_code())
-    user = connection.get_user(name=resolve_artist_display_name())
-    return connection.find_tasks(shot=shot, user=user)
+    return connection.find_tasks(shot=shot, user=connection.get_user(id=user_id))
 
 
 def find_review_playlist(department: str) -> Playlist | None:
@@ -413,7 +418,7 @@ def create_new_shot_version(group):
             # The delivery's name, so the Version and the edit file match.
             version_name=video_path.stem,
             description=group["shotgrid_description"].value() or None,
-            artist_display_name=resolve_artist_display_name() or None,
+            artist_id=current_shotgrid_id(),
             review_playlist_id=playlist.id if playlist else None,
             disk_path=video_path,
             task=task,

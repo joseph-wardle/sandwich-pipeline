@@ -31,7 +31,7 @@ from pipe.core.playblast.review.versions import (
     find_playblast_version_codes,
     upload_playblast_version,
 )
-from pipe.core.util.users import resolve_artist_display_name
+from pipe.core.util.users import current_shotgrid_id
 
 log = logging.getLogger(__name__)
 
@@ -209,7 +209,7 @@ def _upload_to_shotgrid(
                 movie_path=movie,
                 version_name=basename,
                 description=chosen.description,
-                artist_display_name=resolve_artist_display_name().strip() or None,
+                artist_id=current_shotgrid_id(),
                 review_playlist_id=chosen.playlist_id,
                 disk_path=disk_path,
             )
