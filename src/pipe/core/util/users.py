@@ -1,3 +1,5 @@
+"""Who is running the pipeline: their lab login, matched to a person in people.json."""
+
 from __future__ import annotations
 
 import getpass
@@ -5,82 +7,77 @@ import json
 import logging
 import os
 from functools import lru_cache
-from pathlib import Path
+from typing import NotRequired, TypedDict
 
 from pipe.core.util.paths import get_production_path
 
 log = logging.getLogger(__name__)
 
 
-def _current_login_username() -> str:
-    """Return the current login username with a robust fallback."""
+class Person(TypedDict):
+    """One record of people.json, which TDs edit by hand."""
+
+    # How the pipeline shows them. It need not match ShotGrid, which is joined
+    # on `shotgrid` alone: names there are shared by duplicate accounts and change.
+    name: str
+    login: NotRequired[str]
+    # The ShotGrid HumanUser id.
+    shotgrid: NotRequired[int]
+    # The Discord user id, which announcements ping.
+    discord: NotRequired[str]
+
+
+def _current_login() -> str:
     try:
         return os.getlogin()
     except OSError:
         return getpass.getuser()
 
 
-def _username_mapping_path() -> Path:
-    return get_production_path() / "json" / "usernames.json"
-
-
 @lru_cache(maxsize=1)
-def _username_display_map() -> dict[str, str]:
-    """Load username->display name mappings from production JSON."""
-    mapping_path = _username_mapping_path()
-    if not mapping_path.exists():
-        log.warning(
-            "Username mapping file was not found at %s. Falling back to login usernames.",
-            mapping_path,
-        )
-        return {}
-
+def people() -> list[Person]:
+    """Everyone in people.json, or no one when it can't be read."""
+    path = get_production_path() / "json" / "people.json"
     try:
-        raw_data = json.loads(mapping_path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        log.exception(
-            "Could not load username mapping from %s. Falling back to login usernames.",
-            mapping_path,
-        )
-        return {}
+        log.exception("Could not read %s, so everyone shows as their login.", path)
+        return []
 
-    if not isinstance(raw_data, dict):
-        log.warning(
-            "Username mapping file at %s must be a JSON object. Falling back to login usernames.",
-            mapping_path,
-        )
-        return {}
 
-    display_map: dict[str, str] = {}
-    for username, display_name in raw_data.items():
-        if not isinstance(username, str) or not isinstance(display_name, str):
-            continue
-
-        normalized_username = username.strip()
-        normalized_display_name = display_name.strip()
-        if not normalized_username or not normalized_display_name:
-            continue
-
-        display_map[normalized_username] = normalized_display_name
-        display_map.setdefault(normalized_username.lower(), normalized_display_name)
-
-    return display_map
+def current_person() -> Person | None:
+    login = _current_login().strip().lower()
+    return next(
+        (p for p in people() if p.get("login", "").lower() == login),
+        None,
+    )
 
 
 def resolve_artist_display_name() -> str:
-    """Resolve the artist display name with username fallback."""
-    username = _current_login_username().strip()
-    if not username:
-        return ""
+    """The current person's name, or their login when people.json doesn't know them."""
+    person = current_person()
+    return person["name"] if person else _current_login().strip()
 
-    username_map = _username_display_map()
-    mapped_name = username_map.get(username)
-    if mapped_name:
-        return mapped_name
 
-    return username_map.get(username.lower(), username)
+def current_shotgrid_id() -> int | None:
+    person = current_person()
+    return person.get("shotgrid") if person else None
+
+
+def discord_ids() -> dict[int, str]:
+    """Discord user ids by ShotGrid user id."""
+    return {
+        p["shotgrid"]: p["discord"]
+        for p in people()
+        if "shotgrid" in p and "discord" in p
+    }
 
 
 __all__ = [
+    "Person",
+    "current_person",
+    "current_shotgrid_id",
+    "discord_ids",
+    "people",
     "resolve_artist_display_name",
 ]

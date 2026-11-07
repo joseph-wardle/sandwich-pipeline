@@ -36,7 +36,8 @@ class PlayblastVersionUploadRequest:
     movie_path: Path
     version_name: str
     description: str | None = None
-    artist_display_name: str | None = None
+    # The artist's ShotGrid user id; None leaves the Version without one.
+    artist_id: int | None = None
     review_playlist_id: int | None = None
     # Where this playblast was also kept, if anywhere. `movie_path` is a temp
     # encode, so it is the only location worth recording on the Version.
@@ -76,8 +77,7 @@ def upload_playblast_version(
     except ShotGridError as exc:
         log.exception("Could not resolve %s in ShotGrid", request.entity.description)
         return _failed(
-            f"Could not find {request.entity.description} in ShotGrid: "
-            f"{_describe(exc)}"
+            f"Could not find {request.entity.description} in ShotGrid: {_describe(exc)}"
         )
 
     warnings: list[str] = []
@@ -85,7 +85,7 @@ def upload_playblast_version(
         version = connection.create_version(
             code=request.version_name,
             entity=linked,
-            user=_resolve_user(connection, request.artist_display_name, warnings),
+            user=_resolve_user(connection, request.artist_id, warnings),
             task=request.task,
             description=_version_description(request),
             path_to_frames=request.disk_path,
@@ -179,17 +179,21 @@ def _add_to_playlist(
 
 def _resolve_user(
     connection: ShotGrid,
-    artist_display_name: str | None,
+    artist_id: int | None,
     warnings: list[str],
 ) -> User | None:
-    if not artist_display_name:
+    if artist_id is None:
+        warnings.append(
+            "You have no ShotGrid account in people.json, so the Version has no "
+            "artist. Ask a TD to add you."
+        )
         return None
     try:
-        return connection.get_user(name=artist_display_name)
+        return connection.get_user(id=artist_id)
     except ShotGridError:
-        log.exception("Could not resolve ShotGrid user '%s'", artist_display_name)
+        log.exception("Could not resolve ShotGrid user id=%s", artist_id)
         warnings.append(
-            f"Could not resolve ShotGrid user '{artist_display_name}'. "
+            f"Could not find your ShotGrid account (user {artist_id}). "
             "Continuing without an artist link."
         )
         return None
