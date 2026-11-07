@@ -34,6 +34,7 @@ LAUNCHERS = [
     Launcher("panini.desktop", "Panini", "houdini", "houdini.png"),
     Launcher("microwave.desktop", "Microwave", "nuke", "nuke.png"),
     Launcher("toaster.desktop", "Toaster", "blender", "blender.png"),
+    Launcher("final_chop_pro.desktop", "Final Chop Pro", "resolve", "resolve.png"),
 ]
 
 
