@@ -1,0 +1,27 @@
+name: Watchdog
+
+on:
+  schedule:
+    - cron: "0 13 * * *" # 06:00 Mountain Standard Time
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: joseph-wardle/jean-paul
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Check every post is recorded
+        run: uv run --frozen --no-dev jean-paul-watchdog
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          DISCORD_FORUM_ID: ${{ vars.DISCORD_FORUM_ID }}
