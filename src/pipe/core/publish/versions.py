@@ -33,6 +33,8 @@ AUTHOR_KEY = "author"
 DATE_KEY = "date"
 NOTE_KEY = "note"
 FINAL_KEY = "final"
+# What a load layers row saves when it reads the current layer instead of a pin.
+CURRENT = "current"
 
 _VERSION = re.compile(r"v([0-9]{3,})")
 _USD_SUFFIXES = (".usd", ".usda", ".usdc")
@@ -62,6 +64,23 @@ class VersionInfo:
 
 def version_layer_path(current: Path, version: int) -> Path:
     return current.parent / version_name(version) / f"{current.stem}.usd"
+
+
+def chosen_layer_path(current: Path, choice: str) -> Path:
+    """The layer a load layers row reads: `current`, or the version `choice` pins."""
+    if choice == CURRENT:
+        return current
+    return version_layer_path(current, int(choice.removeprefix("v")))
+
+
+def version_choices(current: Path) -> list[tuple[str, str]]:
+    """A row's menu as (choice, label): the current layer, then each version to pin to."""
+    behind = current_version(current)
+    label = version_name(behind) if behind is not None else "not published"
+    pins = [
+        (version_name(version), version_name(version)) for version in versions(current)
+    ]
+    return [(CURRENT, f"Current \N{EM DASH} {label}"), *pins]
 
 
 def staging_layer_path(current: Path, version: int) -> Path:
