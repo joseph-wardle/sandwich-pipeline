@@ -24,7 +24,7 @@ from pxr import Sdf, Usd, UsdGeom
 from env_sg import DB_Config
 from pipe.core.publish import CURRENT
 from pipe.core.shotgrid import ShotGrid, ShotGridError
-from pipe.dcc.blender.fx2d import layers, util
+from pipe.dcc.blender.fx2d import layers, migrate_holdout, util
 
 if TYPE_CHECKING:
     from bpy.stub_internal.rna_enums import OperatorReturnItems
@@ -52,6 +52,7 @@ def reload(
     ReloadError, having changed nothing else, when a layer can't be read.
     """
     assigned = _assigned_sets(shot_root.name)
+    migrate_holdout.add_rows(shot_root, chosen, assigned or [])
     added = layers.add_missing_rows(chosen, assigned or [])
     missing = layers.missing_pins(shot_root, chosen)
     if missing:
@@ -76,6 +77,7 @@ def reload(
     bpy.data.batch_remove(
         [block for block in bpy.data.user_map() if block.get(IMPORTED)]
     )
+    migrated = migrate_holdout.remove_holdout(scene, shot_root)
     context_collection = util.child_collection(scene.collection, util.CONTEXT)
     camera_metadata = Sdf.Layer.OpenAsAnonymous(str(camera))
     scene.frame_start = int(camera_metadata.startTimeCode)
@@ -114,6 +116,7 @@ def reload(
             " ShotGrid could not be reached, so any set assigned since the last "
             "reload is missing."
         )
+    message += migrated
     if any(isinstance(block, Object) and block.type == "MESH" for block in imported):
         message += _turn_off_in_front(scene)
     return message

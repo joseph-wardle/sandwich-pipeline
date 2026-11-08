@@ -116,7 +116,7 @@ def copy_layers(source: SKD_PG_fx2d_layers, target: SKD_PG_fx2d_layers) -> None:
 
 
 def add_missing_rows(layers: SKD_PG_fx2d_layers, set_names: list[str]) -> list[str]:
-    """Add a row for every department and assigned set the file lacks; return the sets added.
+    """Add a row for every department and assigned set the file lacks; return the sets ticked.
 
     A set row is never removed, so a set the artist unticked stays dropped.
     """
@@ -135,7 +135,8 @@ def add_missing_rows(layers: SKD_PG_fx2d_layers, set_names: list[str]) -> list[s
         row.name = name
         row.is_set = True
         row.enabled = not new_file
-    return added
+    # Unticked, a new file's sets change nothing the artist would see.
+    return [] if new_file else added
 
 
 def department_layer(shot_root: Path, row: SKD_PG_fx2d_row) -> Path:
