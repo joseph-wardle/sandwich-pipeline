@@ -51,7 +51,7 @@ def _create(shot_root: Path, path: Path) -> None:
     # and the importer refuses to run without one.
     window = bpy.context.window_manager.windows[0]  # type: ignore
     with bpy.context.temp_override(window=window):
-        reload(scene, view_layer, shot_root)
+        reload(scene, view_layer, shot_root, layers.scene_layers(scene))
     # A new scene sits on frame 1, outside the shot, where a backdrop has no frame.
     scene.frame_current = scene.frame_start
     # Reload sets the frame range from the camera layer but not the fps.

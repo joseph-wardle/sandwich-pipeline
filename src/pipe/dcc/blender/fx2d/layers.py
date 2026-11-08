@@ -9,12 +9,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import bpy
-from bpy.types import PropertyGroup, Scene
+from bpy.types import Context, PropertyGroup, Scene
 from pxr import Gf, Sdf, UsdUtils, Vt
 
-from pipe.core.publish import CURRENT, chosen_layer_path
+from pipe.core.publish import CURRENT, chosen_layer_path, version_choices
 from pipe.core.sets import current_layer_path as set_layer_path
 from pipe.core.shot import current_layer_path
+from pipe.dcc.blender.fx2d import util
 
 CAMERA = "cam"
 # Weakest to strongest, as Houdini's load_layers stacks them. envfx is left out
@@ -28,6 +29,49 @@ SETS_PRIM = Sdf.Path("/sets")
 # The camera is published in centimetres and everything else in metres. Houdini's
 # import_camera scales `/cameras` to match, the stage's only unit conversion.
 CAMERA_SCALE = 0.01
+# The importer's own type switches, by their names in `bpy.ops.wm.usd_import`.
+SWITCHES = (
+    "import_meshes",
+    "import_curves",
+    "import_lights",
+    "import_volumes",
+    "import_materials",
+)
+
+# Each department row's version menu, by row name. Blender keeps pointers into the
+# strings a menu's callback returns, so they have to outlive the call; and the
+# callback runs on every redraw, too often to list the versions on disk each time.
+_VERSION_ITEMS: dict[str, list[tuple[str, str, str]]] = {}
+
+
+def forget_versions() -> None:
+    """Make each version menu list the versions on disk again when next drawn."""
+    _VERSION_ITEMS.clear()
+
+
+def _version_items(
+    row: SKD_PG_fx2d_row, context: Context | None
+) -> list[tuple[str, str, str]]:
+    if row.name not in _VERSION_ITEMS:
+        shot_root = util.shot_root()
+        assert shot_root is not None
+        choices = version_choices(current_layer_path(shot_root, row.name))
+        # A pin to a version that is gone stays in the menu, so the artist can see it.
+        if row.choice not in (choice for choice, _ in choices):
+            choices.append((row.choice, f"{row.choice} \N{EM DASH} gone"))
+        _VERSION_ITEMS[row.name] = [(choice, label, "") for choice, label in choices]
+    return _VERSION_ITEMS[row.name]
+
+
+# The menu only shows `choice`, which is what is saved: Blender saves a menu by its
+# position, and a new publish shifts the positions.
+def _get_version(row: SKD_PG_fx2d_row) -> int:
+    choices = [choice for choice, _, _ in _version_items(row, None)]
+    return choices.index(row.choice)
+
+
+def _set_version(row: SKD_PG_fx2d_row, value: int) -> None:
+    row.choice = _version_items(row, None)[value][0]
 
 
 class SKD_PG_fx2d_row(PropertyGroup):
@@ -38,6 +82,9 @@ class SKD_PG_fx2d_row(PropertyGroup):
     enabled: bpy.props.BoolProperty(default=True)  # type: ignore
     # CURRENT or a version name such as v007, as Houdini saves it. Sets read current.
     choice: bpy.props.StringProperty(default=CURRENT)  # type: ignore
+    version: bpy.props.EnumProperty(  # type: ignore
+        name="Version", items=_version_items, get=_get_version, set=_set_version
+    )
 
 
 class SKD_PG_fx2d_layers(PropertyGroup):
@@ -56,12 +103,27 @@ def scene_layers(scene: Scene) -> SKD_PG_fx2d_layers:
     return scene.fx2d_layers  # type: ignore
 
 
+def copy_layers(source: SKD_PG_fx2d_layers, target: SKD_PG_fx2d_layers) -> None:
+    target.rows.clear()
+    for row in source.rows:
+        copy = target.rows.add()
+        copy.name = row.name
+        copy.is_set = row.is_set
+        copy.enabled = row.enabled
+        copy.choice = row.choice
+    for switch in SWITCHES:
+        setattr(target, switch, getattr(source, switch))
+
+
 def add_missing_rows(layers: SKD_PG_fx2d_layers, set_names: list[str]) -> list[str]:
     """Add a row for every department and assigned set the file lacks; return the sets added.
 
     A set row is never removed, so a set the artist unticked stays dropped.
     """
     names = {row.name for row in layers.rows}
+    # A new file loads only NEW_FILE_ROWS. A set assigned later arrives ticked, so the
+    # artist sees what changed.
+    new_file = not names
     for department in DEPARTMENTS:
         if department not in names:
             row = layers.rows.add()
@@ -72,6 +134,7 @@ def add_missing_rows(layers: SKD_PG_fx2d_layers, set_names: list[str]) -> list[s
         row = layers.rows.add()
         row.name = name
         row.is_set = True
+        row.enabled = not new_file
     return added
 
 
@@ -113,12 +176,13 @@ def camera_layers(shot_root: Path, layers: SKD_PG_fx2d_layers) -> list[Path]:
 
 
 def set_layers(layers: SKD_PG_fx2d_layers) -> dict[str, Path]:
-    """The current layer of every ticked set, by set name."""
-    return {
+    """The current layer of every ticked set that has published, by set name."""
+    paths = {
         row.name: set_layer_path(row.name)
         for row in layers.rows
         if row.is_set and row.enabled
     }
+    return {name: path for name, path in paths.items() if path.is_file()}
 
 
 def write_stack(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -20,11 +21,15 @@ from bpy.types import (
 )
 from pxr import Sdf, Usd, UsdGeom
 
+from env_sg import DB_Config
 from pipe.core.publish import CURRENT
+from pipe.core.shotgrid import ShotGrid, ShotGridError
 from pipe.dcc.blender.fx2d import layers, util
 
 if TYPE_CHECKING:
     from bpy.stub_internal.rna_enums import OperatorReturnItems
+
+log = logging.getLogger(__name__)
 
 # The custom property marking what a reload imported, so the next one removes it all,
 # materials and world included, and nothing the artist made.
@@ -35,14 +40,19 @@ class ReloadError(Exception):
     """Why a reload stopped before changing anything, said to the artist."""
 
 
-def reload(scene: Scene, view_layer: ViewLayer, shot_root: Path) -> str:
-    """Rebuild the context collection from the rows; returns what to tell the artist.
+def reload(
+    scene: Scene,
+    view_layer: ViewLayer,
+    shot_root: Path,
+    chosen: layers.SKD_PG_fx2d_layers,
+) -> str:
+    """Rebuild the context collection from `chosen`; returns what to tell the artist.
 
-    Raises ReloadError, having changed nothing, when a layer can't be read.
+    Adds a row to `chosen` for each set ShotGrid has newly assigned the shot. Raises
+    ReloadError, having changed nothing else, when a layer can't be read.
     """
-    chosen = layers.scene_layers(scene)
-    # The sets ShotGrid assigns are added once Load Layers asks it.
-    layers.add_missing_rows(chosen, [])
+    assigned = _assigned_sets(shot_root.name)
+    added = layers.add_missing_rows(chosen, assigned or [])
     missing = layers.missing_pins(shot_root, chosen)
     if missing:
         raise ReloadError(
@@ -80,11 +90,7 @@ def reload(scene: Scene, view_layer: ViewLayer, shot_root: Path) -> str:
         stack,
         # The shot camera is the only camera; it is keyed above.
         import_cameras=False,
-        import_meshes=chosen.import_meshes,
-        import_curves=chosen.import_curves,
-        import_lights=chosen.import_lights,
-        import_volumes=chosen.import_volumes,
-        import_materials=chosen.import_materials,
+        **{switch: getattr(chosen, switch) for switch in layers.SWITCHES},
     )
     for block in imported:
         block[IMPORTED] = True
@@ -101,9 +107,27 @@ def reload(scene: Scene, view_layer: ViewLayer, shot_root: Path) -> str:
     ]
     if pins:
         message += f" Pinned: {', '.join(pins)}."
+    if added:
+        message += f" Added sets newly assigned in ShotGrid: {', '.join(added)}."
+    if assigned is None:
+        message += (
+            " ShotGrid could not be reached, so any set assigned since the last "
+            "reload is missing."
+        )
     if any(isinstance(block, Object) and block.type == "MESH" for block in imported):
         message += _turn_off_in_front(scene)
     return message
+
+
+def _assigned_sets(shot_code: str) -> list[str] | None:
+    """The sets ShotGrid assigns the shot; None when it can't be reached."""
+    try:
+        shot = ShotGrid.connect(DB_Config).get_shot(code=shot_code)
+    except ShotGridError:
+        # Drawing goes on without ShotGrid: the file's own set rows still load.
+        log.exception("Could not ask ShotGrid which sets %s has.", shot_code)
+        return None
+    return [assigned.name for assigned in shot.sets or []]
 
 
 def _bake_shot_camera(
@@ -262,7 +286,7 @@ class SKD_OT_fx2d_reload(Operator):
         scene, view_layer = context.scene, context.view_layer
         assert shot_root is not None and scene is not None and view_layer is not None
         try:
-            message = reload(scene, view_layer, shot_root)
+            message = reload(scene, view_layer, shot_root, layers.scene_layers(scene))
         except ReloadError as error:
             self.report(
                 {"ERROR"}, f"Could not reload because {error} Nothing was changed."
