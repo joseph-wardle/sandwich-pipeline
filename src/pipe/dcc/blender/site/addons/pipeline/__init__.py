@@ -14,9 +14,11 @@ from pipe.dcc.blender.fx2d import (
     SKD_OT_fx2d_load_layers,
     SKD_OT_fx2d_open_shot,
     SKD_OT_fx2d_reload,
+    SKD_OT_fx2d_reload_on_open,
     SKD_OT_fx2d_set_backdrop,
     SKD_PG_fx2d_layers,
     SKD_PG_fx2d_row,
+    reload_on_open,
 )
 from pipe.dcc.blender.publish import SKD_OT_publish_asset
 
@@ -90,6 +92,7 @@ CLASSES: tuple[type[Operator | Menu | Panel | PropertyGroup], ...] = (
     SKD_PG_fx2d_row,
     SKD_PG_fx2d_layers,
     SKD_OT_open_asset,
+    SKD_OT_fx2d_reload_on_open,
     *ASSET_OPERATORS,
     *SHOT_OPERATORS,
     SKD_MT_menu,
@@ -111,10 +114,12 @@ def register() -> None:
     bpy.types.Scene.pipeline_asset = bpy.props.PointerProperty(type=PipelineAssetProps)  # type: ignore
     bpy.types.Scene.fx2d_layers = bpy.props.PointerProperty(type=SKD_PG_fx2d_layers)  # type: ignore
     bpy.types.TOPBAR_MT_editor_menus.append(draw_pipeline)
+    bpy.app.handlers.load_post.append(reload_on_open)
     log.info("Pipeline addon loaded!")
 
 
 def unregister() -> None:
+    bpy.app.handlers.load_post.remove(reload_on_open)
     bpy.types.TOPBAR_MT_editor_menus.remove(draw_pipeline)
     del bpy.types.Scene.fx2d_layers  # type: ignore
     del bpy.types.Scene.pipeline_asset  # type: ignore

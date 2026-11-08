@@ -13,12 +13,15 @@ from bpy.types import (
     Camera,
     Collection,
     Context,
+    Event,
     Object,
     Operator,
     Scene,
+    Timer,
     TransformCacheConstraint,
     ViewLayer,
 )
+from bpy.app.handlers import persistent
 from pxr import Sdf, Usd, UsdGeom
 
 from env_sg import DB_Config
@@ -285,15 +288,72 @@ class SKD_OT_fx2d_reload(Operator):
         return util.poll_fx2d_file(cls)
 
     def execute(self, context: Context) -> set[OperatorReturnItems]:
-        shot_root = util.shot_root()
-        scene, view_layer = context.scene, context.view_layer
-        assert shot_root is not None and scene is not None and view_layer is not None
-        try:
-            message = reload(scene, view_layer, shot_root, layers.scene_layers(scene))
-        except ReloadError as error:
-            self.report(
-                {"ERROR"}, f"Could not reload because {error} Nothing was changed."
-            )
-            return {"CANCELLED"}
-        self.report({"INFO"}, message)
-        return {"FINISHED"}
+        return _reload_and_report(self, context, save=False)
+
+
+class SKD_OT_fx2d_reload_on_open(Operator):
+    """Reload the file that has just opened, then save it."""
+
+    bl_idname = "skd.fx2d_reload_on_open"
+    bl_label = "Reload on Open"
+    bl_options = {"INTERNAL"}
+
+    _timer: Timer | None = None
+
+    @classmethod
+    def poll(cls, context: Context) -> bool:
+        return util.poll_fx2d_file(cls)
+
+    def invoke(self, context: Context, event: Event) -> set[OperatorReturnItems]:
+        # Reloads from `modal`: only a report made there reaches the status bar. One
+        # made by an operator Python called reaches only the console.
+        window_manager = context.window_manager
+        assert window_manager is not None
+        self._timer = window_manager.event_timer_add(0.0, window=context.window)
+        window_manager.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context: Context, event: Event) -> set[OperatorReturnItems]:
+        if event.type != "TIMER":
+            return {"PASS_THROUGH"}
+        window_manager = context.window_manager
+        assert window_manager is not None and self._timer is not None
+        window_manager.event_timer_remove(self._timer)
+        # Left unsaved, every file would open with changes, and Open Shot refuses to
+        # leave a file that has them.
+        return _reload_and_report(self, context, save=True)
+
+
+def _reload_and_report(
+    operator: Operator, context: Context, save: bool
+) -> set[OperatorReturnItems]:
+    shot_root = util.shot_root()
+    scene, view_layer = context.scene, context.view_layer
+    assert shot_root is not None and scene is not None and view_layer is not None
+    try:
+        message = reload(scene, view_layer, shot_root, layers.scene_layers(scene))
+    except ReloadError as error:
+        operator.report(
+            {"ERROR"}, f"Could not reload because {error} Nothing was changed."
+        )
+        return {"CANCELLED"}
+    if save:
+        bpy.ops.wm.save_mainfile()
+    operator.report({"INFO"}, message)
+    return {"FINISHED"}
+
+
+@persistent
+def reload_on_open(_path: str) -> None:
+    """A `load_post` handler: an fx2d file reloads as it opens."""
+    # A script opening the file in --background gets it as last saved: there are no
+    # events to run the reload, and no status bar to report to.
+    if util.shot_root() is None or bpy.app.background:
+        return
+    window_manager = bpy.context.window_manager
+    assert window_manager is not None
+    # Opening a file from inside an operator, as Open Shot does, leaves the context
+    # with no window, and a modal operator needs one.
+    with bpy.context.temp_override(window=window_manager.windows[0]):
+        # The stubs list only Blender's own operators.
+        bpy.ops.skd.fx2d_reload_on_open("INVOKE_DEFAULT")  # type: ignore
