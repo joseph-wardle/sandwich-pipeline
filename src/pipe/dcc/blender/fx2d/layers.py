@@ -92,7 +92,7 @@ class SKD_PG_fx2d_layers(PropertyGroup):
 
     rows: bpy.props.CollectionProperty(type=SKD_PG_fx2d_row)  # type: ignore
     import_meshes: bpy.props.BoolProperty(name="Meshes", default=True)  # type: ignore
-    import_curves: bpy.props.BoolProperty(name="Curves", default=True)  # type: ignore
+    import_curves: bpy.props.BoolProperty(name="Curves", default=False)  # type: ignore
     import_lights: bpy.props.BoolProperty(name="Lights", default=True)  # type: ignore
     import_volumes: bpy.props.BoolProperty(name="Volumes", default=True)  # type: ignore
     import_materials: bpy.props.BoolProperty(name="Materials", default=True)  # type: ignore
