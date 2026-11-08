@@ -11,9 +11,8 @@ from pipe.dcc.blender.assetfile import (
 )
 from pipe.dcc.blender.fx2d import (
     SKD_OT_fx2d_deliver,
-    SKD_OT_fx2d_import_holdout,
     SKD_OT_fx2d_open_shot,
-    SKD_OT_fx2d_refresh,
+    SKD_OT_fx2d_reload,
     SKD_OT_fx2d_set_backdrop,
     SKD_PG_fx2d_layers,
     SKD_PG_fx2d_row,
@@ -31,8 +30,7 @@ ASSET_OPERATORS: tuple[type[Operator], ...] = (
 SHOT_OPERATORS: tuple[type[Operator], ...] = (
     SKD_OT_fx2d_open_shot,
     SKD_OT_fx2d_set_backdrop,
-    SKD_OT_fx2d_import_holdout,
-    SKD_OT_fx2d_refresh,
+    SKD_OT_fx2d_reload,
     SKD_OT_fx2d_deliver,
 )
 ASSET_LABEL = "Asset"

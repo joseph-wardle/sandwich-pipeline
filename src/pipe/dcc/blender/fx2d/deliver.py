@@ -37,24 +37,15 @@ def _layers(scene: Scene, view_layer: ViewLayer) -> list[Collection]:
 def _uncut(scene: Scene, view_layer: ViewLayer) -> list[str]:
     """Grease Pencil objects the holdout cannot cut: In Front draws over everything."""
     context_collection = scene.collection.children.get(util.CONTEXT)
-    holdout = context_collection and context_collection.children.get(util.HOLDOUT)
-    if not holdout or not any(obj.type == "MESH" for obj in holdout.all_objects):
+    if context_collection is None or not any(
+        obj.type == "MESH" for obj in context_collection.all_objects
+    ):
         return []
     return [
         obj.name
         for layer in _layers(scene, view_layer)
         for obj in layer.all_objects
         if obj.type == "GREASEPENCIL" and obj.show_in_front
-    ]
-
-
-def _missing_camera_files(scene: Scene) -> list[str]:
-    """The files the camera move is read from that are gone."""
-    context_collection = scene.collection.children[util.CONTEXT]
-    return [
-        cache_file.filepath
-        for cache_file in util.camera_cache_files(context_collection)
-        if not Path(bpy.path.abspath(cache_file.filepath)).is_file()
     ]
 
 
@@ -102,17 +93,6 @@ class SKD_OT_fx2d_deliver(Operator):
                 {"ERROR"},
                 "Could not deliver because no layer collection is enabled for "
                 "rendering and has anything in it.",
-            )
-            return {"CANCELLED"}
-
-        missing = _missing_camera_files(scene)
-        if missing:
-            self.report(
-                {"ERROR"},
-                "Could not deliver because the file the shot camera reads is missing: "
-                f"{', '.join(missing)}. Without it the camera is in the wrong place. "
-                "Nothing was rendered. Run SKD > Refresh to read the published "
-                "camera, then deliver again.",
             )
             return {"CANCELLED"}
 
