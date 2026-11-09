@@ -54,9 +54,8 @@ def reload(
     Adds a row to `chosen` for each set ShotGrid has newly assigned the shot. Raises
     ReloadError, having changed nothing else, when a layer can't be read.
     """
-    assigned = _assigned_sets(shot_root.name)
-    migrate_holdout.add_rows(shot_root, chosen, assigned or [])
-    added = layers.add_missing_rows(chosen, assigned or [])
+    assigned = assigned_sets(shot_root.name)
+    added = seed_rows(shot_root, chosen, assigned or [])
     missing = layers.missing_pins(shot_root, chosen)
     if missing:
         raise ReloadError(
@@ -80,7 +79,7 @@ def reload(
     bpy.data.batch_remove(
         [block for block in bpy.data.user_map() if block.get(IMPORTED)]
     )
-    migrated = migrate_holdout.remove_holdout(scene, shot_root)
+    migrated = migrate_holdout.remove_holdout(scene)
     context_collection = util.child_collection(scene.collection, util.CONTEXT)
     camera_metadata = Sdf.Layer.OpenAsAnonymous(str(camera))
     scene.frame_start = int(camera_metadata.startTimeCode)
@@ -125,7 +124,18 @@ def reload(
     return message
 
 
-def _assigned_sets(shot_code: str) -> list[str] | None:
+def seed_rows(
+    shot_root: Path, chosen: layers.SKD_PG_fx2d_layers, assigned: list[str]
+) -> list[str]:
+    """Add the rows `chosen` lacks; return the sets ticked.
+
+    A file that has never reloaded gets the rows its Import Holdout choice asks for.
+    """
+    migrate_holdout.add_rows(shot_root, chosen, assigned)
+    return layers.add_missing_rows(chosen, assigned)
+
+
+def assigned_sets(shot_code: str) -> list[str] | None:
     """The sets ShotGrid assigns the shot; None when it can't be reached."""
     try:
         shot = ShotGrid.connect(DB_Config).get_shot(code=shot_code)

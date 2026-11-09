@@ -1,12 +1,12 @@
 """Files made before Load Layers: turn what Import Holdout left into rows.
 
-Called only from reload. Delete this module and its two calls there once no shot has
-an `fx2d/holdout/` folder.
+Called only from reload. Delete this module, its two calls there and the shots'
+`fx2d/holdout/` folders once every shot's `fx2d/` folder has a `layers.usda`: by then
+every file has reloaded.
 """
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import bpy
@@ -30,7 +30,11 @@ MOVED = "from_context"
 def add_rows(
     shot_root: Path, chosen: layers.SKD_PG_fx2d_layers, assigned: list[str]
 ) -> None:
-    """Give a file that has never reloaded the rows its Import Holdout choice asks for."""
+    """Give a file that has never reloaded the rows its Import Holdout choice asks for.
+
+    Read from the `holdout/` folder, which is kept, so a first reload that fails
+    leaves the choice for the next one.
+    """
     folder = shot_root / util.DEPARTMENT / HOLDOUT
     if chosen.rows or not folder.is_dir():
         return
@@ -50,12 +54,14 @@ def add_rows(
             row.enabled = True
 
 
-def remove_holdout(scene: Scene, shot_root: Path) -> str:
-    """Remove what Import Holdout left in the file and on disk; returns what to tell the artist."""
-    # Every file made before Load Layers parents the shot camera under a
-    # centimetre-scaled empty it read cam.usd through. Reload unparents it.
-    cameras = scene.camera.parent if scene.camera is not None else None
-    if cameras is None:
+def remove_holdout(scene: Scene) -> str:
+    """Remove what Import Holdout left in the file; returns what to tell the artist."""
+    # Every file made before Load Layers parents the shot camera under an empty
+    # scaled to the camera's centimetres, which it read cam.usd through. Reload
+    # unparents it, so a parent the artist adds later, at any other scale, stays.
+    shot_camera = scene.camera
+    cameras = shot_camera.parent if shot_camera is not None else None
+    if cameras is None or cameras.scale.to_tuple(4) != (layers.CAMERA_SCALE,) * 3:
         return ""
     context_collection = util.child_collection(scene.collection, util.CONTEXT)
 
@@ -64,7 +70,7 @@ def remove_holdout(scene: Scene, shot_root: Path) -> str:
         _remove_collection(holdout)
     # The collection's Holdout flag would hide anything drawn here.
     artist = [
-        obj for obj in context_collection.objects if obj not in (cameras, scene.camera)
+        obj for obj in context_collection.objects if obj not in (cameras, shot_camera)
     ]
     if artist:
         moved = util.child_collection(scene.collection, MOVED)
@@ -73,10 +79,6 @@ def remove_holdout(scene: Scene, shot_root: Path) -> str:
             moved.objects.link(obj)
             context_collection.objects.unlink(obj)
     bpy.data.objects.remove(cameras)
-    # Files that never imported a holdout have no folder.
-    folder = shot_root / util.DEPARTMENT / HOLDOUT
-    if folder.is_dir():
-        shutil.rmtree(folder)
 
     message = " Converted the file from Import Holdout."
     if artist:

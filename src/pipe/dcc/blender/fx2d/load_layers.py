@@ -8,7 +8,7 @@ import bpy
 from bpy.types import Context, Event, Operator, UILayout
 
 from pipe.dcc.blender.fx2d import layers, util
-from pipe.dcc.blender.fx2d.reload import ReloadError, reload
+from pipe.dcc.blender.fx2d.reload import ReloadError, assigned_sets, reload, seed_rows
 
 if TYPE_CHECKING:
     from bpy.stub_internal.rna_enums import OperatorReturnItems
@@ -35,10 +35,12 @@ class SKD_OT_fx2d_load_layers(Operator):
         return util.poll_fx2d_file(cls)
 
     def invoke(self, context: Context, event: Event) -> set[OperatorReturnItems]:
-        assert context.scene is not None
+        shot_root = util.shot_root()
+        assert context.scene is not None and shot_root is not None
         layers.copy_layers(layers.scene_layers(context.scene), self.chosen)
-        # A file never reloaded has no rows yet.
-        layers.add_missing_rows(self.chosen, [])
+        # A file never reloaded has no rows yet: show the ones its reload would give it.
+        if not self.chosen.rows:
+            seed_rows(shot_root, self.chosen, assigned_sets(shot_root.name) or [])
         # Lists versions published since the dialog last opened.
         layers.forget_versions()
         return context.window_manager.invoke_props_dialog(self, confirm_text="Reload")  # type: ignore
