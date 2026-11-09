@@ -177,39 +177,41 @@ def _bake_shot_camera(
         # Held for the bake: a prim dies with its stage.
         stage = Usd.Stage.Open(str(stack))
         lens = UsdGeom.Camera(stage.GetPrimAtPath(prim_path))
-    importer_camera = next(
-        block
-        for block in imported
-        if isinstance(block, Object) and block.type == "CAMERA"
-    )
-
-    data = shot_camera.data
-    assert isinstance(data, Camera)
-    frame = scene.frame_current
-    for key in range(scene.frame_start, scene.frame_end + 1):
-        scene.frame_set(key)
-        # The importer's camera carries the centimetre scale; the shot camera's
-        # scale stays 1 so nothing parented to it shrinks.
-        location, rotation, _ = importer_camera.matrix_world.decompose()
-        shot_camera.location = location
-        shot_camera.rotation_euler = rotation.to_euler(
-            "XYZ", shot_camera.rotation_euler
+        # The importer's camera reads its move from the stack on every frame change,
+        # so it is baked and removed before the folder is.
+        importer_camera = next(
+            block
+            for block in imported
+            if isinstance(block, Object) and block.type == "CAMERA"
         )
-        shot_camera.keyframe_insert("location", frame=key)
-        shot_camera.keyframe_insert("rotation_euler", frame=key)
-        # Keyed on every frame so USD, not Blender, interpolates between samples.
-        data.lens = lens.GetFocalLengthAttr().Get(key)
-        data.keyframe_insert("lens", frame=key)
-    bpy.data.batch_remove(imported)
 
-    # Lens and aperture are in millimetres, as published; the clipping range is in
-    # the camera's centimetres.
-    data.sensor_fit = "HORIZONTAL"
-    data.sensor_width = lens.GetHorizontalApertureAttr().Get(scene.frame_start)
-    data.sensor_height = lens.GetVerticalApertureAttr().Get(scene.frame_start)
-    near, far = lens.GetClippingRangeAttr().Get(scene.frame_start)
-    data.clip_start = near * layers.CAMERA_SCALE
-    data.clip_end = far * layers.CAMERA_SCALE
+        data = shot_camera.data
+        assert isinstance(data, Camera)
+        frame = scene.frame_current
+        for key in range(scene.frame_start, scene.frame_end + 1):
+            scene.frame_set(key)
+            # The importer's camera carries the centimetre scale; the shot camera's
+            # scale stays 1 so nothing parented to it shrinks.
+            location, rotation, _ = importer_camera.matrix_world.decompose()
+            shot_camera.location = location
+            shot_camera.rotation_euler = rotation.to_euler(
+                "XYZ", shot_camera.rotation_euler
+            )
+            shot_camera.keyframe_insert("location", frame=key)
+            shot_camera.keyframe_insert("rotation_euler", frame=key)
+            # Keyed on every frame so USD, not Blender, interpolates between samples.
+            data.lens = lens.GetFocalLengthAttr().Get(key)
+            data.keyframe_insert("lens", frame=key)
+        bpy.data.batch_remove(imported)
+
+        # Lens and aperture are in millimetres, as published; the clipping range is in
+        # the camera's centimetres.
+        data.sensor_fit = "HORIZONTAL"
+        data.sensor_width = lens.GetHorizontalApertureAttr().Get(scene.frame_start)
+        data.sensor_height = lens.GetVerticalApertureAttr().Get(scene.frame_start)
+        near, far = lens.GetClippingRangeAttr().Get(scene.frame_start)
+        data.clip_start = near * layers.CAMERA_SCALE
+        data.clip_end = far * layers.CAMERA_SCALE
     # Keying leaves the camera on the last frame until the frame changes.
     scene.frame_set(frame)
 
