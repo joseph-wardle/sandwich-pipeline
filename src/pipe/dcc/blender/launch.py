@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from pipe.core.color import ocio_env_vars
+from pipe.core.util.paths import get_production_path
 from env import Executables
 from pipe.framework.launcher import Launcher
 
@@ -29,6 +30,8 @@ class BlenderLauncher(Launcher):
             "BLENDER_SYSTEM_EXTENSIONS": str(this_path.parent / "extensions"),
             "BLENDER_SYSTEM_SCRIPTS": str(this_path.parent / "site"),
             **ocio_env_vars(),
+            # Assemblies reference their pieces as `@asset/...@`, relative to here.
+            "PXR_AR_DEFAULT_SEARCH_PATH": str(get_production_path()),
         }
 
         launch_command = str(Executables.blender)
