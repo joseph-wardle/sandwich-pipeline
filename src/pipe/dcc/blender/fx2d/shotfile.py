@@ -9,10 +9,10 @@ from bpy.types import Camera, Context, Event, Operator
 from pxr import Usd
 
 from env_sg import DB_Config
-from pipe.core.shot import shot_root_path
+from pipe.core.shot import current_layer_path, shot_root_path
 from pipe.core.shotgrid import ShotGrid, is_previs_shot_code
-from pipe.dcc.blender.fx2d import backdrop
-from pipe.dcc.blender.fx2d import util
+from pipe.dcc.blender.fx2d import backdrop, layers, util
+from pipe.dcc.blender.fx2d.reload import ReloadError, reload
 
 if TYPE_CHECKING:
     from bpy.stub_internal.rna_enums import OperatorReturnItems
@@ -36,28 +36,26 @@ def _shot_items(self: Operator, context: Context | None) -> list[tuple[str, str,
     return _SHOT_ITEMS
 
 
-def _create(camera_usd: Path, path: Path) -> None:
+def _create(shot_root: Path, path: Path) -> None:
+    """Raises ReloadError, leaving an unsaved empty file, when a layer can't be read."""
     bpy.ops.wm.read_homefile(use_empty=True)
     scene = bpy.context.scene
     view_layer = bpy.context.view_layer
     assert scene is not None and view_layer is not None
 
-    context_collection = util.child_collection(scene.collection, util.CONTEXT)
+    # Made first so it sits above the layers in the outliner.
+    util.child_collection(scene.collection, util.CONTEXT)
     layer = util.child_collection(scene.collection, util.DEFAULT_LAYER)
     layer_collections = view_layer.layer_collection.children
-    # Imported objects land in the active collection.
-    view_layer.active_layer_collection = layer_collections[util.CONTEXT]
     # Loading a file from inside an operator leaves the context with no window,
     # and the importer refuses to run without one.
     window = bpy.context.window_manager.windows[0]  # type: ignore
     with bpy.context.temp_override(window=window):
-        bpy.ops.wm.usd_import(filepath=str(camera_usd))
-    scene.camera = next(
-        obj for obj in context_collection.objects if obj.type == "CAMERA"
-    )
+        reload(scene, view_layer, shot_root, layers.scene_layers(scene))
     # A new scene sits on frame 1, outside the shot, where a backdrop has no frame.
     scene.frame_current = scene.frame_start
-    # The importer sets the frame range from the camera file but not the fps.
+    # Reload sets the frame range from the camera layer but not the fps.
+    camera_usd = current_layer_path(shot_root, layers.CAMERA)
     scene.render.fps = round(Usd.Stage.Open(str(camera_usd)).GetTimeCodesPerSecond())
     util.apply_render_settings(scene, view_layer)
 
@@ -106,7 +104,7 @@ class SKD_OT_fx2d_open_shot(Operator):
             bpy.ops.wm.open_mainfile(filepath=str(path))
             return {"FINISHED"}
 
-        camera_usd = util.camera_usd(shot_root)
+        camera_usd = current_layer_path(shot_root, layers.CAMERA)
         if not camera_usd.exists():
             self.report(
                 {"ERROR"},
@@ -114,7 +112,11 @@ class SKD_OT_fx2d_open_shot(Operator):
                 f"published camera at {camera_usd}. Ask layout to publish the camera.",
             )
             return {"CANCELLED"}
-        _create(camera_usd, path)
+        try:
+            _create(shot_root, path)
+        except ReloadError as error:
+            self.report({"ERROR"}, f"Could not create the fx2d file because {error}")
+            return {"CANCELLED"}
         util.link_cache_dirs(shot_root)
         created = f"Created the fx2d file for {self.shot_code}."
 

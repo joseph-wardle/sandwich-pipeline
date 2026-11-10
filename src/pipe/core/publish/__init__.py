@@ -3,9 +3,11 @@
 from .history import Entry, history, move_current, replace_scene
 from .target import Refused, Target, publish_version
 from .versions import (
+    CURRENT,
     PUBLISH_DIRNAME,
     SOURCE_DIRNAME,
     VersionInfo,
+    chosen_layer_path,
     commit_version,
     copy_source,
     create_staging,
@@ -20,18 +22,21 @@ from .versions import (
     staging_layer_path,
     stamp,
     version_info,
+    version_choices,
     version_layer_path,
     version_name,
     versions,
 )
 
 __all__ = [
+    "CURRENT",
     "PUBLISH_DIRNAME",
     "SOURCE_DIRNAME",
     "Entry",
     "Refused",
     "Target",
     "VersionInfo",
+    "chosen_layer_path",
     "commit_version",
     "copy_source",
     "create_staging",
@@ -49,6 +54,7 @@ __all__ = [
     "scene_version",
     "staging_layer_path",
     "stamp",
+    "version_choices",
     "version_info",
     "version_layer_path",
     "version_name",

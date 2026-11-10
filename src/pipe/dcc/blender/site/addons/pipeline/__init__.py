@@ -11,10 +11,14 @@ from pipe.dcc.blender.assetfile import (
 )
 from pipe.dcc.blender.fx2d import (
     SKD_OT_fx2d_deliver,
-    SKD_OT_fx2d_import_holdout,
+    SKD_OT_fx2d_load_layers,
     SKD_OT_fx2d_open_shot,
-    SKD_OT_fx2d_refresh,
+    SKD_OT_fx2d_reload,
+    SKD_OT_fx2d_reload_on_open,
     SKD_OT_fx2d_set_backdrop,
+    SKD_PG_fx2d_layers,
+    SKD_PG_fx2d_row,
+    reload_on_open,
 )
 from pipe.dcc.blender.publish import SKD_OT_publish_asset
 
@@ -29,8 +33,8 @@ ASSET_OPERATORS: tuple[type[Operator], ...] = (
 SHOT_OPERATORS: tuple[type[Operator], ...] = (
     SKD_OT_fx2d_open_shot,
     SKD_OT_fx2d_set_backdrop,
-    SKD_OT_fx2d_import_holdout,
-    SKD_OT_fx2d_refresh,
+    SKD_OT_fx2d_load_layers,
+    SKD_OT_fx2d_reload,
     SKD_OT_fx2d_deliver,
 )
 ASSET_LABEL = "Asset"
@@ -81,10 +85,14 @@ class SKD_MT_menu(Menu):
 
 
 # Every class the addon registers. A new operator does nothing until it is listed
-# here. PipelineAssetProps comes first because the Scene property below points at it.
+# here. Property groups come before whatever points at them: the Scene properties
+# below, and the fx2d rows inside the fx2d layers.
 CLASSES: tuple[type[Operator | Menu | Panel | PropertyGroup], ...] = (
     PipelineAssetProps,
+    SKD_PG_fx2d_row,
+    SKD_PG_fx2d_layers,
     SKD_OT_open_asset,
+    SKD_OT_fx2d_reload_on_open,
     *ASSET_OPERATORS,
     *SHOT_OPERATORS,
     SKD_MT_menu,
@@ -104,12 +112,16 @@ def register() -> None:
     for cls in CLASSES:
         register_class(cls)
     bpy.types.Scene.pipeline_asset = bpy.props.PointerProperty(type=PipelineAssetProps)  # type: ignore
+    bpy.types.Scene.fx2d_layers = bpy.props.PointerProperty(type=SKD_PG_fx2d_layers)  # type: ignore
     bpy.types.TOPBAR_MT_editor_menus.append(draw_pipeline)
+    bpy.app.handlers.load_post.append(reload_on_open)
     log.info("Pipeline addon loaded!")
 
 
 def unregister() -> None:
+    bpy.app.handlers.load_post.remove(reload_on_open)
     bpy.types.TOPBAR_MT_editor_menus.remove(draw_pipeline)
+    del bpy.types.Scene.fx2d_layers  # type: ignore
     del bpy.types.Scene.pipeline_asset  # type: ignore
     for cls in reversed(CLASSES):
         unregister_class(cls)

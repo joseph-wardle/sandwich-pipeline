@@ -7,15 +7,9 @@ from typing import cast
 
 import hou
 
-from pipe.core.publish import (
-    current_version,
-    version_layer_path,
-    version_name,
-    versions,
-)
+from pipe.core.publish import CURRENT, chosen_layer_path, version_choices
 from pipe.core.shot import current_layer_path
 
-CURRENT = "current"
 CAMERA = "cam"
 
 _ENABLE = "{}_enable"
@@ -29,22 +23,15 @@ _MISSING_PIN = (
 
 def layer_path(node: hou.Node, row: str) -> str:
     """The layer a row reads."""
-    current = _current(node, row)
-    pin = _text(node, _VERSION.format(row))
-    if pin == CURRENT:
-        return str(current)
-    return str(version_layer_path(current, int(pin.removeprefix("v"))))
+    return str(
+        chosen_layer_path(_current(node, row), _text(node, _VERSION.format(row)))
+    )
 
 
 def version_menu(node: hou.Node, row: str) -> list[str]:
     """A row's menu: its department's current layer, then each version to pin to."""
-    current = _current(node, row)
-    behind = current_version(current)
-    label = version_name(behind) if behind is not None else "not published"
-    menu = [CURRENT, f"Current \N{EM DASH} {label}"]
-    for version in versions(current):
-        menu += [version_name(version), version_name(version)]
-    return menu
+    # Houdini menus are flat: token, label, token, label.
+    return [item for choice in version_choices(_current(node, row)) for item in choice]
 
 
 def show_pins(node: hou.Node) -> None:
