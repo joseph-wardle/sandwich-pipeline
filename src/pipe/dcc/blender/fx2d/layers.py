@@ -18,16 +18,12 @@ from pipe.core.shot import current_layer_path
 from pipe.dcc.blender.fx2d import util
 
 CAMERA = "cam"
-# Weakest to strongest, as Houdini's load_layers stacks them. envfx is left out
-# because it is being retired.
+# Weakest to strongest
 DEPARTMENTS = (CAMERA, "flo", "anim", "cfx", "fx", "lighting")
-# FLO is on from the start because it can move the camera.
-NEW_FILE_ROWS = (CAMERA, "flo")
-# Where Houdini puts the camera and each set, which the departments' edits target.
+NEW_FILE_ROWS = (CAMERA, "flo", "anim")
 CAMERAS_PRIM = Sdf.Path("/cameras")
 SETS_PRIM = Sdf.Path("/sets")
-# The camera is published in centimetres and everything else in metres. Houdini's
-# import_camera scales `/cameras` to match, the stage's only unit conversion.
+# The camera is published in centimetres and everything else in metres.
 CAMERA_SCALE = 0.01
 # The importer's own type switches, by their names in `bpy.ops.wm.usd_import`.
 SWITCHES = (
