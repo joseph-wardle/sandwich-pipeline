@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import bpy
-from bpy.types import Camera, Context, Event, Operator
+from bpy.types import Camera, Context, Event, Operator, Window
 from pxr import Usd
 
 from env_sg import DB_Config
@@ -61,16 +61,42 @@ def _create(shot_root: Path, path: Path) -> None:
 
     # Anything drawn outside a layer collection would render into every layer.
     view_layer.active_layer_collection = layer_collections[layer.name]
+    _add_drawing(window)
 
-    # The backdrop only shows when looking through the shot camera.
+    # The backdrop only shows through the shot camera; onion skins are off by default.
     for area in window.screen.areas:
         if area.type == "VIEW_3D":
-            area.spaces.active.region_3d.view_perspective = "CAMERA"  # type: ignore
+            space = area.spaces.active
+            space.region_3d.view_perspective = "CAMERA"  # type: ignore
+            space.overlay.use_gpencil_onion_skin = True  # type: ignore
+    _frame_timeline(window)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     # Save As rewrites file paths relative to the .blend by default, which turns
     # production paths into `../` chains that break if the file moves.
     bpy.ops.wm.save_as_mainfile(filepath=str(path), relative_remap=False)
+
+
+def _add_drawing(window: Window) -> None:
+    """A blank Grease Pencil object keyed on the current frame, in Draw mode."""
+    with bpy.context.temp_override(window=window):
+        bpy.ops.object.grease_pencil_add(type="EMPTY")
+        drawing = bpy.context.object
+        assert drawing is not None
+        # Lit strokes change colour with the shot's lights, and In Front draws them
+        # over the holdout.
+        drawing.use_grease_pencil_lights = False
+        drawing.show_in_front = False
+        bpy.ops.object.mode_set(mode="PAINT_GREASE_PENCIL")
+
+
+def _frame_timeline(window: Window) -> None:
+    # Frame All would frame the drawing's one key, not the shot.
+    for area in window.screen.areas:
+        if area.ui_type == "TIMELINE":
+            region = next(r for r in area.regions if r.type == "WINDOW")
+            with bpy.context.temp_override(window=window, area=area, region=region):
+                bpy.ops.anim.scene_range_frame()
 
 
 class SKD_OT_fx2d_open_shot(Operator):
