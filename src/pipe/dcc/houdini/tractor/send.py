@@ -39,8 +39,6 @@ ENV_VARS = (
 # The same on every machine: the license from /etc/profile.d, and RenderMan's
 # install, which names no Houdini build.
 MACHINE_VARS = ("PIXAR_LICENSE_FILE", "RFHTREE", "RMANTREE")
-# Set by Open Shot for the substep sync HDA, and never saved in the hip.
-SHOT_VARS = ("SHOT_SUBSTEPS",)
 # A blade's own PATH has no Houdini, and not even /usr/bin. The Houdini folder
 # is the link each machine points at its own build.
 PATH = os.pathsep.join([str(Executables.hfs / "bin"), "/usr/bin", "/bin"])
@@ -80,8 +78,7 @@ def environment() -> dict[str, str]:
         if value is not None
     }
     env["PATH"] = PATH
-    # hou.getenv sees what hou.putenv set, which os.environ doesn't.
-    for name in (*MACHINE_VARS, *SHOT_VARS):
+    for name in MACHINE_VARS:
         if value := hou.getenv(name):
             env[name] = value
     return dict(sorted(env.items()))
