@@ -1,4 +1,4 @@
-"""Playblast: render the strokes over the backdrop, play them, send the result on.
+"""Playblast: render the strokes over the backdrop or the geometry, play them, send them on.
 
 Nothing persists until the artist presses Send. The preview is a second Blender
 window whose Sequencer plays the HUD-burned frames, with the destinations in its
@@ -23,6 +23,7 @@ from bpy.app.handlers import persistent
 from bpy.types import (
     Area,
     Camera,
+    CameraBackgroundImage,
     CompositorNodeTree,
     Context,
     Event,
@@ -167,13 +168,9 @@ def _destinations(shot_root: Path) -> tuple[Destination, ...]:
     )
 
 
-def _backdrop_tree(camera: Camera) -> CompositorNodeTree | None:
-    """A compositor tree that lays the render over the backdrop, or None for none.
-
-    Background images never render. Laid under the strokes before the view
-    transform, the backdrop looks as it does behind the camera and as comp has it.
-    """
-    background = next(
+def _backdrop(camera: Camera) -> CameraBackgroundImage | None:
+    """The background image Set Backdrop added, or None before it has run."""
+    return next(
         (
             background
             for background in camera.background_images
@@ -181,8 +178,10 @@ def _backdrop_tree(camera: Camera) -> CompositorNodeTree | None:
         ),
         None,
     )
-    if background is None or not camera.show_background_images:
-        return None
+
+
+def _backdrop_tree(background: CameraBackgroundImage) -> CompositorNodeTree:
+    """A compositor tree that lays the render over the backdrop."""
     tree = bpy.data.node_groups.new(PREVIEW, "CompositorNodeTree")
     assert isinstance(tree, CompositorNodeTree) and tree.interface is not None
     tree.interface.new_socket("Image", in_out="OUTPUT", socket_type="NodeSocketColor")
@@ -207,36 +206,56 @@ def _backdrop_tree(camera: Camera) -> CompositorNodeTree | None:
     return tree
 
 
-def _render(scene: Scene, directory: Path) -> None:
-    """Renders the strokes as comp gets them, over the backdrop or black.
+def _render_over_backdrop(scene: Scene, background: CameraBackgroundImage) -> None:
+    """EEVEE, the strokes cut by the holdout as comp gets them; Workbench ignores it.
 
-    EEVEE, because the viewport's Workbench ignores the holdout and draws the
-    context meshes solid.
+    Background images never render, so the backdrop is laid under the strokes in
+    the compositor. Before the view transform, it looks as it does behind the camera
+    and as comp has it.
     """
-    window_manager = bpy.context.window_manager
-    camera = scene.camera.data if scene.camera is not None else None
-    assert window_manager is not None and scene.eevee is not None
-    assert isinstance(camera, Camera)
-    render = scene.render
-    frames = range(scene.frame_start, scene.frame_end + 1)
-    tree = _backdrop_tree(camera)
-
-    def on_write(_scene: Scene, *_: object) -> None:
-        window_manager.progress_update(_scene.frame_current - scene.frame_start + 1)
-
-    bpy.app.handlers.render_write.append(on_write)
-    window_manager.progress_begin(0, len(frames))
+    assert scene.eevee is not None
+    tree = _backdrop_tree(background)
     try:
         with (
             _overridden(
-                render,
+                scene.render,
                 engine="BLENDER_EEVEE",
-                # Over black where there is no backdrop.
                 film_transparent=True,
-                use_compositing=tree is not None,
-                filepath=f"{directory}/{_FRAMES}.",
+                use_compositing=True,
             ),
             _overridden(scene, compositing_node_group=tree),
+            _overridden(scene.eevee, taa_render_samples=_SAMPLES),
+        ):
+            bpy.ops.render.render(animation=True, scene=scene.name)
+    finally:
+        bpy.data.node_groups.remove(tree)
+
+
+def _render_geometry(scene: Scene) -> None:
+    """Workbench, as the viewport draws it: the context meshes solid grey, hiding
+    the strokes behind them by depth, as in a Houdini playblast."""
+    with _overridden(scene.render, film_transparent=False):
+        bpy.ops.render.opengl(animation=True, view_context=False)
+
+
+def _render(
+    scene: Scene, directory: Path, background: CameraBackgroundImage | None
+) -> None:
+    """Renders the shot range over the backdrop, or against the geometry for None."""
+    window_manager = bpy.context.window_manager
+    assert window_manager is not None
+    render = scene.render
+    frames = range(scene.frame_start, scene.frame_end + 1)
+
+    # Not render_write: Workbench renders never call it.
+    def on_frame(_scene: Scene, *_: object) -> None:
+        window_manager.progress_update(_scene.frame_current - scene.frame_start + 1)
+
+    bpy.app.handlers.frame_change_post.append(on_frame)
+    window_manager.progress_begin(0, len(frames))
+    try:
+        with (
+            _overridden(render, filepath=f"{directory}/{_FRAMES}."),
             _overridden(
                 render.image_settings,
                 media_type="IMAGE",
@@ -244,26 +263,28 @@ def _render(scene: Scene, directory: Path) -> None:
                 color_mode="RGB",
                 color_depth="8",
             ),
-            _overridden(scene.eevee, taa_render_samples=_SAMPLES),
         ):
-            bpy.ops.render.render(animation=True, scene=scene.name)
+            if background is None:
+                _render_geometry(scene)
+            else:
+                _render_over_backdrop(scene, background)
     finally:
         window_manager.progress_end()
-        bpy.app.handlers.render_write.remove(on_write)
-        if tree is not None:
-            bpy.data.node_groups.remove(tree)
+        bpy.app.handlers.frame_change_post.remove(on_frame)
 
     written = len(list(directory.glob(f"{_FRAMES}.*.png")))
     if written != len(frames):
         raise RuntimeError(f"Only {written} of {len(frames)} frames were rendered.")
 
 
-def _capture(scene: Scene, shot_root: Path) -> PreviewClip:
+def _capture(
+    scene: Scene, shot_root: Path, background: CameraBackgroundImage | None
+) -> PreviewClip:
     """Renders to a new temp folder and burns the HUD onto the frames."""
     # Read before rendering, so the HUD describes the file as it was captured.
     hud = _hud_content(shot_root, scene)
     directory = create_preview_dir()
-    _render(scene, directory)
+    _render(scene, directory, background)
     render = scene.render
     scale = render.resolution_percentage / 100
     burn_hud_frames(
@@ -343,8 +364,12 @@ def _lay_out(window: Window) -> Area:
     return area
 
 
-def _show_skd_tab() -> None:
-    """A timer: a sidebar's tab can be picked only once the sidebar has drawn."""
+def _show_skd_tab() -> float | None:
+    """A timer, repeating until the preview's sidebar shows the SKD tab.
+
+    The tab is read-only, or quietly reset, until the sidebar has drawn with its
+    tabs, which a busy Blender may not have done yet. Stops once the preview closes.
+    """
     window_manager = bpy.context.window_manager
     assert window_manager is not None
     for window in window_manager.windows:
@@ -352,8 +377,15 @@ def _show_skd_tab() -> None:
             continue
         assert window.screen is not None
         for area in window.screen.areas:
-            if area.type == "SEQUENCE_EDITOR":
-                _region(area, "UI").active_panel_category = "SKD"
+            if area.type != "SEQUENCE_EDITOR":
+                continue
+            sidebar = _region(area, "UI")
+            try:
+                sidebar.active_panel_category = "SKD"
+            except AttributeError:
+                return 0.2
+            return None if sidebar.active_panel_category == "SKD" else 0.2
+    return None
 
 
 def _open_preview(context: Context, clip: PreviewClip) -> None:
@@ -457,15 +489,40 @@ class SKD_PG_fx2d_playblast(PropertyGroup):
     )
 
 
+def _camera(context: Context) -> Camera:
+    assert context.scene is not None and context.scene.camera is not None
+    camera = context.scene.camera.data
+    assert isinstance(camera, Camera)
+    return camera
+
+
 def _props(context: Context) -> SKD_PG_fx2d_playblast:
     return context.window_manager.skd_fx2d_playblast  # type: ignore
 
 
 class SKD_OT_fx2d_playblast(Operator):
-    """Render the effect layers over the backdrop and play them, ready to send"""
+    """Render the shot and play it, ready to send"""
 
     bl_idname = "skd.fx2d_playblast"
     bl_label = "Playblast"
+
+    # Not remembered: each Playblast starts from what the camera shows.
+    show: bpy.props.EnumProperty(  # type: ignore
+        name="Show",
+        items=(
+            (
+                "BACKDROP",
+                "Backdrop",
+                "The strokes over the backdrop, as comp will have them",
+            ),
+            (
+                "GEOMETRY",
+                "Geometry",
+                "The strokes against the shot's geometry in grey, as in a Houdini playblast",
+            ),
+        ),
+        options={"SKIP_SAVE"},
+    )
 
     @classmethod
     def poll(cls, context: Context) -> bool:
@@ -476,15 +533,30 @@ class SKD_OT_fx2d_playblast(Operator):
             return False
         return True
 
+    def invoke(self, context: Context, event: Event) -> set[OperatorReturnItems]:
+        camera = _camera(context)
+        if _backdrop(camera) is None:
+            self.show = "GEOMETRY"
+            return self.execute(context)
+        self.show = "BACKDROP" if camera.show_background_images else "GEOMETRY"
+        window_manager = context.window_manager
+        assert window_manager is not None
+        return window_manager.invoke_props_dialog(self, confirm_text="Playblast")
+
+    def draw(self, context: Context) -> None:
+        assert self.layout is not None
+        self.layout.prop(self, "show", expand=True)
+
     def execute(self, context: Context) -> set[OperatorReturnItems]:
         shot_root = util.shot_root()
         scene = context.scene
         assert shot_root is not None and scene is not None
+        background = _backdrop(_camera(context)) if self.show == "BACKDROP" else None
         _remove_preview()
         _props(context).description = ""
         threading.Thread(target=_fetch_playlists, daemon=True).start()
         try:
-            clip = _capture(scene, shot_root)
+            clip = _capture(scene, shot_root, background)
         except Exception as exc:
             log.exception("Playblast of %s failed.", bpy.data.filepath)
             self.report(
