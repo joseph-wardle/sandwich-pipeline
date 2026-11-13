@@ -38,7 +38,6 @@ from bpy.types import (
 from env_sg import DB_Config
 from pipe.core.hud import ARTIST, HudContent, labeled_line, line_date, line_shot
 from pipe.core.playblast import (
-    CUSTOM_FOLDER_ID,
     ChosenDestination,
     ChosenDisk,
     ChosenShotGrid,
@@ -120,10 +119,11 @@ def _sending() -> bool:
 @contextmanager
 def _overridden(target: Any, **values: object) -> Generator[None]:
     """Sets attributes of a Blender struct, restoring them on the way out."""
-    before = {name: getattr(target, name) for name in values}
-    for name, value in values.items():
-        setattr(target, name, value)
+    before: dict[str, object] = {}
     try:
+        for name, value in values.items():
+            before[name] = getattr(target, name)
+            setattr(target, name, value)
         yield
     finally:
         for name, value in before.items():
@@ -601,6 +601,13 @@ class SKD_OT_fx2d_playblast_discard(Operator):
         return {"FINISHED"}
 
 
+def _folder(destination: DiskDestination, context: Context) -> Path:
+    path = _props(context).custom_folder_path.strip()
+    if destination.browsable and path:
+        return Path(bpy.path.abspath(path))
+    return destination.directory
+
+
 def _chosen(clip: PreviewClip, context: Context) -> tuple[ChosenDestination, ...]:
     props = _props(context)
     chosen: list[ChosenDestination] = []
@@ -616,21 +623,24 @@ def _chosen(clip: PreviewClip, context: Context) -> tuple[ChosenDestination, ...
                     description=props.description.strip() or None,
                 )
             )
-        elif destination.id == CUSTOM_FOLDER_ID:
-            folder = Path(bpy.path.abspath(props.custom_folder_path))
-            chosen.append(ChosenDisk(destination, folder))
-        else:
-            chosen.append(ChosenDisk(destination, destination.directory))
+        elif isinstance(destination, DiskDestination):
+            chosen.append(ChosenDisk(destination, _folder(destination, context)))
     return tuple(chosen)
 
 
-def _run_send(send: _Send, chosen: tuple[ChosenDestination, ...]) -> None:
-    names = {destination.id: destination.name for destination in send.clip.destinations}
-    folders = tuple(
-        destination.directory
-        for destination in send.clip.destinations
+def _folders(clip: PreviewClip, context: Context) -> tuple[Path, ...]:
+    """Every folder the version number must be new in, ticked or not, as the Qt viewer does."""
+    return tuple(
+        _folder(destination, context)
+        for destination in clip.destinations
         if isinstance(destination, DiskDestination)
     )
+
+
+def _run_send(
+    send: _Send, chosen: tuple[ChosenDestination, ...], folders: tuple[Path, ...]
+) -> None:
+    names = {destination.id: destination.name for destination in send.clip.destinations}
     try:
         send.result = confirm_clip(
             send.clip,
@@ -670,7 +680,8 @@ class SKD_OT_fx2d_playblast_send(Operator):
         assert _clip is not None
         _send = _Send(_clip)
         _send.thread = threading.Thread(
-            target=_run_send, args=(_send, _chosen(_clip, context))
+            target=_run_send,
+            args=(_send, _chosen(_clip, context), _folders(_clip, context)),
         )
         _send.thread.start()
         window_manager = context.window_manager
@@ -757,7 +768,7 @@ class SKD_PT_fx2d_playblast(Panel):
                         text=f"Playlists unavailable: {_playlist_error}", icon="ERROR"
                     )
                 column.prop(props, "description")
-            elif destination.id == CUSTOM_FOLDER_ID:
+            elif destination.browsable:
                 layout.prop(props, "custom_folder_path", text="")
         row = layout.row()
         row.scale_y = 1.4
