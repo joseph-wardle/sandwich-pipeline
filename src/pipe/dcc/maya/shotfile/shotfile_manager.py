@@ -29,15 +29,14 @@ log = logging.getLogger(__name__)
 VIEWPORT_TEXTURE_MAX_RESOLUTION = 1024
 
 
-def show_viewport_textures() -> None:
+def cap_viewport_textures() -> None:
+    """Whether textures show stays the artist's choice, saved with the scene."""
     mc.setAttr("hardwareRenderingGlobals.enableTextureMaxRes", True)  # type: ignore
     mc.setAttr("hardwareRenderingGlobals.textureMaxResMode", 0)  # type: ignore
     mc.setAttr(
         "hardwareRenderingGlobals.textureMaxResolution",
         VIEWPORT_TEXTURE_MAX_RESOLUTION,  # type: ignore
     )
-    for panel in mc.getPanel(type="modelPanel") or []:
-        mc.modelEditor(panel, edit=True, displayTextures=True)
 
 
 def _set_hd_render_resolution() -> None:
@@ -105,7 +104,7 @@ class MShotFileManager(FileManager):
     def run_on_open(cls) -> None:
         """Called after every open of a scene this manager tagged."""
         _set_hd_render_resolution()
-        show_viewport_textures()
+        cap_viewport_textures()
         if mc.about(batch=True):
             return
 
