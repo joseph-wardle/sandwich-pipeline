@@ -23,6 +23,7 @@ import logging
 import os
 import socket
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -240,7 +241,9 @@ class ShotGrid:
     _sg: shotgun_api3.Shotgun
     _project_id: int
 
-    _conn_instances: dict[SG_Config, ShotGrid] = {}
+    # One per thread: a `shotgun_api3.Shotgun` is not thread-safe, and two
+    # threads reading through one crash Blender inside SSL.
+    _conn_instances: dict[tuple[SG_Config, int], ShotGrid] = {}
 
     # Backoff *between* failed `upload_movie` attempts.  Three attempts total:
     # initial, then sleep 2s, retry, sleep 4s, retry.
@@ -250,16 +253,17 @@ class ShotGrid:
 
     @classmethod
     def connect(cls, config: SG_Config) -> ShotGrid:
-        """Return the cached ShotGrid connection for `config` or open one.
+        """Return this thread's cached ShotGrid connection for `config` or open one.
 
-        Two calls with an equal `SG_Config` return the same instance.
+        Two calls on one thread with an equal `SG_Config` return the same instance.
         """
-        existing = cls._conn_instances.get(config)
+        key = (config, threading.get_ident())
+        existing = cls._conn_instances.get(key)
         if existing is not None:
             return existing
         log.debug(f"Opening new ShotGrid connection for project {config.project_id}")
         instance = cls(config)
-        cls._conn_instances[config] = instance
+        cls._conn_instances[key] = instance
         return instance
 
     def __init__(self, config: SG_Config) -> None:
