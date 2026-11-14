@@ -252,7 +252,8 @@ class DialogFilteredList:
 
     def _filter_items(self) -> None:
         filter_text = self._filter_field.text().lower()
-        pattern = re.compile(".*".join(["", *filter_text.split(), ""]))
+        tokens = re.findall(r"\d+|[^\d\s]+", filter_text)
+        pattern = re.compile(".*".join(["", *map(re.escape, tokens), ""]))
         filtering = bool(filter_text.strip())
         tree = self._list_widget
 
