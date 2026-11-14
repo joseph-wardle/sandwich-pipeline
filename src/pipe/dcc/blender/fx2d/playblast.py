@@ -82,11 +82,16 @@ _SAMPLES = 16
 _FRAMES = "playblast"
 _NO_PLAYLIST = ("NONE", "None", "", 0)
 
-# The preview on screen. Blender properties cannot hold a PreviewClip.
-_clip: PreviewClip | None = None
-# Bumped per preview, so a closing preview's cleanup cannot remove a newer one.
-_generation = 0
-_sequencer_scene_before: tuple[str, str | None] | None = None
+
+@attrs.define(eq=False)
+class _Preview:
+    clip: PreviewClip
+    workspace: str
+    # The preview window's workspace's sequencer scene before the preview.
+    sequencer_scene: str | None
+
+
+_preview: _Preview | None = None
 
 # Enum items are read from C after the callback returns, so they live here.
 _playlists: list[tuple[str, str, str, int]] = [_NO_PLAYLIST]
@@ -389,7 +394,7 @@ def _show_skd_tab() -> float | None:
 
 
 def _open_preview(context: Context, clip: PreviewClip) -> None:
-    global _clip, _generation, _sequencer_scene_before
+    global _preview
     assert context.scene is not None and context.window_manager is not None
     scene = _preview_scene(context.scene, clip)
     with context.temp_override(window=context.window):
@@ -402,10 +407,8 @@ def _open_preview(context: Context, clip: PreviewClip) -> None:
     assert workspace is not None
     # The Sequencer shows the workspace's sequencer scene, not the window's.
     before = workspace.sequencer_scene
-    _sequencer_scene_before = (workspace.name, before.name if before else None)
+    _preview = _Preview(clip, workspace.name, before.name if before else None)
     workspace.sequencer_scene = scene
-    _clip = clip
-    _generation += 1
 
     area = _lay_out(window)
     with context.temp_override(
@@ -416,39 +419,44 @@ def _open_preview(context: Context, clip: PreviewClip) -> None:
     bpy.app.timers.register(_show_skd_tab, first_interval=0.2)
 
 
-def _remove_preview() -> None:
+def _close_preview() -> None:
     """Closes the preview window and removes its scene. Safe to call twice."""
-    global _clip, _sequencer_scene_before
     window_manager = bpy.context.window_manager
     assert window_manager is not None
     for window in list(window_manager.windows):
         if window.scene is not None and window.scene.name == PREVIEW:
             with bpy.context.temp_override(window=window):
                 bpy.ops.wm.window_close()
-    if _sequencer_scene_before is not None:
-        workspace_name, scene_name = _sequencer_scene_before
-        workspace = bpy.data.workspaces.get(workspace_name)
-        if workspace is not None:
-            workspace.sequencer_scene = (
-                bpy.data.scenes.get(scene_name) if scene_name else None
-            )
     scene = bpy.data.scenes.get(PREVIEW)
     if scene is not None:
         bpy.data.scenes.remove(scene)
-    _clip = None
-    _sequencer_scene_before = None
 
 
-def _remove_if_current(generation: int) -> None:
-    if generation == _generation:
+def _remove_preview() -> None:
+    """Closes the preview on screen, putting back its workspace's sequencer scene."""
+    global _preview
+    if _preview is None:
+        return
+    _close_preview()
+    workspace = bpy.data.workspaces.get(_preview.workspace)
+    if workspace is not None:
+        name = _preview.sequencer_scene
+        workspace.sequencer_scene = bpy.data.scenes.get(name) if name else None
+    _preview = None
+
+
+def _remove_if_current(preview: _Preview | None) -> None:
+    if preview is _preview:
         _remove_preview()
 
 
 @persistent
 def remove_saved_preview(_path: str) -> None:
-    """A `load_post` handler: a file saved with a preview open reopens with it."""
-    if bpy.data.scenes.get(PREVIEW) is not None:
-        _remove_preview()
+    """A `load_post` handler: forgets the last file's preview, and closes the
+    one a file saved with a preview open reopens with."""
+    global _preview
+    _preview = None
+    _close_preview()
 
 
 def _fetch_playlists() -> None:
@@ -575,7 +583,7 @@ class SKD_OT_fx2d_playblast_watch(Operator):
     bl_options = {"INTERNAL"}
 
     def invoke(self, context: Context, event: Event) -> set[OperatorReturnItems]:
-        self.generation = _generation
+        self.preview = _preview
         assert context.window_manager is not None
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
@@ -586,7 +594,7 @@ class SKD_OT_fx2d_playblast_watch(Operator):
     def cancel(self, context: Context) -> None:
         # The window is mid-close here; removing its scene now would pull it out
         # from under Blender.
-        bpy.app.timers.register(functools.partial(_remove_if_current, self.generation))
+        bpy.app.timers.register(functools.partial(_remove_if_current, self.preview))
 
 
 class SKD_OT_fx2d_playblast_discard(Operator):
@@ -597,7 +605,7 @@ class SKD_OT_fx2d_playblast_discard(Operator):
 
     def execute(self, context: Context) -> set[OperatorReturnItems]:
         # After this operator returns: it runs inside the window being closed.
-        bpy.app.timers.register(functools.partial(_remove_if_current, _generation))
+        bpy.app.timers.register(functools.partial(_remove_if_current, _preview))
         return {"FINISHED"}
 
 
@@ -661,13 +669,13 @@ class SKD_OT_fx2d_playblast_send(Operator):
 
     @classmethod
     def poll(cls, context: Context) -> bool:
-        if _clip is None:
+        if _preview is None:
             return False
         props = _props(context)
         if _sending():
             cls.poll_message_set("The last playblast is still sending.")
             return False
-        if not any(getattr(props, d.id) for d in _clip.destinations):
+        if not any(getattr(props, d.id) for d in _preview.clip.destinations):
             cls.poll_message_set("Tick at least one destination.")
             return False
         if props.custom_folder and not props.custom_folder_path.strip():
@@ -677,11 +685,12 @@ class SKD_OT_fx2d_playblast_send(Operator):
 
     def execute(self, context: Context) -> set[OperatorReturnItems]:
         global _send
-        assert _clip is not None
-        _send = _Send(_clip)
+        assert _preview is not None
+        clip = _preview.clip
+        _send = _Send(clip)
         _send.thread = threading.Thread(
             target=_run_send,
-            args=(_send, _chosen(_clip, context), _folders(_clip, context)),
+            args=(_send, _chosen(clip, context), _folders(clip, context)),
         )
         _send.thread.start()
         window_manager = context.window_manager
@@ -689,7 +698,7 @@ class SKD_OT_fx2d_playblast_send(Operator):
         main = next(w for w in window_manager.windows if w.scene.name != PREVIEW)
         with context.temp_override(window=main):
             bpy.ops.skd.fx2d_playblast_progress("INVOKE_DEFAULT")  # type: ignore
-        bpy.app.timers.register(functools.partial(_remove_if_current, _generation))
+        bpy.app.timers.register(functools.partial(_remove_if_current, _preview))
         return {"FINISHED"}
 
 
@@ -747,16 +756,16 @@ class SKD_PT_fx2d_playblast(Panel):
     @classmethod
     def poll(cls, context: Context) -> bool:
         return (
-            _clip is not None
+            _preview is not None
             and context.scene is not None
             and context.scene.name == PREVIEW
         )
 
     def draw(self, context: Context) -> None:
         layout = self.layout
-        assert layout is not None and _clip is not None
+        assert layout is not None and _preview is not None
         props = _props(context)
-        for destination in _clip.destinations:
+        for destination in _preview.clip.destinations:
             layout.prop(props, destination.id, text=destination.name)
             if not getattr(props, destination.id):
                 continue
