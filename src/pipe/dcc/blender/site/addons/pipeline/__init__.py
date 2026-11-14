@@ -128,7 +128,6 @@ def register() -> None:
         register_class(cls)
     bpy.types.Scene.pipeline_asset = bpy.props.PointerProperty(type=PipelineAssetProps)  # type: ignore
     bpy.types.Scene.fx2d_layers = bpy.props.PointerProperty(type=SKD_PG_fx2d_layers)  # type: ignore
-    # Never saved with the file, like the preview it routes.
     bpy.types.WindowManager.skd_fx2d_playblast = bpy.props.PointerProperty(  # type: ignore
         type=SKD_PG_fx2d_playblast
     )

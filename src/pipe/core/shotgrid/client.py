@@ -242,9 +242,7 @@ class ShotGrid:
     _sg: shotgun_api3.Shotgun
     _project_id: int
 
-    # One per thread: a `shotgun_api3.Shotgun` is not thread-safe, and two
-    # threads reading through one crash Blender inside SSL. A thread's
-    # connections go when it ends.
+    # One per thread since a `shotgun_api3.Shotgun` is not thread-safe
     _per_thread = threading.local()
 
     # Backoff *between* failed `upload_movie` attempts.  Three attempts total:
@@ -255,10 +253,7 @@ class ShotGrid:
 
     @classmethod
     def connect(cls, config: SG_Config) -> ShotGrid:
-        """Return this thread's cached ShotGrid connection for `config` or open one.
-
-        Two calls on one thread with an equal `SG_Config` return the same instance.
-        """
+        """Return this thread's cached ShotGrid connection for `config` or open one."""
         instances: dict[SG_Config, ShotGrid] | None = getattr(
             cls._per_thread, "instances", None
         )

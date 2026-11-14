@@ -1,5 +1,3 @@
-"""Playblast capture: render the shot range and burn the HUD onto the frames."""
-
 from __future__ import annotations
 
 from collections.abc import Generator
@@ -33,8 +31,6 @@ from pipe.dcc.blender.fx2d import util
 from pipe.dcc.blender.fx2d.backdrop import BACKDROP
 
 SHOT_FOLDER_ID = DestinationId("shot_folder")
-# Enough to anti-alias strokes; more samples barely change a frame's render time,
-# which is mostly evaluating the scene.
 _SAMPLES = 16
 _FRAMES = "playblast"
 _TREE = "skd_playblast"
@@ -42,7 +38,6 @@ _TREE = "skd_playblast"
 
 @contextmanager
 def _overridden(target: Any, **values: object) -> Generator[None]:
-    """Sets attributes of a Blender struct, restoring them on the way out."""
     before: dict[str, object] = {}
     try:
         for name, value in values.items():
@@ -55,7 +50,6 @@ def _overridden(target: Any, **values: object) -> Generator[None]:
 
 
 def _hud_content(shot_root: Path, scene: Scene) -> HudContent:
-    """Artist and the fx2d.blend version the last Deliver saved, `*` for unsaved edits."""
     shot = ShotGrid.connect(DB_Config).get_shot(code=shot_root.name)
     stream = blender_fx2d_stream(shot)
     records = list_version_records(stream)
@@ -86,7 +80,7 @@ def _destinations(shot_root: Path) -> tuple[Destination, ...]:
 
 
 def backdrop(camera: Camera) -> CameraBackgroundImage | None:
-    """The background image Set Backdrop added, or None before it has run."""
+    """The background image, or None."""
     return next(
         (
             background
@@ -109,7 +103,6 @@ def _backdrop_tree(background: CameraBackgroundImage) -> CompositorNodeTree:
     image.frame_start = user.frame_start
     image.frame_offset = user.frame_offset
     image.frame_duration = user.frame_duration
-    # The proxy of a 4K render is 4K; fit it to the frame as the camera view does.
     scale: Any = nodes.new("CompositorNodeScale")
     scale.inputs["Type"].default_value = "Render Size"
     scale.inputs["Frame Type"].default_value = "Fit"
@@ -124,9 +117,6 @@ def _backdrop_tree(background: CameraBackgroundImage) -> CompositorNodeTree:
 
 
 def _render_over_backdrop(scene: Scene, background: CameraBackgroundImage) -> None:
-    """EEVEE, because Workbench ignores the holdout. Background images never
-    render, so the compositor lays the backdrop under the strokes before the view
-    transform, as comp does."""
     assert scene.eevee is not None
     tree = _backdrop_tree(background)
     try:
@@ -146,8 +136,6 @@ def _render_over_backdrop(scene: Scene, background: CameraBackgroundImage) -> No
 
 
 def _render_geometry(scene: Scene) -> None:
-    """Workbench, as the viewport draws it: the context meshes solid grey, hiding
-    the strokes behind them by depth, as in a Houdini playblast."""
     with _overridden(scene.render, film_transparent=False):
         bpy.ops.render.opengl(animation=True, view_context=False)
 
@@ -155,13 +143,11 @@ def _render_geometry(scene: Scene) -> None:
 def _render(
     scene: Scene, directory: Path, background: CameraBackgroundImage | None
 ) -> None:
-    """Renders the shot range over the backdrop, or against the geometry for None."""
     window_manager = bpy.context.window_manager
     assert window_manager is not None
     render = scene.render
     frames = range(scene.frame_start, scene.frame_end + 1)
 
-    # Not render_write: Workbench renders never call it.
     def on_frame(_scene: Scene, *_: object) -> None:
         window_manager.progress_update(_scene.frame_current - scene.frame_start + 1)
 
@@ -195,7 +181,6 @@ def capture(
     scene: Scene, shot_root: Path, background: CameraBackgroundImage | None
 ) -> PreviewClip:
     """Renders to a new temp folder and burns the HUD onto the frames."""
-    # Read before rendering, so the HUD describes the file as it was captured.
     hud = _hud_content(shot_root, scene)
     directory = create_preview_dir()
     _render(scene, directory, background)

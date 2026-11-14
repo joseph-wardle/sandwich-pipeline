@@ -1,11 +1,3 @@
-"""Playblast: render the strokes over the backdrop or the geometry, play them, send them on.
-
-Nothing persists until the artist presses Send. The preview is a second Blender
-window whose Sequencer plays the HUD-burned frames, with the destinations in its
-sidebar. Send hands the frames to the shared playblast engine on a thread,
-reporting to the main window's status bar.
-"""
-
 from __future__ import annotations
 
 import functools
@@ -53,8 +45,6 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 PREVIEW = "skd_playblast"
-# The frames went through the view transform as they rendered. Shown as data
-# through no view, they look exactly like the movie they become.
 _RAW = "Raw"
 _NO_PLAYLIST = ("NONE", "None", "", 0)
 
@@ -65,10 +55,7 @@ class _Preview:
     workspace: str
     # The preview window's workspace's sequencer scene before the preview.
     sequencer_scene: str | None
-    # Set by a Send that failed somewhere, so the retry keeps its version.
     basename: str | None = None
-    # Unticked for the retry; ticked again once the preview closes, so the
-    # next playblast starts with what the artist chose.
     delivered: set[str] = attrs.field(factory=set)
 
 
@@ -117,7 +104,6 @@ def _preview_scene(source: Scene, clip: PreviewClip) -> Scene:
     strip.colorspace_settings.name = _RAW
     view_settings = scene.view_settings
     assert view_settings is not None
-    # The stubs list only the "NONE" view; the views come from the OCIO config.
     view_settings.view_transform = _RAW  # type: ignore
     return scene
 
@@ -149,11 +135,6 @@ def _lay_out(window: Window) -> Area:
 
 
 def _show_skd_tab() -> float | None:
-    """A timer, repeating until the preview's sidebar shows the SKD tab.
-
-    The tab is read-only, or quietly reset, until the sidebar has drawn with its
-    tabs, which a busy Blender may not have done yet. Stops once the preview closes.
-    """
     window_manager = bpy.context.window_manager
     assert window_manager is not None
     for window in window_manager.windows:
@@ -179,12 +160,9 @@ def _open_preview(context: Context, clip: PreviewClip) -> None:
     with context.temp_override(window=context.window):
         bpy.ops.wm.window_new_main()
     window = context.window_manager.windows[-1]
-    # A window opened beside another is independent only when it is a main
-    # window, so playing it leaves the artist's frame alone.
     window.scene = scene
     workspace = window.workspace
     assert workspace is not None
-    # The Sequencer shows the workspace's sequencer scene, not the window's.
     before = workspace.sequencer_scene
     _preview = _Preview(clip, workspace.name, before.name if before else None)
     workspace.sequencer_scene = scene
@@ -233,15 +211,12 @@ def _remove_if_current(preview: _Preview | None) -> None:
 
 @persistent
 def remove_saved_preview(_path: str) -> None:
-    """A `load_post` handler: forgets the last file's preview, and closes the
-    one a file saved with a preview open reopens with."""
     global _preview
     _preview = None
     _close_preview()
 
 
 def _fetch_playlists() -> None:
-    """Runs on a thread: the newest review playlists, for the Playlist menu."""
     global _playlist_error
     try:
         options = list_review_playlists(limit=50)
@@ -265,14 +240,10 @@ def _playlist_items(
 class SKD_PG_fx2d_playblast(PropertyGroup):
     """The routing choices."""
 
-    # Named by destination id, so the panel and Send find them from the clip.
     shotgrid: bpy.props.BoolProperty(name="ShotGrid", default=True)  # type: ignore
     shot_folder: bpy.props.BoolProperty(name="Shot Folder", default=True)  # type: ignore
     custom_folder: bpy.props.BoolProperty(name="Custom Folder", default=False)  # type: ignore
-    # Off: edit has one version counter per shot, so this would replace the
-    # shot's newer delivery from another department in the cut.
     edit: bpy.props.BoolProperty(name="Send to Edit", default=False)  # type: ignore
-    # Numbered by playlist id, so a pick survives the list being fetched again.
     playlist: bpy.props.EnumProperty(name="Playlist", items=_playlist_items)  # type: ignore
     description: bpy.props.StringProperty(name="Description")  # type: ignore
     custom_folder_path: bpy.props.StringProperty(  # type: ignore
@@ -297,7 +268,6 @@ class SKD_OT_fx2d_playblast(Operator):
     bl_idname = "skd.fx2d_playblast"
     bl_label = "Playblast"
 
-    # Not remembered: each Playblast starts from what the camera shows.
     show: bpy.props.EnumProperty(  # type: ignore
         name="Show",
         items=(
@@ -359,8 +329,6 @@ class SKD_OT_fx2d_playblast(Operator):
 
 
 class SKD_OT_fx2d_playblast_watch(Operator):
-    """Lives in the preview window: Blender cancels it when the window closes."""
-
     bl_idname = "skd.fx2d_playblast_watch"
     bl_label = "Watch Playblast Preview"
     bl_options = {"INTERNAL"}
@@ -375,8 +343,6 @@ class SKD_OT_fx2d_playblast_watch(Operator):
         return {"PASS_THROUGH"}
 
     def cancel(self, context: Context) -> None:
-        # The window is mid-close here; removing its scene now would pull it out
-        # from under Blender.
         bpy.app.timers.register(functools.partial(_remove_if_current, self.preview))
 
 
@@ -387,7 +353,6 @@ class SKD_OT_fx2d_playblast_discard(Operator):
     bl_label = "Discard"
 
     def execute(self, context: Context) -> set[OperatorReturnItems]:
-        # After this operator returns: it runs inside the window being closed.
         bpy.app.timers.register(functools.partial(_remove_if_current, _preview))
         return {"FINISHED"}
 
@@ -420,7 +385,6 @@ def _chosen(clip: PreviewClip, context: Context) -> tuple[ChosenDestination, ...
 
 
 def _folders(clip: PreviewClip, context: Context) -> tuple[Path, ...]:
-    """Every folder the version number must be new in, ticked or not, as the Qt viewer does."""
     return tuple(
         _folder(destination, context)
         for destination in clip.destinations
@@ -447,8 +411,6 @@ def _run_send(
 
 
 class SKD_OT_fx2d_playblast_send(Operator):
-    """Send the playblast to every ticked destination. Blender stays usable while it uploads"""
-
     bl_idname = "skd.fx2d_playblast_send"
     bl_label = "Send"
 
@@ -487,8 +449,6 @@ class SKD_OT_fx2d_playblast_send(Operator):
 
 
 def _finish(send: _Send, context: Context) -> tuple[str, str]:
-    """Closes the preview once every destination has it, or leaves the failed
-    ones ticked for a retry. Returns the report level and message."""
     if send.result is None:
         return "ERROR", f"Could not send the playblast. {send.error}"
     preview = send.preview
@@ -520,7 +480,7 @@ def _finish(send: _Send, context: Context) -> tuple[str, str]:
 
 
 class SKD_OT_fx2d_playblast_progress(Operator):
-    """Reports a running Send in the status bar; only modal operators reach it."""
+    """Reports a running Send in the status bar"""
 
     bl_idname = "skd.fx2d_playblast_progress"
     bl_label = "Playblast Send Progress"
