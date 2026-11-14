@@ -174,6 +174,7 @@ _SG_NOTE_CONTENT = "content"
 _SG_NOTE_LINKS = "note_links"
 _SG_NOTE_TO = "addressings_to"
 _SG_NOTE_AUTHOR = "user"
+_SG_NOTE_TYPE = "sg_note_type"
 
 # The `sg_asset_type` of an Asset row that is a set.
 SET_ASSET_TYPE = "Set"
@@ -1058,8 +1059,11 @@ class ShotGrid:
         links: list[Shot | Asset],
         to: list[User],
         author: User | None = None,
+        note_type: str | None = None,
     ) -> None:
         """Write a Note addressed to `to`, shown on every entity in `links`.
+
+        `note_type` must be one of the Note Type field's list values.
 
         Raises:
             ShotGridWriteError: ShotGrid rejected the create.
@@ -1076,6 +1080,8 @@ class ShotGrid:
         }
         if author is not None:
             payload[_SG_NOTE_AUTHOR] = _entity_ref("HumanUser", author)
+        if note_type is not None:
+            payload[_SG_NOTE_TYPE] = note_type
         _write_or_raise(
             lambda: self._sg.create("Note", payload, ["id"]),
             entity_type="Note",

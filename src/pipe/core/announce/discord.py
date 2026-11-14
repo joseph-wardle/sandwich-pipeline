@@ -16,15 +16,13 @@ def post_message(
     text: str,
     *,
     role_ids: list[str],
-    user_ids: list[str],
 ) -> None:
-    """Post `text` to the webhook's channel, pinging every role and user listed."""
+    """Post `text` to the webhook's channel, pinging every role listed."""
     mentions = [f"<@&{role_id}>" for role_id in role_ids]
-    mentions += [f"<@{user_id}>" for user_id in user_ids]
     payload = {
         "content": " ".join([*mentions, text]),
-        # Only the listed roles and users ping; nothing else in the text can.
-        "allowed_mentions": {"parse": [], "roles": role_ids, "users": user_ids},
+        # Only the listed roles ping; nothing else in the text can.
+        "allowed_mentions": {"parse": [], "roles": role_ids},
     }
     request = urllib.request.Request(
         webhook_url,

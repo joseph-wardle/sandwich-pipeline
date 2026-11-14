@@ -21,10 +21,8 @@ class Person(TypedDict):
     # on `shotgrid` alone: names there are shared by duplicate accounts and change.
     name: str
     login: NotRequired[str]
-    # The ShotGrid HumanUser id.
+    # The ShotGrid HumanUser id. A Discord id lives on the HumanUser, for Jean Paul.
     shotgrid: NotRequired[int]
-    # The Discord user id, which announcements ping.
-    discord: NotRequired[str]
 
 
 def _current_login() -> str:
@@ -64,20 +62,10 @@ def current_shotgrid_id() -> int | None:
     return person.get("shotgrid") if person else None
 
 
-def discord_ids() -> dict[int, str]:
-    """Discord user ids by ShotGrid user id."""
-    return {
-        p["shotgrid"]: p["discord"]
-        for p in people()
-        if "shotgrid" in p and "discord" in p
-    }
-
-
 __all__ = [
     "Person",
     "current_person",
     "current_shotgrid_id",
-    "discord_ids",
     "people",
     "resolve_artist_display_name",
 ]

@@ -12,6 +12,8 @@ log = logging.getLogger(__name__)
 # A Task status: the work isn't happening on this deliverable, so nobody is told.
 OMITTED = "omt"
 
+PUBLISH_NOTE_TYPE = "Publish"
+
 
 def find_assignees(
     conn: ShotGrid, deliverable: Shot | Asset, steps: list[str]
@@ -57,6 +59,7 @@ def send_note(
         links=[deliverable],
         to=to,
         author=_author(conn),
+        note_type=PUBLISH_NOTE_TYPE,
     )
 
 
