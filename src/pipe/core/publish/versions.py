@@ -37,6 +37,7 @@ FINAL_KEY = "final"
 CURRENT = "current"
 
 _VERSION = re.compile(r"v([0-9]{3,})")
+_MENU_DATE = "%b %d %H:%M"
 _USD_SUFFIXES = (".usd", ".usda", ".usdc")
 # What a stage takes from its root layer alone. The current layer carries them so
 # that opening it gives the same units, frame range and frame rate as the version.
@@ -75,11 +76,13 @@ def chosen_layer_path(current: Path, choice: str) -> Path:
 
 def version_choices(current: Path) -> list[tuple[str, str]]:
     """A row's menu as (choice, label): the current layer, then each version to pin to."""
+    labels = {version: _menu_label(current, version) for version in versions(current)}
     behind = current_version(current)
-    label = version_name(behind) if behind is not None else "not published"
-    pins = [
-        (version_name(version), version_name(version)) for version in versions(current)
-    ]
+    if behind is None:
+        label = "not published"
+    else:
+        label = labels.get(behind, version_name(behind))
+    pins = [(version_name(version), text) for version, text in labels.items()]
     return [(CURRENT, f"Current \N{EM DASH} {label}"), *pins]
 
 
@@ -303,6 +306,12 @@ def _points_at(layer: Sdf.Layer, current: Path) -> int | None:
         return None
     version = int(match.group(1))
     return version if sublayer == _sublayer(current, version) else None
+
+
+def _menu_label(current: Path, version: int) -> str:
+    path = version_layer_path(current, version)
+    published = datetime.fromtimestamp(path.stat().st_mtime)
+    return f"{version_name(version)} \N{MIDDLE DOT} {published.strftime(_MENU_DATE)}"
 
 
 def _source(current: Path, version: int) -> Path | None:
