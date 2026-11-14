@@ -14,6 +14,7 @@ from typing import cast
 
 import hou
 from env_sg import DB_Config
+from pxr import Sdf
 from Qt import QtWidgets
 
 from pipe.core.publish import Refused, Target, publish_version
@@ -193,6 +194,23 @@ def _render(node: hou.LopNode, staged: Path, frame_range: tuple[int, int]) -> No
         raise Refused(
             f"Nothing was published. {node.path()} wrote no file. Check the errors "
             "on the nodes above it."
+        )
+    layer = Sdf.Layer.FindOrOpen(str(staged))
+    if layer is None or not layer.rootPrims:
+        log.error(
+            "%s wrote an empty layer %s. ROP warnings:\n%s",
+            node.path(),
+            staged,
+            "\n".join(rop.warnings()),
+        )
+        warnings = "\n".join(dict.fromkeys(w.splitlines()[0] for w in rop.warnings()))
+        raise Refused(
+            f"Nothing was published. {node.path()} wrote an empty layer.\n"
+            + (
+                f"Fix what it warned about, then try again:\n{warnings}"
+                if warnings
+                else "Check that it is wired below the work to publish, then try again."
+            )
         )
 
 
