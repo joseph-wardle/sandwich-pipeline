@@ -61,11 +61,7 @@ from pipe.core.playblast.tempdir import create_preview_dir
 from pipe.core.shot import blender_fx2d_stream
 from pipe.core.shotgrid import ShotGrid
 from pipe.core.util.users import resolve_artist_display_name
-from pipe.core.versioning import (
-    current_version_label,
-    list_version_records,
-    version_label,
-)
+from pipe.core.versioning import list_version_records, version_label
 from pipe.dcc.blender.fx2d import util
 from pipe.dcc.blender.fx2d.backdrop import BACKDROP
 
@@ -141,20 +137,15 @@ def _overridden(target: Any, **values: object) -> Generator[None]:
 
 
 def _hud_content(shot_root: Path, scene: Scene) -> HudContent:
-    """Artist and the fx2d.blend version the last Deliver saved, `*` once it has changed."""
+    """Artist and the fx2d.blend version the last Deliver saved, `*` for unsaved edits."""
     shot = ShotGrid.connect(DB_Config).get_shot(code=shot_root.name)
     stream = blender_fx2d_stream(shot)
     records = list_version_records(stream)
     latest = version_label(records[0].version) if records else None
-    matching, _ = current_version_label(stream, Path(bpy.data.filepath))
     return HudContent(
         left_lines=(
             labeled_line(ARTIST, resolve_artist_display_name()),
-            line_shot(
-                shot_root.name,
-                latest,
-                unsaved=bpy.data.is_dirty or matching != latest,
-            ),
+            line_shot(shot_root.name, latest, unsaved=bpy.data.is_dirty),
         ),
         right_lines=(line_date(),),
         frame_start=scene.frame_start,
