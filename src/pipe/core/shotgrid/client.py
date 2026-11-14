@@ -23,6 +23,7 @@ import logging
 import os
 import socket
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -228,8 +229,9 @@ class ShotGrid:
     """ShotGrid client
 
     Obtain an instance with `connect` — the class caches one connection
-    per `SG_Config` so the same process never opens two sockets to the
-    same project. Direct `__init__` usage is possible but bypasses the cache.
+    per `SG_Config` and thread, so cached reads, and the cache clearing done
+    by write verbs, are per thread too. Direct `__init__` usage is possible
+    but bypasses the cache.
 
     Every read method returns a fully-typed entity from
     `pipe.core.shotgrid.entities` or raises a subclass of
@@ -240,7 +242,8 @@ class ShotGrid:
     _sg: shotgun_api3.Shotgun
     _project_id: int
 
-    _conn_instances: dict[SG_Config, ShotGrid] = {}
+    # One per thread since a `shotgun_api3.Shotgun` is not thread-safe
+    _per_thread = threading.local()
 
     # Backoff *between* failed `upload_movie` attempts.  Three attempts total:
     # initial, then sleep 2s, retry, sleep 4s, retry.
@@ -250,16 +253,18 @@ class ShotGrid:
 
     @classmethod
     def connect(cls, config: SG_Config) -> ShotGrid:
-        """Return the cached ShotGrid connection for `config` or open one.
-
-        Two calls with an equal `SG_Config` return the same instance.
-        """
-        existing = cls._conn_instances.get(config)
+        """Return this thread's cached ShotGrid connection for `config` or open one."""
+        instances: dict[SG_Config, ShotGrid] | None = getattr(
+            cls._per_thread, "instances", None
+        )
+        if instances is None:
+            instances = cls._per_thread.instances = {}
+        existing = instances.get(config)
         if existing is not None:
             return existing
         log.debug(f"Opening new ShotGrid connection for project {config.project_id}")
         instance = cls(config)
-        cls._conn_instances[config] = instance
+        instances[config] = instance
         return instance
 
     def __init__(self, config: SG_Config) -> None:
