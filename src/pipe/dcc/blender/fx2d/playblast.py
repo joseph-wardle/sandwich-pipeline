@@ -89,6 +89,11 @@ class _Preview:
     workspace: str
     # The preview window's workspace's sequencer scene before the preview.
     sequencer_scene: str | None
+    # Set by a Send that failed somewhere, so the retry keeps its version.
+    basename: str | None = None
+    # Unticked for the retry; ticked again once the preview closes, so the
+    # next playblast starts with what the artist chose.
+    delivered: set[str] = attrs.field(factory=set)
 
 
 _preview: _Preview | None = None
@@ -102,7 +107,7 @@ _playlist_error = ""
 class _Send:
     """One Send running on a thread."""
 
-    clip: PreviewClip
+    preview: _Preview
     steps: queue.SimpleQueue[str] = attrs.field(factory=queue.SimpleQueue)
     result: ConfirmResult | None = None
     error: str = ""
@@ -438,6 +443,8 @@ def _remove_preview() -> None:
     if _preview is None:
         return
     _close_preview()
+    for id in _preview.delivered:
+        setattr(_props(bpy.context), id, True)
     workspace = bpy.data.workspaces.get(_preview.workspace)
     if workspace is not None:
         name = _preview.sequencer_scene
@@ -648,16 +655,18 @@ def _folders(clip: PreviewClip, context: Context) -> tuple[Path, ...]:
 def _run_send(
     send: _Send, chosen: tuple[ChosenDestination, ...], folders: tuple[Path, ...]
 ) -> None:
-    names = {destination.id: destination.name for destination in send.clip.destinations}
+    clip = send.preview.clip
+    names = {destination.id: destination.name for destination in clip.destinations}
     try:
         send.result = confirm_clip(
-            send.clip,
+            clip,
             chosen,
             folders,
+            basename=send.preview.basename,
             on_step=lambda id, step: send.steps.put(f"{names[id]}: {step}"),
         )
     except Exception as exc:
-        log.exception("Sending the playblast of %s failed.", send.clip.label)
+        log.exception("Sending the playblast of %s failed.", clip.label)
         send.error = artist_reason(exc)
 
 
@@ -687,7 +696,7 @@ class SKD_OT_fx2d_playblast_send(Operator):
         global _send
         assert _preview is not None
         clip = _preview.clip
-        _send = _Send(clip)
+        _send = _Send(_preview)
         _send.thread = threading.Thread(
             target=_run_send,
             args=(_send, _chosen(clip, context), _folders(clip, context)),
@@ -698,22 +707,40 @@ class SKD_OT_fx2d_playblast_send(Operator):
         main = next(w for w in window_manager.windows if w.scene.name != PREVIEW)
         with context.temp_override(window=main):
             bpy.ops.skd.fx2d_playblast_progress("INVOKE_DEFAULT")  # type: ignore
-        bpy.app.timers.register(functools.partial(_remove_if_current, _preview))
         return {"FINISHED"}
 
 
-def _summary(send: _Send) -> tuple[str, str]:
-    """The report level and message for a finished Send."""
+def _finish(send: _Send, context: Context) -> tuple[str, str]:
+    """Closes the preview once every destination has it, or leaves the failed
+    ones ticked for a retry. Returns the report level and message."""
     if send.result is None:
         return "ERROR", f"Could not send the playblast. {send.error}"
-    names = {destination.id: destination.name for destination in send.clip.destinations}
+    preview = send.preview
+    names = {
+        destination.id: destination.name for destination in preview.clip.destinations
+    }
     rows = [
-        f"{names[outcome.id]}: {outcome.path or outcome.detail}"
-        for outcome in send.result.outcomes
+        f"{names[outcome.id]}: {outcome.detail}" for outcome in send.result.outcomes
     ]
-    failed = any(not outcome.ok for outcome in send.result.outcomes)
+    if all(outcome.ok for outcome in send.result.outcomes):
+        # After this operator returns, as Discard does.
+        bpy.app.timers.register(functools.partial(_remove_if_current, preview))
+        return "INFO", f"Playblast sent. {' | '.join(rows)}"
+    if preview is _preview:
+        preview.basename = send.result.basename
+        props = _props(context)
+        for outcome in send.result.outcomes:
+            if outcome.ok:
+                setattr(props, outcome.id, False)
+                preview.delivered.add(outcome.id)
+        # The panel redraws on its own only under the mouse.
+        assert context.window_manager is not None
+        for window in context.window_manager.windows:
+            if window.scene.name == PREVIEW:
+                for area in window.screen.areas:
+                    area.tag_redraw()
     message = " | ".join([failure_summary(send.result), *rows]).strip(" |")
-    return ("ERROR" if failed else "INFO"), f"Playblast sent. {message}"
+    return "ERROR", f"Could not send the playblast. {message}"
 
 
 class SKD_OT_fx2d_playblast_progress(Operator):
@@ -740,7 +767,7 @@ class SKD_OT_fx2d_playblast_progress(Operator):
             self.report({"INFO"}, step)
         if _sending():
             return {"PASS_THROUGH"}
-        level, message = _summary(_send)
+        level, message = _finish(_send, context)
         self.report({level}, message)  # type: ignore
         assert context.window_manager is not None
         context.window_manager.event_timer_remove(self.timer)
@@ -781,5 +808,9 @@ class SKD_PT_fx2d_playblast(Panel):
                 layout.prop(props, "custom_folder_path", text="")
         row = layout.row()
         row.scale_y = 1.4
-        row.operator(SKD_OT_fx2d_playblast_send.bl_idname, icon="EXPORT")
+        row.operator(
+            SKD_OT_fx2d_playblast_send.bl_idname,
+            text="Retry Failed" if _preview.basename else "Send",
+            icon="EXPORT",
+        )
         row.operator(SKD_OT_fx2d_playblast_discard.bl_idname, icon="TRASH")
