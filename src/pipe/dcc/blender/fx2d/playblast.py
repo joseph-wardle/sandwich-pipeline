@@ -12,8 +12,6 @@ import functools
 import logging
 import queue
 import threading
-from collections.abc import Generator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -23,8 +21,6 @@ from bpy.app.handlers import persistent
 from bpy.types import (
     Area,
     Camera,
-    CameraBackgroundImage,
-    CompositorNodeTree,
     Context,
     Event,
     Operator,
@@ -35,35 +31,21 @@ from bpy.types import (
     Window,
 )
 
-from env_sg import DB_Config
-from pipe.core.hud import ARTIST, HudContent, labeled_line, line_date, line_shot
 from pipe.core.playblast import (
     ChosenDestination,
     ChosenDisk,
     ChosenShotGrid,
     ConfirmResult,
-    Destination,
-    DestinationId,
     DiskDestination,
-    FFmpegPreset,
     PreviewClip,
-    ShotEntity,
     ShotGridDestination,
     confirm_clip,
-    custom_folder_destination,
-    edit_destination,
 )
 from pipe.core.playblast.confirm import failure_summary
-from pipe.core.playblast.encoding import burn_hud_frames
 from pipe.core.playblast.errors import artist_reason
 from pipe.core.playblast.review.playlists import list_review_playlists
-from pipe.core.playblast.tempdir import create_preview_dir
-from pipe.core.shot import blender_fx2d_stream
-from pipe.core.shotgrid import ShotGrid
-from pipe.core.util.users import resolve_artist_display_name
-from pipe.core.versioning import list_version_records, version_label
 from pipe.dcc.blender.fx2d import util
-from pipe.dcc.blender.fx2d.backdrop import BACKDROP
+from pipe.dcc.blender.fx2d.playblast_capture import backdrop, capture
 
 if TYPE_CHECKING:
     from bpy.stub_internal.rna_enums import OperatorReturnItems
@@ -71,11 +53,9 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 PREVIEW = "skd_playblast"
-SHOT_FOLDER_ID = DestinationId("shot_folder")
-# Enough to anti-alias strokes; more samples barely change a frame's render time,
-# which is mostly evaluating the scene.
-_SAMPLES = 16
-_FRAMES = "playblast"
+# The frames went through the view transform as they rendered. Shown as data
+# through no view, they look exactly like the movie they become.
+_RAW = "Raw"
 _NO_PLAYLIST = ("NONE", "None", "", 0)
 
 
@@ -117,201 +97,6 @@ def _sending() -> bool:
     return _send is not None and _send.thread is not None and _send.thread.is_alive()
 
 
-# ----------------------------------------------------------------------
-# Capture
-# ----------------------------------------------------------------------
-
-
-@contextmanager
-def _overridden(target: Any, **values: object) -> Generator[None]:
-    """Sets attributes of a Blender struct, restoring them on the way out."""
-    before: dict[str, object] = {}
-    try:
-        for name, value in values.items():
-            before[name] = getattr(target, name)
-            setattr(target, name, value)
-        yield
-    finally:
-        for name, value in before.items():
-            setattr(target, name, value)
-
-
-def _hud_content(shot_root: Path, scene: Scene) -> HudContent:
-    """Artist and the fx2d.blend version the last Deliver saved, `*` for unsaved edits."""
-    shot = ShotGrid.connect(DB_Config).get_shot(code=shot_root.name)
-    stream = blender_fx2d_stream(shot)
-    records = list_version_records(stream)
-    latest = version_label(records[0].version) if records else None
-    return HudContent(
-        left_lines=(
-            labeled_line(ARTIST, resolve_artist_display_name()),
-            line_shot(shot_root.name, latest, unsaved=bpy.data.is_dirty),
-        ),
-        right_lines=(line_date(),),
-        frame_start=scene.frame_start,
-    )
-
-
-def _destinations(shot_root: Path) -> tuple[Destination, ...]:
-    code = shot_root.name
-    return (
-        ShotGridDestination(entity=ShotEntity(code)),
-        DiskDestination(
-            id=SHOT_FOLDER_ID,
-            name="Shot Folder",
-            directory=shot_root / util.DEPARTMENT / "flip",
-            preset=FFmpegPreset.WEB,
-        ),
-        custom_folder_destination(),
-        # Off: edit has one version counter per shot, so this would replace the
-        # shot's newer delivery from another department in the cut.
-        edit_destination(code, util.DEPARTMENT, default_on=False),
-    )
-
-
-def _backdrop(camera: Camera) -> CameraBackgroundImage | None:
-    """The background image Set Backdrop added, or None before it has run."""
-    return next(
-        (
-            background
-            for background in camera.background_images
-            if background.image is not None and background.image.name == BACKDROP
-        ),
-        None,
-    )
-
-
-def _backdrop_tree(background: CameraBackgroundImage) -> CompositorNodeTree:
-    """A compositor tree that lays the render over the backdrop."""
-    tree = bpy.data.node_groups.new(PREVIEW, "CompositorNodeTree")
-    assert isinstance(tree, CompositorNodeTree) and tree.interface is not None
-    tree.interface.new_socket("Image", in_out="OUTPUT", socket_type="NodeSocketColor")
-    nodes, links = tree.nodes, tree.links
-    image: Any = nodes.new("CompositorNodeImage")
-    image.image = background.image
-    user = background.image_user
-    image.frame_start = user.frame_start
-    image.frame_offset = user.frame_offset
-    image.frame_duration = user.frame_duration
-    # The proxy of a 4K render is 4K; fit it to the frame as the camera view does.
-    scale = nodes.new("CompositorNodeScale")
-    scale.inputs["Type"].default_value = "Render Size"  # type: ignore
-    scale.inputs["Frame Type"].default_value = "Fit"  # type: ignore
-    over = nodes.new("CompositorNodeAlphaOver")
-    links.new(image.outputs["Image"], scale.inputs["Image"])
-    links.new(scale.outputs["Image"], over.inputs["Background"])
-    links.new(
-        nodes.new("CompositorNodeRLayers").outputs["Image"], over.inputs["Foreground"]
-    )
-    links.new(over.outputs["Image"], nodes.new("NodeGroupOutput").inputs[0])
-    return tree
-
-
-def _render_over_backdrop(scene: Scene, background: CameraBackgroundImage) -> None:
-    """EEVEE, the strokes cut by the holdout as comp gets them; Workbench ignores it.
-
-    Background images never render, so the backdrop is laid under the strokes in
-    the compositor. Before the view transform, it looks as it does behind the camera
-    and as comp has it.
-    """
-    assert scene.eevee is not None
-    tree = _backdrop_tree(background)
-    try:
-        with (
-            _overridden(
-                scene.render,
-                engine="BLENDER_EEVEE",
-                film_transparent=True,
-                use_compositing=True,
-            ),
-            _overridden(scene, compositing_node_group=tree),
-            _overridden(scene.eevee, taa_render_samples=_SAMPLES),
-        ):
-            bpy.ops.render.render(animation=True, scene=scene.name)
-    finally:
-        bpy.data.node_groups.remove(tree)
-
-
-def _render_geometry(scene: Scene) -> None:
-    """Workbench, as the viewport draws it: the context meshes solid grey, hiding
-    the strokes behind them by depth, as in a Houdini playblast."""
-    with _overridden(scene.render, film_transparent=False):
-        bpy.ops.render.opengl(animation=True, view_context=False)
-
-
-def _render(
-    scene: Scene, directory: Path, background: CameraBackgroundImage | None
-) -> None:
-    """Renders the shot range over the backdrop, or against the geometry for None."""
-    window_manager = bpy.context.window_manager
-    assert window_manager is not None
-    render = scene.render
-    frames = range(scene.frame_start, scene.frame_end + 1)
-
-    # Not render_write: Workbench renders never call it.
-    def on_frame(_scene: Scene, *_: object) -> None:
-        window_manager.progress_update(_scene.frame_current - scene.frame_start + 1)
-
-    bpy.app.handlers.frame_change_post.append(on_frame)
-    window_manager.progress_begin(0, len(frames))
-    try:
-        with (
-            _overridden(render, filepath=f"{directory}/{_FRAMES}."),
-            _overridden(
-                render.image_settings,
-                media_type="IMAGE",
-                file_format="PNG",
-                color_mode="RGB",
-                color_depth="8",
-            ),
-        ):
-            if background is None:
-                _render_geometry(scene)
-            else:
-                _render_over_backdrop(scene, background)
-    finally:
-        window_manager.progress_end()
-        bpy.app.handlers.frame_change_post.remove(on_frame)
-
-    written = len(list(directory.glob(f"{_FRAMES}.*.png")))
-    if written != len(frames):
-        raise RuntimeError(f"Only {written} of {len(frames)} frames were rendered.")
-
-
-def _capture(
-    scene: Scene, shot_root: Path, background: CameraBackgroundImage | None
-) -> PreviewClip:
-    """Renders to a new temp folder and burns the HUD onto the frames."""
-    # Read before rendering, so the HUD describes the file as it was captured.
-    hud = _hud_content(shot_root, scene)
-    directory = create_preview_dir()
-    _render(scene, directory, background)
-    render = scene.render
-    scale = render.resolution_percentage / 100
-    burn_hud_frames(
-        f"{directory}/{_FRAMES}.%04d.png",
-        f"{directory}/{_FRAMES}.hud.%04d.png",
-        hud,
-        (round(render.resolution_x * scale), round(render.resolution_y * scale)),
-        start_frame=scene.frame_start,
-    )
-    return PreviewClip(
-        label=shot_root.name,
-        frames_dir=directory,
-        frames_basename=f"{_FRAMES}.hud",
-        frame_start=scene.frame_start,
-        frame_end=scene.frame_end,
-        fps=round(render.fps / render.fps_base),
-        output_prefix=f"{shot_root.name}_{util.DEPARTMENT}",
-        destinations=_destinations(shot_root),
-    )
-
-
-# ----------------------------------------------------------------------
-# Preview window
-# ----------------------------------------------------------------------
-
-
 def _preview_scene(source: Scene, clip: PreviewClip) -> Scene:
     """A scene whose Sequencer plays the clip's frames."""
     scene = bpy.data.scenes.new(PREVIEW)
@@ -329,13 +114,11 @@ def _preview_scene(source: Scene, clip: PreviewClip) -> Scene:
     )
     for frame in frames[1:]:
         strip.elements.append(frame.name)
-    # The frames went through the view transform as they rendered. Shown as data
-    # through no view, they look exactly like the movie they become.
-    strip.colorspace_settings.name = "Raw"
+    strip.colorspace_settings.name = _RAW
     view_settings = scene.view_settings
     assert view_settings is not None
     # The stubs list only the "NONE" view; the views come from the OCIO config.
-    view_settings.view_transform = "Raw"  # type: ignore
+    view_settings.view_transform = _RAW  # type: ignore
     return scene
 
 
@@ -480,12 +263,14 @@ def _playlist_items(
 
 
 class SKD_PG_fx2d_playblast(PropertyGroup):
-    """The routing choices. Kept on the window manager, which is never saved."""
+    """The routing choices."""
 
     # Named by destination id, so the panel and Send find them from the clip.
     shotgrid: bpy.props.BoolProperty(name="ShotGrid", default=True)  # type: ignore
     shot_folder: bpy.props.BoolProperty(name="Shot Folder", default=True)  # type: ignore
     custom_folder: bpy.props.BoolProperty(name="Custom Folder", default=False)  # type: ignore
+    # Off: edit has one version counter per shot, so this would replace the
+    # shot's newer delivery from another department in the cut.
     edit: bpy.props.BoolProperty(name="Send to Edit", default=False)  # type: ignore
     # Numbered by playlist id, so a pick survives the list being fetched again.
     playlist: bpy.props.EnumProperty(name="Playlist", items=_playlist_items)  # type: ignore
@@ -541,7 +326,7 @@ class SKD_OT_fx2d_playblast(Operator):
 
     def invoke(self, context: Context, event: Event) -> set[OperatorReturnItems]:
         camera = _camera(context)
-        if _backdrop(camera) is None:
+        if backdrop(camera) is None:
             self.show = "GEOMETRY"
             return self.execute(context)
         self.show = "BACKDROP" if camera.show_background_images else "GEOMETRY"
@@ -557,12 +342,12 @@ class SKD_OT_fx2d_playblast(Operator):
         shot_root = util.shot_root()
         scene = context.scene
         assert shot_root is not None and scene is not None
-        background = _backdrop(_camera(context)) if self.show == "BACKDROP" else None
+        background = backdrop(_camera(context)) if self.show == "BACKDROP" else None
         _remove_preview()
         _props(context).description = ""
         threading.Thread(target=_fetch_playlists, daemon=True).start()
         try:
-            clip = _capture(scene, shot_root, background)
+            clip = capture(scene, shot_root, background)
         except Exception as exc:
             log.exception("Playblast of %s failed.", bpy.data.filepath)
             self.report(
