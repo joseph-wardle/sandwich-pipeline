@@ -1,4 +1,4 @@
 {
     "enable": "houdini_os == 'linux'",
-    "package_path": "/groups/sandwich/06_software/openmoonray/2026.29.1-b04a5ce_houdini21.0.596/houdini"
+    "package_path": "/groups/sandwich/06_software/openmoonray/2026.29.1-04324fe_houdini21.0.596/houdini"
 }
