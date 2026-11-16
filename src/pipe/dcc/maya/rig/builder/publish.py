@@ -72,6 +72,7 @@ class RigPublisher:
         return test_runner.run_tests()
 
     def _publish_rig_model(self, rig: RigDefinition):
+        from pipe.dcc.maya.publish.prim_paths import RIG_GEO_PATH
         from pipe.dcc.maya.publish.usdchaser.export import (
             ExportChaser,
             ExportChaserMode,
@@ -90,7 +91,7 @@ class RigPublisher:
                 chaserArgs=[(ExportChaser.ID, "mode", ExportChaserMode.RIG)],
                 exportCollectionBasedBindings=True,
                 exportMaterialCollections=True,
-                materialCollectionsPath="/rig/geo",
+                materialCollectionsPath=str(RIG_GEO_PATH),
                 shadingMode="useRegistry",
             )
         log.info(
