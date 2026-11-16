@@ -4,7 +4,7 @@ from pxr import Sdf
 
 # Prim paths inside a published rig.
 RIG_ROOT_PATH = Sdf.Path("/rig")
-RIG_GEO_PATH = RIG_ROOT_PATH.AppendChild("geo")
+RIG_GEO_PATH = RIG_ROOT_PATH.AppendPath("trs/geo")
 
 # Prim paths inside a shot's anim publish, which indexes rigs rather than holding
 # one: a class prim per rig carrying that rig's animation, and a def per rig that

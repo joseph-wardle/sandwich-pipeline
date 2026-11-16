@@ -25,7 +25,7 @@ from .version import VersionPublisher
 
 log = logging.getLogger(__name__)
 
-CACHE_SET = "rig_geo_grp"
+CACHE_SET = "anim_publish_set"
 
 
 # Frames of preroll spent blending animated channels from their default values
