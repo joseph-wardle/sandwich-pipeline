@@ -57,6 +57,7 @@ class RigPublisher:
         rig_builder = RigBuilder()
         rig_builder.connect_progress(self.build_progress.update_progress)
         rig_build_result = rig_builder.build_rig(rig)
+        cmds.dgdirty(allPlugs=True)
         return rig_build_result
 
     def _run_tests(self, tests: Iterable[type[RigBuildTest]]) -> bool:
