@@ -6,6 +6,7 @@ import maya.cmds as mc
 from timeline_marker.ui import TimelineMarker  # type: ignore[import-not-found]
 
 from pipe.core.shotgrid import Shot, ShotGridError
+from pipe.core.struct.timeline import Timeline, preroll_warning
 
 _Cut = tuple[int, int]
 
@@ -20,13 +21,13 @@ class _Segment(NamedTuple):
     length: int
 
 
-_PREROLL = (
+_WINDUP = (
     _Segment("Rest Pose @Origin", (70, 0, 0), 8),
     _Segment("Rest Pose -> Windup", (150, 0, 0), 8),
     _Segment("Hold Windup", (255, 0, 0), 5),
     _Segment("Windup", (128, 128, 0), 5),
-    _Segment("Head", (128, 255, 128), 5),
 )
+_HEAD_COLOR = (128, 255, 128)
 _TAIL = _Segment("Tail", (100, 160, 255), 5)
 
 
@@ -40,8 +41,11 @@ def sync_shot_timeline(shot: Shot) -> None:
     acknowledged = _acknowledged_cut()
     if acknowledged == cut:
         return
-    if acknowledged is None or _confirm_update(shot.code, acknowledged, cut):
-        _set_timeline(cut)
+    warning = preroll_warning(shot)
+    if acknowledged is None or _confirm_update(shot.code, acknowledged, cut, warning):
+        _set_timeline(Timeline.from_shot(shot), cut)
+        if warning:
+            mc.warning(warning)
     _acknowledge(cut)
 
 
@@ -57,13 +61,16 @@ def _acknowledge(cut: _Cut) -> None:
     mc.fileInfo(_ACKNOWLEDGED_CUT, f"{cut[0]} {cut[1]}")
 
 
-def _confirm_update(code: str | None, old: _Cut, new: _Cut) -> bool:
+def _confirm_update(
+    code: str | None, old: _Cut, new: _Cut, warning: str | None
+) -> bool:
+    message = (
+        f"{code}'s cut changed in ShotGrid from {old[0]}–{old[1]} "
+        f"to {new[0]}–{new[1]}.\n\nUpdate this scene's timeline to match?"
+    )
     answer = mc.confirmDialog(
         title="Timeline",
-        message=(
-            f"{code}'s cut changed in ShotGrid from {old[0]}–{old[1]} "
-            f"to {new[0]}–{new[1]}.\n\nUpdate this scene's timeline to match?"
-        ),
+        message=f"{message}\n\n{warning}" if warning else message,
         button=[_UPDATE, _KEEP],
         defaultButton=_UPDATE,
         cancelButton=_KEEP,
@@ -72,15 +79,16 @@ def _confirm_update(code: str | None, old: _Cut, new: _Cut) -> bool:
     return answer == _UPDATE
 
 
-def _set_timeline(cut: _Cut) -> None:
+def _set_timeline(timeline: Timeline, cut: _Cut) -> None:
     cut_in, cut_out = cut
+    head = _Segment("Head", _HEAD_COLOR, cut_in - timeline.start)
     shot_body = _Segment("Animate!", (0, 255, 0), cut_out - cut_in + 1)
     frame_segments = [
         segment
-        for segment in (*_PREROLL, shot_body, _TAIL)
+        for segment in (*_WINDUP, head, shot_body, _TAIL)
         for _ in range(segment.length)
     ]
-    start = cut_in - sum(segment.length for segment in _PREROLL)
+    start = timeline.start - sum(segment.length for segment in _WINDUP)
     end = start + len(frame_segments) - 1
 
     TimelineMarker.set(

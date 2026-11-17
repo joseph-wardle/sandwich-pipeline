@@ -13,6 +13,7 @@ import maya.cmds as mc
 from pipe.core.publish import Target
 from pipe.core.shot import shot_target
 from pipe.core.shotgrid import Shot
+from pipe.core.struct.timeline import Timeline
 from pipe.core.ui import (
     FilteredListDialog,
     MessageDialog,
@@ -160,13 +161,11 @@ class CameraPublisher(VersionPublisher):
 
     def _get_mayausd_kwargs(self) -> dict[str, Any]:
         shot = cast(Shot, self._target.entity)
-        cut_in, cut_out = shot.frame_range
-        start = cut_in - 5
-        end = cut_out + 5
+        timeline = Timeline.from_shot(shot)
         return {
             "chaser": [ExportChaser.ID],
             "chaserArgs": [(ExportChaser.ID, "mode", ExportChaserMode.CAM)],
-            "frameRange": (start, end),
+            "frameRange": (timeline.start, timeline.end),
             "frameStride": 1.0 / shot.substeps,
         }
 

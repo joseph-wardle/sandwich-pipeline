@@ -22,6 +22,7 @@ from pipe.core.shotgrid import (
     Shot,
     ShotGridNotFound,
 )
+from pipe.core.struct.timeline import Timeline, preroll_warning
 from pipe.dcc.houdini.util import nodetypes
 
 from .filemanager import HFileManager
@@ -346,9 +347,13 @@ class HShotFileManager(HFileManager):
         hou.setContextOption("SHOT", shot.shot_path)
 
     def _set_playbar_ranges(self, shot: Shot) -> None:
-        cut_in, cut_out = shot.frame_range
-        hou.playbar.setFrameRange(cut_in - 5, cut_out + 5)
-        hou.playbar.setPlaybackRange(cut_in - 5, cut_out + 5)
+        timeline = Timeline.from_shot(shot)
+        hou.playbar.setFrameRange(timeline.start, timeline.end)
+        hou.playbar.setPlaybackRange(timeline.start, timeline.end)
+        if warning := preroll_warning(shot):
+            log.warning(warning)
+            if hou.isUIAvailable():
+                hou.ui.setStatusMessage(warning, severity=hou.severityType.Warning)
 
     def _sync_sets(self, shot: Shot) -> None:
         sets = shot.sets or []
