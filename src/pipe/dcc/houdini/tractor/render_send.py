@@ -8,6 +8,7 @@ that file, and spools the job.
 from __future__ import annotations
 
 import functools
+import json
 import logging
 import re
 import traceback
@@ -20,6 +21,7 @@ import tractor.api.author as author
 from pxr import Sdf, Tf, Usd, UsdRender
 
 from pipe.core.playblast.presets import FFmpegPreset
+from pipe.core.render import farm
 from pipe.core.publish import current_version, loaded_version, pin, version_name
 from pipe.core.render import RENDER_USD
 from pipe.dcc.houdini.tractor import (
@@ -31,7 +33,13 @@ from pipe.dcc.houdini.tractor import (
     parms,
     paths,
 )
-from pipe.dcc.houdini.tractor.send import BUILD_FAILED, refuse, setenv, spool
+from pipe.dcc.houdini.tractor.send import (
+    BUILD_FAILED,
+    refuse,
+    setenv,
+    try_spool,
+    unconfirmed_message,
+)
 
 CONFIGURE = "tractor_configure"
 DENOISE = "tractor_denoise"
@@ -54,10 +62,71 @@ class Chain:
     output: hou.Node
 
 
+@dataclass(frozen=True)
+class Sent:
+    title: str
+    # One per chain, in the order they were sent.
+    folders: list[Path]
+    # None when Tractor never confirmed the job, which may still be queued.
+    job_id: int | None
+    # The traceback of the unconfirmed spool, else "".
+    unconfirmed: str
+
+    @property
+    def kept(self) -> str:
+        return "Its folders were kept:\n" + "\n".join(str(f) for f in self.folders)
+
+
+class BuildFailed(Exception):
+    """Building the job raised something no check refused; `details` holds the traceback."""
+
+    details: str
+
+    def __init__(self, details: str) -> None:
+        super().__init__(BUILD_FAILED)
+        self.details = details
+
+
 def send(submit: hou.Node, inputs: list[hou.Node] | None = None) -> None:
-    """Send `inputs`, by default every chain wired into `submit`, as one job."""
+    """Send `inputs`, by default every chain wired into `submit`, as one job,
+    and tell the artist in a dialog what happened."""
+    try:
+        sent = send_job(submit, inputs)
+    except SendRefused as refusal:
+        refuse(str(refusal))
+        return
+    except BuildFailed as failure:
+        refuse(BUILD_FAILED, failure.details)
+        return
+
+    if sent.job_id is None:
+        hou.ui.displayMessage(
+            unconfirmed_message(sent.title, sent.kept),
+            title="Tractor did not confirm the job",
+            severity=hou.severityType.Warning,
+            details=sent.unconfirmed,
+        )
+        return
+    hou.ui.displayMessage(
+        f"Job {sent.job_id} renders into:\n"
+        + "\n".join(str(folder) for folder in sent.folders)
+        + "\n\nCheck its progress in Tractor.",
+        title="Job sent to Tractor",
+    )
+
+
+def send_job(submit: hou.Node, inputs: list[hou.Node] | None = None) -> Sent:
+    """Send `inputs`, by default every chain wired into `submit`, as one job.
+
+    Shows nothing, so the Render Network window's headless Houdini sends with
+    it too.
+
+    Raises:
+        SendRefused: A check found something the artist must fix; no folder
+            was kept and nothing was sent.
+        BuildFailed: Building the job raised; no folder was kept.
+    """
     claimed: list[Path] = []
-    built = None
     try:
         chains = [chain(n) for n in (submit.inputs() if inputs is None else inputs)]
         check_layers(chains)
@@ -66,27 +135,18 @@ def send(submit: hou.Node, inputs: list[hou.Node] | None = None) -> None:
         claimed = folders.claim([c.configure for c in chains])
         title = _title(submit, chains)
         built = build(submit, title, chains)
-    except SendRefused as refusal:
-        refuse(str(refusal))
-    except Exception:
-        log.exception("Building the job from %s failed", submit.path())
-        refuse(BUILD_FAILED, traceback.format_exc())
-    if built is None:
+    except SendRefused:
         folders.release(claimed)
-        return
+        raise
+    except Exception as exc:
+        log.exception("Building the job from %s failed", submit.path())
+        folders.release(claimed)
+        raise BuildFailed(traceback.format_exc()) from exc
 
-    kept = "\n".join(str(folder) for folder in claimed)
-    job_id = spool(built, title, f"Its folders were kept:\n{kept}")
-    if job_id is not None:
-        hou.ui.displayMessage(
-            f"Job {job_id} renders into:\n"
-            + "\n".join(str(folder) for folder in claimed)
-            + "\n\nCheck its progress in Tractor.",
-            title="Job sent to Tractor",
-        )
-
+    job_id, unconfirmed = try_spool(built, title)
     for c, folder in zip(chains, claimed):
         folders.record_sent(c.configure, folder, job_id)
+    return Sent(title, claimed, job_id, unconfirmed)
 
 
 def chain(node: hou.Node | None) -> Chain:
@@ -167,12 +227,27 @@ def build(submit: hou.Node, title: str, chains: list[Chain]) -> author.Job:
     # Each current layer is read once, so every layer of the job renders the
     # same versions even when someone publishes during the Send.
     version_of = functools.cache(_sent_version)
+    layers = [layer(c, version_of) for c in chains]
     return job.render_job(
         title,
         int(submit.evalParm("priority")),
         setenv(),
-        [layer(c, version_of) for c in chains],
+        layers,
+        _metadata(layers),
     )
+
+
+def _metadata(layers: list[commands.Layer]) -> str:
+    """The shot and each layer's folder, so the Render Network window finds
+    the job by its shot whatever its title, and shows its frames."""
+    found: dict[str, object] = {
+        "folders": {lay.name: str(lay.folder) for lay in layers}
+    }
+    # A shot hip's SHOT is "shot/<code>"; other hips have none.
+    shot = str(hou.contextOption("SHOT") or "")
+    if shot.startswith("shot/"):
+        found[farm.SHOT_KEY] = shot.removeprefix("shot/")
+    return json.dumps(found)
 
 
 def layer(chain: Chain, version_of: Callable[[Path], int | None]) -> commands.Layer:

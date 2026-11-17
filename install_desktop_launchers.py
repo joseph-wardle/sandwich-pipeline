@@ -70,6 +70,13 @@ LAUNCHERS: list[Launcher | ToolLauncher] = [
         "sandwich.png",
         "Sandwich Kwon Do Lighting Render Cleanup",
     ),
+    ToolLauncher(
+        "render-network.desktop",
+        "Render Network",
+        "pipe.core.render.network",
+        "sandwich.png",
+        "Sandwich Kwon Do Render Layers and Tractor Sends",
+    ),
 ]
 
 

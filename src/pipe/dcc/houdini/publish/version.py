@@ -23,6 +23,7 @@ from pipe.core.shot import shot_target
 from pipe.core.shotgrid import Set, Shot, ShotGrid, ShotGridError, ShotGridNotFound
 from pipe.core.struct.timeline import Timeline
 from pipe.core.ui import MessageDialog, prompt_publish
+from pipe.core.ui.publish_dialog import PublishChoice
 from pipe.core.util.paths import get_production_path
 from pipe.core.util.users import resolve_artist_display_name
 from pipe.dcc.houdini import runtime
@@ -86,6 +87,34 @@ def _publish(window: QtWidgets.QWidget | None) -> _Published | None:
     if choice is None:
         return None
     _save_hip()
+    lines = publish_hip(conn, target, hip_path, choice, node, frame_range)
+    if lines is None:
+        return None
+    description = f"{target.label}: {choice.note}" if choice.note else target.label
+    return _Published(lines, description if choice.playblast else None)
+
+
+def publish_hip(
+    conn: ShotGrid,
+    target: Target,
+    hip_path: Path,
+    choice: PublishChoice,
+    node: hou.LopNode | None = None,
+    frame_range: tuple[int, int] | None = None,
+) -> list[str] | None:
+    """Write the loaded hip's publish node and publish it as `target`'s next
+    version, keeping `hip_path` as its scene. Shows no dialog for a shot, so
+    the Render Network window's headless Houdini publishes lighting with it.
+
+    The hip on disk is the scene kept with the version, so the caller saves
+    it first if it has changed. Returns what the result box says, or None if
+    the artist backed out of a set publish.
+
+    Raises:
+        Refused: Nothing was published, and why.
+    """
+    node = node or publish_node()
+    frame_range = frame_range or _frame_range(target.entity)
 
     def write(staged: Path) -> None:
         _render(node, staged, frame_range)
@@ -93,7 +122,7 @@ def _publish(window: QtWidgets.QWidget | None) -> _Published | None:
             _prepare_set(staged, target.entity, hip_path)
 
     try:
-        lines = publish_version(
+        return publish_version(
             conn,
             target,
             scene=hip_path,
@@ -105,8 +134,6 @@ def _publish(window: QtWidgets.QWidget | None) -> _Published | None:
         )
     except _BackedOut:
         return None
-    description = f"{target.label}: {choice.note}" if choice.note else target.label
-    return _Published(lines, description if choice.playblast else None)
 
 
 def publish_node() -> hou.LopNode:
