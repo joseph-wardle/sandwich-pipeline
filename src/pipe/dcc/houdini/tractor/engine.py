@@ -18,8 +18,7 @@ def ended(job_id: int) -> bool:
     by an error hasn't ended: it may be retried. Raises OSError when the engine
     can't be reached, and ValueError when its reply can't be read."""
     url = f"https://{os.environ['TRACTOR_ENGINE']}/Tractor/monitor?q=jtree&jid={job_id}"
-    cafile = SYSTEM_CA_BUNDLE if os.path.isfile(SYSTEM_CA_BUNDLE) else None
-    context = ssl.create_default_context(cafile=cafile)
+    context = tls_context()
     with urllib.request.urlopen(url, timeout=TIMEOUT_SECONDS, context=context) as reply:
         users = json.load(reply).get("users", {})
     # The job's owner is the one key.
@@ -28,3 +27,10 @@ def ended(job_id: int) -> bool:
         total, _active, done, _errors = data["nTasks"]
         return data.get("deletetime") is not None or done == total
     return True
+
+
+def tls_context() -> ssl.SSLContext:
+    """What verifies the engine's certificate. On Windows, Python reads the
+    system store itself."""
+    cafile = SYSTEM_CA_BUNDLE if os.path.isfile(SYSTEM_CA_BUNDLE) else None
+    return ssl.create_default_context(cafile=cafile)

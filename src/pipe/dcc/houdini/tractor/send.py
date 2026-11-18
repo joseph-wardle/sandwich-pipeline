@@ -3,17 +3,21 @@ in, spooling the job, and what it tells the artist."""
 
 from __future__ import annotations
 
+import getpass
 import logging
 import os
+import platform
+import socket
 import traceback
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import hou
 import tractor.api.author as author
+from tractor.base import TrHttpRPC
 
-from env import Executables
+from pipe.core.util import mounts
 from pipe.dcc.houdini import launch
-from pipe.dcc.houdini.tractor import SendRefused
+from pipe.dcc.houdini.tractor import SendRefused, engine
 
 BUILD_FAILED = (
     "The job could not be built, so nothing was sent to Tractor. The details "
@@ -39,11 +43,13 @@ ENV_VARS = (
 # The same on every machine: the license from /etc/profile.d, and RenderMan's
 # install, which names no Houdini build.
 MACHINE_VARS = ("PIXAR_LICENSE_FILE", "RFHTREE", "RMANTREE")
-# A blade's own PATH has no Houdini, and not even /usr/bin. The Houdini folder
-# is the link each machine points at its own build.
-PATH = os.pathsep.join([str(Executables.hfs / "bin"), "/usr/bin", "/bin"])
+PIXAR_TREES = ("RFHTREE", "RMANTREE")
+BLADE_PIXAR = PurePosixPath("/opt/pixar")
+SYSTEM_PATH = ("/usr/bin", "/bin")
+BLADE_PATH_SEPARATOR = ":"
 
 log = logging.getLogger(__name__)
+_tls_connected = False
 
 
 def check(node: hou.Node) -> None:
@@ -67,21 +73,72 @@ def _locked_asset(node: hou.Node) -> hou.Node:
 
 
 def environment() -> dict[str, str]:
-    """What a blade needs to load the hip as the session did.
+    """What a blade needs to load the hip as the session did, naming the
+    blade's own paths whichever machine sends.
 
     The launcher's values, not the session's: Houdini's packages add paths named
     for this workstation's build, and on a blade they add the blade's own.
+
+    Raises:
+        SendRefused: A value names a Windows path no blade can read.
     """
     env = {
         name: str(value)
         for name, value in launch.environment().items()
         if value is not None
     }
-    env["PATH"] = PATH
     for name in MACHINE_VARS:
         if value := hou.getenv(name):
             env[name] = value
-    return dict(sorted(env.items()))
+    installs = _pixar_installs(env)
+    blade = {
+        name: BLADE_PATH_SEPARATOR.join(
+            _blade_path(name, entry, installs) for entry in value.split(os.pathsep)
+        )
+        for name, value in env.items()
+    }
+    blade["PATH"] = BLADE_PATH_SEPARATOR.join(
+        [str(_blade_houdini() / "bin"), *SYSTEM_PATH]
+    )
+    return dict(sorted(blade.items()))
+
+
+def _pixar_installs(env: dict[str, str]) -> dict[PureWindowsPath, PurePosixPath]:
+    """Each RenderMan install on this Windows machine's own disk, and the
+    blade's install of it."""
+    found = (PureWindowsPath(env[name]) for name in PIXAR_TREES if name in env)
+    return {
+        local: BLADE_PIXAR / local.name
+        for local in found
+        if mounts.is_windows_path(local)
+    }
+
+
+def _blade_path(
+    name: str, entry: str, installs: dict[PureWindowsPath, PurePosixPath]
+) -> str:
+    """One entry of the variable `name`, as a blade names it."""
+    if not mounts.is_windows_path(entry):
+        return entry
+    local = PureWindowsPath(entry)
+    for install, blade in installs.items():
+        if local.is_relative_to(install):
+            return str(blade.joinpath(*local.relative_to(install).parts))
+    try:
+        return str(mounts.linux_path(entry))
+    except mounts.NotOnShare:
+        drives = ", ".join(f"{drive}:" for drive in mounts.DRIVE_SHARES)
+        raise SendRefused(
+            f"{name} names {entry}, which is on this computer's own disk, so no "
+            "farm blade can read it. Send needs the pipeline and everything it "
+            f"reads on a production drive ({drives}). Ask a pipeline TD to move it."
+        ) from None
+
+
+def _blade_houdini() -> PurePosixPath:
+    """The blade's Houdini of the session's version."""
+    major, minor, _build = hou.applicationVersion()
+    return PurePosixPath(f"/opt/hfs{major}.{minor}")
 
 
 def setenv() -> str:
@@ -101,8 +158,10 @@ def job_title(node: hou.Node, what: str = "") -> str:
 def spool(built: author.Job, title: str, unconfirmed: str = "") -> int | None:
     """The job's id, or None after warning that Tractor did not confirm it,
     ending with `unconfirmed`."""
+    if platform.system() == "Windows":
+        _connect_with_tls()
     try:
-        return built.spool(block=True)
+        return built.spool(block=True, owner=getpass.getuser())
     except Exception:
         # A lost reply looks the same as a refusal, and the job may already be
         # queued and reading its folders, so they stay.
@@ -116,6 +175,33 @@ def spool(built: author.Job, title: str, unconfirmed: str = "") -> int | None:
             details=traceback.format_exc(),
         )
         return None
+
+
+def _connect_with_tls() -> None:
+    """Make the Tractor client speak TLS, for this session."""
+    global _tls_connected
+    if _tls_connected:
+        return
+    connect = TrHttpRPC.TrHttpRPC.httpConnect
+    context = engine.tls_context()
+
+    def connect_with_tls(
+        rpc: TrHttpRPC.TrHttpRPC,
+    ) -> tuple[int, str | None, socket.socket | None]:
+        errcode, outdata, plain = connect(rpc)
+        if plain is None:
+            return errcode, outdata, None
+        try:
+            secure = context.wrap_socket(plain, server_hostname=rpc.host)
+        except OSError as error:
+            plain.close()
+            # The client's own shape for a failed connect, so its SpoolError
+            # names the engine.
+            return 999, f"TLS handshake with {rpc.host}:{rpc.port}: {error}", None
+        return errcode, outdata, secure
+
+    TrHttpRPC.TrHttpRPC.httpConnect = connect_with_tls
+    _tls_connected = True
 
 
 def refuse(message: str, details: str | None = None) -> None:
