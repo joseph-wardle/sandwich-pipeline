@@ -1,9 +1,10 @@
-"""What Tractor says about a shot's render jobs, and retrying and archiving them.
+"""What Tractor says about a shot's render jobs and the farm's blades, and
+retrying and archiving jobs.
 
-Jobs, tasks and command logs come from the engine's monitor and log endpoints,
-which need no login, so anyone can see every artist's jobs. Retrying and
-archiving go through `tractor.api.query`, which needs the Tractor login of the
-job's owner or of an administrator.
+Jobs, tasks, commands, command logs and blades come from the engine's monitor
+and log endpoints, which need no login, so anyone can see every artist's jobs.
+Retrying and archiving go through `tractor.api.query`, which needs the Tractor
+login of the job's owner or of an administrator.
 """
 
 from __future__ import annotations
@@ -27,6 +28,9 @@ TIMEOUT_SECONDS = 15.0
 SYSTEM_CA_BUNDLE = "/etc/pki/tls/certs/ca-bundle.crt"
 # Send writes this into each job's metadata; older jobs are matched by title.
 SHOT_KEY = "shot"
+# Every job a pipeline tool sends sets its environment from the production's
+# folders, which no other class's job names.
+_SANDWICH_ENV = "/job/sandwich/"
 # Each attempt at a command starts its log with a header like
 # "====[2026/11/13 15:35:57 /J18142/T3/C1.1/pdolbin@host on blade ]====".
 _ATTEMPT_HEADER = re.compile(r"^====\[\S+ \S+ /J\d+/T\d+/", re.MULTILINE)
@@ -73,6 +77,8 @@ class Job:
     paused: bool
     # Send's notes, such as {"shot": "A_080", "folders": {"beauty": "..."}}.
     metadata: dict[str, Any]
+    # Sent by a pipeline tool, rather than by another class on the same farm.
+    sandwich: bool = False
 
     @property
     def status(self) -> str:
@@ -115,12 +121,51 @@ class Task:
     # How far along it is, 0 to 100: done is 100, and one that hasn't started
     # or that errored has none.
     percent: int | None = None
+    # The ids of the commands it runs, which changing a command needs.
+    cids: tuple[int, ...] = ()
 
     @property
     def seconds(self) -> float | None:
         if self.started is None or self.finished is None:
             return None
         return max(self.finished - self.started, 0.0)
+
+
+@dataclass(frozen=True)
+class Command:
+    """One command of a task, as Tractor's task details describe its last attempt."""
+
+    cid: int
+    # The service key expression that chooses which blades may run it.
+    service: str
+    state: str
+    exit_code: int | None
+    # The most memory it held, in GB, as the blade reported it.
+    peak_memory_gb: float
+    blades: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Blade:
+    """A render blade, as it last reported itself to the engine."""
+
+    name: str
+    profile: str
+    address: str
+    # Empty when the blade takes anyone's work. Lab blades in use are set to
+    # "/local/<host>", so they take only jobs sent from that computer.
+    nimby: str
+    # Free memory and disk, in GB, when it last reported.
+    free_memory_gb: float
+    free_disk_gb: float
+    cpus: int
+    gpu: str
+    slots: int
+    running: int
+    # When it last reported, in seconds since the epoch.
+    heartbeat: float | None
+    # Tractor's own word on why it isn't taking work, such as "no free slots (1)".
+    note: str
 
 
 def shot_jobs(shot_code: str) -> list[Job]:
@@ -158,7 +203,7 @@ def shot_of(job: Job, shot_codes: list[str]) -> str | None:
     if shot := job.metadata.get(SHOT_KEY):
         return str(shot)
     # Longest first, so "A_080_alt" is not taken for "A_080".
-    for code in sorted(shot_codes, key=len, reverse=True):
+    for code in sorted(shot_codes, key=lambda code: len(code), reverse=True):
         if _code_pattern(code).search(job.title):
             return code
     return None
@@ -173,6 +218,17 @@ def tasks(job: Job) -> list[Task]:
     found: list[Task] = []
     _collect(tree, found)
     return found
+
+
+def commands(job: Job, task: Task) -> list[Command]:
+    """The task's commands, with each one's service key and last attempt."""
+    reply = _monitor({"q": "taskdetails", "jid": str(job.jid), "tid": str(task.tid)})
+    return [_command(data) for data in reply.get("cmds") or []]
+
+
+def blades() -> list[Blade]:
+    """Every blade the engine knows, as each last reported."""
+    return [_blade(data) for data in _monitor({"q": "blades"}).get("blades", [])]
 
 
 def log(job: Job, task: Task) -> str:
@@ -280,11 +336,16 @@ def _as(user: str, password: str, action: str, run: Callable[[Any], None]) -> No
         query.closeEngineClient()
 
 
-def _query(user: str, password: str) -> Any:
+def use_tractor_api() -> None:
+    """Make the Tractor API importable, as `tractor.api` and `tractor.base`."""
     # The Tractor API ships with RenderMan, outside every venv.
     api = str(Executables.rmantree / "bin")
     if api not in sys.path:
         sys.path.append(api)
+
+
+def _query(user: str, password: str) -> Any:
+    use_tractor_api()
     import tractor.api.query as query
 
     host, _, port = TRACTOR_ENGINE.partition(":")
@@ -352,6 +413,7 @@ def _job(owner: str, data: dict[str, Any], metadata: dict[str, Any]) -> Job:
         errors=errors,
         paused=bool(data.get("paused")),
         metadata=metadata,
+        sandwich=any(_SANDWICH_ENV in str(env) for env in data.get("envkey") or []),
     )
 
 
@@ -378,4 +440,34 @@ def _task(data: dict[str, Any]) -> Task:
         started=data.get("activetime"),
         finished=data.get("statetime"),
         percent=int(progress) if progress.isdigit() else None,
+        cids=tuple(int(cid) for cid in data.get("cids") or []),
+    )
+
+
+def _command(data: dict[str, Any]) -> Command:
+    code = str(data.get("exitcode", ""))
+    return Command(
+        cid=int(data["cid"]),
+        service=str(data.get("service") or ""),
+        state=str(data.get("state") or ""),
+        exit_code=int(code) if code.lstrip("-").isdigit() else None,
+        peak_memory_gb=float(data.get("rss") or 0.0),
+        blades=tuple(str(blade) for blade in data.get("blades") or []),
+    )
+
+
+def _blade(data: dict[str, Any]) -> Blade:
+    return Blade(
+        name=str(data.get("hnm", "")),
+        profile=str(data.get("profile", "")),
+        address=str(data.get("addr", "")),
+        nimby=str(data.get("nimby") or ""),
+        free_memory_gb=float(data.get("mem") or 0.0),
+        free_disk_gb=float(data.get("disk") or 0.0),
+        cpus=int(data.get("ncpu") or 0),
+        gpu=str(data.get("gpulabel") or ""),
+        slots=int(data.get("ns") or 0),
+        running=int(data.get("numcmd") or 0),
+        heartbeat=float(data["t"]) if data.get("t") else None,
+        note=str(data.get("note") or ""),
     )

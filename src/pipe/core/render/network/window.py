@@ -17,6 +17,7 @@ from Qt import QtCore, QtGui, QtWidgets
 from pipe.core.render.network.client import WorkerRun
 from pipe.core.render.network.log_viewer import LogViewer
 from pipe.core.render.network.departments import DepartmentPanel
+from pipe.core.render.network.doctor_page import DoctorPage
 from pipe.core.render.network.farm_tab import FarmTab
 from pipe.core.render.network.overview import OverviewPage
 from pipe.core.render.network.form import ParmForm
@@ -69,6 +70,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
     _tabs: QtWidgets.QTabWidget
     _farm: FarmTab
     _overview: OverviewPage
+    _doctor: DoctorPage
     _pages: QtWidgets.QTabWidget
     _viewer: FrameViewer
     _busy: QtWidgets.QWidget
@@ -133,6 +135,9 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._pages = QtWidgets.QTabWidget()
         self._pages.addTab(splitter, "Shots")
         self._pages.addTab(self._overview, "Tractor Overview")
+        self._doctor = DoctorPage([shot.code or "" for shot in shots])
+        self._doctor.open_job.connect(self._open_farm_job)
+        self._pages.addTab(self._doctor, "Farm Doctor")
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self._pages)
 
@@ -501,7 +506,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
             self._open(result.shot)
 
     def _open_farm_job(self, shot: str, jid: int) -> None:
-        """Show a job the Overview chose, on its shot's Farm tab."""
+        """Show a job the Overview or the Farm Doctor chose, on its shot's Farm tab."""
         self._pages.setCurrentIndex(0)
         self._shot_list.select(shot)
         self._choose_shot(shot)
