@@ -135,8 +135,14 @@ class FarmTab(QtWidgets.QWidget):
         self._retry_selected.setToolTip("Run the selected tasks again")
         self._retry_selected.clicked.connect(lambda: self._retry(selected=True))
         self._retry_errors = QtWidgets.QPushButton("Retry All Errors")
-        self._retry_errors.setToolTip("Run every errored task of this job again")
+        self._retry_errors.setToolTip(
+            "Run every errored task of the selected job again (R)"
+        )
         self._retry_errors.clicked.connect(lambda: self._retry(selected=False))
+        # Anywhere in the Farm tab, and nowhere else in the window.
+        retry_key = _shortcut(QtGui.QKeySequence("R"), self)
+        retry_key.setContext(QtCore.Qt.WidgetWithChildrenShortcut)
+        retry_key.activated.connect(self._retry_errors_key)
         self._view = QtWidgets.QPushButton("View Frames")
         self._view.setToolTip(
             "Show this task's frame in the Images tab (or double-click it)"
@@ -418,6 +424,16 @@ class FarmTab(QtWidgets.QWidget):
             self._login_failed,
         )
 
+    def _retry_errors_key(self) -> None:
+        """R: retry the selected job's errored tasks, as Retry All Errors does."""
+        job = self._job
+        if job is None:
+            self._status.setText("Choose a job to retry its errors.")
+        elif not job.errors:
+            self._status.setText(f"Job {job.jid} has no errored tasks to retry.")
+        else:
+            self._retry(selected=False)
+
     def _retried(self, job: Job, what: str) -> None:
         self._status.setText(f"Tractor is running {what} of job {job.jid} again.")
         QtCore.QTimer.singleShot(2000, self.refresh)
@@ -606,6 +622,10 @@ class _LoginDialog(QtWidgets.QDialog):
 
     def remember(self) -> bool:
         return self._remember.isChecked()
+
+
+# Qt 6 moved QShortcut from QtWidgets to QtGui.
+_shortcut = getattr(QtGui, "QShortcut", None) or QtWidgets.QShortcut
 
 
 def _table(headers: list[str]) -> QtWidgets.QTreeWidget:

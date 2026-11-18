@@ -12,7 +12,7 @@ import argparse
 import logging
 import sys
 
-from Qt import QtWidgets
+from Qt import QtGui, QtWidgets
 
 from pipe.core.render.lighters import current_user, lit_shots
 from pipe.core.render.network import splash, theme
@@ -21,9 +21,12 @@ from pipe.core.render.network import render_status
 from pipe.core.render.network.render_status import RenderBoard
 from pipe.core.shotgrid import Shot, ShotGrid, is_previs_shot_code
 from pipe.core.ui import MessageDialog
+from pipe.core.util.paths import get_repo_root
 from pipe.core.util.users import is_admin
 
 log = logging.getLogger(__name__)
+
+ICON = get_repo_root() / "resources/icon/sandwich_renderer.png"
 
 
 def main() -> None:
@@ -38,6 +41,10 @@ def main() -> None:
     args = parser.parse_args()
 
     app = QtWidgets.QApplication(sys.argv)
+    # The taskbar matches the window to its desktop launcher by these.
+    app.setApplicationName(TITLE)
+    app.setDesktopFileName("sandwich-renderer")
+    app.setWindowIcon(QtGui.QIcon(str(ICON)))
     theme.apply(app)
     shown = splash.show()
 

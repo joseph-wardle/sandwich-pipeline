@@ -218,7 +218,16 @@ class ShotList(QtWidgets.QWidget):
 
 class _ShotTree(QtWidgets.QTreeWidget):
     """Over a shot's status icon, the tooltip names its Render status; elsewhere on
-    the row it shows the row's own tooltip."""
+    the row it shows the row's own tooltip. Right-clicking a shot leaves the
+    open shot as it is."""
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802 (Qt's name)
+        # Right-click only opens the status menu: choosing the shot would open
+        # it in Houdini, which changing its status doesn't need.
+        if event.button() == QtCore.Qt.RightButton:
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
     def viewportEvent(self, event: QtCore.QEvent) -> bool:  # noqa: N802 (Qt's name)
         if event.type() != QtCore.QEvent.ToolTip:
