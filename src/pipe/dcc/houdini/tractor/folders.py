@@ -35,11 +35,14 @@ def _holder(node: hou.Node, name: str) -> hou.Parm | None:
     return parm
 
 
+# Their renders are the shot's, so they sit beside it where Nuke's auto-read looks.
+_SHOT_RENDERING = (Department.LIGHTING, Department.RENDER)
+
+
 def default_root(node: hou.Node) -> str:
-    # Lighting renders sit beside the shot, where Nuke's auto-read looks;
-    # every other hip keeps its test renders to itself.
+    # Every other hip keeps its test renders to itself.
     hip = Path(hou.text.expandString("$HIP"))
-    base = hip.parent if hip.name == Department.LIGHTING else hip
+    base = hip.parent if hip.name in _SHOT_RENDERING else hip
     return str(base / RENDER_DIRNAME / text(node, LAYER))
 
 

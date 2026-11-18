@@ -43,6 +43,7 @@ from pipe.core.shotgrid.entities import (
     Sequence,
     Set,
     Shot,
+    Status,
     Task,
     User,
     Version,
@@ -461,6 +462,38 @@ class ShotGrid:
         )
         return self._many(rows, Shot)
 
+    @ttl_cache(seconds=300)
+    def find_statuses(self, *, entity_type: str) -> list[Status]:
+        """The statuses `entity_type`'s status field may hold, in menu order."""
+        codes = _read_or_raise(
+            lambda: self._sg.schema_field_read(entity_type, "sg_status_list"),
+            entity_type=entity_type,
+            selector="field",
+            value="sg_status_list",
+        )["sg_status_list"]["properties"]["valid_values"]["value"]
+        rows = _read_or_raise(
+            lambda: self._sg.find(
+                "Status",
+                [("code", "in", codes)],
+                ["code", "name", "bg_color", "icon.Icon.image_map_key"],
+            ),
+            entity_type="Status",
+            selector="codes",
+            value=codes,
+        )
+        by_code = {row["code"]: row for row in rows}
+        return [
+            Status(
+                code=code,
+                name=by_code[code].get("name") or code,
+                color=_rgb(by_code[code].get("bg_color")),
+                icon=by_code[code].get("icon.Icon.image_map_key"),
+            )
+            if code in by_code
+            else Status(code=code, name=code, color=None, icon=None)
+            for code in codes
+        ]
+
     # ---- reads: sequences --------------------------------------------------
 
     def get_sequence(
@@ -636,6 +669,7 @@ class ShotGrid:
         shot: Shot | None = None,
         asset: Asset | None = None,
         user: User | None = None,
+        step: str | None = None,
     ) -> list[Task]:
         """Return tasks matching the given filters.
 
@@ -643,6 +677,7 @@ class ShotGrid:
             shot: Restrict to tasks on this shot.
             asset: Restrict to tasks on this asset.
             user: Restrict to tasks assigned to this user.
+            step: Restrict to tasks of this pipeline step, such as "Render".
         """
         filters: list[Any] = [self._project_filter()]
         if shot is not None:
@@ -651,6 +686,8 @@ class ShotGrid:
             filters.append(("entity", "is", _entity_ref("Asset", asset)))
         if user is not None:
             filters.append(("task_assignees", "in", [_entity_ref("HumanUser", user)]))
+        if step is not None:
+            filters.append(("step.Step.code", "is", step))
         rows = _read_or_raise(
             lambda: self._sg.find("Task", filters, list(_SG_FIELDS_TASK)),
             entity_type="Task",
@@ -1148,6 +1185,21 @@ class ShotGrid:
         invalidate(self)
         return self.reload(shot)
 
+    def set_task_status(self, task: Task, status: str) -> None:
+        """Set `task`'s status to the status code `status`, such as "hold".
+
+        Raises:
+            ShotGridWriteError: ShotGrid rejected the update, such as for a
+                status its tasks don't allow.
+        """
+        _write_or_raise(
+            lambda: self._sg.update("Task", task.id, {"sg_status_list": status}),
+            entity_type="Task",
+            entity_id=task.id,
+            field="sg_status_list",
+        )
+        invalidate(self)
+
     # ---- versions ----------------------------------------------------------
 
     def find_version_codes(self, *, code_starts_with: str) -> list[str]:
@@ -1571,6 +1623,15 @@ def _entity_ref(sg_type: str, entity: SGEntity | None) -> dict[str, Any] | None:
     if entity is None:
         return None
     return {"type": sg_type, "id": entity.id}
+
+
+def _rgb(text: str | None) -> tuple[int, int, int] | None:
+    """ShotGrid's "r,g,b" colour, or None for none or one it can't read."""
+    try:
+        red, green, blue = (int(part) for part in (text or "").split(","))
+    except ValueError:
+        return None
+    return red, green, blue
 
 
 def _read_or_raise(

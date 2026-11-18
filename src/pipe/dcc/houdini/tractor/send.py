@@ -101,21 +101,35 @@ def job_title(node: hou.Node, what: str = "") -> str:
 def spool(built: author.Job, title: str, unconfirmed: str = "") -> int | None:
     """The job's id, or None after warning that Tractor did not confirm it,
     ending with `unconfirmed`."""
+    job_id, details = try_spool(built, title)
+    if job_id is None:
+        hou.ui.displayMessage(
+            unconfirmed_message(title, unconfirmed),
+            title="Tractor did not confirm the job",
+            severity=hou.severityType.Warning,
+            details=details,
+        )
+    return job_id
+
+
+def try_spool(built: author.Job, title: str) -> tuple[int | None, str]:
+    """The job's id and "", or None and the traceback when Tractor did not
+    confirm it. Shows nothing, so a session without a UI can spool too."""
     try:
-        return built.spool(block=True)
+        return built.spool(block=True), ""
     except Exception:
         # A lost reply looks the same as a refusal, and the job may already be
         # queued and reading its folders, so they stay.
         log.exception("Tractor did not confirm the job %s", title)
-        hou.ui.displayMessage(
-            "Tractor did not confirm the job, but it may still have been queued. "
-            f'Look for "{title}" in Tractor before sending again.\n\n'
-            f"{unconfirmed}".strip(),
-            title="Tractor did not confirm the job",
-            severity=hou.severityType.Warning,
-            details=traceback.format_exc(),
-        )
-        return None
+        return None, traceback.format_exc()
+
+
+def unconfirmed_message(title: str, unconfirmed: str = "") -> str:
+    return (
+        "Tractor did not confirm the job, but it may still have been queued. "
+        f'Look for "{title}" in Tractor before sending again.\n\n'
+        f"{unconfirmed}".strip()
+    )
 
 
 def refuse(message: str, details: str | None = None) -> None:

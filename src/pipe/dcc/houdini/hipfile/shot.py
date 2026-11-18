@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import traceback
+from collections.abc import Iterable
 from enum import Enum
 from pathlib import Path
 from typing import cast
@@ -113,36 +114,7 @@ class HShotFileManager(HFileManager):
         try:
             super()._setup_file(path, entity)
             self._set_shot_context(shot)
-            stage = self._get_stage()
-            muted_departments = self._get_muted_departments()
-
-            sets = create_sets_node(stage)
-            load_layers = self._create_load_layers(
-                stage=stage, muted_departments=muted_departments
-            )
-            load_layers.setInput(0, sets)
-            layer_break = stage.createNode("layerbreak")
-            layer_break.setInput(0, load_layers)
-
-            department_name = self._department_value().upper()
-            begin_dep = stage.createNode("null")
-            begin_dep.setName(f"BEGIN_{department_name}")
-
-            end_dep = stage.createNode("null")
-            end_dep.setName(f"END_{department_name}")
-
-            begin_dep.setInput(0, layer_break)
-            end_dep.setInput(0, begin_dep)
-            if self._department in PUBLISHING_DEPARTMENTS:
-                publish = stage.createNode(nodetypes.PUBLISH, "PUBLISH")
-                publish.setInput(0, end_dep)
-
-            end_dep.setPosition((0, 1))
-            begin_dep.setPosition((0, 4))
-            layer_break.setPosition((0, 5))
-            load_layers.setPosition((0, 6))
-            sets.setPosition((0, 7))
-
+            build_department_chain(self._get_stage(), self._department_value())
             self._post_open_file(shot)
 
             hou.hipFile.save()
@@ -347,10 +319,7 @@ class HShotFileManager(HFileManager):
         hou.setContextOption("SHOT", shot.shot_path)
 
     def _set_playbar_ranges(self, shot: Shot) -> None:
-        timeline = Timeline.from_shot(shot)
-        hou.playbar.setFrameRange(timeline.start, timeline.end)
-        hou.playbar.setPlaybackRange(timeline.start, timeline.end)
-        if warning := preroll_warning(shot):
+        if warning := set_frame_range(shot):
             log.warning(warning)
             if hou.isUIAvailable():
                 hou.ui.setStatusMessage(warning, severity=hou.severityType.Warning)
@@ -383,31 +352,63 @@ class HShotFileManager(HFileManager):
             )
         MessageDialog(self._main_window, "\n\n".join(lines), "Shot Sets").exec_()
 
-    def _get_muted_departments(self) -> list[str]:
-        department = self._department_value()
-        if department == self.DEPARTMENT.CFX.value:
-            return ["cfx", "fx", "envfx", "lighting"]
-        if department == self.DEPARTMENT.FX.value:
-            return ["fx"]
-        if department == self.DEPARTMENT.FLO.value:
-            return ["cfx", "fx", "envfx", "lighting", "flo"]
-        if department == self.DEPARTMENT.ENVFX.value:
-            return ["envfx"]
-        if department == self.DEPARTMENT.LIGHTING.value:
-            return ["lighting"]
-        if department == self.DEPARTMENT.RENDER.value:
-            return []
-        return []
 
-    def _create_load_layers(
-        self, *, stage: hou.Node, muted_departments: list[str]
-    ) -> hou.Node:
-        load_layers = stage.createNode(nodetypes.LOAD_LAYERS)
-        load_layers.setUserData("nodeshape", "bulge_down")
-        load_layers.parm("shot").set("$JOB/`@SHOT`")  # type: ignore
-        for department in muted_departments:
-            load_layers.parm(f"{department}_enable").set(0)  # type: ignore
-        return load_layers
+# The publishes a department's hip does not load: its own, and those built on it.
+_MUTED_DEPARTMENTS: dict[str, tuple[str, ...]] = {
+    Department.CFX.value: ("cfx", "fx", "envfx", "lighting"),
+    Department.FX.value: ("fx",),
+    Department.FLO.value: ("cfx", "fx", "envfx", "lighting", "flo"),
+    Department.ENVFX.value: ("envfx",),
+    Department.LIGHTING.value: ("lighting",),
+    Department.RENDER.value: (),
+}
+
+
+def set_frame_range(shot: Shot) -> str | None:
+    """Set the hip's frame range, which $FSTART and $FEND read, to the shot's
+    timeline, and return the warning when its preroll had to move earlier."""
+    timeline = Timeline.from_shot(shot)
+    hou.playbar.setFrameRange(timeline.start, timeline.end)
+    hou.playbar.setPlaybackRange(timeline.start, timeline.end)
+    return preroll_warning(shot)
+
+
+def build_department_chain(stage: hou.Node, department: str) -> hou.Node:
+    """Create the nodes every shot hip of `department` starts with, and return
+    its `END_<DEPARTMENT>` null, below which the department's work goes.
+
+    sets → load layers → layer break → BEGIN → END [→ PUBLISH]
+    """
+    sets = create_sets_node(stage)
+    load_layers = _create_load_layers(stage, _MUTED_DEPARTMENTS.get(department, ()))
+    load_layers.setInput(0, sets)
+    layer_break = stage.createNode("layerbreak")
+    layer_break.setInput(0, load_layers)
+
+    department_name = department.upper()
+    begin_dep = stage.createNode("null", f"BEGIN_{department_name}")
+    end_dep = stage.createNode("null", f"END_{department_name}")
+    begin_dep.setInput(0, layer_break)
+    end_dep.setInput(0, begin_dep)
+    if department in PUBLISHING_DEPARTMENTS:
+        publish = stage.createNode(nodetypes.PUBLISH, "PUBLISH")
+        publish.setInput(0, end_dep)
+
+    end_dep.setPosition((0, 1))
+    begin_dep.setPosition((0, 4))
+    layer_break.setPosition((0, 5))
+    load_layers.setPosition((0, 6))
+    sets.setPosition((0, 7))
+    return end_dep
+
+
+def _create_load_layers(stage: hou.Node, muted_departments: Iterable[str]) -> hou.Node:
+    load_layers = stage.createNode(nodetypes.LOAD_LAYERS)
+    load_layers.setUserData("nodeshape", "bulge_down")
+    load_layers.parm("shot").set("$JOB/`@SHOT`")  # type: ignore
+    for department in muted_departments:
+        load_layers.parm(f"{department}_enable").set(0)  # type: ignore
+    return load_layers
 
 
 def _names(sets: list[Set]) -> str:
