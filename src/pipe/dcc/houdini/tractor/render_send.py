@@ -118,7 +118,7 @@ def send(submit: hou.Node, inputs: list[hou.Node] | None = None) -> None:
 def send_job(submit: hou.Node, inputs: list[hou.Node] | None = None) -> Sent:
     """Send `inputs`, by default every chain wired into `submit`, as one job.
 
-    Shows nothing, so the Render Network window's headless Houdini sends with
+    Shows nothing, so the Sandwich Renderer window's headless Houdini sends with
     it too.
 
     Raises:
@@ -238,7 +238,7 @@ def build(submit: hou.Node, title: str, chains: list[Chain]) -> author.Job:
 
 
 def _metadata(layers: list[commands.Layer]) -> str:
-    """The shot and each layer's folder, so the Render Network window finds
+    """The shot and each layer's folder, so the Sandwich Renderer window finds
     the job by its shot whatever its title, and shows its frames."""
     found: dict[str, object] = {
         "folders": {lay.name: str(lay.folder) for lay in layers}

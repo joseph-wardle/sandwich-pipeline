@@ -110,7 +110,7 @@ class ImageCanvas(QtWidgets.QWidget):
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:  # noqa: N802 (Qt's name)
         notches = event.angleDelta().y() / _WHEEL_NOTCH
         if notches:
-            self._zoom_about(_position(event), _STEP**notches)
+            self._zoom_about(event_position(event), _STEP**notches)
         event.accept()
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802 (Qt's name)
@@ -125,7 +125,7 @@ class ImageCanvas(QtWidgets.QWidget):
         else:
             super().mousePressEvent(event)
             return
-        self._last = self._anchor = _position(event)
+        self._last = self._anchor = event_position(event)
         self.setCursor(
             QtCore.Qt.ClosedHandCursor
             if self._drag == "pan"
@@ -134,7 +134,7 @@ class ImageCanvas(QtWidgets.QWidget):
         event.accept()
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802 (Qt's name)
-        position = _position(event)
+        position = event_position(event)
         if self._drag == "pan":
             self._offset += position - self._last
             self._fitted = False
@@ -192,7 +192,7 @@ class ImageCanvas(QtWidgets.QWidget):
         return QtCore.QPointF(self.width() / 2, self.height() / 2)
 
 
-def _position(event: QtGui.QMouseEvent | QtGui.QWheelEvent) -> QtCore.QPointF:
+def event_position(event: QtGui.QMouseEvent | QtGui.QWheelEvent) -> QtCore.QPointF:
     """Where the event happened in the widget. Qt 6 names it position(), and
     its wheel events have no pos(); Qt 5, which the stubs describe, only pos()."""
     position = getattr(event, "position", None)

@@ -1,6 +1,9 @@
 """The Farm tab: every Tractor job for the shot, its tasks and their logs, and
 retrying what errored.
 
+Each render task shows the size of the EXR it wrote, flagged when it is far
+from the frames around it, and Size Graph draws them across the shot.
+
 The farm already reruns a render frame by itself when it crashes, runs out of
 memory or misses a license (`job.RENDER_RETRIES`); what errors past that is
 listed here to read and retry by hand.
@@ -16,23 +19,45 @@ from pathlib import Path
 from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.render import farm
-from pipe.core.render.farm import ERROR, FarmError, Job, LoginRefused, Task
-from pipe.core.render.network import background, credentials
+from pipe.core.render.farm import (
+    ERROR,
+    PAUSED,
+    RENDERING,
+    WAITING,
+    FarmError,
+    Job,
+    LoginRefused,
+    Task,
+)
+from pipe.core.render.network import background, credentials, sizes
 from pipe.core.render.network.progress import PERCENT_ROLE, ProgressDelegate
+from pipe.core.render.network.size_graph import SizeGraphDialog
+from pipe.core.render.network.sizes import FrameSize
 
 _DATA_ROLE = QtCore.Qt.UserRole
 _REFRESH_MS = 30_000
-# The task table's progress column.
-_PROGRESS = 2
-# Render Send names each frame's task "Render <layer> <frame>".
-_RENDER_TASK = re.compile(r"^Render (\S+) (\d+)$")
-_STATUS_COLORS = {
-    ERROR: "#e06c6c",
-    "Rendering": "#6ca0e0",
-    "Active": "#6ca0e0",
-    "Done": "#7fbf7f",
-    "Paused": "#c9a14a",
+# The task table's progress and size columns.
+_PROGRESS, _SIZE = 2, 3
+_RENDER_TASK = farm.RENDER_TASK
+_RED, _GREEN, _GREY, _DIM = "#f08080", "#8fe0a0", "#a3a6ad", "#686b72"
+# A job's whole row: (text, background or None). Errored and active jobs
+# stand out; done and waiting ones step back.
+_JOB_ROWS: dict[str, tuple[str, str | None]] = {
+    ERROR: (_RED, "#40252a"),
+    RENDERING: (_GREEN, "#1f3a28"),
+    PAUSED: ("#c9a14a", None),
+    WAITING: (_GREY, None),
+    "Done": (_DIM, None),
 }
+# A task's state, in the jobs' colors.
+_STATUS_COLORS = {
+    ERROR: _RED,
+    "Active": _GREEN,
+    "Ready": _GREY,
+    "Blocked": _GREY,
+    "Done": _DIM,
+}
+_ODD_SIZE = ("#ffd27a", "#4a3a1c")
 _LOG_ERROR = re.compile(r"error|fatal|segmentation|killed|traceback", re.IGNORECASE)
 
 
@@ -51,11 +76,16 @@ class FarmTab(QtWidgets.QWidget):
     _archive_button: QtWidgets.QPushButton
     _forget: QtWidgets.QPushButton
     _view: QtWidgets.QPushButton
+    _graph: QtWidgets.QPushButton
     _timer: QtCore.QTimer
 
     _shot: str | None
     _job: Job | None
     _task_list: list[Task]
+    # Each render layer's frame sizes, for the job shown.
+    _sizes: dict[str, list[FrameSize]]
+    # The version folder each layer of the job shown writes, by layer.
+    _folders: dict[str, str]
     # The Tractor login for retries, kept only while the window is open.
     _login: tuple[str, str] | None
     # What the last action did, shown once with the next refreshed list.
@@ -64,6 +94,7 @@ class FarmTab(QtWidgets.QWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self._shot, self._job, self._task_list, self._login = None, None, [], None
+        self._sizes, self._folders = {}, {}
         self._wanted_jid: int | None = None
         self._note = ""
 
@@ -73,7 +104,9 @@ class FarmTab(QtWidgets.QWidget):
         self._jobs.currentItemChanged.connect(lambda *_: self._job_chosen())
         self._jobs.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self._jobs.itemSelectionChanged.connect(self._enable)
-        self._tasks = _table(["Task", "State", "Progress", "Blade", "Exit", "Time"])
+        self._tasks = _table(
+            ["Task", "State", "Progress", "Size", "Blade", "Exit", "Time"]
+        )
         self._tasks.setItemDelegateForColumn(_PROGRESS, ProgressDelegate(self._tasks))
         self._tasks.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self._tasks.currentItemChanged.connect(lambda *_: self._task_chosen())
@@ -109,6 +142,11 @@ class FarmTab(QtWidgets.QWidget):
             "Show this task's frame in the Images tab (or double-click it)"
         )
         self._view.clicked.connect(self._on_view)
+        self._graph = QtWidgets.QPushButton("Size Graph")
+        self._graph.setToolTip(
+            "Graph each layer's EXR size across the job's frames, odd ones in red"
+        )
+        self._graph.clicked.connect(self._show_graph)
 
         top = QtWidgets.QHBoxLayout()
         top.addWidget(QtWidgets.QLabel("<b>Tractor jobs for this shot</b>"))
@@ -120,6 +158,7 @@ class FarmTab(QtWidgets.QWidget):
         task_bar = QtWidgets.QHBoxLayout()
         task_bar.addWidget(self._errors_only)
         task_bar.addStretch(1)
+        task_bar.addWidget(self._graph)
         task_bar.addWidget(self._view)
         task_bar.addWidget(self._retry_selected)
         task_bar.addWidget(self._retry_errors)
@@ -160,7 +199,7 @@ class FarmTab(QtWidgets.QWidget):
     def set_shot(self, shot_code: str) -> None:
         if shot_code == self._shot:
             return
-        self._shot, self._job, self._task_list = shot_code, None, []
+        self._shot, self._job, self._task_list, self._sizes = shot_code, None, [], {}
         self._jobs.clear()
         self._tasks.clear()
         self._log.clear()
@@ -208,10 +247,7 @@ class FarmTab(QtWidgets.QWidget):
                 ]
             )
             item.setData(0, _DATA_ROLE, job)
-            if color := _STATUS_COLORS.get(job.status):
-                item.setForeground(6, QtGui.QBrush(QtGui.QColor(color)))
-            if job.errors:
-                item.setForeground(5, QtGui.QBrush(QtGui.QColor(_STATUS_COLORS[ERROR])))
+            _color_row(item, *_JOB_ROWS.get(job.status, (_GREY, None)))
             self._jobs.addTopLevelItem(item)
             if job.jid == chosen:
                 current = item
@@ -254,18 +290,24 @@ class FarmTab(QtWidgets.QWidget):
         if not (same and keep_log):
             self._log.clear()
         background.run(
-            lambda: farm.tasks(job),
-            lambda found: self._tasks_read(job, found),
+            lambda: _tasks_and_sizes(job),
+            lambda found: self._tasks_read(job, *found),
             self._failed,
         )
         self._enable()
 
     # ---- tasks ---------------------------------------------------------
 
-    def _tasks_read(self, job: Job, found: list[Task]) -> None:
+    def _tasks_read(
+        self,
+        job: Job,
+        found: list[Task],
+        folders: dict[str, str],
+        layer_sizes: dict[str, list[FrameSize]],
+    ) -> None:
         if self._job is None or job.jid != self._job.jid:
             return
-        self._task_list = found
+        self._task_list, self._folders, self._sizes = found, folders, layer_sizes
         self._show_tasks()
 
     def _show_tasks(self) -> None:
@@ -273,6 +315,10 @@ class FarmTab(QtWidgets.QWidget):
         current = self._current_task()
         self._tasks.blockSignals(True)
         self._tasks.clear()
+        by_frame = {
+            layer: {size.frame: size for size in found}
+            for layer, found in self._sizes.items()
+        }
         for task in self._task_list:
             if self._errors_only.isChecked() and task.state != ERROR:
                 continue
@@ -281,6 +327,7 @@ class FarmTab(QtWidgets.QWidget):
                 [
                     task.title,
                     task.state,
+                    "",
                     "",
                     task.blade,
                     "" if task.exit_code is None else str(task.exit_code),
@@ -293,6 +340,10 @@ class FarmTab(QtWidgets.QWidget):
             if color := _STATUS_COLORS.get(task.state):
                 item.setForeground(1, QtGui.QBrush(QtGui.QColor(color)))
             item.setData(_PROGRESS, PERCENT_ROLE, task.percent)
+            if (match := _RENDER_TASK.match(task.title)) and (
+                size := by_frame.get(match[1], {}).get(int(match[2]))
+            ):
+                _show_size(item, size)
             self._tasks.addTopLevelItem(item)
             item.setSelected(task.tid in chosen)
             if current is not None and task.tid == current.tid:
@@ -300,6 +351,7 @@ class FarmTab(QtWidgets.QWidget):
         self._tasks.blockSignals(False)
         self._tasks.resizeColumnToContents(0)
         self._tasks.setColumnWidth(_PROGRESS, 110)
+        self._tasks.resizeColumnToContents(_SIZE)
         self._enable()
 
     def _task_chosen(self) -> None:
@@ -424,7 +476,7 @@ class FarmTab(QtWidgets.QWidget):
             f"Archived {_count(len(archived), 'job')}: {', '.join(map(str, archived))}"
         )
         if self._job is not None and self._job.jid in archived:
-            self._job, self._task_list = None, []
+            self._job, self._task_list, self._sizes = None, [], {}
             self._tasks.clear()
             self._log.clear()
         self.refresh()
@@ -463,7 +515,7 @@ class FarmTab(QtWidgets.QWidget):
         job, task = self._job, self._current_task()
         if job is None:
             return
-        folders = job.metadata.get("folders", {})
+        folders = self._folders or job.metadata.get("folders", {})
         match = _RENDER_TASK.match(task.title) if task is not None else None
         if match:
             layer, frame = match[1], int(match[2])
@@ -474,6 +526,15 @@ class FarmTab(QtWidgets.QWidget):
             return
         folder = folders.get(layer)
         self.view_frames.emit(layer, Path(folder) if folder else None, frame)
+
+    def _show_graph(self) -> None:
+        job = self._job
+        if job is None or not self._sizes:
+            return
+        dialog = SizeGraphDialog(
+            f"Frame Sizes — {self._shot}, job {job.jid}", self._sizes, self
+        )
+        dialog.show()
 
     # ---- helpers -------------------------------------------------------
 
@@ -492,6 +553,7 @@ class FarmTab(QtWidgets.QWidget):
         self._retry_errors.setEnabled(has_job and bool(self._job and self._job.errors))
         self._retry_selected.setEnabled(has_job and bool(self._tasks.selectedItems()))
         self._view.setEnabled(has_job)
+        self._graph.setEnabled(has_job and any(self._sizes.values()))
         self._archive_button.setEnabled(bool(self._jobs.selectedItems()))
 
     def _failed(self, exc: Exception) -> None:
@@ -553,6 +615,39 @@ def _table(headers: list[str]) -> QtWidgets.QTreeWidget:
     table.setUniformRowHeights(True)
     table.setAlternatingRowColors(True)
     return table
+
+
+def _tasks_and_sizes(
+    job: Job,
+) -> tuple[list[Task], dict[str, str], dict[str, list[FrameSize]]]:
+    """The job's tasks, its layers' folders, and each layer's frame sizes."""
+    found = farm.tasks(job)
+    folders = farm.folders(job, found)
+    layer_sizes = {}
+    for layer, folder in folders.items():
+        path = Path(folder)
+        layer_sizes[layer] = sizes.layer_sizes(path) if path.is_dir() else []
+    return found, folders, layer_sizes
+
+
+def _color_row(item: QtWidgets.QTreeWidgetItem, text: str, fill: str | None) -> None:
+    for column in range(item.columnCount()):
+        item.setForeground(column, QtGui.QBrush(QtGui.QColor(text)))
+        if fill is not None:
+            item.setBackground(column, QtGui.QBrush(QtGui.QColor(fill)))
+
+
+def _show_size(item: QtWidgets.QTreeWidgetItem, size: FrameSize) -> None:
+    item.setText(_SIZE, sizes.human(size.bytes))
+    item.setTextAlignment(_SIZE, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
+    tip = f"{size.path}\n{size.bytes:,} bytes"
+    if size.anomaly:
+        text, fill = _ODD_SIZE
+        item.setText(_SIZE, f"⚠ {sizes.human(size.bytes)}")
+        item.setForeground(_SIZE, QtGui.QBrush(QtGui.QColor(text)))
+        item.setBackground(_SIZE, QtGui.QBrush(QtGui.QColor(fill)))
+        tip += f"\n{sizes.describe(size)}"
+    item.setToolTip(_SIZE, tip)
 
 
 def _duration(seconds: float) -> str:

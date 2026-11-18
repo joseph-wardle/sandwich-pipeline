@@ -236,6 +236,63 @@ def read(exr: Path, group: ChannelGroup) -> np.ndarray:
     return np.dstack([*planes, alpha])
 
 
+EMPTY = "empty: every pixel is black"
+NOT_FINITE = "broken: holds NaN or infinite pixels"
+
+
+@dataclass(frozen=True)
+class Thumbnail:
+    """A small copy of one channel group, or why there is nothing to show."""
+
+    group: ChannelGroup
+    # Height × width × 4, as `read` gives; None when `problem` says why.
+    pixels: np.ndarray | None
+    problem: str | None = None
+
+
+def thumbnails(exr: Path, groups: list[ChannelGroup], width: int) -> list[Thumbnail]:
+    """Every group of the frame, `width` pixels across, reading the file once.
+
+    A group whose pixels are all black, or that holds NaN or infinite values,
+    is reported as a problem rather than shown: it is an LPE or AOV that
+    rendered nothing, or that broke.
+    """
+    with OpenEXR.File(str(exr), separate_channels=True) as file:
+        channels = file.channels()
+        found = []
+        for group in groups:
+            try:
+                planes = [channels[name].pixels for name in group.channels]
+            except KeyError as exc:
+                found.append(Thumbnail(group, None, f"missing channel {exc}"))
+                continue
+            found.append(_thumbnail(group, planes, channels, width))
+    return found
+
+
+def _thumbnail(
+    group: ChannelGroup, planes: list[np.ndarray], channels: dict, width: int
+) -> Thumbnail:
+    # Judged on every pixel, so one bad pixel isn't skipped by the shrink.
+    # Data passes aren't judged: depth holds infinity where nothing was hit,
+    # and motion vectors are all zero when nothing moves.
+    if not group.is_data:
+        if not all(np.isfinite(plane).all() for plane in planes):
+            return Thumbnail(group, None, NOT_FINITE)
+        if not any(np.any(plane) for plane in planes):
+            return Thumbnail(group, None, EMPTY)
+    step = max(planes[0].shape[1] // max(width, 1), 1)
+    small = [plane[::step, ::step].astype(np.float32) for plane in planes]
+    while len(small) < 3:
+        small.append(small[-1])
+    alpha = (
+        channels[group.alpha].pixels[::step, ::step].astype(np.float32)
+        if group.alpha in channels
+        else np.full_like(small[0], np.nan)
+    )
+    return Thumbnail(group, np.dstack([*small, alpha]))
+
+
 def views() -> list[str]:
     return list(_config().getViews(DISPLAY))
 

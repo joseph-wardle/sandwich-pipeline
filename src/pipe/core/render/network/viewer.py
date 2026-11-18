@@ -1,5 +1,9 @@
 """The Images tab: a shot's rendered frames, one AOV or LPE at a time, through
-the show's OCIO display transform (OpenDRT by default), without Nuke."""
+the show's OCIO display transform (OpenDRT by default), without Nuke.
+
+Contact Sheet shows every AOV and LPE of the frame at once instead, with a red
+X on any that rendered nothing or broke.
+"""
 
 from __future__ import annotations
 
@@ -14,8 +18,9 @@ from pipe.core.color import DEFAULT_VIEW
 from pipe.core.render import versions
 from pipe.core.render.network import background, frames
 from pipe.core.render.network.canvas import ImageCanvas
+from pipe.core.render.network.contact_sheet import THUMB_WIDTH, ContactSheet
 from pipe.core.render.network.playback import DEFAULT_FPS, Look, Player
-from pipe.core.render.network.frames import ChannelGroup, Product
+from pipe.core.render.network.frames import ChannelGroup, Product, Thumbnail
 
 _DATA_ROLE = QtCore.Qt.UserRole
 # Frames of float pixels kept, so scrubbing back is instant: about 25 MB each.
@@ -36,6 +41,9 @@ class FrameViewer(QtWidgets.QWidget):
     _slider: QtWidgets.QSlider
     _frame: QtWidgets.QSpinBox
     _canvas: ImageCanvas
+    _sheet: ContactSheet
+    _sheet_button: QtWidgets.QToolButton
+    _stack: QtWidgets.QStackedWidget
     _player: Player
     _play: QtWidgets.QToolButton
     _fps: QtWidgets.QDoubleSpinBox
@@ -52,11 +60,15 @@ class FrameViewer(QtWidgets.QWidget):
     _scrub: QtCore.QTimer
     # The frame to show once the version loads, when another tab asked for one.
     _pending_frame: int | None
+    # The contact sheet's frame and its thumbnails, in scene linear.
+    _thumbs: tuple[Path, list[Thumbnail]] | None
+    _wanted_sheet: Path | None
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self._shot, self._frames, self._pixels, self._wanted = None, [], None, None
         self._pending_frame = None
+        self._thumbs, self._wanted_sheet = None, None
         self._cache = OrderedDict()
 
         self._layer = _combo("The render layer")
@@ -91,6 +103,19 @@ class FrameViewer(QtWidgets.QWidget):
 
         self._canvas = ImageCanvas()
         self._canvas.hovered.connect(self._hovered)
+        self._sheet = ContactSheet()
+        self._sheet.chosen.connect(self._sheet_chosen)
+        self._stack = QtWidgets.QStackedWidget()
+        self._stack.addWidget(self._canvas)
+        self._stack.addWidget(self._sheet)
+        self._sheet_button = QtWidgets.QToolButton()
+        self._sheet_button.setText("Contact Sheet")
+        self._sheet_button.setCheckable(True)
+        self._sheet_button.setToolTip(
+            "Every AOV and LPE of this frame side by side; a red X marks one "
+            "that rendered nothing or broke"
+        )
+        self._sheet_button.toggled.connect(self._sheet_toggled)
         self._zoom = QtWidgets.QLabel()
         self._zoom.setToolTip(self._canvas.toolTip())
         self._canvas.zoomed.connect(lambda scale: self._zoom.setText(f"{scale:.0%}"))
@@ -127,6 +152,7 @@ class FrameViewer(QtWidgets.QWidget):
             pick.addWidget(QtWidgets.QLabel(label))
             pick.addWidget(widget, 1)
         pick.addWidget(self._exposure)
+        pick.addWidget(self._sheet_button)
         self._player = Player(self)
         self._player.shown.connect(self._played)
         self._player.status.connect(self._status.setText)
@@ -166,7 +192,7 @@ class FrameViewer(QtWidgets.QWidget):
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.addLayout(pick)
-        layout.addWidget(self._canvas, 1)
+        layout.addWidget(self._stack, 1)
         layout.addLayout(scrub)
         layout.addLayout(footer)
         self._clear("Choose a shot.")
@@ -255,6 +281,8 @@ class FrameViewer(QtWidgets.QWidget):
     # ---- playing -------------------------------------------------------
 
     def toggle_play(self) -> None:
+        if self._sheet_button.isChecked():
+            return
         if self._player.is_playing():
             self._player.pause()
             # The full-precision frame, for the pixel readout.
@@ -280,7 +308,9 @@ class FrameViewer(QtWidgets.QWidget):
         return True
 
     def _look_changed(self) -> None:
-        if self._player.is_playing():
+        if self._sheet_button.isChecked():
+            self._draw_sheet()
+        elif self._player.is_playing():
             self._sync_player()
         else:
             self._redraw()
@@ -332,16 +362,22 @@ class FrameViewer(QtWidgets.QWidget):
         self._slider.blockSignals(False)
         self._load()
 
-    def _load(self) -> None:
+    def _frame_path(self) -> Path | None:
         product: Product | None = self._product.currentData()
-        group: ChannelGroup | None = self._group.currentData()
-        if product is None or group is None:
-            return
+        if product is None:
+            return None
         # A frame missing mid-range, as in a job still rendering, shows the one before it.
         frame = max((f for f in self._frames if f <= self._frame.value()), default=None)
-        if frame is None:
+        return product.frames[frame] if frame is not None else None
+
+    def _load(self) -> None:
+        if self._sheet_button.isChecked():
+            self._load_sheet()
             return
-        path = product.frames[frame]
+        group: ChannelGroup | None = self._group.currentData()
+        path = self._frame_path()
+        if group is None or path is None:
+            return
         key = (path, group.name)
         self._wanted = key
         if key in self._cache:
@@ -400,11 +436,84 @@ class FrameViewer(QtWidgets.QWidget):
         values = tuple(float(v) for v in self._pixels[y, x])
         self._readout.setText(_readout_text(x, y, values))
 
+    # ---- contact sheet -------------------------------------------------
+
+    def _sheet_toggled(self, on: bool) -> None:
+        self._player.pause()
+        self._play.setEnabled(not on)
+        self._stack.setCurrentWidget(self._sheet if on else self._canvas)
+        if on:
+            self._readout.setText("")
+        self._load()
+
+    def _sheet_chosen(self, name: str) -> None:
+        index = self._group.findText(name)
+        self._sheet_button.setChecked(False)
+        if index >= 0:
+            self._group.setCurrentIndex(index)
+
+    def _groups(self) -> list[ChannelGroup]:
+        return [self._group.itemData(i) for i in range(self._group.count())]
+
+    def _load_sheet(self) -> None:
+        path = self._frame_path()
+        groups = self._groups()
+        if path is None or not groups:
+            self._sheet.show_message("No frames to show.")
+            return
+        if self._thumbs is not None and self._thumbs[0] == path:
+            self._draw_sheet()
+            return
+        self._wanted_sheet = path
+        self._sheet.show_message(f"Reading every AOV and LPE of {path.name}…")
+        self._status.setText(f"Reading {path.name}…")
+        background.run(
+            lambda: frames.thumbnails(path, groups, THUMB_WIDTH),
+            lambda thumbs: self._sheet_read(path, thumbs),
+            lambda exc: self._sheet_failed(path, exc),
+        )
+
+    def _sheet_read(self, path: Path, thumbs: list[Thumbnail]) -> None:
+        if path != self._wanted_sheet:
+            return
+        self._thumbs = (path, thumbs)
+        broken = [t.group.name for t in thumbs if t.problem]
+        self._status.setText(
+            f"{path}  —  {len(thumbs)} AOVs and LPEs"
+            + (
+                f", {len(broken)} empty or broken: {', '.join(broken)}"
+                if broken
+                else ""
+            )
+        )
+        self._draw_sheet()
+
+    def _sheet_failed(self, path: Path, exc: Exception) -> None:
+        self._failed(path, exc)
+        self._sheet.show_message(f"Could not read {path.name}: {exc}")
+
+    def _draw_sheet(self) -> None:
+        if self._thumbs is None or not self._sheet_button.isChecked():
+            return
+        view, exposure = self._view.currentText(), self._exposure.value()
+
+        def to_screen(thumb: Thumbnail) -> np.ndarray:
+            assert thumb.pixels is not None
+            # Data passes as they are, as when shown on their own.
+            shown = frames.RAW_VIEW if thumb.group.is_data else view
+            return frames.display(thumb.pixels, shown, exposure)
+
+        self._sheet.show_thumbnails(
+            self._thumbs[1], to_screen, self._group.currentText()
+        )
+
     def _failed(self, path: Path, exc: Exception) -> None:
         log.warning("Could not read %s", path, exc_info=exc)
         self._status.setText(f"Could not read {path.name}: {exc}")
 
     def _clear(self, message: str) -> None:
+        self._thumbs = None
+        self._sheet.show_message(message)
         self._player.clear()
         self._pixels = None
         self._canvas.clear()

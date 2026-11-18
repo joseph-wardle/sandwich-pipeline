@@ -19,7 +19,7 @@ from Qt import QtCore
 SECRET_TOOL = "secret-tool"
 # Attributes the keyring entry is found by.
 _SERVICE = ("service", "sandwich-render-network-tractor")
-_LABEL = "Tractor login (Sandwich Render Network)"
+_LABEL = "Tractor login (Sandwich Renderer)"
 _SETTINGS = ("SandwichKwonDo", "RenderNetwork")
 _USER_KEY = "tractor/user"
 # The keyring may ask the artist to unlock it first, so allow time for that.

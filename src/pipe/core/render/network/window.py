@@ -1,4 +1,4 @@
-"""The Render Network window: choose a shot, edit its render layers, send them.
+"""The Sandwich Renderer window: choose a shot, edit its render layers, send them.
 
 Every action runs the headless Houdini worker, which opens the shot's render
 hip. Nothing in the window changes the hip until Save or Send.
@@ -15,6 +15,7 @@ from typing import Any
 from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.render.network.client import WorkerRun
+from pipe.core.render.network.log_viewer import LogViewer
 from pipe.core.render.network.departments import DepartmentPanel
 from pipe.core.render.network.farm_tab import FarmTab
 from pipe.core.render.network.overview import OverviewPage
@@ -36,13 +37,14 @@ from pipe.core.render.network.shots import ShotList
 from pipe.core.render.network.viewer import FrameViewer
 from pipe.core.render.lighters import LIGHTING_STEP
 from pipe.core.publish import Target
-from pipe.core.shotgrid import Shot
+from pipe.core.shotgrid import Shot, ShotGrid, Status
+from pipe.core.render.network import background, render_status
+from pipe.core.render.network.render_status import RenderBoard, RenderStatus
 from pipe.core.ui import prompt_publish
 
-TITLE = "Render Network"
+TITLE = "Sandwich Renderer"
 # How far the shot's title and render hip sit in from the edge, in pixels.
 _TITLE_INSET = 12
-_LAYER, _ON, _NEXT, _LAST = range(4)
 _BUSY_WORDS = {
     DESCRIBE: "Opening {shot} in Houdini…",
     SAVE: "Saving {shot}'s render hip…",
@@ -61,7 +63,6 @@ class RenderNetworkWindow(QtWidgets.QWidget):
     _heading: QtWidgets.QLabel
     _hip: QtWidgets.QLabel
     _notes: QtWidgets.QLabel
-    _layers: QtWidgets.QTreeWidget
     _scroll: QtWidgets.QScrollArea
     _scene_graph: SceneGraphPanel
     _departments: DepartmentPanel
@@ -72,7 +73,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
     _viewer: FrameViewer
     _busy: QtWidgets.QWidget
     _busy_text: QtWidgets.QLabel
-    _log: QtWidgets.QPlainTextEdit
+    _log: LogViewer
     _reload: QtWidgets.QPushButton
     _save: QtWidgets.QPushButton
     _send: QtWidgets.QPushButton
@@ -92,10 +93,12 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         open_shot: str | None = None,
         lit_shots: set[str] | None = None,
         admin: bool = False,
+        render: RenderBoard | None = None,
     ) -> None:
         """`lit_shots` are the codes the artist is assigned to light, which they
         may publish lighting for; None when ShotGrid couldn't say. An `admin`
-        may publish any shot's lighting."""
+        may publish any shot's lighting. `render` is each shot's Render
+        task status, shown beside it; the same artists may change it."""
         super().__init__()
         self._admin = admin
         self._shots_by_code = {shot.code or "": shot for shot in shots}
@@ -107,8 +110,11 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._form_states = {}
         self._shown = None
 
-        self._shot_list = ShotList(shots, lit_shots or set())
+        self._shot_list = ShotList(
+            shots, lit_shots or set(), render, self._render_status_refusal
+        )
         self._shot_list.chosen.connect(self._choose_shot)
+        self._shot_list.render_status_chosen.connect(self._change_render_status)
 
         splitter = QtWidgets.QSplitter()
         splitter.addWidget(self._shot_list)
@@ -156,16 +162,14 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._notes.setWordWrap(True)
         self._notes.setStyleSheet(_NOTE_STYLE)
 
-        self._layers = QtWidgets.QTreeWidget()
-        self._layers.setHeaderLabels(["Layer", "On", "Next render", "Last send"])
-        self._layers.setRootIsDecorated(False)
-        self._layers.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
-
+        self._publish = QtWidgets.QPushButton("Publish Lighting")
+        self._publish.clicked.connect(self._on_publish)
         self._scroll = QtWidgets.QScrollArea()
         self._scroll.setObjectName(theme.PARMS)
         self._scroll.setWidgetResizable(True)
         self._scene_graph = SceneGraphPanel()
-        self._departments = DepartmentPanel()
+        # Publish Lighting sits under the lighting layer it publishes.
+        self._departments = DepartmentPanel(self._publish)
         self._departments.hide()
         self._departments.changed.connect(self._edited)
         stage_side = QtWidgets.QWidget()
@@ -181,23 +185,11 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         parms_and_stage.setStretchFactor(1, 2)
         parms_and_stage.setSizes([640, 420])
 
-        self._busy_text = QtWidgets.QLabel()
-        bar = QtWidgets.QProgressBar()
-        bar.setRange(0, 0)
-        bar.setMaximumWidth(160)
-        cancel = QtWidgets.QPushButton("Cancel")
-        cancel.clicked.connect(self._cancel)
-        self._busy = QtWidgets.QWidget()
-        busy_layout = QtWidgets.QHBoxLayout(self._busy)
-        busy_layout.setContentsMargins(0, 0, 0, 0)
-        busy_layout.addWidget(bar)
-        busy_layout.addWidget(self._busy_text, 1)
-        busy_layout.addWidget(cancel)
-
-        self._publish = QtWidgets.QPushButton("Publish Lighting")
-        self._publish.clicked.connect(self._on_publish)
         self._reload = QtWidgets.QPushButton("Reload")
-        self._reload.setToolTip("Read the render hip again, dropping unsaved edits")
+        self._reload.setToolTip(
+            "Open the render hip in Houdini again and reread its parms, layers and "
+            "stage, dropping unsaved edits"
+        )
         self._reload.clicked.connect(self._on_reload)
         self._save = QtWidgets.QPushButton("Save")
         self._save.setToolTip("Save these settings into the shot's render hip (Ctrl+S)")
@@ -209,19 +201,33 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         )
         self._send.clicked.connect(self._on_send)
         buttons = QtWidgets.QHBoxLayout()
+        buttons.setContentsMargins(6, 6, 6, 6)
         buttons.addWidget(self._reload)
         buttons.addWidget(self._save)
-        buttons.addWidget(self._publish)
         buttons.addStretch(1)
         buttons.addWidget(self._send)
+        # The buttons act on the parms, so they live on the parms' tab.
+        parms_page = QtWidgets.QWidget()
+        parms_layout = QtWidgets.QVBoxLayout(parms_page)
+        parms_layout.setContentsMargins(0, 0, 0, 0)
+        parms_layout.setSpacing(0)
+        parms_layout.addWidget(parms_and_stage, 1)
+        parms_layout.addLayout(buttons)
 
-        self._log = QtWidgets.QPlainTextEdit()
-        self._log.setObjectName(theme.LOG)
-        self._log.setReadOnly(True)
-        self._log.setMaximumBlockCount(5000)
-        self._log.setPlaceholderText("What Houdini says while it works shows here.")
-        font = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont)
-        self._log.setFont(font)
+        self._busy_text = QtWidgets.QLabel()
+        bar = QtWidgets.QProgressBar()
+        bar.setRange(0, 0)
+        bar.setMaximumWidth(160)
+        cancel = QtWidgets.QPushButton("Cancel")
+        cancel.clicked.connect(self._cancel)
+        self._busy = QtWidgets.QWidget()
+        busy_layout = QtWidgets.QHBoxLayout(self._busy)
+        busy_layout.setContentsMargins(_TITLE_INSET, 0, 0, 0)
+        busy_layout.addWidget(bar)
+        busy_layout.addWidget(self._busy_text, 1)
+        busy_layout.addWidget(cancel)
+
+        self._log = LogViewer()
 
         top = QtWidgets.QWidget()
         top_layout = QtWidgets.QVBoxLayout(top)
@@ -229,24 +235,23 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         top_layout.addWidget(self._heading)
         top_layout.addWidget(self._hip)
         top_layout.addWidget(self._notes)
-        top_layout.addWidget(self._layers)
         # The farm and the frames need no Houdini, so they show while it opens.
         self._farm = FarmTab()
         self._viewer = FrameViewer()
         self._farm.view_frames.connect(self._view_frames)
         self._tabs = QtWidgets.QTabWidget()
-        self._tabs.addTab(parms_and_stage, "Parameters")
+        self._tabs.addTab(parms_page, "Parameters")
         self._tabs.addTab(self._farm, "Farm")
         self._tabs.addTab(self._viewer, "Images")
         top_layout.addWidget(self._tabs, 1)
         top_layout.addWidget(self._busy)
-        top_layout.addLayout(buttons)
 
         split = QtWidgets.QSplitter(QtCore.Qt.Vertical)
         split.addWidget(top)
         split.addWidget(self._log)
         split.setStretchFactor(0, 1)
-        split.setSizes([760, 140])
+        split.setCollapsible(0, False)
+        split.setCollapsible(1, False)
         return split
 
     # ---- choosing a shot -----------------------------------------------
@@ -265,7 +270,6 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._heading.setText(code)
         self._hip.setText("")
         self._notes.hide()
-        self._layers.hide()
         self._scene_graph.show_prims([])
         self._farm.set_shot(code)
         self._viewer.set_shot(code)
@@ -396,6 +400,42 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         if self._result is None or self._result.lighting_target is None:
             return "Waiting for Houdini to read the shot's lighting publishes."
         return ""
+
+    def _render_status_refusal(self, code: str) -> str:
+        """Why the artist can't change shot `code`'s Render status, or ""."""
+        if self._admin or (self._lit_shots is not None and code in self._lit_shots):
+            return ""
+        if self._lit_shots is None:
+            return "ShotGrid couldn't say which shots you light. Reopen the window."
+        return f"Only {code}'s lighter or a pipeline admin can change it."
+
+    def _change_render_status(self, code: str, status: object) -> None:
+        current = self._shot_list.render_status(code)
+        if not isinstance(status, Status) or current is None:
+            return
+        if refusal := self._render_status_refusal(code):
+            _tell(self, refusal, QtWidgets.QMessageBox.Information)
+            return
+        self._log_line(f"Setting {code}'s {current.task} to {status.name} in ShotGrid…")
+
+        def change() -> RenderStatus:
+            from env_sg import DB_Config
+
+            return render_status.change(ShotGrid.connect(DB_Config), current, status)
+
+        def changed(render: RenderStatus) -> None:
+            self._shot_list.set_render_status(code, render)
+            self._log_line(f"{code}'s {render.task} is now {render.name} in ShotGrid.")
+
+        def failed(exc: Exception) -> None:
+            _tell(
+                self,
+                f"ShotGrid didn't change {code}'s {current.task} to {status.name}.",
+                QtWidgets.QMessageBox.Warning,
+                str(exc),
+            )
+
+        background.run(change, changed, failed)
 
     def _on_publish(self) -> None:
         code = self._shown
@@ -543,8 +583,11 @@ class RenderNetworkWindow(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.Critical,
                 result.failure.details,
             )
+            self._log.expand()
             if self._result is None or self._result.shot != result.shot:
-                self._show_empty(f"Could not open {result.shot}. See the log below.")
+                self._show_empty(
+                    f"Could not open {result.shot}. See the Log Viewer below."
+                )
             return
 
         self._forget_form()
@@ -565,52 +608,12 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         )
         self._form.changed.connect(self._edited)
         self._scroll.setWidget(self._form)
-        self._show_layers()
         self._scene_graph.show_prims(result.prims)
         self._departments.show_departments(result.departments)
         self._set_busy(None)
 
-    def _show_layers(self) -> None:
-        self._layers.clear()
-        self._layers.setVisible(self._result is not None and self._form is not None)
-        if self._result is None or self._form is None:
-            return
-        for layer in self._result.layers:
-            on = bool(self._form.value(layer.toggle))
-            item = QtWidgets.QTreeWidgetItem(
-                [
-                    layer.name,
-                    "●" if on else "",
-                    layer.next_folder,
-                    layer.last_job or "—",
-                ]
-            )
-            item.setToolTip(_NEXT, layer.next_folder)
-            item.setToolTip(_LAST, layer.last_job)
-            if not on:
-                for column in range(4):
-                    item.setForeground(
-                        column,
-                        self.palette().brush(
-                            QtGui.QPalette.Disabled, QtGui.QPalette.Text
-                        ),
-                    )
-            self._layers.addTopLevelItem(item)
-        for column in (_LAYER, _ON):
-            self._layers.resizeColumnToContents(column)
-        self._layers.setColumnWidth(_NEXT, 420)
-        # As tall as its rows, so the parms get the rest.
-        rows = self._layers.topLevelItemCount()
-        row_height = self._layers.sizeHintForRow(0) if rows else 0
-        self._layers.setFixedHeight(
-            self._layers.header().sizeHint().height()
-            + rows * row_height
-            + 2 * self._layers.frameWidth()
-        )
-
     def _edited(self) -> None:
         self._dirty = True
-        self._show_layers()
         if self._result is not None:
             self._heading.setText(f"{self._result.shot}  •  unsaved")
 
@@ -630,7 +633,6 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._heading.setText(message)
         self._hip.setText("")
         self._notes.hide()
-        self._layers.hide()
         self._scene_graph.show_prims([])
         self._departments.hide()
         self._set_busy(None)
@@ -649,7 +651,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._departments.setEnabled(not busy)
 
     def _log_line(self, line: str) -> None:
-        self._log.appendPlainText(line)
+        self._log.append(line)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802 (Qt's name)
         if self._run is not None:

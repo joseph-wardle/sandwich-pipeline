@@ -1,4 +1,4 @@
-"""What the Render Network window and its headless Houdini worker say to each other.
+"""What the Sandwich Renderer window and its headless Houdini worker say to each other.
 
 The window runs in mayapy for its Qt binding and has no `hou`; the worker runs
 in hython and has no window. The window starts the worker once per action with

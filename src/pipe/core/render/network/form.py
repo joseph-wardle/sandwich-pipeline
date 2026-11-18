@@ -5,6 +5,9 @@ edits it, and every edit re-reads the Disable When and Hide When conditions.
 Adding or removing a multiparm instance rebuilds the form, keeping which
 folders are open and which tabs are chosen.
 
+A yellow dot marks each row, collapsed folder and tab whose parms differ from
+the values the form opened with, which are the hip's as last saved.
+
 Multiparms inside multiparms are not supported; the Render Network has none.
 """
 
@@ -18,6 +21,7 @@ from typing import Any
 from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.render.network.conditions import UNKNOWN, MenuValue, holds
+from pipe.core.render.network.marks import ChangeDot, dot_icon
 from pipe.core.render.network.scene_graph import (
     PrimPicker,
     TypeFilter,
@@ -88,6 +92,12 @@ class ParmForm(QtWidgets.QWidget):
     _components: dict[str, tuple[str, int]]
     _conditionals: list[_Conditional]
     _body: QtWidgets.QWidget | None
+    # The values as opened, which the change dots compare against.
+    _baseline: Values | None
+    # Each dot's parm names, and how to show whether any of them changed.
+    _marks: list[tuple[set[str], Callable[[bool], None]]]
+    # The names of the folders and tabs being built, innermost last.
+    _scopes: list[set[str]]
 
     def __init__(
         self,
@@ -104,10 +114,12 @@ class ParmForm(QtWidgets.QWidget):
         self._evaluated = evaluated or {}
         self._prims = prims
         self._state = state if state is not None else {}
-        self._body = None
+        self._body, self._baseline = None, None
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self._build()
+        # After building, which fills in the defaults of parms the hip lacks.
+        self._baseline = copy.deepcopy(self._values)
 
     def values(self) -> Values:
         return copy.deepcopy(self._values)
@@ -127,6 +139,7 @@ class ParmForm(QtWidgets.QWidget):
             self._body.hide()
             self._body.deleteLater()
         self._menus, self._components, self._conditionals = {}, {}, []
+        self._marks, self._scopes = [], []
         self._body = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(self._body)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -184,6 +197,16 @@ class ParmForm(QtWidgets.QWidget):
         row = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(row)
         layout.setContentsMargins(0, 1, 0, 1)
+        dot = ChangeDot()
+        layout.addWidget(dot)
+        self._mark(
+            {
+                _instanced(e["name"], instance)
+                for e in entries
+                if e["type"] not in (LABEL, SEPARATOR)
+            },
+            dot.set_changed,
+        )
         title = QtWidgets.QLabel()
         title.setFixedWidth(LABEL_WIDTH)
         title.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
@@ -308,7 +331,9 @@ class ParmForm(QtWidgets.QWidget):
         key = _instanced(entry["name"], instance)
         body = QtWidgets.QWidget()
         body_layout = QtWidgets.QVBoxLayout(body)
+        self._scopes.append(inside := set())
         self._add_entries(entry["children"], body_layout, instance)
+        self._scopes.pop()
 
         if entry["style"] != COLLAPSIBLE:
             if entry.get("look") == _BLANK_LOOK:
@@ -333,6 +358,8 @@ class ParmForm(QtWidgets.QWidget):
         if toggle_name:
             section.add_toggle(on, lambda checked: self._set(toggle_name, [checked]))
         section.set_body(body)
+        # Its dot shows changes to parms hidden while it's closed.
+        self._mark(inside | {toggle_name} - {""}, section.set_changed)
         self._watch(entry, instance, body.setEnabled, section.setVisible)
         return section
 
@@ -342,8 +369,16 @@ class ParmForm(QtWidgets.QWidget):
         tabs.setDocumentMode(True)
         for position, entry in enumerate(entries):
             page = QtWidgets.QWidget()
+            self._scopes.append(inside := set())
             self._add_entries(entry["children"], QtWidgets.QVBoxLayout(page), instance)
+            self._scopes.pop()
             tabs.addTab(page, entry["label"])
+            self._mark(
+                inside,
+                lambda changed, p=position: tabs.setTabIcon(
+                    p, dot_icon() if changed else QtGui.QIcon()
+                ),
+            )
             self._watch(
                 entry,
                 instance,
@@ -362,6 +397,9 @@ class ParmForm(QtWidgets.QWidget):
         box = QtWidgets.QGroupBox()
         layout = QtWidgets.QVBoxLayout(box)
         header = QtWidgets.QHBoxLayout()
+        dot = ChangeDot()
+        header.addWidget(dot)
+        self._mark({name}, dot.set_changed)
         title = QtWidgets.QLabel(f"<b>{entry['label']}</b>  ({count})")
         header.addWidget(title)
         header.addStretch(1)
@@ -483,6 +521,27 @@ class ParmForm(QtWidgets.QWidget):
         QtCore.QTimer.singleShot(0, self._build)
         self.changed.emit()
 
+    # ---- change dots ---------------------------------------------------
+
+    def _mark(self, names: set[str], set_changed: Callable[[bool], None]) -> None:
+        """Show `set_changed` whether any of `names` changed, and count them as
+        inside every folder and tab being built."""
+        for scope in self._scopes:
+            scope.update(names)
+        self._marks.append((names, set_changed))
+
+    def _refresh_marks(self) -> None:
+        if self._baseline is None:
+            return
+        baseline = self._baseline
+        changed = {
+            name
+            for name in self._values.keys() | baseline.keys()
+            if self._values.get(name) != baseline.get(name)
+        }
+        for names, set_changed in self._marks:
+            set_changed(not names.isdisjoint(changed))
+
     # ---- conditions ----------------------------------------------------
 
     def _watch(
@@ -500,6 +559,7 @@ class ParmForm(QtWidgets.QWidget):
             )
 
     def _refresh(self) -> None:
+        self._refresh_marks()
         for conditional in self._conditionals:
             if conditional.disable_when:
                 conditional.set_enabled(
@@ -558,6 +618,7 @@ class _Section(QtWidgets.QWidget):
     _arrow: QtWidgets.QToolButton
     _header: QtWidgets.QHBoxLayout
     _body: QtWidgets.QWidget | None
+    _dot: ChangeDot
 
     def __init__(self, title: str, expanded: bool) -> None:
         super().__init__()
@@ -581,6 +642,8 @@ class _Section(QtWidgets.QWidget):
         self._arrow.setChecked(expanded)
         self._arrow.setStyleSheet("QToolButton { font-weight: bold; border: none; }")
         self._arrow.toggled.connect(self._expand)
+        self._dot = ChangeDot()
+        self._header.addWidget(self._dot)
         self._header.addWidget(self._arrow)
         self._header.addStretch(1)
         layout.addWidget(bar)
@@ -590,7 +653,11 @@ class _Section(QtWidgets.QWidget):
         box = QtWidgets.QCheckBox()
         box.setChecked(on)
         box.toggled.connect(toggled)
-        self._header.insertWidget(0, box)
+        # After the dot, before the title.
+        self._header.insertWidget(1, box)
+
+    def set_changed(self, changed: bool) -> None:
+        self._dot.set_changed(changed)
 
     def set_body(self, body: QtWidgets.QWidget) -> None:
         self._body = body

@@ -30,6 +30,12 @@ SHOT_KEY = "shot"
 # Each attempt at a command starts its log with a header like
 # "====[2026/11/13 15:35:57 /J18142/T3/C1.1/pdolbin@host on blade ]====".
 _ATTEMPT_HEADER = re.compile(r"^====\[\S+ \S+ /J\d+/T\d+/", re.MULTILINE)
+# Render Send names each frame's task "Render <layer> <frame>".
+RENDER_TASK = re.compile(r"^Render (\S+) (\d+)$")
+# A render command's stage, which sits in the version folder it renders into.
+_RENDER_USD = re.compile(r"(/\S+/v\d{3,})/render\.usd\b")
+# Folders found in jobs' logs, by job id; a job's folders never change.
+_LOGGED_FOLDERS: dict[int, dict[str, str]] = {}
 
 STATES = {
     "B": "Blocked",
@@ -179,6 +185,34 @@ def log(job: Job, task: Task) -> str:
         raise FarmError(
             f"Could not read the log of {task.title} ({exc}). It may not have run yet."
         ) from exc
+
+
+def folders(job: Job, job_tasks: list[Task]) -> dict[str, str]:
+    """The version folder each of the job's render layers writes, by layer.
+
+    Send notes them on the job. Jobs sent before it did are read from the
+    log of each layer's first render task, which names the stage it renders.
+    """
+    if noted := job.metadata.get("folders"):
+        return {str(layer): str(folder) for layer, folder in noted.items()}
+    if job.jid in _LOGGED_FOLDERS:
+        return _LOGGED_FOLDERS[job.jid]
+    found: dict[str, str] = {}
+    first: dict[str, Task] = {}
+    for task in job_tasks:
+        if (match := RENDER_TASK.match(task.title)) and task.state != "Blocked":
+            first.setdefault(match[1], task)
+    for layer, task in first.items():
+        try:
+            text = log(job, task)
+        except FarmError:
+            continue
+        if match := _RENDER_USD.search(text):
+            found[layer] = match[1]
+    # Kept only once every layer is found, as a log may not exist yet.
+    if len(found) == len(first):
+        _LOGGED_FOLDERS[job.jid] = found
+    return found
 
 
 def attempts(log_text: str) -> int:

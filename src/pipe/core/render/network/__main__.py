@@ -1,4 +1,4 @@
-"""Open the Render Network window, optionally on one shot.
+"""Open the Sandwich Renderer window, optionally on one shot.
 
 Needs a Python with a Qt binding, which the pipeline venv lacks, so the
 desktop launcher runs it in mayapy:
@@ -15,8 +15,10 @@ import sys
 from Qt import QtWidgets
 
 from pipe.core.render.lighters import current_user, lit_shots
-from pipe.core.render.network import theme
+from pipe.core.render.network import splash, theme
 from pipe.core.render.network.window import TITLE, RenderNetworkWindow
+from pipe.core.render.network import render_status
+from pipe.core.render.network.render_status import RenderBoard
 from pipe.core.shotgrid import Shot, ShotGrid, is_previs_shot_code
 from pipe.core.ui import MessageDialog
 from pipe.core.util.users import is_admin
@@ -37,14 +39,30 @@ def main() -> None:
 
     app = QtWidgets.QApplication(sys.argv)
     theme.apply(app)
+    shown = splash.show()
+
+    def say(message: str) -> None:
+        if shown is not None:
+            shown.say(message)
+
+    say("Reading shots from ShotGrid…")
     try:
         shots = _load_shots()
     except _StartupError as exc:
+        if shown is not None:
+            shown.close()
         MessageDialog(None, str(exc), TITLE).exec_()
         sys.exit(1)
 
-    window = RenderNetworkWindow(shots, args.shot, _load_lit_shots(), is_admin())
+    say("Finding the shots you light…")
+    lit = _load_lit_shots()
+    say("Reading Render statuses…")
+    render = _load_render_statuses()
+    say(f"Opening {TITLE}…")
+    window = RenderNetworkWindow(shots, args.shot, lit, is_admin(), render)
     window.show()
+    if shown is not None:
+        shown.finish(window)
     sys.exit(app.exec_())
 
 
@@ -83,6 +101,18 @@ def _load_lit_shots() -> set[str] | None:
     except Exception:
         log.exception("Could not read which shots this artist lights")
         return None
+
+
+def _load_render_statuses() -> RenderBoard:
+    """Each shot's Render task status, or none when ShotGrid can't say."""
+    from env_sg import DB_Config
+
+    try:
+        return render_status.load(ShotGrid.connect(DB_Config))
+    # Only the shot list's icons need them, so the window opens without them.
+    except Exception:
+        log.exception("Could not read the shots' Render statuses")
+        return RenderBoard()
 
 
 if __name__ == "__main__":
