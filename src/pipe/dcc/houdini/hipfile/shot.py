@@ -23,6 +23,7 @@ from pipe.core.shotgrid import (
     Shot,
     ShotGridNotFound,
 )
+from pipe.core.struct.timeline import Timeline, preroll_warning
 from pipe.dcc.houdini.util import nodetypes
 
 from .filemanager import HFileManager
@@ -318,7 +319,10 @@ class HShotFileManager(HFileManager):
         hou.setContextOption("SHOT", shot.shot_path)
 
     def _set_playbar_ranges(self, shot: Shot) -> None:
-        set_frame_range(shot)
+        if warning := set_frame_range(shot):
+            log.warning(warning)
+            if hou.isUIAvailable():
+                hou.ui.setStatusMessage(warning, severity=hou.severityType.Warning)
 
     def _sync_sets(self, shot: Shot) -> None:
         sets = shot.sets or []
@@ -360,15 +364,13 @@ _MUTED_DEPARTMENTS: dict[str, tuple[str, ...]] = {
 }
 
 
-# Frames rendered and simulated either side of the cut.
-HANDLES = 5
-
-
-def set_frame_range(shot: Shot) -> None:
-    """Set the hip's frame range, which $FSTART and $FEND read, to the cut and its handles."""
-    cut_in, cut_out = shot.frame_range
-    hou.playbar.setFrameRange(cut_in - HANDLES, cut_out + HANDLES)
-    hou.playbar.setPlaybackRange(cut_in - HANDLES, cut_out + HANDLES)
+def set_frame_range(shot: Shot) -> str | None:
+    """Set the hip's frame range, which $FSTART and $FEND read, to the shot's
+    timeline, and return the warning when its preroll had to move earlier."""
+    timeline = Timeline.from_shot(shot)
+    hou.playbar.setFrameRange(timeline.start, timeline.end)
+    hou.playbar.setPlaybackRange(timeline.start, timeline.end)
+    return preroll_warning(shot)
 
 
 def build_department_chain(stage: hou.Node, department: str) -> hou.Node:

@@ -19,7 +19,7 @@ from ..anim_index import (
     entries_from_json,
     verify_keepable,
 )
-from ..prim_paths import RIG_GEO_PATH, RIG_ROOT_PATH, RIG_SCOPE_PATH, SHOT_CAM_PATH
+from ..prim_paths import RIG_GEO_PATH, RIG_ROOT_PATH, SHOT_CAM_PATH
 from .utils import (
     clear_root_prims,
     flatten_camera,
@@ -135,7 +135,7 @@ class ExportChaser(mayaUsdLib.ExportChaser):
                 layer_name,
                 Path(
                     split_preroll(
-                        layer, layer_name, RIG_GEO_PATH, self._chaser_args.timeline
+                        layer, layer_name, RIG_ROOT_PATH, self._chaser_args.timeline
                     ).realPath
                 ),
                 _rig_reference(conn, namespace),
@@ -206,5 +206,4 @@ def _rig_reference(
         return None
     return RigReference(
         asset_path=asset_paths.rig_path / "usd/main.usd",
-        prim_path=RIG_SCOPE_PATH.AppendChild(rig_name).pathString,
     )

@@ -37,7 +37,6 @@ class RigReference:
     """The published rig a shot's animation is applied to."""
 
     asset_path: Path
-    prim_path: str
 
 
 @attrs.define(frozen=True)
@@ -136,7 +135,7 @@ def author_rig_entry(
 
     if rig is not None:
         instance_spec.referenceList.Append(
-            Sdf.Reference(rig.asset_path.as_posix(), Sdf.Path(rig.prim_path))
+            Sdf.Reference(rig.asset_path.as_posix(), RIG_ROOT_PATH)
         )
 
 
@@ -200,5 +199,4 @@ def _rig_reference_of(spec: Sdf.PrimSpec | None, folder: Path) -> RigReference |
         return None
     return RigReference(
         asset_path=folder / reference.assetPath,
-        prim_path=reference.primPath.pathString,
     )

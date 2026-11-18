@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 import maya.cmds as mc
 
-from pipe.core.struct.timeline import Timeline
+from pipe.core.struct.timeline import Timeline, preroll_warning
 from pipe.core.ui import MessageDialog
 from pipe.dcc.maya.playblast import AnimPlayblastDialog
 
@@ -25,7 +25,7 @@ from .version import VersionPublisher
 
 log = logging.getLogger(__name__)
 
-CACHE_SET = "rig_geo_grp"
+CACHE_SET = "anim_publish_set"
 
 
 # Frames of preroll spent blending animated channels from their default values
@@ -143,12 +143,16 @@ class AnimPublisher(VersionPublisher):
         }
 
     def _detail(self) -> str:
-        return ", ".join(
+        rigs = ", ".join(
             namespace_of(cache_set) for cache_set in self._selection.sets_to_export
         )
+        warning = preroll_warning(self._shot)
+        return f"{rigs}\n{warning}" if warning else rigs
 
     def _warnings(self) -> list[str]:
         warnings: list[str] = []
+        if preroll := preroll_warning(self._shot):
+            warnings.append(preroll)
         if kept := self._selection.anims_to_keep:
             warnings.append(
                 "Kept from the previous publish:\n"

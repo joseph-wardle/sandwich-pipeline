@@ -24,6 +24,7 @@ from pipe.core.playblast import (
 from pipe.core.publish import scene_version, version_name
 from pipe.core.shot import current_layer_path, shot_root_path
 from pipe.core.shotgrid import Shot
+from pipe.core.struct.timeline import HANDLE_DURATION, head_handle
 from pipe.dcc.maya.playblast.shot.config import (
     MPlayblastConfig,
     MShotPlayblastConfig,
@@ -128,7 +129,7 @@ class AnimPlayblastDialog(MPlayblastDialog):
         return MShotPlayblastConfig(
             camera=self._get_shot_camera_path(),
             shot=self._shot,
-            tails=(5, 5),
+            tails=(head_handle(self._shot.frame_range[0]), HANDLE_DURATION),
             version_label=_published_version(self._shot),
         )
 
