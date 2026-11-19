@@ -3,6 +3,7 @@ headings, banners and status chips, so every page reads the same way."""
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from Qt import QtCore, QtGui, QtWidgets
@@ -10,6 +11,10 @@ from Qt import QtCore, QtGui, QtWidgets
 from pipe.core.render.network import icons, theme
 
 ICON_SIZE = QtCore.QSize(16, 16)
+# A cell's value to sort by, when its text doesn't sort right, such as a date
+# shown as "Nov 18 16:26" or a progress bar with no text.
+SORT_ROLE = QtCore.Qt.UserRole + 7
+_CHUNKS = re.compile(r"(\d+(?:\.\d+)?)")
 # Styled buttons draw their icon flush against their text, so text beside an
 # icon starts with this.
 GAP = " "
@@ -179,3 +184,37 @@ def separator() -> QtWidgets.QFrame:
     line.setFixedWidth(1)
     line.setStyleSheet("QFrame { background-color: #34363d; border: none; }")
     return line
+
+
+class SortableItem(QtWidgets.QTreeWidgetItem):
+    """A table row that sorts numbers as numbers, so "9" comes before "10" and
+    "6 GB" before "122 GB", or by a cell's SORT_ROLE when it has one."""
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, QtWidgets.QTreeWidgetItem):
+            return NotImplemented
+        table = self.treeWidget()
+        column = table.sortColumn() if table is not None else 0
+        mine, theirs = self.data(column, SORT_ROLE), other.data(column, SORT_ROLE)
+        if mine is not None and theirs is not None:
+            return mine < theirs
+        return _sort_key(self.text(column)) < _sort_key(other.text(column))
+
+
+def sortable(table: QtWidgets.QTreeWidget) -> None:
+    """Let the artist sort `table` by clicking a column's header. Rows keep the
+    order they were added in until then."""
+    table.header().setSortIndicator(-1, QtCore.Qt.AscendingOrder)
+    table.setSortingEnabled(True)
+
+
+def _sort_key(text: str) -> tuple[tuple[int, float, str], ...]:
+    """`text` split into numbers and words, so each compares as what it is:
+    each part is (0, number, "") or (1, 0, word). Blank cells sort last."""
+    if not text.strip() or text.strip() == "—":
+        return ((2, 0.0, ""),)
+    return tuple(
+        (0, float(chunk), "") if index % 2 else (1, 0.0, chunk.lower())
+        for index, chunk in enumerate(_CHUNKS.split(text))
+        if chunk
+    )

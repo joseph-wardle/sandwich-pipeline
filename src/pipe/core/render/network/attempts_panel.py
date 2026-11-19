@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.render import farm
-from pipe.core.render.network import background, theme
+from pipe.core.render.network import background, theme, widgets
 
 _DATA_ROLE = QtCore.Qt.UserRole
 # Logs read in the last minute are shown again without asking Tractor.
@@ -38,6 +38,8 @@ class TryRow:
     # The try's key, such as "J18230/T71/C68.3", or "" when it isn't known.
     key: str
     machine: str
+    # When it ended, in seconds since the epoch.
+    when: float = 0.0
     color: str | None = None
 
 
@@ -62,6 +64,7 @@ class TriesPanel(QtWidgets.QSplitter):
         self._rows.setAlternatingRowColors(True)
         self._rows.setToolTip("Click a try to read its log below")
         self._rows.currentItemChanged.connect(lambda *_: self._chosen())
+        widgets.sortable(self._rows)
 
         self._heading = QtWidgets.QLabel("Click a try above to read its log.")
         self._heading.setEnabled(False)
@@ -88,8 +91,10 @@ class TriesPanel(QtWidgets.QSplitter):
         self._rows.clear()
         again = None
         for row in rows:
-            item = QtWidgets.QTreeWidgetItem(list(row.cells))
+            item = widgets.SortableItem(list(row.cells))
             item.setData(0, _DATA_ROLE, row)
+            # Its first column shows only the time; sort by the whole date.
+            item.setData(0, widgets.SORT_ROLE, row.when)
             if row.color:
                 for column in range(item.columnCount()):
                     item.setForeground(column, QtGui.QBrush(QtGui.QColor(row.color)))

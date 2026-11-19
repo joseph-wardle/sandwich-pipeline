@@ -37,7 +37,9 @@ from pipe.core.render.network.sizes import FrameSize
 _DATA_ROLE = QtCore.Qt.UserRole
 _REFRESH_MS = 30_000
 # The task table's progress and size columns.
-_PROGRESS, _SIZE = 2, 3
+_PROGRESS, _SIZE, _TIME = 2, 3, 6
+# The jobs table's Sent column.
+_SENT = 3
 _RENDER_TASK = farm.RENDER_TASK
 _RED, _GREEN, _GREY, _DIM = "#f08080", "#8fe0a0", "#a3a6ad", "#686b72"
 # A job's whole row: (text, background or None). Errored and active jobs
@@ -260,7 +262,7 @@ class FarmTab(QtWidgets.QWidget):
         current = None
         for job in jobs:
             sent = job.spooled.strftime("%b %d %H:%M") if job.spooled else ""
-            item = QtWidgets.QTreeWidgetItem(
+            item = widgets.SortableItem(
                 [
                     str(job.jid),
                     job.title,
@@ -272,6 +274,11 @@ class FarmTab(QtWidgets.QWidget):
                 ]
             )
             item.setData(0, _DATA_ROLE, job)
+            item.setData(
+                _SENT,
+                widgets.SORT_ROLE,
+                job.spooled.timestamp() if job.spooled else 0.0,
+            )
             _color_row(item, *_JOB_ROWS.get(job.status, (_GREY, None)))
             self._jobs.addTopLevelItem(item)
             if job.jid == chosen:
@@ -348,7 +355,7 @@ class FarmTab(QtWidgets.QWidget):
             if self._errors_only.isChecked() and task.state != ERROR:
                 continue
             seconds = task.seconds
-            item = QtWidgets.QTreeWidgetItem(
+            item = widgets.SortableItem(
                 [
                     task.title,
                     task.state,
@@ -365,6 +372,12 @@ class FarmTab(QtWidgets.QWidget):
             if color := _STATUS_COLORS.get(task.state):
                 item.setForeground(1, QtGui.QBrush(QtGui.QColor(color)))
             item.setData(_PROGRESS, PERCENT_ROLE, task.percent)
+            # Numbers to sort by, as the cells show a bar, "1.2 GB" and "1:02:05".
+            item.setData(_PROGRESS, widgets.SORT_ROLE, task.percent or -1)
+            item.setData(_SIZE, widgets.SORT_ROLE, -1)
+            item.setData(
+                _TIME, widgets.SORT_ROLE, seconds if seconds is not None else -1.0
+            )
             if (match := _RENDER_TASK.match(task.title)) and (
                 size := by_frame.get(match[1], {}).get(int(match[2]))
             ):
@@ -653,6 +666,7 @@ def _table(headers: list[str]) -> QtWidgets.QTreeWidget:
     table.setRootIsDecorated(False)
     table.setUniformRowHeights(True)
     table.setAlternatingRowColors(True)
+    widgets.sortable(table)
     return table
 
 
@@ -678,6 +692,7 @@ def _color_row(item: QtWidgets.QTreeWidgetItem, text: str, fill: str | None) -> 
 
 def _show_size(item: QtWidgets.QTreeWidgetItem, size: FrameSize) -> None:
     item.setText(_SIZE, sizes.human(size.bytes))
+    item.setData(_SIZE, widgets.SORT_ROLE, size.bytes)
     item.setTextAlignment(_SIZE, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
     tip = f"{size.path}\n{size.bytes:,} bytes"
     if size.anomaly:

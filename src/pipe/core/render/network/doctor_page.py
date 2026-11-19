@@ -515,7 +515,7 @@ class DoctorPage(QtWidgets.QWidget):
             when = (
                 f" at {_clock(first.retry_at)}" if first.action is Action.WAIT else ""
             )
-            item = QtWidgets.QTreeWidgetItem(
+            item = widgets.SortableItem(
                 [
                     f"{problem.job.jid}  {problem.job.title}",
                     farm.shot_of(problem.job, self._shot_codes) or "—",
@@ -566,7 +566,7 @@ class DoctorPage(QtWidgets.QWidget):
             if self._troubled.isChecked() and not health.problems:
                 continue
             blade = health.blade
-            item = QtWidgets.QTreeWidgetItem(
+            item = widgets.SortableItem(
                 [
                     blade.name,
                     blade.profile,
@@ -639,7 +639,7 @@ class DoctorPage(QtWidgets.QWidget):
         for entry in reversed(journal):
             services = entry.get("services") or []
             result = str(entry.get("result", ""))
-            item = QtWidgets.QTreeWidgetItem(
+            item = widgets.SortableItem(
                 [
                     time.strftime("%b %d %H:%M", time.localtime(entry.get("when", 0))),
                     _who(str(entry.get("by", "doctor"))),
@@ -651,6 +651,7 @@ class DoctorPage(QtWidgets.QWidget):
                     _kept_off(" ".join(str(s.get("after")) for s in services)),
                 ]
             )
+            item.setData(0, widgets.SORT_ROLE, float(entry.get("when", 0)))
             color = (
                 _GREEN
                 if result == "retried"
@@ -1088,6 +1089,7 @@ def _problem_tries(problem: Problem) -> list[TryRow]:
                         title=d.task.title,
                         key=f.attempt.key if f.attempt.number else "",
                         machine=f.attempt.blade,
+                        when=f.attempt.ended or f.attempt.started,
                     ),
                 )
             )
@@ -1110,6 +1112,7 @@ def _machine_tries(health: BladeHealth) -> list[TryRow]:
                 title=f.task,
                 key=f.key,
                 machine=health.blade.name,
+                when=f.when,
             )
         )
     return rows
@@ -1325,6 +1328,7 @@ def _count(n: int, one: str, many: str | None = None) -> str:
 
 def _table(headers: list[str]) -> QtWidgets.QTreeWidget:
     table = QtWidgets.QTreeWidget()
+    widgets.sortable(table)
     table.setHeaderLabels(headers)
     table.setRootIsDecorated(False)
     table.setUniformRowHeights(True)

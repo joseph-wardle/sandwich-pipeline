@@ -32,7 +32,7 @@ _COLUMNS = (
     "Errors",
     "Sent",
 )
-_STATUS, _SHOT, _PROGRESS, _ERRORS = 1, 2, 6, 9
+_STATUS, _SHOT, _PROGRESS, _ERRORS, _SENT = 1, 2, 6, 9, 10
 _COLORS = {
     RENDERING: "#6ca0e0",
     WAITING: "#c9c9c9",
@@ -98,6 +98,7 @@ class OverviewPage(QtWidgets.QWidget):
         self._table.setAlternatingRowColors(True)
         self._table.setItemDelegateForColumn(_PROGRESS, ProgressDelegate(self._table))
         self._table.itemDoubleClicked.connect(self._opened)
+        widgets.sortable(self._table)
 
         header = QtWidgets.QHBoxLayout()
         header.addWidget(title)
@@ -155,7 +156,7 @@ class OverviewPage(QtWidgets.QWidget):
                 continue
             shot = farm.shot_of(job, self._shot_codes)
             sent = job.spooled.strftime("%b %d %H:%M") if job.spooled else ""
-            item = QtWidgets.QTreeWidgetItem(
+            item = widgets.SortableItem(
                 [
                     str(job.jid),
                     job.queue_status,
@@ -172,6 +173,8 @@ class OverviewPage(QtWidgets.QWidget):
             )
             item.setData(0, _DATA_ROLE, job)
             item.setData(_PROGRESS, PERCENT_ROLE, job.percent)
+            item.setData(_PROGRESS, widgets.SORT_ROLE, job.percent)
+            item.setData(_SENT, widgets.SORT_ROLE, _when(job))
             item.setForeground(
                 _STATUS, QtGui.QBrush(QtGui.QColor(_COLORS[job.queue_status]))
             )
@@ -199,3 +202,8 @@ class OverviewPage(QtWidgets.QWidget):
 
     def _failed(self, exc: Exception) -> None:
         self._status.setText(str(exc))
+
+
+def _when(job: Job) -> float:
+    """When the job was sent, to sort by; unknown ones sort first."""
+    return job.spooled.timestamp() if job.spooled else 0.0
