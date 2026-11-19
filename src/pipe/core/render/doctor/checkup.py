@@ -14,7 +14,7 @@ import socket
 import time
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from pipe.core.render import farm
@@ -34,6 +34,11 @@ log = logging.getLogger(__name__)
 MAX_RETRIES_PER_ROUND = 40
 # How long the doctor leaves a task alone after Tractor refused to retry it.
 _REFUSED_SECONDS = 15 * 60
+# How long a task sent to a machine in hyperfocus may wait to start there
+# before the doctor frees it to run anywhere, as when the machine can't take it.
+PIN_SECONDS = 15 * 60
+# A pinned task's commands in these states are past needing their pin.
+_FINISHED_STATES = {"Done", ERROR, "Skipped"}
 
 
 @dataclass(frozen=True)
@@ -53,6 +58,8 @@ class Checkup:
     # jobs say: the engine's own count per blade keeps commands it lost track
     # of, long after their jobs finished.
     rendering: dict[str, int] = field(default_factory=dict)
+    # The machines in hyperfocus, with when it ends.
+    focused: dict[str, float] = field(default_factory=dict)
 
     @property
     def suspects(self) -> set[str]:
@@ -61,9 +68,20 @@ class Checkup:
     def plans(self, steer: bool) -> list[Plan]:
         suspects = self.suspects
         return [
-            policy.plan(d, suspects, self.when, steer, self.cleared)
+            policy.plan(d, suspects, self.when, steer, self.cleared, self.focused)
             for d in self.diagnoses
         ]
+
+    def can_take(self, machine: str, idle: bool = True) -> bool:
+        """Whether `machine` is on the farm and reporting, not nimby'd, and
+        with `idle`, running nothing."""
+        health = next((h for h in self.blades if h.blade.name == machine), None)
+        if health is None or health.blade.nimby:
+            return False
+        heartbeat = health.blade.heartbeat
+        if heartbeat is None or self.when - heartbeat > blades.SILENT_SECONDS:
+            return False
+        return not (idle and self.rendering.get(machine))
 
 
 @dataclass(frozen=True)
@@ -162,6 +180,11 @@ class Doctor:
         self._logs = {key: value for key, value in self._logs.items() if key in errored}
         self.history.add(f for d in diagnoses for f in blades.failures(d))
         cleared = records.cleared_since(self.paths) if self.paths else {}
+        focused = (
+            {m: e["until"] for m, e in records.read_focus(self.paths).items()}
+            if self.paths
+            else {}
+        )
         health = blades.health(
             farm.blades(),
             self.history.since(now - blades.WINDOW_SECONDS),
@@ -181,6 +204,7 @@ class Doctor:
             cleared,
             tuple(kept),
             dict(rendering),
+            focused,
         )
 
     def treat(
@@ -204,9 +228,142 @@ class Doctor:
             and not self._recently_handled(p, checkup.when, settings.acting)
         ]
         due.sort(key=lambda p: p.retry_at or 0.0)
-        return self.retry(
-            due[: settings.max_retries], settings, connection, paths, checkup.when
+        due = due[: settings.max_retries]
+        entries: list[dict[str, Any]] = []
+        pins: list[dict[str, Any]] = []
+        if settings.steer:
+            entries, pins = self._free_pins(checkup, settings, connection, paths)
+            due = self._pin(due, checkup, settings, pins)
+        entries += self.retry(due, settings, connection, paths, checkup.when)
+        if settings.steer and settings.acting:
+            pins += [
+                {
+                    "jid": e["jid"],
+                    "tid": e["tid"],
+                    "machine": e["pin"],
+                    "when": e["when"],
+                }
+                for e in entries
+                if e.get("pin") and e.get("result") == "retried"
+            ]
+            records.write_pins(paths, pins)
+        return entries
+
+    def _pin(
+        self,
+        due: list[Plan],
+        checkup: Checkup,
+        settings: Settings,
+        pins: list[dict[str, Any]],
+    ) -> list[Plan]:
+        """`due`, with a task sent to each machine in hyperfocus that is free
+        and has none waiting for it: one due now, else the soonest waiting,
+        retried early to keep the machine tested."""
+        waiting = sorted(
+            (
+                p
+                for p in checkup.plans(settings.steer)
+                if p.action is Action.WAIT
+                and (
+                    settings.owners is None or p.diagnosis.job.owner in settings.owners
+                )
+                and not self._recently_handled(p, checkup.when, settings.acting)
+            ),
+            key=lambda p: p.retry_at or 0.0,
         )
+        due = list(due)
+        for machine in sorted(checkup.focused):
+            if any(pin["machine"] == machine for pin in pins):
+                continue
+            if not checkup.can_take(machine):
+                continue
+            taken = {(p.diagnosis.job.jid, p.diagnosis.task.tid) for p in due if p.pin}
+            for plan in (*due, *waiting):
+                key = (plan.diagnosis.job.jid, plan.diagnosis.task.tid)
+                # One that asks for more memory might never fit; leave it be.
+                if plan.pin or plan.needs_memory or key in taken:
+                    continue
+                pinned = replace(
+                    plan,
+                    pin=machine,
+                    reason=f"{plan.reason.rstrip('.')}, on {machine} to test it "
+                    "(hyperfocus).",
+                )
+                if plan in due:
+                    due[due.index(plan)] = pinned
+                else:
+                    due.append(pinned)
+                break
+        return due
+
+    def _free_pins(
+        self,
+        checkup: Checkup,
+        settings: Settings,
+        connection: Callable[[], Connection] | None,
+        paths: Paths,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Free the tasks sent to machines in hyperfocus that haven't started
+        and now can't, or won't soon, so they may run anywhere. Returns the
+        journal's entries for those freed, and the pins still held."""
+        entries, kept = [], []
+        for pin in records.read_pins(paths):
+            machine = str(pin.get("machine"))
+            try:
+                commands = farm.task_commands(int(pin["jid"]), int(pin["tid"]))
+            except (FarmError, KeyError, ValueError) as exc:
+                log.warning("Could not read the task pinned to %s: %s", machine, exc)
+                kept.append(pin)
+                continue
+            mine = [c for c in commands if policy.pinned(c.service) == machine]
+            if not mine or all(c.state in _FINISHED_STATES for c in mine):
+                # Run, or retried since without its pin: done with.
+                continue
+            if any(c.state == "Active" for c in mine):
+                kept.append(pin)
+                continue
+            stale = (
+                machine not in checkup.focused
+                or not checkup.can_take(machine, idle=False)
+                or checkup.when - float(pin.get("when", 0)) > PIN_SECONDS
+            )
+            if not stale:
+                kept.append(pin)
+                continue
+            changes = [
+                (c.cid, c.service, policy.steered(c.service, (), None)) for c in mine
+            ]
+            entry: dict[str, Any] = {
+                "when": time.time(),
+                "host": socket.gethostname(),
+                "acting": settings.acting,
+                "jid": pin["jid"],
+                "tid": pin["tid"],
+                "job": "",
+                "task": f"task {pin['tid']}",
+                "blade": machine,
+                "by": "doctor",
+                "reason": f"It was sent to {machine} to test it (hyperfocus), "
+                "but hasn't started there, so it may run anywhere again.",
+                "services": [
+                    {"cid": c, "before": b, "after": a} for c, b, a in changes
+                ],
+            }
+            if not settings.acting or connection is None:
+                entry["result"] = "would free it (watching only)"
+                kept.append(pin)
+            else:
+                try:
+                    logged_in = connection()
+                    for cid, _before, after in changes:
+                        logged_in.set_service(int(pin["jid"]), cid, after)
+                    entry["result"] = "freed"
+                except FarmError as exc:
+                    entry["result"] = f"failed: {exc}"
+                    kept.append(pin)
+            records.write_journal(paths, entry)
+            entries.append(entry)
+        return entries, kept
 
     def retry(
         self,
@@ -293,14 +450,17 @@ def _service_changes(
 ) -> list[tuple[int, str, str]]:
     """(cid, service before, service after) for each of the task's `commands`
     the retry steers."""
-    if not plan.steers:
+    # A pin from an earlier test is dropped by any retry not pinning afresh.
+    if not plan.steers and not any(policy.pinned(c.service) for c in commands):
         return []
     changes = []
     for command in commands:
         memory = (
             policy.memory_needed(command.peak_memory_gb) if plan.needs_memory else None
         )
-        after = policy.steered(command.service, plan.avoid, memory, plan.forgiven)
+        after = policy.steered(
+            command.service, plan.avoid, memory, plan.forgiven, plan.pin
+        )
         if after != command.service:
             changes.append((command.cid, command.service, after))
     return changes
@@ -332,4 +492,5 @@ def _entry(plan: Plan, settings: Settings) -> dict[str, Any]:
         "blade": latest.attempt.blade,
         "evidence": latest.evidence,
         "reason": plan.reason,
+        "pin": plan.pin,
     }

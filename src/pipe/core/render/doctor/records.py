@@ -9,6 +9,11 @@ from the login, so they can be read or shared without it:
 - history.jsonl: the failed attempts it has seen, for `blades.History`.
 - cleared.json: machines given a fresh start, as after a reboot: their
   failures before then no longer count, and retries stop avoiding them.
+- focus.json: machines in hyperfocus, to test them: retries go to them first,
+  while they're free. The window and `doctor focus` write it.
+- pins.json: the tasks the doctor sent to a machine in hyperfocus, so it can
+  free them should the machine go before they start. Only the doctor writes
+  it, so the window's writes to focus.json never race the doctor's.
 
 Home folders are shared by every lab computer, so the Sandwich Renderer window
 reads these wherever the doctor runs.
@@ -32,6 +37,9 @@ JOURNAL_LINES = 300
 # How long a fresh start is remembered: by then its machine's earlier
 # failures have long left the doctor's history.
 _CLEARED_SECONDS = 7 * 24 * 3600
+# How long hyperfocus lasts unless stopped: long enough for a few test tasks,
+# short enough that a forgotten one doesn't keep sending work to a bad machine.
+FOCUS_SECONDS = 4 * 3600
 
 
 @dataclass(frozen=True)
@@ -69,6 +77,14 @@ class Paths:
     @property
     def cleared(self) -> Path:
         return self.state / "cleared.json"
+
+    @property
+    def focus(self) -> Path:
+        return self.state / "focus.json"
+
+    @property
+    def pins(self) -> Path:
+        return self.state / "pins.json"
 
     @property
     def lock(self) -> Path:
@@ -158,3 +174,53 @@ def clear(paths: Paths, machine: str, by: str, undo: bool = False) -> None:
     temporary = paths.cleared.with_suffix(".tmp")
     temporary.write_text(json.dumps(cleared, indent=1), encoding="utf-8")
     temporary.replace(paths.cleared)
+
+
+def read_focus(paths: Paths) -> dict[str, dict[str, Any]]:
+    """The machines in hyperfocus now, each with "since", "until" and "by"."""
+    now = time.time()
+    return {
+        machine: entry
+        for machine, entry in _read_json(paths.focus).items()
+        if isinstance(entry, dict)
+        and isinstance(entry.get("until"), int | float)
+        and entry["until"] > now
+    }
+
+
+def focus(paths: Paths, machine: str, by: str, stop: bool = False) -> None:
+    """Put `machine` in hyperfocus, noted as `by` someone, or with `stop`,
+    take it out."""
+    focused = read_focus(paths)
+    focused.pop(machine, None)
+    if not stop:
+        now = time.time()
+        focused[machine] = {"since": now, "until": now + FOCUS_SECONDS, "by": by}
+    _write_json(paths, paths.focus, focused)
+
+
+def read_pins(paths: Paths) -> list[dict[str, Any]]:
+    """The tasks the doctor sent to machines in hyperfocus: each with "jid",
+    "tid", "machine" and "when"."""
+    found = _read_json(paths.pins).get("pins")
+    return [pin for pin in found or [] if isinstance(pin, dict)]
+
+
+def write_pins(paths: Paths, pins: list[dict[str, Any]]) -> None:
+    _write_json(paths, paths.pins, {"pins": pins})
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        found = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return found if isinstance(found, dict) else {}
+
+
+def _write_json(paths: Paths, path: Path, data: dict[str, Any]) -> None:
+    paths.state.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    # Replaced whole, so no reader sees half of it.
+    temporary.replace(path)

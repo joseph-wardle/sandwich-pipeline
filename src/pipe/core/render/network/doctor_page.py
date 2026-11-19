@@ -31,7 +31,14 @@ from pipe.core.render.doctor.blades import (
     Failure,
     History,
 )
-from pipe.core.render.doctor.checkup import Checkup, Doctor, Problem, Settings, group
+from pipe.core.render.doctor.checkup import (
+    PIN_SECONDS,
+    Checkup,
+    Doctor,
+    Problem,
+    Settings,
+    group,
+)
 from pipe.core.render.doctor.diagnose import MAX_ATTEMPTS, Cause, Diagnosis, Remedy
 from pipe.core.render.doctor.login import Connection, NoLogin
 from pipe.core.render.doctor.policy import Action, Plan
@@ -170,6 +177,8 @@ _SPANS = (
 )
 _DEFAULT_SPAN = 1
 _AVOIDED = re.compile(r"!'([^']+)'")
+# A blade a task was sent to alone: 'yoshi', not after a "!".
+_PINNED = re.compile(r"(?:^|&& |\s)'([^']+)'")
 _MEMORY = re.compile(r"@\.mem > (\d+)")
 
 
@@ -204,6 +213,8 @@ class DoctorPage(QtWidgets.QWidget):
     _busy: bool
     # The artist set "Steer retries" themselves, so it no longer follows the doctor.
     _steer_chosen: bool
+    # The running doctor's last status, if any.
+    _doctor_state: dict[str, Any] | None
     _scope_chosen: bool
     _production: QtWidgets.QCheckBox
 
@@ -222,6 +233,7 @@ class DoctorPage(QtWidgets.QWidget):
         )
         self._checkup, self._busy, self._steer_chosen = None, False, False
         self._scope_chosen = False
+        self._doctor_state = None
         self._windows = set()
         # What the logs say about each machine's lost tasks, by machine, with
         # the failures it was read for: read once, as it takes a log per task.
@@ -389,6 +401,8 @@ class DoctorPage(QtWidgets.QWidget):
         self._in_windows.toggled.connect(lambda _: self._fill_blades())
         self._blades.currentItemChanged.connect(lambda *_: self._machine_chosen())
         self._blades.itemDoubleClicked.connect(lambda item, _: self._map(item))
+        self._blades.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self._blades.customContextMenuRequested.connect(self._machine_menu)
         self._lab_map: LabMapWindow | None = None
         self._machine_detail = QtWidgets.QTextBrowser()
         self._machine_detail.setPlaceholderText(
@@ -407,7 +421,8 @@ class DoctorPage(QtWidgets.QWidget):
             "Failed counts tasks from the last 12 hours that failed because of the "
             "machine itself, such as running out of memory or crashing. Machines in "
             "red failed tasks from several jobs, so retries avoid them. Double-click "
-            "a machine to see where it is on its lab's map."
+            "a machine to see where it is on its lab's map; right-click it for a "
+            "fresh start or hyperfocus."
         )
         hint.setWordWrap(True)
         hint.setEnabled(False)
@@ -421,15 +436,6 @@ class DoctorPage(QtWidgets.QWidget):
             clicked=self._download_machine_logs,
         )
         self._machine_download.setEnabled(False)
-        self._machine_clear = widgets.button(
-            "Fresh Start",
-            "refresh",
-            "Stop counting this machine's failures so far, as after rebooting it: "
-            "it's no longer flagged, and retries stop avoiding it. If it keeps "
-            "failing, it's flagged again as usual.",
-            clicked=self._fresh_start,
-        )
-        self._machine_clear.setEnabled(False)
         self._span = QtWidgets.QComboBox()
         self._span.setToolTip(
             "How far back to list the machine's failed tries and download their "
@@ -445,7 +451,6 @@ class DoctorPage(QtWidgets.QWidget):
         machine_bar.addStretch(1)
         machine_bar.addWidget(QtWidgets.QLabel("Failed tries from"))
         machine_bar.addWidget(self._span)
-        machine_bar.addWidget(self._machine_clear)
         machine_bar.addWidget(self._machine_download)
         layout.addLayout(machine_bar)
         layout.addWidget(split, 1)
@@ -490,6 +495,7 @@ class DoctorPage(QtWidgets.QWidget):
     ) -> None:
         self._busy = False
         self._checkup, status, journal, self._windows = found
+        self._doctor_state = status
         self._show_doctor_status(status)
         self._follow_doctor_steering(status)
         self._follow_doctor_scope(status)
@@ -666,7 +672,7 @@ class DoctorPage(QtWidgets.QWidget):
                     str(rendering or ""),
                     str(health.passed or ""),
                     str(len(health.failures) or ""),
-                    "; ".join(_machine_notes(health)),
+                    "; ".join(_machine_notes(health, self._focus_until(blade.name))),
                     blade.gpu.split(",")[0],
                 ]
             )
@@ -689,6 +695,8 @@ class DoctorPage(QtWidgets.QWidget):
                     f"{_count(rendering, 'task')} of any job is running: it still "
                     "counts commands it lost track of.",
                 )
+            if self._focus_until(blade.name):
+                item.setForeground(0, QtGui.QBrush(QtGui.QColor(theme.INFO)))
             item.setData(0, _DATA_ROLE, health)
             self._blades.addTopLevelItem(item)
             if blade.name == chosen:
@@ -703,7 +711,6 @@ class DoctorPage(QtWidgets.QWidget):
         health: BladeHealth | None = item.data(0, _DATA_ROLE) if item else None
         failures = self._span_failures(health) if health else []
         self._machine_download.setEnabled(bool(failures))
-        self._machine_clear.setEnabled(bool(health and health.failures))
         if item is None or health is None:
             self._machine_detail.clear()
             self._machine_tries.set_rows([])
@@ -718,6 +725,7 @@ class DoctorPage(QtWidgets.QWidget):
                 report,
                 health.blade.name in self._windows,
                 self._rendering(health.blade.name),
+                self._focus_until(health.blade.name),
             )
         )
         if lost and report is None:
@@ -735,6 +743,83 @@ class DoctorPage(QtWidgets.QWidget):
         self._lab_map.show()
         self._lab_map.raise_()
         self._lab_map.activateWindow()
+
+    def _focus_until(self, machine: str) -> float | None:
+        """When `machine`'s hyperfocus ends, or None if it's not in one."""
+        return self._checkup.focused.get(machine) if self._checkup else None
+
+    def _machine_menu(self, position: QtCore.QPoint) -> None:
+        item = self._blades.itemAt(position)
+        if item is None:
+            return
+        self._blades.setCurrentItem(item)
+        health: BladeHealth = item.data(0, _DATA_ROLE)
+        machine = health.blade.name
+        menu = QtWidgets.QMenu(self)
+        menu.setToolTipsVisible(True)
+        view = menu.addAction("View on Map")
+        view.triggered.connect(lambda: self._map(item))
+        menu.addSeparator()
+        fresh = menu.addAction("Fresh Start")
+        fresh.setToolTip(
+            "Stop counting its failures so far, as after rebooting it: it's no "
+            "longer flagged, and retries stop avoiding it."
+        )
+        fresh.setEnabled(bool(health.failures))
+        fresh.triggered.connect(self._fresh_start)
+        if self._focus_until(machine):
+            focus = menu.addAction("Stop Hyperfocus")
+            focus.triggered.connect(lambda: self._set_focus(machine, stop=True))
+        else:
+            focus = menu.addAction("Hyperfocus")
+            focus.setToolTip(
+                "Test it: while it's free, retries go to it before any other "
+                "machine, one at a time, for the next "
+                f"{records.FOCUS_SECONDS // 3600} hours."
+            )
+            focus.triggered.connect(lambda: self._set_focus(machine))
+        menu.exec_(self._blades.viewport().mapToGlobal(position))
+
+    def _set_focus(self, machine: str, stop: bool = False) -> None:
+        """Put `machine` in hyperfocus, or with `stop`, take it out."""
+        if not stop:
+            status = self._doctor_state
+            steering = bool(
+                status
+                and _running(status)
+                and status.get("acting")
+                and status.get("steering")
+            )
+            caveat = (
+                ""
+                if steering
+                else "\n\nThe automatic retries aren't running with steering now, so "
+                "nothing is sent to it until they are."
+            )
+            answer = QtWidgets.QMessageBox.question(
+                self,
+                "Hyperfocus",
+                f"Hyperfocus on {machine}?\n\nWhile it's free, the automatic "
+                "retries send it one task at a time, before any other machine, and "
+                "stop avoiding it, so you can see whether it still fails. It ends "
+                f"by itself in {records.FOCUS_SECONDS // 3600} hours. A task sent "
+                "to it that can't start there within "
+                f"{PIN_SECONDS // 60} minutes is freed to run anywhere.{caveat}",
+            )
+            if answer != QtWidgets.QMessageBox.Yes:
+                return
+        try:
+            records.focus(self._paths, machine, getpass.getuser(), stop)
+        except OSError as exc:
+            self._status.setText(f"Couldn't change {machine}'s hyperfocus: {exc}")
+            return
+        self._status.setText(
+            f"Stopped hyperfocus on {machine}."
+            if stop
+            else f"Hyperfocus on {machine}: from the doctor's next round, retries "
+            "go to it first while it's free."
+        )
+        self.refresh()
 
     def _rendering(self, machine: str) -> int:
         """How many tasks are really running on `machine`."""
@@ -795,6 +880,7 @@ class DoctorPage(QtWidgets.QWidget):
                     report,
                     health.blade.name in self._windows,
                     self._rendering(health.blade.name),
+                    self._focus_until(health.blade.name),
                 )
             )
 
@@ -1136,8 +1222,10 @@ def _blade_state(health: BladeHealth, rendering: int) -> str:
     return "Rendering" if rendering else "Available"
 
 
-def _machine_notes(health: BladeHealth) -> list[str]:
+def _machine_notes(health: BladeHealth, focus_until: float | None = None) -> list[str]:
     notes = []
+    if focus_until:
+        notes.append(f"Hyperfocus until {_clock(focus_until)}: retries go here first")
     if (offline := _offline_for(health)) is not None:
         notes.append(f"Offline for {_ago(offline)}")
     if health.blade.free_disk_gb < LOW_DISK_GB:
@@ -1207,7 +1295,11 @@ def _save_logs(
 
 
 def _describe_machine(
-    health: BladeHealth, report: _LostReport | None, in_windows: bool, rendering: int
+    health: BladeHealth,
+    report: _LostReport | None,
+    in_windows: bool,
+    rendering: int,
+    focus_until: float | None = None,
 ) -> str:
     """A machine's health and what failed on it, as HTML for the detail pane.
     `report` says what its lost tasks' logs show, None while they're read.
@@ -1232,7 +1324,7 @@ def _describe_machine(
     # The failures get their own section below.
     notes = "".join(
         f"<li>{html.escape(n)}</li>"
-        for n in _machine_notes(health)
+        for n in _machine_notes(health, focus_until)
         if not n.startswith("Failed ")
     )
     head = (
@@ -1518,6 +1610,8 @@ def _result_words(result: str) -> str:
         return f"Skipped: already {state}"
     if result.startswith("failed: "):
         return "Failed: " + result.removeprefix("failed: ")
+    if result == "freed":
+        return "Freed: it couldn't start on its hyperfocus machine"
     return result.capitalize()
 
 
@@ -1525,7 +1619,10 @@ def _kept_off(services: str) -> str:
     """What a retry's service keys asked for, in words."""
     machines = list(dict.fromkeys(_AVOIDED.findall(services)))
     memory = [int(m) for m in _MEMORY.findall(services)]
-    parts = [f"Not on {_either(tuple(machines))}"] if machines else []
+    pinned = list(dict.fromkeys(_PINNED.findall(services)))
+    parts = [f"Only on {_either(tuple(pinned))} (hyperfocus)"] if pinned else []
+    if machines:
+        parts.append(f"Not on {_either(tuple(machines))}")
     if memory:
         parts.append(f"needs {max(memory)} GB free memory")
     return "; ".join(parts)

@@ -90,6 +90,13 @@ def main() -> None:
     fresh.add_argument(
         "--undo", action="store_true", help="take back the machine's fresh start"
     )
+    hyper = commands.add_parser(
+        "focus",
+        help="hyperfocus on a machine to test it: while it's free, retries go to "
+        "it first, one at a time, for a few hours",
+    )
+    hyper.add_argument("machine", help="the machine's name, as Tractor shows it")
+    hyper.add_argument("--stop", action="store_true", help="end its hyperfocus")
     args = parser.parse_args()
 
     paths = records.default_paths()
@@ -114,6 +121,15 @@ def main() -> None:
             _login(paths, args.user)
         elif args.command == "unsteer":
             _unsteer(paths, args.jid, set(args.tid))
+        elif args.command == "focus":
+            records.focus(paths, args.machine, getpass.getuser(), args.stop)
+            print(
+                f"Stopped hyperfocus on {args.machine}."
+                if args.stop
+                else f"Hyperfocus on {args.machine} for "
+                f"{records.FOCUS_SECONDS // 3600} hours: from the doctor's next "
+                "round, retries go to it first while it's free."
+            )
         elif args.command == "clear":
             records.clear(paths, args.machine, getpass.getuser(), args.undo)
             print(

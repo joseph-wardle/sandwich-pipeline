@@ -225,7 +225,12 @@ def tasks(job: Job) -> list[Task]:
 
 def commands(job: Job, task: Task) -> list[Command]:
     """The task's commands, with each one's service key and last attempt."""
-    reply = _monitor({"q": "taskdetails", "jid": str(job.jid), "tid": str(task.tid)})
+    return task_commands(job.jid, task.tid)
+
+
+def task_commands(jid: int, tid: int) -> list[Command]:
+    """Task `tid` of job `jid`'s commands, as `commands` gives them."""
+    reply = _monitor({"q": "taskdetails", "jid": str(jid), "tid": str(tid)})
     return [_command(data) for data in reply.get("cmds") or []]
 
 
