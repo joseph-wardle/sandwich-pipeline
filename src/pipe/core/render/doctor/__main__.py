@@ -4,11 +4,12 @@ Needs no Qt, so any Python 3.11 with the pipeline's `src` on its path will do:
 
     PYTHONPATH=src .venv/bin/python -m pipe.core.render.doctor check
     PYTHONPATH=src .venv/bin/python -m pipe.core.render.doctor login
-    PYTHONPATH=src .venv/bin/python -m pipe.core.render.doctor run --act --steer
+    PYTHONPATH=src .venv/bin/python -m pipe.core.render.doctor run --act
 
 `check` diagnoses the farm once and prints it. `run` checks every few minutes
 and notes in its journal what it would retry; with `--act` it retries for
-real, which needs `login` first. `status` shows what a running doctor is doing.
+real, which needs `login` first. Retries always keep off the machines that
+failed them (`policy.steered`). `status` shows what a running doctor is doing.
 """
 
 from __future__ import annotations
@@ -107,7 +108,7 @@ def main() -> None:
             owners = frozenset(args.owner) if args.owner else None
             _run(
                 paths,
-                Settings(acting=args.act, steer=args.steer, owners=owners),
+                Settings(acting=args.act, owners=owners),
                 args.interval,
                 args.once,
                 args.if_not_running,
@@ -151,11 +152,8 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="retry for real, rather than only noting what it would",
     )
-    parser.add_argument(
-        "--steer",
-        action="store_true",
-        help="keep retries off the blades that failed them",
-    )
+    # Steering is always on now; accepted so older cron lines still run.
+    parser.add_argument("--steer", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--all-jobs",
         action="store_true",
@@ -178,7 +176,6 @@ def _schedule(paths: Paths, args: argparse.Namespace) -> None:
             "`python -m pipe.core.render.doctor login` first."
         )
     arguments = ["--act"] if args.act else []
-    arguments += ["--steer"] if args.steer else []
     arguments += ["--all-jobs"] if args.all_jobs else []
     for owner in args.owner or []:
         arguments += ["--owner", owner]

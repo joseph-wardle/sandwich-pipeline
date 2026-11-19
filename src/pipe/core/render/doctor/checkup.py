@@ -116,7 +116,7 @@ class Settings:
     acting: bool = False
     # Keep retries off blades that failed them, and give memory to those that
     # ran out (`policy.steered`).
-    steer: bool = False
+    steer: bool = True
     # Only these artists' jobs, or everyone's when None.
     owners: frozenset[str] | None = None
     max_retries: int = MAX_RETRIES_PER_ROUND

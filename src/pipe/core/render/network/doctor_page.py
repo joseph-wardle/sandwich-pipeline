@@ -71,7 +71,7 @@ _RED, _AMBER, _GREEN, _GREY = "#f08080", "#e0b060", "#8fe0a0", "#a3a6ad"
 _ACTION_COLORS = {Action.HOLD: _RED, Action.WAIT: _GREY, Action.RETRY: _GREEN}
 # Automatic retries that haven't checked in this long have likely stopped.
 _STALE_SECONDS = 15 * 60
-_RUN_COMMAND = "python -m pipe.core.render.doctor schedule --act --steer"
+_RUN_COMMAND = "python -m pipe.core.render.doctor schedule --act"
 # The doctor's words are a TD's. Artists see these instead, by cause key:
 # (what went wrong, what it means and what to do).
 _CAUSE_WORDS = {
@@ -208,7 +208,6 @@ class DoctorPage(QtWidgets.QWidget):
     _doctor_status: widgets.Banner
     _status: QtWidgets.QLabel
     _mine: QtWidgets.QCheckBox
-    _steer: QtWidgets.QCheckBox
     _troubled: QtWidgets.QCheckBox
     _in_windows: QtWidgets.QCheckBox
     _retry: QtWidgets.QPushButton
@@ -221,7 +220,6 @@ class DoctorPage(QtWidgets.QWidget):
     _windows: set[str]
     _busy: bool
     # The artist set "Steer retries" themselves, so it no longer follows the doctor.
-    _steer_chosen: bool
     # The running doctor's last status, if any.
     _doctor_state: dict[str, Any] | None
     _scope_chosen: bool
@@ -248,7 +246,7 @@ class DoctorPage(QtWidgets.QWidget):
         self._doctor = Doctor(
             History(self._paths.history), paths=self._paths, all_jobs=True
         )
-        self._checkup, self._busy, self._steer_chosen = None, False, False
+        self._checkup, self._busy = None, False
         self._scope_chosen = False
         self._doctor_state = None
         self._windows = set()
@@ -343,19 +341,12 @@ class DoctorPage(QtWidgets.QWidget):
         self._production.setChecked(True)
         self._production.toggled.connect(lambda _: self._fill_problems())
         self._production.clicked.connect(self._choose_scope)
-        self._steer = QtWidgets.QCheckBox("Avoid failing machines")
-        self._steer.setToolTip(
-            "Retries skip the machines a task already failed on and the machines "
-            "flagged in red, and wait for a machine with enough free memory if it ran "
-            "out. Starts the same as the automatic retries."
-        )
-        self._steer.toggled.connect(lambda _: self._fill_problems())
-        # Only a click, not the doctor's setting being copied, counts as a choice.
-        self._steer.clicked.connect(self._choose_steering)
         self._retry = widgets.button(
             "Retry Selected",
             "retry",
-            "Retry the selected tasks now",
+            "Retry the selected tasks now, as the automatic retries would: kept off "
+            "the machines that failed them and those flagged in red, and on one with "
+            "more free memory if they ran out",
             theme.PRIMARY,
             self._retry_selected,
         )
@@ -369,7 +360,6 @@ class DoctorPage(QtWidgets.QWidget):
         bar = QtWidgets.QHBoxLayout()
         bar.addWidget(self._mine)
         bar.addWidget(self._production)
-        bar.addWidget(self._steer)
         bar.addStretch(1)
         self._download = widgets.button(
             "Download Logs",
@@ -515,7 +505,6 @@ class DoctorPage(QtWidgets.QWidget):
         self._checkup, status, journal, self._windows, self._nimbied = found
         self._doctor_state = status
         self._show_doctor_status(status)
-        self._follow_doctor_steering(status)
         self._follow_doctor_scope(status)
         self._fill_problems()
         self._fill_blades()
@@ -555,14 +544,10 @@ class DoctorPage(QtWidgets.QWidget):
             )
         else:
             healthy = not status.get("error")
-            avoiding = (
-                ", on machines that haven't failed them"
-                if status.get("steering")
-                else ""
-            )
             text = (
-                f"Automatic retries are on: failed tasks that can work are retried"
-                f"{avoiding}. Last checked at {_clock(status.get('checked'))}."
+                "Automatic retries are on: failed tasks that can work are retried, "
+                "on machines that haven't failed them. Last checked at "
+                f"{_clock(status.get('checked'))}."
             )
             if status.get("error"):
                 text += f" The last check failed: {status['error']}"
@@ -574,15 +559,6 @@ class DoctorPage(QtWidgets.QWidget):
             else f"A TD starts them with {_RUN_COMMAND}"
         )
 
-    def _follow_doctor_steering(self, status: dict[str, Any] | None) -> None:
-        """Steer as the running doctor does, so the tab's plans and retries
-        match its, until the artist chooses otherwise."""
-        if self._steer_chosen or status is None or not _running(status):
-            return
-        self._steer.blockSignals(True)
-        self._steer.setChecked(bool(status.get("steering")))
-        self._steer.blockSignals(False)
-
     def _follow_doctor_scope(self, status: dict[str, Any] | None) -> None:
         """Show the jobs the running doctor looks after, until the artist
         chooses otherwise."""
@@ -592,9 +568,6 @@ class DoctorPage(QtWidgets.QWidget):
         self._production.setChecked(not status.get("all_jobs"))
         self._production.blockSignals(False)
 
-    def _choose_steering(self) -> None:
-        self._steer_chosen = True
-
     def _choose_scope(self) -> None:
         self._scope_chosen = True
 
@@ -603,7 +576,7 @@ class DoctorPage(QtWidgets.QWidget):
     def _plans(self) -> list[Plan]:
         if self._checkup is None:
             return []
-        plans = self._checkup.plans(self._steer.isChecked())
+        plans = self._checkup.plans(steer=True)
         if self._mine.isChecked():
             plans = [p for p in plans if p.diagnosis.job.owner == self._user]
         if self._production.isChecked():
@@ -856,17 +829,12 @@ class DoctorPage(QtWidgets.QWidget):
         """Put `machine` in hyperfocus, or with `stop`, take it out."""
         if not stop:
             status = self._doctor_state
-            steering = bool(
-                status
-                and _running(status)
-                and status.get("acting")
-                and status.get("steering")
-            )
+            acting = bool(status and _running(status) and status.get("acting"))
             # Only the account running them can see how they run.
             caveat = (
-                "\n\nThe automatic retries aren't running with steering now, so "
+                "\n\nThe automatic retries aren't retrying for real now, so "
                 "nothing is sent to it until they are."
-                if status is not None and not steering
+                if status is not None and not acting
                 else ""
             )
             if not self._renderers_only(
@@ -1071,7 +1039,7 @@ class DoctorPage(QtWidgets.QWidget):
         held = [p for p in plans if p.action is Action.HOLD]
         if held and not self._confirm_held(held):
             return
-        settings = Settings(acting=True, steer=self._steer.isChecked())
+        settings = Settings(acting=True)
         self._status.setText(f"Retrying {_count(len(plans), 'task')}…")
         self._retry.setEnabled(False)
         background.run(
