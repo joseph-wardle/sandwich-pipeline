@@ -3,8 +3,8 @@
 Tractor groups machines by their profile, which follows their hardware, not
 the room they're in; an artist looking for a machine wants the room, and the
 desk. The rooms, their desks and who sits at each come from the lab's own
-map (labMapper, by Samuel Schulthies), with machines named the way the farm
-names them: cs-<asset tag>, or a pretty name. A desk may list a machine by
+map (labMapper, by Samuel Schulthies), and 2255's from its floor plan
+(2255_map.png), with machines named the way the farm names them: cs-<asset tag>, or a pretty name. A desk may list a machine by
 both, as waternoose is cs-1031635.
 """
 
@@ -14,6 +14,19 @@ from dataclasses import dataclass
 
 # A desk on a room's plan is its number; a door is its words; None is floor.
 Spot = int | str | None
+
+
+@dataclass(frozen=True)
+class Drawing:
+    """A room drawn to scale from its floor plan, in the plan image's pixels,
+    for a room whose desks don't sit in a grid."""
+
+    # The walls, corner by corner.
+    outline: tuple[tuple[float, float], ...]
+    # Each desk's box: left, top, width, height.
+    boxes: dict[int, tuple[float, float, float, float]]
+    # The door's hinge and how wide it swings, up and away from the wall.
+    door: tuple[float, float, float]
 
 
 @dataclass(frozen=True)
@@ -28,6 +41,8 @@ class Room:
     desks: dict[int | str, tuple[str, ...]]
     # Machines known to be in the room, but not at which desk.
     unplaced: tuple[str, ...] = ()
+    # The room to scale, in place of a grid `plan`.
+    drawing: Drawing | None = None
 
 
 @dataclass(frozen=True)
@@ -170,20 +185,55 @@ ROOMS = (
         "2255 (Parris' Lab)",
         (),
         {
-            "next to the main door": ("maleficent", "ursula"),
-            "at the desk between the thermostat and the Epson printer": _cs(
-                "1002523", "1002548"
-            ),
-            "on the east wall, at the back": (
-                "cruella",
-                "scar",
-                "hook",
-                "hades",
-                "cs-teamcity1",
-                *_cs("1002531", "1002549", "1002547", "1002540", "1002534"),
-                *_cs("1002545", "1002551", "1002524"),
-            ),
+            1: ("ursula",),
+            2: ("maleficent",),
+            3: _cs("1002548"),
+            4: _cs("1002523"),
+            # Down the east wall, from the back corner.
+            **{
+                desk: (name,)
+                for desk, name in enumerate(
+                    (
+                        *_cs("1002524"),
+                        "cs-teamcity1",
+                        *_cs("1002545", "1002534", "1002540", "1002547"),
+                        *_cs("1002549", "1002531"),
+                        "hades",
+                        "hook",
+                        "scar",
+                        "cruella",
+                    ),
+                    start=5,
+                )
+            },
         },
+        # On labMapper's list of 2255, but not on its floor plan.
+        _cs("1002551"),
+        Drawing(
+            outline=(
+                (60, 128),
+                (1075, 128),
+                (1075, 738),
+                (752, 740),
+                (752, 1378),
+                (60, 1378),
+            ),
+            boxes={
+                1: (245, 1285, 108, 75),
+                2: (361, 1285, 158, 75),
+                3: (610, 460, 140, 82),
+                4: (610, 550, 140, 82),
+                # The east wall's machines stand in a column, close together.
+                **{
+                    desk: (905, 163 + 35 * (desk - 5), 160, 32) for desk in range(5, 13)
+                },
+                **{
+                    desk: (915, 578 + 36 * (desk - 13), 140, 32)
+                    for desk in range(13, 17)
+                },
+            },
+            door=(651, 1362, 115),
+        ),
     ),
 )
 

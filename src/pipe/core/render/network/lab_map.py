@@ -59,8 +59,29 @@ class RoomPlan(QtWidgets.QWidget):
         self._phase = (self._phase + _FRAME_MS / 1000 / _PULSE_SECONDS) % 1.0
         self.update()
 
+    def _scale(self, drawing: labs.Drawing) -> QtGui.QTransform:
+        """From the drawing's pixels to the widget's, scaled to fit, centered."""
+        xs = [x for x, _ in drawing.outline]
+        ys = [y for _, y in drawing.outline]
+        width, height = max(xs) - min(xs), max(ys) - min(ys)
+        scale = min((self.width() - 16) / width, (self.height() - 16) / height)
+        transform = QtGui.QTransform()
+        transform.translate(
+            (self.width() - width * scale) / 2, (self.height() - height * scale) / 2
+        )
+        transform.scale(scale, scale)
+        transform.translate(-min(xs), -min(ys))
+        return transform
+
     def _cells(self) -> list[tuple[QtCore.QRectF, labs.Spot]]:
         """Each spot of the plan and where it is drawn, scaled to fit."""
+        if self._room is not None and self._room.drawing is not None:
+            drawing = self._room.drawing
+            transform = self._scale(drawing)
+            return [
+                (transform.mapRect(QtCore.QRectF(*box)).adjusted(1, 1, -1, -1), desk)
+                for desk, box in drawing.boxes.items()
+            ]
         if self._room is None or not self._room.plan:
             return []
         plan = self._room.plan
@@ -88,7 +109,29 @@ class RoomPlan(QtWidgets.QWidget):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
         room = self._room
-        for box, spot in self._cells():
+        if room is not None and room.drawing is not None:
+            self._paint_walls(painter, room.drawing)
+        cells = self._cells()
+        # One size for all the room's names, as big as fits its smallest desk.
+        longest = max(
+            (len(_short(names[0])) for names in (room.desks.values() if room else ())),
+            default=6,
+        )
+        size = max(
+            7,
+            int(
+                min(
+                    (
+                        min(box.height() * 0.55, box.width() * 1.4 / max(longest, 6))
+                        for box, spot in cells
+                        if isinstance(spot, int)
+                    ),
+                    default=15,
+                )
+            ),
+        )
+        size = min(size, 15)
+        for box, spot in cells:
             if isinstance(spot, str):
                 painter.setPen(QtGui.QColor(theme.DIM_TEXT))
                 painter.drawText(box, QtCore.Qt.AlignCenter, spot)
@@ -106,18 +149,41 @@ class RoomPlan(QtWidgets.QWidget):
                 painter.setBrush(_DESK)
             painter.drawRoundedRect(box, 4, 4)
             font = painter.font()
-            font.setPixelSize(max(7, int(box.height() * 0.32)))
+            label = _short(names[0]) if names else str(spot)
+            font.setPixelSize(size)
             font.setBold(found)
             painter.setFont(font)
             painter.setPen(
                 QtGui.QColor(theme.TEXT if found or names else theme.DISABLED_TEXT)
             )
-            label = _short(names[0]) if names else str(spot)
             shown = painter.fontMetrics().elidedText(
                 label, QtCore.Qt.ElideRight, int(box.width() - 4)
             )
             painter.drawText(box, QtCore.Qt.AlignCenter, shown)
         painter.end()
+
+    def _paint_walls(self, painter: QtGui.QPainter, drawing: labs.Drawing) -> None:
+        """The room's walls and door, under its desks."""
+        transform = self._scale(drawing)
+        walls = transform.map(
+            QtGui.QPolygonF([QtCore.QPointF(x, y) for x, y in drawing.outline])
+        )
+        painter.setPen(QtGui.QPen(QtGui.QColor(theme.DIM_TEXT), 2))
+        painter.setBrush(QtGui.QColor("#1b1c20"))
+        painter.drawPolygon(walls)
+        hinge_x, hinge_y, reach = drawing.door
+        swing = transform.mapRect(
+            QtCore.QRectF(hinge_x - reach, hinge_y - reach, reach * 2, reach * 2)
+        )
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(QtGui.QColor(theme.DIM_TEXT))
+        # Qt's angles are in sixteenths of a degree, counterclockwise from 3 o'clock.
+        painter.drawPie(swing, 90 * 16, 90 * 16)
+        painter.setPen(QtGui.QColor(theme.DIM_TEXT))
+        door = transform.mapRect(
+            QtCore.QRectF(hinge_x - reach, hinge_y - reach * 1.5, reach, reach * 0.4)
+        )
+        painter.drawText(door, QtCore.Qt.AlignCenter, "Door")
 
     def event(self, event: QtCore.QEvent) -> bool:
         if event.type() == QtCore.QEvent.ToolTip and isinstance(
@@ -134,8 +200,9 @@ class RoomPlan(QtWidgets.QWidget):
     def _tip_at(self, point: QtCore.QPointF) -> str:
         for box, spot in self._cells():
             if box.contains(point) and isinstance(spot, int) and self._room:
-                names = self._room.desks.get(spot, ())
-                return f"Desk {spot}: " + (" / ".join(names) or "not on the map")
+                names = " / ".join(self._room.desks.get(spot, ())) or "not on the map"
+                # A drawn room's desks are numbered only to tell them apart.
+                return names if self._room.drawing else f"Desk {spot}: {names}"
         return ""
 
 
@@ -175,14 +242,16 @@ class LabMapWindow(QtWidgets.QWidget):
         room = place.room
         self._title.setText(room.label)
         self.setWindowTitle(f"Lab Map: {room.label}")
-        if isinstance(place.desk, int):
+        if isinstance(place.desk, int) and room.drawing is not None:
+            where = f"<b>{machine}</b> is at the highlighted desk."
+        elif isinstance(place.desk, int):
             where = f"<b>{machine}</b> is at the highlighted desk ({place.desk})."
         elif isinstance(place.desk, str):
             where = f"<b>{machine}</b> is {place.desk}."
         else:
             where = f"<b>{machine}</b> is in this room, but its desk isn't on the map."
         self._where.setText(where)
-        self._plan.setVisible(bool(room.plan))
+        self._plan.setVisible(bool(room.plan) or room.drawing is not None)
         self._plan.show_room(room, place.desk if isinstance(place.desk, int) else None)
 
 
