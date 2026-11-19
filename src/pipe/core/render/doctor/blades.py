@@ -23,10 +23,10 @@ from pipe.core.render.farm import Blade
 WINDOW_SECONDS = 12 * 3600
 # Failures of work from at least this many jobs mark a blade as suspect: one
 # job failing on many blades is the job's fault, not theirs.
-SUSPECT_FAILURES = 3
+SUSPECT_FAILURES = 6
 SUSPECT_JOBS = 2
 # Or this many failures of any one job's work, while its other blades pass.
-SUSPECT_FAILURES_ONE_JOB = 6
+SUSPECT_FAILURES_ONE_JOB = 10
 # A blade that hasn't reported for this long is likely off or hung.
 SILENT_SECONDS = 10 * 60
 LOW_DISK_GB = 10.0
