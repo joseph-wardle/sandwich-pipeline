@@ -14,7 +14,7 @@ from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.render import farm
 from pipe.core.render.farm import PAUSED, RENDERING, WAITING, Job
-from pipe.core.render.network import background
+from pipe.core.render.network import background, widgets
 from pipe.core.render.network.progress import PERCENT_ROLE, ProgressDelegate
 
 _REFRESH_MS = 30_000
@@ -65,15 +65,16 @@ class OverviewPage(QtWidgets.QWidget):
         super().__init__(parent)
         self._shot_codes, self._user, self._jobs = list(shot_codes), user, []
 
-        title = QtWidgets.QLabel(
-            "<b>Tractor Overview</b> — every unfinished job on the farm"
+        title = widgets.PageHeading(
+            "activity", "Tractor Overview", "Every unfinished job on the farm"
         )
         self._summary = QtWidgets.QLabel()
         self._summary.setStyleSheet("font-size: 13pt;")
         self._status = QtWidgets.QLabel()
         self._status.setEnabled(False)
-        refresh = QtWidgets.QPushButton("Refresh")
-        refresh.clicked.connect(self.refresh)
+        refresh = widgets.button(
+            "Refresh", "refresh", "Ask Tractor again now", clicked=self.refresh
+        )
 
         filters = QtWidgets.QHBoxLayout()
         self._show = {}
@@ -108,7 +109,8 @@ class OverviewPage(QtWidgets.QWidget):
         )
         hint.setEnabled(False)
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setContentsMargins(16, 14, 16, 10)
+        layout.setSpacing(10)
         layout.addLayout(header)
         layout.addLayout(filters)
         layout.addWidget(self._table, 1)

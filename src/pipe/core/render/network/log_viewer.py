@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render.network import theme
+from pipe.core.render.network import icons, theme
 
 TITLE = "Log Viewer"
 _OPEN_HEIGHT = 220
@@ -15,6 +15,7 @@ class LogViewer(QtWidgets.QWidget):
     """Put in a vertical QSplitter: open, its top edge drags to resize it."""
 
     _tab: QtWidgets.QToolButton
+    _chevron: QtWidgets.QToolButton
     _text: QtWidgets.QPlainTextEdit
     _unread: int
 
@@ -24,11 +25,19 @@ class LogViewer(QtWidgets.QWidget):
         self._tab = QtWidgets.QToolButton()
         self._tab.setCheckable(True)
         self._tab.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+        self._tab.setIcon(icons.get("terminal", theme.DIM_TEXT))
+        self._tab.setCursor(QtCore.Qt.PointingHandCursor)
+        self._tab.setToolTip("Show or hide what Houdini says while it works")
         self._tab.setStyleSheet(
-            "QToolButton { padding: 3px 12px; border: 1px solid #45484f;"
-            " border-bottom: none; background: #232428; }"
-            "QToolButton:checked { background: #17181a; }"
+            "QToolButton { padding: 4px 10px; border: none; border-radius: 0;"
+            f" color: {theme.DIM_TEXT}; background: transparent; }}"
+            f"QToolButton:hover {{ color: {theme.TEXT}; }}"
+            f"QToolButton:checked {{ color: {theme.TEXT}; background: transparent; }}"
         )
+        self._chevron = QtWidgets.QToolButton()
+        self._chevron.setCursor(QtCore.Qt.PointingHandCursor)
+        self._chevron.setAutoRaise(True)
+        self._chevron.clicked.connect(lambda *_: self._tab.toggle())
         self._tab.toggled.connect(self._toggled)
 
         self._text = QtWidgets.QPlainTextEdit()
@@ -40,14 +49,17 @@ class LogViewer(QtWidgets.QWidget):
             QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont)
         )
 
-        bar = QtWidgets.QHBoxLayout()
-        bar.setContentsMargins(6, 0, 0, 0)
+        strip = QtWidgets.QWidget()
+        theme.shade(strip, theme.HEADER)
+        bar = QtWidgets.QHBoxLayout(strip)
+        bar.setContentsMargins(6, 0, 10, 0)
         bar.addWidget(self._tab)
         bar.addStretch(1)
+        bar.addWidget(self._chevron)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addLayout(bar)
+        layout.addWidget(strip)
         layout.addWidget(self._text, 1)
         self._toggled(False)
 
@@ -68,15 +80,18 @@ class LogViewer(QtWidgets.QWidget):
             self._make_room()
         else:
             # Only the tab, which the splitter can't drag open.
-            self.setMaximumHeight(self._tab.sizeHint().height())
+            self.setMaximumHeight(self._tab.sizeHint().height() + 1)
         self._label()
 
     def _label(self) -> None:
-        self._tab.setArrowType(
-            QtCore.Qt.DownArrow if self._tab.isChecked() else QtCore.Qt.UpArrow
+        self._chevron.setIcon(
+            icons.get(
+                "chevron-down" if self._tab.isChecked() else "chevron-up",
+                theme.DIM_TEXT,
+            )
         )
-        new = f"  ({self._unread} new lines)" if self._unread else ""
-        self._tab.setText(TITLE + new)
+        new = f"  ·  {self._unread} new lines" if self._unread else ""
+        self._tab.setText(" " + TITLE + new)
 
     def _make_room(self) -> None:
         splitter = self.parentWidget()

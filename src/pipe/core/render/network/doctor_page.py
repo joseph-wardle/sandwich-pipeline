@@ -32,7 +32,7 @@ from pipe.core.render.doctor.checkup import Checkup, Doctor, Problem, Settings, 
 from pipe.core.render.doctor.diagnose import MAX_ATTEMPTS, Cause, Diagnosis, Remedy
 from pipe.core.render.doctor.login import Connection, NoLogin
 from pipe.core.render.doctor.policy import Action, Plan
-from pipe.core.render.network import background, credentials
+from pipe.core.render.network import background, credentials, icons, theme, widgets
 
 _REFRESH_MS = 60_000
 _DATA_ROLE = QtCore.Qt.UserRole
@@ -140,7 +140,7 @@ class DoctorPage(QtWidgets.QWidget):
     _blades: QtWidgets.QTreeWidget
     _activity: QtWidgets.QTreeWidget
     _summary: QtWidgets.QLabel
-    _doctor_status: QtWidgets.QLabel
+    _doctor_status: widgets.Banner
     _status: QtWidgets.QLabel
     _mine: QtWidgets.QCheckBox
     _steer: QtWidgets.QCheckBox
@@ -164,18 +164,19 @@ class DoctorPage(QtWidgets.QWidget):
         self._doctor = Doctor(History(self._paths.history))
         self._checkup, self._busy, self._steer_chosen = None, False, False
 
-        title = QtWidgets.QLabel(
-            "<b>Farm Doctor</b> — why tasks failed, and which ones a retry will fix"
+        title = widgets.PageHeading(
+            "stethoscope",
+            "Farm Doctor",
+            "Why tasks failed, and which ones a retry will fix",
         )
         self._summary = QtWidgets.QLabel()
         self._summary.setStyleSheet("font-size: 13pt;")
-        self._doctor_status = QtWidgets.QLabel()
-        self._doctor_status.setWordWrap(True)
-        self._doctor_status.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        self._doctor_status = widgets.Banner()
         self._status = QtWidgets.QLabel()
         self._status.setEnabled(False)
-        refresh = QtWidgets.QPushButton("Refresh")
-        refresh.clicked.connect(self.refresh)
+        refresh = widgets.button(
+            "Refresh", "refresh", "Read Tractor's logs again now", clicked=self.refresh
+        )
 
         header = QtWidgets.QHBoxLayout()
         header.addWidget(title)
@@ -187,12 +188,15 @@ class DoctorPage(QtWidgets.QWidget):
         status_bar.addWidget(refresh)
 
         tabs = QtWidgets.QTabWidget()
-        tabs.addTab(self._build_problems(), "Problems")
-        tabs.addTab(self._build_blades(), "Machines")
-        tabs.addTab(self._build_activity(), "Activity")
+        tabs.setDocumentMode(True)
+        tabs.setIconSize(widgets.ICON_SIZE)
+        tabs.addTab(self._build_problems(), icons.get("circle-alert"), "Problems")
+        tabs.addTab(self._build_blades(), icons.get("cpu"), "Machines")
+        tabs.addTab(self._build_activity(), icons.get("history"), "Activity")
 
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setContentsMargins(16, 14, 16, 10)
+        layout.setSpacing(10)
         layout.addLayout(header)
         layout.addLayout(status_bar)
         layout.addWidget(tabs, 1)
@@ -246,11 +250,19 @@ class DoctorPage(QtWidgets.QWidget):
         self._steer.toggled.connect(lambda _: self._fill_problems())
         # Only a click, not the doctor's setting being copied, counts as a choice.
         self._steer.clicked.connect(self._choose_steering)
-        self._retry = QtWidgets.QPushButton("Retry Selected")
-        self._retry.setToolTip("Retry the selected tasks now")
-        self._retry.clicked.connect(self._retry_selected)
-        self._open = QtWidgets.QPushButton("Open on Farm Tab")
-        self._open.clicked.connect(self._open_job)
+        self._retry = widgets.button(
+            "Retry Selected",
+            "retry",
+            "Retry the selected tasks now",
+            theme.PRIMARY,
+            self._retry_selected,
+        )
+        self._open = widgets.button(
+            "Open on Farm Tab",
+            "external",
+            "Show the job on its shot's Farm tab (or double-click it)",
+            clicked=self._open_job,
+        )
 
         bar = QtWidgets.QHBoxLayout()
         bar.addWidget(self._mine)
@@ -349,6 +361,7 @@ class DoctorPage(QtWidgets.QWidget):
 
     def _show_doctor_status(self, status: dict[str, Any] | None) -> None:
         host = str((status or {}).get("host", "")).split(".")[0]
+        healthy = False
         if status is None:
             text = (
                 "Automatic retries are off, so failed tasks wait until someone retries "
@@ -370,6 +383,7 @@ class DoctorPage(QtWidgets.QWidget):
                 f"but don't. Last checked at {_clock(status.get('checked'))}."
             )
         else:
+            healthy = not status.get("error")
             avoiding = (
                 ", on machines that haven't failed them"
                 if status.get("steering")
@@ -382,6 +396,7 @@ class DoctorPage(QtWidgets.QWidget):
             if status.get("error"):
                 text += f" The last check failed: {status['error']}"
         self._doctor_status.setText(text)
+        self._doctor_status.set_kind(widgets.INFO if healthy else widgets.WARNING)
         self._doctor_status.setToolTip(
             f"The Farm Doctor runs on {host}, {status.get('login')}."
             if status and host

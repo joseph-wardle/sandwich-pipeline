@@ -10,7 +10,7 @@ from collections.abc import Callable, Sequence
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render.network import status_icons
+from pipe.core.render.network import icons, status_icons, theme
 from pipe.core.render.network.render_status import RenderBoard, RenderStatus
 from pipe.core.shotgrid import Shot, Status
 
@@ -68,6 +68,9 @@ class ShotList(QtWidgets.QWidget):
         self._filter = QtWidgets.QLineEdit()
         self._filter.setPlaceholderText("Filter shots or statuses")
         self._filter.setClearButtonEnabled(True)
+        self._filter.addAction(
+            icons.get("search", theme.DIM_TEXT), QtWidgets.QLineEdit.LeadingPosition
+        )
         self._filter.textChanged.connect(self._apply_filter)
 
         self._tree = _ShotTree()
@@ -149,6 +152,14 @@ class ShotList(QtWidgets.QWidget):
         code = item.data(0, _CODE_ROLE) if item is not None else None
         if not code:
             return
+        menu = self.status_menu(code)
+        if menu is not None:
+            menu.exec_(self._tree.viewport().mapToGlobal(position))
+
+    def status_menu(self, code: str) -> QtWidgets.QMenu | None:
+        """A menu to change shot `code`'s Render status, or None for no such shot."""
+        if code not in self._shots:
+            return None
         menu = QtWidgets.QMenu(self)
         render = self._render.get(code)
         title = menu.addAction(
@@ -167,7 +178,7 @@ class ShotList(QtWidgets.QWidget):
             action.setChecked(render is not None and status.code == render.code)
             action.setEnabled(not refusal)
             action.triggered.connect(lambda _=False, s=status: self._chose(code, s))
-        menu.exec_(self._tree.viewport().mapToGlobal(position))
+        return menu
 
     def _chose(self, code: str, status: Status) -> None:
         render = self._render.get(code)

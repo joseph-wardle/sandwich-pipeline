@@ -16,7 +16,7 @@ from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.color import DEFAULT_VIEW
 from pipe.core.render import versions
-from pipe.core.render.network import background, frames
+from pipe.core.render.network import background, frames, icons, theme
 from pipe.core.render.network.canvas import ImageCanvas
 from pipe.core.render.network.contact_sheet import THUMB_WIDTH, ContactSheet
 from pipe.core.render.network.playback import DEFAULT_FPS, Look, Player
@@ -109,7 +109,10 @@ class FrameViewer(QtWidgets.QWidget):
         self._stack.addWidget(self._canvas)
         self._stack.addWidget(self._sheet)
         self._sheet_button = QtWidgets.QToolButton()
-        self._sheet_button.setText("Contact Sheet")
+        self._sheet_button.setText(" Contact Sheet")
+        self._sheet_button.setIcon(icons.get("grid"))
+        self._sheet_button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+        self._sheet_button.setCursor(QtCore.Qt.PointingHandCursor)
         self._sheet_button.setCheckable(True)
         self._sheet_button.setToolTip(
             "Every AOV and LPE of this frame side by side; a red X marks one "
@@ -120,7 +123,9 @@ class FrameViewer(QtWidgets.QWidget):
         self._zoom.setToolTip(self._canvas.toolTip())
         self._canvas.zoomed.connect(lambda scale: self._zoom.setText(f"{scale:.0%}"))
         fit = QtWidgets.QToolButton()
-        fit.setText("Fit")
+        fit.setText(" Fit")
+        fit.setIcon(icons.get("fit"))
+        fit.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
         fit.setToolTip("Fit the image to the view (F)")
         fit.clicked.connect(self._canvas.fit)
         actual = QtWidgets.QToolButton()
@@ -151,6 +156,7 @@ class FrameViewer(QtWidgets.QWidget):
         ):
             pick.addWidget(QtWidgets.QLabel(label))
             pick.addWidget(widget, 1)
+        pick.setSpacing(6)
         pick.addWidget(self._exposure)
         pick.addWidget(self._sheet_button)
         self._player = Player(self)
@@ -179,7 +185,6 @@ class FrameViewer(QtWidgets.QWidget):
             shortcut.activated.connect(action)
         scrub = QtWidgets.QHBoxLayout()
         scrub.addWidget(self._play)
-        scrub.addWidget(QtWidgets.QLabel("Frame"))
         scrub.addWidget(self._slider, 1)
         scrub.addWidget(self._frame)
         scrub.addWidget(self._fps)
@@ -190,7 +195,9 @@ class FrameViewer(QtWidgets.QWidget):
         footer.addWidget(fit)
         footer.addWidget(actual)
 
+        self._zoom.setStyleSheet(f"QLabel {{ color: {theme.DIM_TEXT}; }}")
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 8)
         layout.addLayout(pick)
         layout.addWidget(self._stack, 1)
         layout.addLayout(scrub)
@@ -323,7 +330,7 @@ class FrameViewer(QtWidgets.QWidget):
         self._canvas.set_image(image)
 
     def _show_playing(self, playing: bool) -> None:
-        self._play.setText("⏸" if playing else "▶")
+        self._play.setIcon(icons.get("pause" if playing else "play", theme.TEXT, 14))
 
     def _step(self, by: int) -> None:
         """To the next or previous rendered frame, as Nuke's arrow keys do."""

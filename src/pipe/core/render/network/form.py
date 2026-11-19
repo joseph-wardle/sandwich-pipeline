@@ -20,6 +20,7 @@ from typing import Any
 
 from Qt import QtCore, QtGui, QtWidgets
 
+from pipe.core.render.network import icons, theme
 from pipe.core.render.network.conditions import UNKNOWN, MenuValue, holds
 from pipe.core.render.network.marks import ChangeDot, dot_icon
 from pipe.core.render.network.scene_graph import (
@@ -630,7 +631,8 @@ class _Section(QtWidgets.QWidget):
         bar = QtWidgets.QFrame()
         bar.setObjectName("sectionBar")
         bar.setStyleSheet(
-            "#sectionBar { background-color: palette(button); border-radius: 3px; }"
+            "#sectionBar { background-color: #2c2e34; border: 1px solid #34363d;"
+            " border-radius: 6px; }"
         )
         self._header = QtWidgets.QHBoxLayout(bar)
         self._header.setContentsMargins(4, 2, 4, 2)
@@ -640,7 +642,11 @@ class _Section(QtWidgets.QWidget):
         self._arrow.setAutoRaise(True)
         self._arrow.setCheckable(True)
         self._arrow.setChecked(expanded)
-        self._arrow.setStyleSheet("QToolButton { font-weight: bold; border: none; }")
+        self._arrow.setStyleSheet(
+            "QToolButton { font-weight: 600; border: none; background: transparent;"
+            " padding: 3px 4px; }"
+        )
+        self._arrow.setCursor(QtCore.Qt.PointingHandCursor)
         self._arrow.toggled.connect(self._expand)
         self._dot = ChangeDot()
         self._header.addWidget(self._dot)
@@ -672,8 +678,8 @@ class _Section(QtWidgets.QWidget):
         self.expandedChanged.emit(expanded)
 
     def _set_arrow(self, expanded: bool) -> None:
-        self._arrow.setArrowType(
-            QtCore.Qt.DownArrow if expanded else QtCore.Qt.RightArrow
+        self._arrow.setIcon(
+            icons.get("chevron-down" if expanded else "chevron-right", theme.DIM_TEXT)
         )
 
 

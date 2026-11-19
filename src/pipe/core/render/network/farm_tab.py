@@ -29,7 +29,7 @@ from pipe.core.render.farm import (
     LoginRefused,
     Task,
 )
-from pipe.core.render.network import background, credentials, sizes
+from pipe.core.render.network import background, credentials, sizes, theme, widgets
 from pipe.core.render.network.progress import PERCENT_ROLE, ProgressDelegate
 from pipe.core.render.network.size_graph import SizeGraphDialog
 from pipe.core.render.network.sizes import FrameSize
@@ -117,45 +117,62 @@ class FarmTab(QtWidgets.QWidget):
         self._log.setFont(QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont))
         self._log.setPlaceholderText("Choose a task to read its log.")
 
-        self._forget = QtWidgets.QPushButton("Forget Login")
-        self._forget.clicked.connect(self._forget_login)
-        self._archive_button = QtWidgets.QPushButton("Archive Selected")
-        self._archive_button.setToolTip(
-            "Move the selected jobs to Tractor's archive. Ctrl- or Shift-click to "
-            "choose several."
+        self._forget = widgets.button(
+            "Forget Login",
+            "log-out",
+            "Remove the Tractor login kept in your keyring",
+            theme.QUIET,
+            self._forget_login,
         )
-        self._archive_button.clicked.connect(self._archive)
-        refresh = QtWidgets.QPushButton("Refresh")
-        refresh.clicked.connect(self.refresh)
+        self._archive_button = widgets.button(
+            "Archive",
+            "archive",
+            "Move the selected jobs to Tractor's archive. Ctrl- or Shift-click to "
+            "choose several.",
+            clicked=self._archive,
+        )
+        refresh = widgets.button(
+            "Refresh", "refresh", "Ask Tractor again now", clicked=self.refresh
+        )
         self._status = QtWidgets.QLabel()
         self._status.setEnabled(False)
         self._errors_only = QtWidgets.QCheckBox("Errors only")
         self._errors_only.toggled.connect(lambda _: self._show_tasks())
-        self._retry_selected = QtWidgets.QPushButton("Retry Selected")
-        self._retry_selected.setToolTip("Run the selected tasks again")
-        self._retry_selected.clicked.connect(lambda: self._retry(selected=True))
-        self._retry_errors = QtWidgets.QPushButton("Retry All Errors")
-        self._retry_errors.setToolTip(
-            "Run every errored task of the selected job again (R)"
+        self._retry_selected = widgets.button(
+            "Retry Selected",
+            "retry",
+            "Run the selected tasks again",
+            clicked=lambda: self._retry(selected=True),
         )
-        self._retry_errors.clicked.connect(lambda: self._retry(selected=False))
+        self._retry_errors = widgets.button(
+            "Retry All Errors",
+            "retry",
+            "Run every errored task of the selected job again (R)",
+            theme.PRIMARY,
+            lambda: self._retry(selected=False),
+        )
         # Anywhere in the Farm tab, and nowhere else in the window.
         retry_key = _shortcut(QtGui.QKeySequence("R"), self)
         retry_key.setContext(QtCore.Qt.WidgetWithChildrenShortcut)
         retry_key.activated.connect(self._retry_errors_key)
-        self._view = QtWidgets.QPushButton("View Frames")
-        self._view.setToolTip(
-            "Show this task's frame in the Images tab (or double-click it)"
+        self._view = widgets.button(
+            "View Frames",
+            "eye",
+            "Show this task's frame in the Images tab (or double-click it)",
+            clicked=self._on_view,
         )
-        self._view.clicked.connect(self._on_view)
-        self._graph = QtWidgets.QPushButton("Size Graph")
-        self._graph.setToolTip(
-            "Graph each layer's EXR size across the job's frames, odd ones in red"
+        self._graph = widgets.button(
+            "Size Graph",
+            "chart",
+            "Graph each layer's EXR size across the job's frames, odd ones in red",
+            clicked=self._show_graph,
         )
-        self._graph.clicked.connect(self._show_graph)
 
+        jobs_title = QtWidgets.QLabel("Tractor jobs for this shot")
+        jobs_title.setStyleSheet("QLabel { font-weight: 600; }")
         top = QtWidgets.QHBoxLayout()
-        top.addWidget(QtWidgets.QLabel("<b>Tractor jobs for this shot</b>"))
+        top.addWidget(widgets.icon_label("server"))
+        top.addWidget(jobs_title)
         top.addStretch(1)
         top.addWidget(self._status)
         top.addWidget(self._forget)
@@ -166,6 +183,7 @@ class FarmTab(QtWidgets.QWidget):
         task_bar.addStretch(1)
         task_bar.addWidget(self._graph)
         task_bar.addWidget(self._view)
+        task_bar.addWidget(widgets.separator())
         task_bar.addWidget(self._retry_selected)
         task_bar.addWidget(self._retry_errors)
 
@@ -184,6 +202,7 @@ class FarmTab(QtWidgets.QWidget):
         split.setSizes([260, 520])
 
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
         layout.addLayout(top)
         layout.addWidget(split, 1)
 
