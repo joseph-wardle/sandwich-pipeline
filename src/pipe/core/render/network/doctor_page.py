@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import getpass
 import html
+import re
 import time
 from collections.abc import Sequence
 from typing import Any
@@ -19,9 +20,17 @@ from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.render import farm
 from pipe.core.render.doctor import login, records
-from pipe.core.render.doctor.blades import BladeHealth, History
+from pipe.core.render.doctor import diagnose
+from pipe.core.render.doctor.blades import (
+    LOW_DISK_GB,
+    SILENT_SECONDS,
+    BladeHealth,
+    Failure,
+    History,
+)
 from pipe.core.render.doctor.checkup import Checkup, Doctor, Problem, Settings, group
-from pipe.core.render.doctor.login import Connection
+from pipe.core.render.doctor.diagnose import MAX_ATTEMPTS, Cause, Diagnosis, Remedy
+from pipe.core.render.doctor.login import Connection, NoLogin
 from pipe.core.render.doctor.policy import Action, Plan
 from pipe.core.render.network import background, credentials
 
@@ -29,9 +38,96 @@ _REFRESH_MS = 60_000
 _DATA_ROLE = QtCore.Qt.UserRole
 _RED, _AMBER, _GREEN, _GREY = "#f08080", "#e0b060", "#8fe0a0", "#a3a6ad"
 _ACTION_COLORS = {Action.HOLD: _RED, Action.WAIT: _GREY, Action.RETRY: _GREEN}
-# A headless doctor that hasn't checked in this long has likely stopped.
+# Automatic retries that haven't checked in this long have likely stopped.
 _STALE_SECONDS = 15 * 60
-_RUN_COMMAND = "python -m pipe.core.render.doctor run --act"
+_RUN_COMMAND = "python -m pipe.core.render.doctor schedule --act --steer"
+# The doctor's words are a TD's. Artists see these instead, by cause key:
+# (what went wrong, what it means and what to do).
+_CAUSE_WORDS = {
+    "disk_quota": (
+        "Folder's storage limit is full",
+        "The folder it saves to has used up its storage limit (quota). Free up "
+        "space there, then retry.",
+    ),
+    "shared_disk_full": (
+        "Shared drive is full",
+        "The shared drive it saves to is full. Free up space there, then retry.",
+    ),
+    "blade_disk_full": (
+        "Machine's disk is full",
+        "The farm machine's own disk is full. It should work on another machine.",
+    ),
+    "license": (
+        "No license available",
+        "Every license was in use for a moment. It works once one frees up.",
+    ),
+    "cook_error": (
+        "Error in the Houdini scene",
+        "A node in the hip file has an error, shown below. Fix it, then retry or "
+        "send again.",
+    ),
+    "out_of_memory": (
+        "Ran out of memory",
+        "It needed more memory than the machine had free. It should work on a "
+        "machine with more free memory.",
+    ),
+    "lost": (
+        "Machine crashed or restarted",
+        "The machine went down partway through, often from running out of memory. "
+        "It should work on another machine.",
+    ),
+    "crash": (
+        "Crashed",
+        "The renderer or Houdini crashed. This usually works on the next try.",
+    ),
+    "gpu": (
+        "Graphics card error",
+        "The machine's graphics card failed or ran out of memory. It should work on "
+        "another machine.",
+    ),
+    "storage": (
+        "Couldn't reach the shared drive",
+        "The machine lost its connection to the shared drive. It should work on "
+        "another machine.",
+    ),
+    "command_not_found": (
+        "Software missing on the machine",
+        "The machine is missing a program the task runs. If every machine is "
+        "missing it, the job was set up wrong: tell a TD.",
+    ),
+    "missing_file": (
+        "A file is missing",
+        "It couldn't find a file it needs. If that happens on several machines, the "
+        "file really is missing: publish it or fix the path, then retry.",
+    ),
+    "python_error": (
+        "Pipeline script error",
+        "A pipeline script hit an error. If it happens on several machines, the "
+        "scene or the script needs fixing: tell a TD if it isn't yours.",
+    ),
+    "stopped": (
+        "Stopped",
+        "It was stopped partway, as when someone retries or kills it, or someone "
+        "sits down at the machine. It works on the next try.",
+    ),
+    "unknown": (
+        "Unrecognized error",
+        "The Farm Doctor doesn't recognize this error. Read the log below.",
+    ),
+}
+# The doctor's journal keeps a cause's label, not its key.
+_KEY_OF_LABEL = {
+    cause.label: cause.key
+    for cause in vars(diagnose).values()
+    if isinstance(cause, Cause)
+} | {"Its blade stopped reporting": "lost"}
+_ACTION_WORDS = {
+    Action.RETRY: "Retry now",
+    Action.WAIT: "Retry",
+    Action.HOLD: "Needs a fix",
+}
+_AVOIDED = re.compile(r"!'([^']+)'")
+_MEMORY = re.compile(r"@\.mem > (\d+)")
 
 
 class DoctorPage(QtWidgets.QWidget):
@@ -69,7 +165,7 @@ class DoctorPage(QtWidgets.QWidget):
         self._checkup, self._busy, self._steer_chosen = None, False, False
 
         title = QtWidgets.QLabel(
-            "<b>Farm Doctor</b> — why the production's tasks fail, and what retrying can fix"
+            "<b>Farm Doctor</b> — why tasks failed, and which ones a retry will fix"
         )
         self._summary = QtWidgets.QLabel()
         self._summary.setStyleSheet("font-size: 13pt;")
@@ -92,7 +188,7 @@ class DoctorPage(QtWidgets.QWidget):
 
         tabs = QtWidgets.QTabWidget()
         tabs.addTab(self._build_problems(), "Problems")
-        tabs.addTab(self._build_blades(), "Blades")
+        tabs.addTab(self._build_blades(), "Machines")
         tabs.addTab(self._build_activity(), "Activity")
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -126,12 +222,12 @@ class DoctorPage(QtWidgets.QWidget):
             [
                 "Job",
                 "Shot",
-                "Owner",
+                "Artist",
                 "Tasks",
-                "Cause",
-                "What to do",
-                "Attempts",
-                "Blades",
+                "Problem",
+                "Next step",
+                "Tries",
+                "Machines",
             ]
         )
         self._problems.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
@@ -141,19 +237,17 @@ class DoctorPage(QtWidgets.QWidget):
         self._detail.setPlaceholderText("Choose a problem to see why its tasks failed.")
         self._mine = QtWidgets.QCheckBox("Only mine")
         self._mine.toggled.connect(lambda _: self._fill_problems())
-        self._steer = QtWidgets.QCheckBox("Steer retries off failing blades")
+        self._steer = QtWidgets.QCheckBox("Avoid machines that failed them")
         self._steer.setToolTip(
-            "Narrow each retried command's service key, so it keeps off the blades that "
-            "failed it and, if it ran out of memory, waits for a blade with more free. "
-            "It starts as the running headless doctor steers."
+            "Retries skip the machines a task already failed on and the machines "
+            "flagged in red, and wait for a machine with enough free memory if it ran "
+            "out. Starts the same as the automatic retries."
         )
         self._steer.toggled.connect(lambda _: self._fill_problems())
         # Only a click, not the doctor's setting being copied, counts as a choice.
         self._steer.clicked.connect(self._choose_steering)
         self._retry = QtWidgets.QPushButton("Retry Selected")
-        self._retry.setToolTip(
-            "Retry the selected problems' tasks now, as the doctor plans to"
-        )
+        self._retry.setToolTip("Retry the selected tasks now")
         self._retry.clicked.connect(self._retry_selected)
         self._open = QtWidgets.QPushButton("Open on Farm Tab")
         self._open.clicked.connect(self._open_job)
@@ -177,25 +271,25 @@ class DoctorPage(QtWidgets.QWidget):
     def _build_blades(self) -> QtWidgets.QWidget:
         self._blades = _table(
             [
-                "Blade",
-                "Profile",
-                "State",
+                "Machine",
+                "Group",
+                "Status",
                 "Free memory",
                 "Free disk",
-                "Running",
-                "Passed",
-                "Failures",
-                "Problems",
-                "GPU",
+                "Rendering",
+                "Finished",
+                "Failed",
+                "Notes",
+                "Graphics card",
             ]
         )
-        self._troubled = QtWidgets.QCheckBox("Only blades with problems")
+        self._troubled = QtWidgets.QCheckBox("Only machines with problems")
         self._troubled.setChecked(True)
         self._troubled.toggled.connect(lambda _: self._fill_blades())
         hint = QtWidgets.QLabel(
-            "Failures are the last 12 hours' failed attempts that were the blade's fault, "
-            "such as running out of memory or losing a command. Suspect blades, in red, "
-            "failed several jobs' work."
+            "Failed counts tasks from the last 12 hours that failed because of the "
+            "machine itself, such as running out of memory or crashing. Machines in "
+            "red failed tasks from several jobs, so retries avoid them."
         )
         hint.setWordWrap(True)
         hint.setEnabled(False)
@@ -208,11 +302,10 @@ class DoctorPage(QtWidgets.QWidget):
 
     def _build_activity(self) -> QtWidgets.QWidget:
         self._activity = _table(
-            ["When", "By", "Result", "Job", "Task", "Owner", "Cause", "Steered to"]
+            ["When", "By", "Result", "Job", "Task", "Artist", "Problem", "Kept off"]
         )
-        hint = QtWidgets.QLabel(
-            f"From the doctor's journal, {self._paths.journal}, newest first."
-        )
+        hint = QtWidgets.QLabel("Every retry, newest first.")
+        hint.setToolTip(f"From the Farm Doctor's journal, {self._paths.journal}")
         hint.setEnabled(False)
         page = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(page)
@@ -255,28 +348,45 @@ class DoctorPage(QtWidgets.QWidget):
         self._status.setText(str(exc))
 
     def _show_doctor_status(self, status: dict[str, Any] | None) -> None:
+        host = str((status or {}).get("host", "")).split(".")[0]
         if status is None:
             text = (
-                "The headless doctor hasn't run on your account, so nothing retries by "
-                f"itself. Start it with <code>{_RUN_COMMAND}</code>."
+                "Automatic retries are off, so failed tasks wait until someone retries "
+                "them."
             )
         elif status.get("stopped"):
-            text = f"The headless doctor stopped at {_clock(status['stopped'])} on {status.get('host')}."
-        elif time.time() - float(status.get("checked") or 0) > _STALE_SECONDS:
             text = (
-                f"The headless doctor on {status.get('host')} last checked at "
-                f"{_clock(status.get('checked'))}, so it may have stopped."
+                f"Automatic retries stopped at {_clock(status['stopped'])}, so failed "
+                "tasks wait until someone retries them."
+            )
+        elif not _running(status):
+            text = (
+                f"Automatic retries last checked the farm at "
+                f"{_clock(status.get('checked'))}, so they may have stopped."
+            )
+        elif not status.get("acting"):
+            text = (
+                "Automatic retries are only watching: they note what they would retry, "
+                f"but don't. Last checked at {_clock(status.get('checked'))}."
             )
         else:
-            doing = "retrying by itself" if status.get("acting") else "watching only"
-            steering = ", steering retries" if status.get("steering") else ""
+            avoiding = (
+                ", on machines that haven't failed them"
+                if status.get("steering")
+                else ""
+            )
             text = (
-                f"The headless doctor is {doing}{steering} on {status.get('host')}, last "
-                f"checked at {_clock(status.get('checked'))}; {status.get('login')}."
+                f"Automatic retries are on: failed tasks that can work are retried"
+                f"{avoiding}. Last checked at {_clock(status.get('checked'))}."
             )
             if status.get("error"):
-                text += f" Its last round failed: {status['error']}"
+                text += f" The last check failed: {status['error']}"
         self._doctor_status.setText(text)
+        self._doctor_status.setToolTip(
+            f"The Farm Doctor runs on {host}, {status.get('login')}."
+            if status and host
+            else f"A TD starts them with {_RUN_COMMAND}"
+        )
 
     def _follow_doctor_steering(self, status: dict[str, Any] | None) -> None:
         """Steer as the running doctor does, so the tab's plans and retries
@@ -317,8 +427,8 @@ class DoctorPage(QtWidgets.QWidget):
                     farm.shot_of(problem.job, self._shot_codes) or "—",
                     problem.job.owner,
                     str(len(problem.plans)),
-                    d.latest.cause.label,
-                    first.action.value + when,
+                    _cause_label(d.latest.cause.key),
+                    _ACTION_WORDS[first.action] + when,
                     str(max(p.diagnosis.attempts for p in problem.plans)),
                     ", ".join(d.same_way_blades[-4:]),
                 ]
@@ -327,7 +437,7 @@ class DoctorPage(QtWidgets.QWidget):
             item.setForeground(
                 5, QtGui.QBrush(QtGui.QColor(_ACTION_COLORS[first.action]))
             )
-            item.setToolTip(4, d.why)
+            item.setToolTip(4, _why(d))
             self._problems.addTopLevelItem(item)
             item.setSelected(_problem_key(problem) in chosen)
         self._problems.blockSignals(False)
@@ -336,8 +446,8 @@ class DoctorPage(QtWidgets.QWidget):
         held = sum(len(p.plans) for p in problems if p.first.action is Action.HOLD)
         retrying = sum(len(p.plans) for p in problems) - held
         self._summary.setText(
-            f"<span style='color:{_RED}'>{held} need a person</span> · "
-            f"<span style='color:{_GREEN}'>{retrying} can be retried</span>"
+            f"<span style='color:{_RED}'>{held} need a fix</span> · "
+            f"<span style='color:{_GREEN}'>{retrying} will be retried</span>"
         )
         self._problem_chosen()
 
@@ -368,14 +478,16 @@ class DoctorPage(QtWidgets.QWidget):
                     str(blade.running or ""),
                     str(health.passed or ""),
                     str(len(health.failures) or ""),
-                    "; ".join(health.problems),
+                    "; ".join(_machine_notes(health)),
                     blade.gpu.split(",")[0],
                 ]
             )
             if health.suspect:
                 for column in range(item.columnCount()):
                     item.setForeground(column, QtGui.QBrush(QtGui.QColor(_RED)))
-                item.setToolTip(0, "Suspect: it failed several jobs' work")
+                item.setToolTip(
+                    0, "Flagged: it failed tasks from several jobs, so retries avoid it"
+                )
             if health.failures:
                 item.setToolTip(7, _failure_list(health))
             self._blades.addTopLevelItem(item)
@@ -390,13 +502,13 @@ class DoctorPage(QtWidgets.QWidget):
             item = QtWidgets.QTreeWidgetItem(
                 [
                     time.strftime("%b %d %H:%M", time.localtime(entry.get("when", 0))),
-                    str(entry.get("by", "doctor")),
-                    result,
+                    _who(str(entry.get("by", "doctor"))),
+                    _result_words(result),
                     f"{entry.get('jid')}  {entry.get('job', '')}",
                     str(entry.get("task", "")),
                     str(entry.get("owner", "")),
-                    str(entry.get("cause", "")),
-                    "; ".join(str(s.get("after")) for s in services),
+                    _cause_label(_KEY_OF_LABEL.get(str(entry.get("cause", "")), "")),
+                    _kept_off(" ".join(str(s.get("after")) for s in services)),
                 ]
             )
             color = (
@@ -407,7 +519,9 @@ class DoctorPage(QtWidgets.QWidget):
                 else _GREY
             )
             item.setForeground(2, QtGui.QBrush(QtGui.QColor(color)))
-            item.setToolTip(2, str(entry.get("reason", "")))
+            item.setToolTip(2, result)
+            if services:
+                item.setToolTip(7, "; ".join(str(s.get("after")) for s in services))
             self._activity.addTopLevelItem(item)
         for column in range(self._activity.columnCount()):
             self._activity.resizeColumnToContents(column)
@@ -449,24 +563,30 @@ class DoctorPage(QtWidgets.QWidget):
             remembered = credentials.load()
             return remembered[1] if remembered and remembered[0] == self._user else None
 
-        return login.connect(self._paths, self._user, keyring)
+        try:
+            return login.connect(self._paths, self._user, keyring)
+        except NoLogin as exc:
+            raise NoLogin(
+                "Retrying needs your Tractor login. Retry any task once on a shot's "
+                "Farm tab with Remember ticked, then try again here."
+            ) from exc
 
     def _retried(self, entries: list[dict[str, Any]]) -> None:
         retried = sum(1 for e in entries if e.get("result") == "retried")
         failed = [e for e in entries if e.get("result") != "retried"]
         text = f"Retried {_count(retried, 'task')}."
         if failed:
-            text += f" {len(failed)} not: {failed[0].get('result')}"
+            text += f" {len(failed)} not: {_result_words(str(failed[0].get('result')))}"
         self._status.setText(text)
         self._enable()
         QtCore.QTimer.singleShot(3000, self.refresh)
 
     def _confirm_held(self, held: list[Plan]) -> bool:
-        reasons = sorted({p.reason for p in held})
+        reasons = sorted({_why(p.diagnosis) for p in held})
         answer = QtWidgets.QMessageBox.question(
             self,
             "Retry Anyway",
-            f"The doctor thinks retrying won't help {len(held)} of these tasks:\n\n"
+            f"Retrying probably won't fix {len(held)} of these tasks:\n\n"
             + "\n".join(f"• {r}" for r in reasons[:4])
             + "\n\nRetry them anyway?",
         )
@@ -499,13 +619,14 @@ def _describe(problem: Problem) -> str:
     first = problem.first
     d = first.diagnosis
     latest = d.latest
+    label, advice = _cause_words(latest.cause.key)
     color = _ACTION_COLORS[first.action]
-    # The verdict's reason, unless it only repeats the cause's advice.
-    why = "" if d.why.startswith(latest.cause.label) else f"<p>{html.escape(d.why)}</p>"
-    plan = "" if first.reason == d.why else f" {html.escape(first.reason)}"
+    why = _why(d)
+    extra = "" if why == advice else f"<p>{html.escape(why)}</p>"
     rows = "".join(
         f"<tr><td>{f.attempt.number or ''}</td><td>{html.escape(f.attempt.blade)}</td>"
-        f"<td>{html.escape(f.cause.label)}</td><td>{_clock(f.attempt.ended or f.attempt.started)}</td></tr>"
+        f"<td>{html.escape(_cause_label(f.cause.key))}</td>"
+        f"<td>{_clock(f.attempt.ended or f.attempt.started)}</td></tr>"
         for f in reversed(d.findings[-12:])
     )
     tasks = ", ".join(html.escape(p.diagnosis.task.title) for p in problem.plans[:30])
@@ -513,41 +634,177 @@ def _describe(problem: Problem) -> str:
         tasks += f" and {len(problem.plans) - 30} more"
     return (
         f"<h3>{problem.job.jid} {html.escape(problem.job.title)}</h3>"
-        f"<p><b>{html.escape(latest.cause.label)}.</b> {html.escape(latest.cause.advice)}</p>"
-        f"{why}<p><b style='color:{color}'>{first.action.value}.</b>{plan}</p>"
-        f"<p><b>From the log</b> of {html.escape(d.task.title)}, attempt {latest.attempt.number} "
-        f"on {html.escape(latest.attempt.blade)}:</p>"
-        f"<pre style='white-space: pre-wrap'>{html.escape(latest.evidence)}</pre>"
+        f"<p><b>{html.escape(label)}.</b> {html.escape(advice)}</p>{extra}"
+        f"<p><b style='color:{color}'>{_next_step(first)}</b></p>"
+        f"<p><b>From the log</b> of {html.escape(d.task.title)} (try "
+        f"{latest.attempt.number}, on {html.escape(latest.attempt.blade)}):</p>"
+        f"<pre style='white-space: pre-wrap'>{html.escape(_evidence(d))}</pre>"
         f"<p><b>Failed this way on:</b> {html.escape(', '.join(d.same_way_blades))}</p>"
-        f"<p><b>Its failed attempts</b> ({len(d.findings)} of {d.attempts}), latest first:</p>"
-        f"<table cellspacing='6'><tr><th>#</th><th>Blade</th><th>Cause</th><th>Ended</th></tr>{rows}</table>"
+        f"<p><b>Failed tries</b> ({len(d.findings)} of {d.attempts}), latest first:</p>"
+        "<table cellspacing='6'><tr><th>#</th><th>Machine</th><th>Problem</th>"
+        f"<th>Ended</th></tr>{rows}</table>"
         f"<p><b>{_count(len(problem.plans), 'task')}:</b> {tasks}</p>"
     )
 
 
+def _cause_words(key: str) -> tuple[str, str]:
+    return _CAUSE_WORDS.get(key, _CAUSE_WORDS["unknown"])
+
+
+def _cause_label(key: str) -> str:
+    return _cause_words(key)[0] if key else ""
+
+
+def _why(d: Diagnosis) -> str:
+    """Why the task got its verdict, in an artist's words."""
+    cause = d.latest.cause
+    advice = _cause_words(cause.key)[1]
+    if d.verdict is not diagnose.Verdict.PERSON or cause.remedy is Remedy.PERSON:
+        return advice
+    if cause.blade_limit is not None and len(d.same_way_blades) >= cause.blade_limit:
+        return (
+            f"It failed the same way on {len(d.same_way_blades)} different machines, "
+            "so the problem is in the task, not the machines."
+        )
+    if d.attempts >= MAX_ATTEMPTS:
+        return f"It's still failing after {d.attempts} tries."
+    return advice
+
+
+def _next_step(plan: Plan) -> str:
+    """What happens to the task next, in a sentence."""
+    if plan.action is Action.HOLD:
+        if plan.diagnosis.verdict is not diagnose.Verdict.PERSON:
+            return "Its job is paused, so it won't be retried."
+        return "Needs a fix: retrying won't help until someone fixes it."
+    if not plan.steers:
+        where = "on any machine"
+    elif plan.needs_memory:
+        where = "on a machine with more free memory"
+    else:
+        where = "on a different machine"
+    if plan.avoid:
+        where += f", not {_either(plan.avoid)}"
+    if plan.action is Action.WAIT:
+        return f"Will be retried at {_clock(plan.retry_at)}, {where}."
+    return f"Will be retried now, {where}."
+
+
+def _evidence(d: Diagnosis) -> str:
+    """The log line that shows the cause, or what the exit code means."""
+    latest = d.latest
+    if latest.attempt.number and latest.evidence.startswith(
+        ("Exit code", "The log stops")
+    ):
+        if latest.cause.key == "lost":
+            return (
+                f"Exit code {latest.exit_code}: the machine restarted, and Tractor "
+                "lost track of the task."
+            )
+        if latest.cause.key == "stopped":
+            return f"Exit code {latest.exit_code}: Tractor stopped the task."
+    return latest.evidence
+
+
 def _running(status: dict[str, Any]) -> bool:
-    """The headless doctor whose `status` this is is still checking the farm."""
+    """The automatic retries whose `status` this is are still checking the farm."""
     checked = float(status.get("checked") or 0)
     return not status.get("stopped") and time.time() - checked <= _STALE_SECONDS
 
 
 def _blade_state(health: BladeHealth) -> str:
     blade = health.blade
-    if any(p.startswith("Not reporting") for p in health.problems):
-        return "Not reporting"
+    if _offline_for(health) is not None:
+        return "Offline"
     if blade.nimby.startswith("/local/"):
-        return "In use (its user's jobs only)"
+        return "Someone's using it"
     if blade.nimby:
-        return "Nimby"
-    return blade.note.capitalize() if blade.note else "Up"
+        return "Not taking farm work"
+    return "Rendering" if blade.running else "Available"
+
+
+def _machine_notes(health: BladeHealth) -> list[str]:
+    notes = []
+    if (offline := _offline_for(health)) is not None:
+        notes.append(f"Offline for {_ago(offline)}")
+    if health.blade.free_disk_gb < LOW_DISK_GB:
+        notes.append(f"Only {health.blade.free_disk_gb:.0f} GB of disk space free")
+    if health.failures:
+        counts: dict[str, int] = {}
+        for failure in health.failures:
+            label = _failure_label(failure).lower()
+            counts[label] = counts.get(label, 0) + 1
+        listed = ", ".join(f"{label} ×{n}" for label, n in counts.items())
+        notes.append(
+            f"Failed {_count(len(health.failures), 'task')} from "
+            f"{_count(health.jobs, 'job')}: {listed}"
+        )
+    return notes
+
+
+def _offline_for(health: BladeHealth) -> float | None:
+    """How long the machine has been silent, or None while it reports in."""
+    heartbeat = health.blade.heartbeat
+    silent = time.time() - heartbeat if heartbeat is not None else 0.0
+    return silent if silent > SILENT_SECONDS else None
 
 
 def _failure_list(health: BladeHealth) -> str:
     lines = [
-        f"{_clock(f.when)}  J{f.jid} {f.task}: {f.label}"
+        f"{_clock(f.when)}  J{f.jid} {f.task}: {_failure_label(f)}"
         for f in reversed(health.failures[-15:])
     ]
     return "\n".join(lines)
+
+
+def _failure_label(failure: Failure) -> str:
+    return _cause_label(failure.cause)
+
+
+def _who(by: str) -> str:
+    """Who retried: "Automatic" for the Farm Doctor, else the artist."""
+    return "Automatic" if by == "doctor" else by.split(" (")[0]
+
+
+def _result_words(result: str) -> str:
+    if result == "retried":
+        return "Retried"
+    if result == "would retry (watching only)":
+        return "Would retry (only watching)"
+    if result.startswith("would retry ("):
+        return "Not retried: no Tractor login"
+    if result.startswith("skipped: it is "):
+        state = result.removeprefix("skipped: it is ").split(" now")[0]
+        return f"Skipped: already {state}"
+    if result.startswith("failed: "):
+        return "Failed: " + result.removeprefix("failed: ")
+    return result.capitalize()
+
+
+def _kept_off(services: str) -> str:
+    """What a retry's service keys asked for, in words."""
+    machines = list(dict.fromkeys(_AVOIDED.findall(services)))
+    memory = [int(m) for m in _MEMORY.findall(services)]
+    parts = [f"Not on {_either(tuple(machines))}"] if machines else []
+    if memory:
+        parts.append(f"needs {max(memory)} GB free memory")
+    return "; ".join(parts)
+
+
+def _either(names: tuple[str, ...]) -> str:
+    """'a', 'a or b', 'a, b or c', or 'a, b, c or 2 others'."""
+    shown = list(names[-3:])
+    if len(names) > 3:
+        return f"{', '.join(shown)} or {len(names) - 3} others"
+    return shown[0] if len(shown) == 1 else f"{', '.join(shown[:-1])} or {shown[-1]}"
+
+
+def _ago(seconds: float) -> str:
+    if seconds < 3600:
+        return f"{seconds / 60:.0f} min"
+    if seconds < 2 * 86400:
+        return f"{seconds / 3600:.0f} h"
+    return f"{seconds / 86400:.0f} days"
 
 
 def _problem_key(problem: Problem) -> tuple[int, str]:
