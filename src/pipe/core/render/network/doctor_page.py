@@ -137,6 +137,7 @@ class DoctorPage(QtWidgets.QWidget):
 
     _problems: QtWidgets.QTreeWidget
     _detail: QtWidgets.QTextBrowser
+    _machine_detail: QtWidgets.QTextBrowser
     _blades: QtWidgets.QTreeWidget
     _activity: QtWidgets.QTreeWidget
     _summary: QtWidgets.QLabel
@@ -298,6 +299,15 @@ class DoctorPage(QtWidgets.QWidget):
         self._troubled = QtWidgets.QCheckBox("Only machines with problems")
         self._troubled.setChecked(True)
         self._troubled.toggled.connect(lambda _: self._fill_blades())
+        self._blades.currentItemChanged.connect(lambda *_: self._machine_chosen())
+        self._machine_detail = QtWidgets.QTextBrowser()
+        self._machine_detail.setPlaceholderText(
+            "Choose a machine to see what failed on it."
+        )
+        split = QtWidgets.QSplitter()
+        split.addWidget(self._blades)
+        split.addWidget(self._machine_detail)
+        split.setSizes([760, 480])
         hint = QtWidgets.QLabel(
             "Failed counts tasks from the last 12 hours that failed because of the "
             "machine itself, such as running out of memory or crashing. Machines in "
@@ -308,7 +318,7 @@ class DoctorPage(QtWidgets.QWidget):
         page = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(page)
         layout.addWidget(self._troubled)
-        layout.addWidget(self._blades, 1)
+        layout.addWidget(split, 1)
         layout.addWidget(hint)
         return page
 
@@ -467,8 +477,12 @@ class DoctorPage(QtWidgets.QWidget):
         self._problem_chosen()
 
     def _fill_blades(self) -> None:
+        current = self._blades.currentItem()
+        chosen = current.text(0) if current is not None else None
+        self._blades.blockSignals(True)
         self._blades.clear()
         if self._checkup is None:
+            self._blades.blockSignals(False)
             return
         rows = sorted(
             self._checkup.blades,
@@ -505,9 +519,21 @@ class DoctorPage(QtWidgets.QWidget):
                 )
             if health.failures:
                 item.setToolTip(7, _failure_list(health))
+            item.setData(0, _DATA_ROLE, health)
             self._blades.addTopLevelItem(item)
+            if blade.name == chosen:
+                self._blades.setCurrentItem(item)
+        self._blades.blockSignals(False)
         for column in range(self._blades.columnCount()):
             self._blades.resizeColumnToContents(column)
+        self._machine_chosen()
+
+    def _machine_chosen(self) -> None:
+        item = self._blades.currentItem()
+        if item is None:
+            self._machine_detail.clear()
+            return
+        self._machine_detail.setHtml(_describe_machine(item.data(0, _DATA_ROLE)))
 
     def _fill_activity(self, journal: list[dict[str, Any]]) -> None:
         self._activity.clear()
@@ -762,6 +788,86 @@ def _offline_for(health: BladeHealth) -> float | None:
     heartbeat = health.blade.heartbeat
     silent = time.time() - heartbeat if heartbeat is not None else 0.0
     return silent if silent > SILENT_SECONDS else None
+
+
+def _describe_machine(health: BladeHealth) -> str:
+    """A machine's health and what failed on it, as HTML for the detail pane."""
+    blade = health.blade
+    flagged = (
+        f"<p><b style='color:{_RED}'>Flagged:</b> it failed tasks from "
+        f"{_count(health.jobs, 'job')}, so retries avoid it.</p>"
+        if health.suspect
+        else ""
+    )
+    reported = (
+        f"{_ago(time.time() - blade.heartbeat)} ago" if blade.heartbeat else "never"
+    )
+    specs = (
+        f"{html.escape(blade.profile)} · {blade.cpus} CPUs · "
+        f"{html.escape(blade.gpu.split(',')[0] or 'no GPU')}<br>"
+        f"{blade.free_memory_gb:.0f} GB memory and {blade.free_disk_gb:.0f} GB disk "
+        f"free · rendering {blade.running} · last reported {reported}"
+    )
+    # The failures get their own section below.
+    notes = "".join(
+        f"<li>{html.escape(n)}</li>"
+        for n in _machine_notes(health)
+        if not n.startswith("Failed ")
+    )
+    head = (
+        f"<h3>{html.escape(blade.name)} — {html.escape(_blade_state(health))}</h3>"
+        f"{flagged}<p>{specs}</p>" + (f"<ul>{notes}</ul>" if notes else "")
+    )
+    if not health.failures:
+        return head + (
+            "<p>Nothing has failed here because of the machine in the last 12 hours.</p>"
+        )
+    tally: dict[str, int] = {}
+    lines: dict[str, int] = {}
+    jobs: dict[int, list[Failure]] = {}
+    for failure in health.failures:
+        label = _failure_label(failure)
+        tally[label] = tally.get(label, 0) + 1
+        line = _machine_evidence(failure)
+        lines[line] = lines.get(line, 0) + 1
+        jobs.setdefault(failure.jid, []).append(failure)
+    tallied = " · ".join(f"{html.escape(k)} ×{n}" for k, n in tally.items())
+    hit = "".join(
+        f"<li>Job {jid} ({html.escape(found[0].owner)}): {_count(len(found), 'task')}</li>"
+        for jid, found in sorted(jobs.items(), key=lambda j: -len(j[1]))
+    )
+    logged = "".join(
+        f"<li><code>{html.escape(line)}</code>" + (f" ×{n}" if n > 1 else "") + "</li>"
+        for line, n in sorted(lines.items(), key=lambda kv: -kv[1])[:6]
+    )
+    rows = "".join(
+        f"<tr><td>{_clock(f.when)}</td><td>{f.jid}</td><td>{html.escape(f.task)}</td>"
+        f"<td>{html.escape(_failure_label(f))}</td></tr>"
+        for f in reversed(health.failures[-25:])
+    )
+    more = (
+        f"<p>…and {len(health.failures) - 25} earlier.</p>"
+        if len(health.failures) > 25
+        else ""
+    )
+    return head + (
+        f"<p><b>Failed here in the last 12 hours</b> "
+        f"({_count(len(health.failures), 'task')}): {tallied}</p>"
+        f"<p><b>Jobs hit:</b></p><ul>{hit}</ul>"
+        f"<p><b>From the logs:</b></p><ul>{logged}</ul>"
+        "<p><b>Failed tasks</b>, latest first:</p><table cellspacing='6'>"
+        "<tr><th>Ended</th><th>Job</th><th>Task</th><th>Problem</th></tr>"
+        f"{rows}</table>{more}"
+    )
+
+
+def _machine_evidence(failure: Failure) -> str:
+    """The failure's log line, or what its exit code means."""
+    if failure.cause == "lost" and failure.evidence.startswith(
+        ("Exit code", "The log")
+    ):
+        return "The machine restarted, and Tractor lost track of the task."
+    return failure.evidence
 
 
 def _failure_list(health: BladeHealth) -> str:
