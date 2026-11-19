@@ -47,6 +47,8 @@ class Checkup:
     problems: tuple[str, ...]
     # When each machine given a fresh start was given it.
     cleared: dict[str, float] = field(default_factory=dict)
+    # Every failure the history keeps, counted or not, oldest first.
+    history: tuple[blades.Failure, ...] = ()
 
     @property
     def suspects(self) -> set[str]:
@@ -159,8 +161,17 @@ class Doctor:
             now,
             cleared,
         )
+        kept = sorted(
+            self.history.since(now - blades.KEEP_SECONDS), key=lambda f: f.when
+        )
         return Checkup(
-            now, jobs, tuple(diagnoses), tuple(health), tuple(problems), cleared
+            now,
+            jobs,
+            tuple(diagnoses),
+            tuple(health),
+            tuple(problems),
+            cleared,
+            tuple(kept),
         )
 
     def treat(

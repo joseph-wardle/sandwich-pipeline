@@ -157,6 +157,15 @@ _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 # Where the window keeps its settings, and the folder logs were last saved to.
 _SETTINGS = ("SandwichKwonDo", "RenderNetwork")
 _LOG_FOLDER_KEY = "doctor/log_folder"
+_SPAN_KEY = "doctor/tries_span"
+# How far back a machine's failed tries are listed, as the artist chooses.
+_SPANS = (
+    ("Last hour", 3600),
+    ("Last 24 hours", 24 * 3600),
+    ("Last week", 7 * 24 * 3600),
+    ("Last month", 31 * 24 * 3600),
+)
+_DEFAULT_SPAN = 1
 _AVOIDED = re.compile(r"!'([^']+)'")
 _MEMORY = re.compile(r"@\.mem > (\d+)")
 
@@ -416,10 +425,21 @@ class DoctorPage(QtWidgets.QWidget):
             clicked=self._fresh_start,
         )
         self._machine_clear.setEnabled(False)
+        self._span = QtWidgets.QComboBox()
+        self._span.setToolTip(
+            "How far back to list the machine's failed tries and download their "
+            "logs. Tries from before a fresh start are listed too, in grey."
+        )
+        for label, seconds in _SPANS:
+            self._span.addItem(label, seconds)
+        self._span.setCurrentIndex(_saved_span())
+        self._span.currentIndexChanged.connect(self._span_chosen)
         machine_bar = QtWidgets.QHBoxLayout()
         machine_bar.addWidget(self._troubled)
         machine_bar.addWidget(self._in_windows)
         machine_bar.addStretch(1)
+        machine_bar.addWidget(QtWidgets.QLabel("Failed tries from"))
+        machine_bar.addWidget(self._span)
         machine_bar.addWidget(self._machine_clear)
         machine_bar.addWidget(self._machine_download)
         layout.addLayout(machine_bar)
@@ -664,13 +684,14 @@ class DoctorPage(QtWidgets.QWidget):
     def _machine_chosen(self) -> None:
         item = self._blades.currentItem()
         health: BladeHealth | None = item.data(0, _DATA_ROLE) if item else None
-        self._machine_download.setEnabled(bool(health and health.failures))
+        failures = self._span_failures(health) if health else []
+        self._machine_download.setEnabled(bool(failures))
         self._machine_clear.setEnabled(bool(health and health.failures))
         if item is None or health is None:
             self._machine_detail.clear()
             self._machine_tries.set_rows([])
             return
-        self._machine_tries.set_rows(_machine_tries(health))
+        self._machine_tries.set_rows(_machine_tries(health, failures))
         lost = frozenset(f.key for f in health.failures if f.cause == _LOST)
         cached = self._lost_reports.get(health.blade.name)
         report = cached[1] if cached and cached[0] == lost else None
@@ -692,6 +713,22 @@ class DoctorPage(QtWidgets.QWidget):
         self._lab_map.show()
         self._lab_map.raise_()
         self._lab_map.activateWindow()
+
+    def _span_failures(self, health: BladeHealth) -> list[Failure]:
+        """The failures the machine was blamed for within the chosen span,
+        whether or not they still count against it, oldest first."""
+        if self._checkup is None:
+            return []
+        since = time.time() - int(self._span.currentData())
+        return [
+            f
+            for f in self._checkup.history
+            if f.blade == health.blade.name and f.blames_blade and f.when >= since
+        ]
+
+    def _span_chosen(self) -> None:
+        QtCore.QSettings(*_SETTINGS).setValue(_SPAN_KEY, self._span.currentIndex())
+        self._machine_chosen()
 
     def _fresh_start(self) -> None:
         """Give the chosen machine a fresh start, for the doctor and this window."""
@@ -865,7 +902,7 @@ class DoctorPage(QtWidgets.QWidget):
             return
         health: BladeHealth = item.data(0, _DATA_ROLE)
         wanted = []
-        for failure in health.failures:
+        for failure in self._span_failures(health):
             if match := _ATTEMPT_KEY.match(failure.key):
                 wanted.append(
                     _LogRequest(
@@ -1134,8 +1171,14 @@ def _describe_machine(
         f"{flagged}<p>{specs}</p>" + (f"<ul>{notes}</ul>" if notes else "")
     )
     if not health.failures:
+        since = (
+            "since its fresh start"
+            if health.cleared and time.time() - health.cleared < WINDOW_SECONDS
+            else "in the last 12 hours"
+        )
         return head + (
-            "<p>Nothing has failed here because of the machine in the last 12 hours.</p>"
+            f"<p>Nothing has failed here because of the machine {since}. Earlier "
+            "failed tries are listed below, by the time chosen above.</p>"
         )
     tally: dict[str, int] = {}
     lines: dict[str, int] = {}
@@ -1196,16 +1239,19 @@ def _problem_tries(problem: Problem) -> list[TryRow]:
     return [row for _, row in sorted(rows, key=lambda r: r[0], reverse=True)]
 
 
-def _machine_tries(health: BladeHealth) -> list[TryRow]:
-    """The tries that failed on the machine because of it, latest first."""
+def _machine_tries(health: BladeHealth, failures: list[Failure]) -> list[TryRow]:
+    """The tries in `failures`, latest first; those from before the machine's
+    fresh start in grey."""
     rows = []
-    for f in reversed(health.failures):
+    for f in reversed(failures):
         match = _ATTEMPT_KEY.match(f.key)
         if match is None:
             continue
+        before = health.cleared is not None and f.when < health.cleared
+        problem = _failure_label(f) + (" (before fresh start)" if before else "")
         rows.append(
             TryRow(
-                cells=(_clock(f.when), str(f.jid), f.task, _failure_label(f)),
+                cells=(_when(f.when), str(f.jid), f.task, problem),
                 owner=f.owner,
                 jid=int(match[1]),
                 tid=int(match[2]),
@@ -1213,9 +1259,26 @@ def _machine_tries(health: BladeHealth) -> list[TryRow]:
                 key=f.key,
                 machine=health.blade.name,
                 when=f.when,
+                color=theme.DISABLED_TEXT if before else None,
             )
         )
     return rows
+
+
+def _when(seconds: float) -> str:
+    """A time, with its day when it isn't today."""
+    if time.strftime("%x", time.localtime(seconds)) == time.strftime("%x"):
+        return _clock(seconds)
+    return time.strftime("%b %d %H:%M", time.localtime(seconds))
+
+
+def _saved_span() -> int:
+    try:
+        saved = QtCore.QSettings(*_SETTINGS).value(_SPAN_KEY, _DEFAULT_SPAN)
+        index = int(saved)
+    except (TypeError, ValueError):
+        return _DEFAULT_SPAN
+    return index if 0 <= index < len(_SPANS) else _DEFAULT_SPAN
 
 
 @dataclass(frozen=True)

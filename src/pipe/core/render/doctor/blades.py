@@ -30,8 +30,9 @@ SUSPECT_FAILURES_ONE_JOB = 6
 # A blade that hasn't reported for this long is likely off or hung.
 SILENT_SECONDS = 10 * 60
 LOW_DISK_GB = 10.0
-# How long `History` keeps a failure.
-_KEEP_SECONDS = 2 * 24 * 3600
+# How long `History` keeps a failure: long after it stops counting against
+# its blade, so its log can still be found from the window.
+KEEP_SECONDS = 31 * 24 * 3600
 
 log = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ class History:
     def _compact(self, path: Path) -> None:
         """Drop failures too old to matter, so the file stays small."""
         self.refresh()
-        keep = time.time() - _KEEP_SECONDS
+        keep = time.time() - KEEP_SECONDS
         kept = [f for f in self._seen.values() if f.when >= keep]
         if len(kept) == len(self._seen):
             return
