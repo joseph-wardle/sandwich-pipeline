@@ -48,6 +48,9 @@ from pipe.core.render.network.attempts_panel import TriesPanel, TryRow
 
 _REFRESH_MS = 60_000
 _DATA_ROLE = QtCore.Qt.UserRole
+# A Problems row's (job, how it failed), and a job's several ways of failing.
+_KEY_ROLE = QtCore.Qt.UserRole + 1
+_KINDS_ROLE = QtCore.Qt.UserRole + 2
 _RED, _AMBER, _GREEN, _GREY = "#f08080", "#e0b060", "#8fe0a0", "#a3a6ad"
 _ACTION_COLORS = {Action.HOLD: _RED, Action.WAIT: _GREY, Action.RETRY: _GREEN}
 # Automatic retries that haven't checked in this long have likely stopped.
@@ -295,6 +298,8 @@ class DoctorPage(QtWidgets.QWidget):
             ]
         )
         self._problems.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        # A job's several ways of failing open beneath it.
+        self._problems.setRootIsDecorated(True)
         self._problems.itemSelectionChanged.connect(self._problem_chosen)
         self._problems.itemDoubleClicked.connect(lambda *_: self._open_job())
         self._detail = QtWidgets.QTextBrowser()
@@ -582,35 +587,39 @@ class DoctorPage(QtWidgets.QWidget):
         return plans
 
     def _fill_problems(self) -> None:
-        chosen = {_problem_key(p) for p in self._selected_problems()}
+        chosen = {_item_key(item) for item in self._problems.selectedItems()}
+        expanded = {
+            _item_key(self._problems.topLevelItem(i))
+            for i in range(self._problems.topLevelItemCount())
+            if self._problems.topLevelItem(i).isExpanded()
+        }
         self._problems.blockSignals(True)
         self._problems.clear()
         problems = group(self._plans())
+        # One row per job; a job whose tasks failed in several ways lists each
+        # way in rows beneath it, worst first.
+        by_job: dict[int, list[Problem]] = {}
         for problem in problems:
-            first = problem.first
-            d = first.diagnosis
-            when = (
-                f" at {_clock(first.retry_at)}" if first.action is Action.WAIT else ""
-            )
-            item = widgets.SortableItem(
-                [
-                    f"{problem.job.jid}  {problem.job.title}",
-                    farm.shot_of(problem.job, self._shot_codes) or "—",
-                    problem.job.owner,
-                    str(len(problem.plans)),
-                    _cause_label(d.latest.cause.key),
-                    _ACTION_WORDS[first.action] + when,
-                    str(max(p.diagnosis.attempts for p in problem.plans)),
-                    ", ".join(d.same_way_blades[-4:]),
-                ]
-            )
-            item.setData(0, _DATA_ROLE, problem)
-            item.setForeground(
-                5, QtGui.QBrush(QtGui.QColor(_ACTION_COLORS[first.action]))
-            )
-            item.setToolTip(4, _why(d))
+            by_job.setdefault(problem.job.jid, []).append(problem)
+        for found in by_job.values():
+            kinds = _by_kind(found)
+            if len(kinds) == 1:
+                item = self._problem_row(kinds[0], kinds[0].job.title)
+            else:
+                merged = Problem(
+                    kinds[0].job, tuple(plan for kind in kinds for plan in kind.plans)
+                )
+                item = self._problem_row(merged, kinds[0].job.title)
+                item.setText(
+                    4, f"{item.text(4)} + {_count(len(kinds) - 1, 'more problem')}"
+                )
+                item.setData(0, _KINDS_ROLE, kinds)
+                for kind in kinds:
+                    item.addChild(self._problem_row(kind, ""))
             self._problems.addTopLevelItem(item)
-            item.setSelected(_problem_key(problem) in chosen)
+            item.setExpanded(_item_key(item) in expanded)
+            for row in (item, *(item.child(i) for i in range(item.childCount()))):
+                row.setSelected(_item_key(row) in chosen)
         self._problems.blockSignals(False)
         for column in range(self._problems.columnCount()):
             self._problems.resizeColumnToContents(column)
@@ -822,18 +831,47 @@ class DoctorPage(QtWidgets.QWidget):
         for column in range(self._activity.columnCount()):
             self._activity.resizeColumnToContents(column)
 
+    def _problem_row(self, problem: Problem, title: str) -> QtWidgets.QTreeWidgetItem:
+        """A row for `problem`, titled with its job's `title`, or untitled as
+        one of a job's several ways of failing."""
+        first = problem.first
+        d = first.diagnosis
+        when = f" at {_clock(first.retry_at)}" if first.action is Action.WAIT else ""
+        job = problem.job
+        item = widgets.SortableItem(
+            [
+                f"{job.jid}  {title}" if title else "",
+                (farm.shot_of(job, self._shot_codes) or "—") if title else "",
+                job.owner if title else "",
+                str(len(problem.plans)),
+                _cause_label(d.latest.cause.key),
+                _ACTION_WORDS[first.action] + when,
+                str(max(p.diagnosis.attempts for p in problem.plans)),
+                ", ".join(d.same_way_blades[-4:]),
+            ]
+        )
+        item.setData(0, _DATA_ROLE, problem)
+        kind = f"{d.latest.cause.key}/{first.action.name}"
+        item.setData(0, _KEY_ROLE, (job.jid, "" if title else kind))
+        item.setForeground(5, QtGui.QBrush(QtGui.QColor(_ACTION_COLORS[first.action])))
+        item.setToolTip(4, _why(d))
+        return item
+
     def _problem_chosen(self) -> None:
         problems = self._selected_problems()
-        self._detail.setHtml(_describe(problems[0]) if problems else "")
+        items = self._problems.selectedItems()
+        kinds: list[Problem] | None = items[0].data(0, _KINDS_ROLE) if items else None
+        if kinds:
+            self._detail.setHtml("<hr>".join(_describe(kind) for kind in kinds))
+        else:
+            self._detail.setHtml(_describe(problems[0]) if problems else "")
         self._problem_tries.set_rows(_problem_tries(problems[0]) if problems else [])
         self._enable()
 
     # ---- acting --------------------------------------------------------
 
     def _retry_selected(self) -> None:
-        plans = [
-            plan for problem in self._selected_problems() for plan in problem.plans
-        ]
+        plans = self._selected_plans()
         if not plans:
             return
         held = [p for p in plans if p.action is Action.HOLD]
@@ -910,8 +948,7 @@ class DoctorPage(QtWidgets.QWidget):
                 p.diagnosis.task.tid,
                 p.diagnosis.task.title,
             )
-            for problem in self._selected_problems()
-            for p in problem.plans
+            for p in self._selected_plans()
         ]
         jobs = sorted({request.jid for request in wanted})
         name = f"J{jobs[0]}" if len(jobs) == 1 else f"{len(jobs)}_jobs"
@@ -972,6 +1009,16 @@ class DoctorPage(QtWidgets.QWidget):
 
     def _selected_problems(self) -> list[Problem]:
         return [item.data(0, _DATA_ROLE) for item in self._problems.selectedItems()]
+
+    def _selected_plans(self) -> list[Plan]:
+        """The selected rows' tasks, each once: a job's row and a row beneath
+        it may both be selected."""
+        plans: dict[tuple[int, int], Plan] = {}
+        for problem in self._selected_problems():
+            for plan in problem.plans:
+                d = plan.diagnosis
+                plans.setdefault((d.job.jid, d.task.tid), plan)
+        return list(plans.values())
 
     def _enable(self) -> None:
         chosen = bool(self._problems.selectedItems())
@@ -1500,8 +1547,25 @@ def _ago(seconds: float) -> str:
     return f"{seconds / 86400:.0f} days"
 
 
-def _problem_key(problem: Problem) -> tuple[int, str]:
-    return problem.job.jid, problem.first.diagnosis.latest.signature
+def _by_kind(problems: list[Problem]) -> list[Problem]:
+    """One job's `problems`, merged by what failed them and what comes next:
+    the same failure worded a little differently, or due to be retried at
+    another time, is one kind to a person. The soonest retried leads each."""
+    kinds: dict[tuple[str, Action], list[Plan]] = {}
+    for problem in problems:
+        for plan in problem.plans:
+            key = (plan.diagnosis.latest.cause.key, plan.action)
+            kinds.setdefault(key, []).append(plan)
+    return [
+        Problem(problems[0].job, tuple(sorted(plans, key=lambda p: p.retry_at or 0.0)))
+        for plans in kinds.values()
+    ]
+
+
+def _item_key(item: QtWidgets.QTreeWidgetItem) -> tuple[int, str]:
+    """What a Problems row stands for, to find it again once refreshed: its
+    job, and for a row beneath a job, how its tasks failed."""
+    return item.data(0, _KEY_ROLE)
 
 
 def _clock(when: float | None) -> str:
