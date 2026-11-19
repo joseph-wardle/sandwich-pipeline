@@ -42,6 +42,7 @@ from pipe.core.render.network import (
     theme,
     widgets,
 )
+from pipe.core.render.network.lab_map import LabMapWindow
 from pipe.core.render.network.attempts_panel import TriesPanel, TryRow
 
 _REFRESH_MS = 60_000
@@ -356,6 +357,8 @@ class DoctorPage(QtWidgets.QWidget):
         self._in_windows = QtWidgets.QCheckBox("Only machines in Windows")
         self._in_windows.toggled.connect(lambda _: self._fill_blades())
         self._blades.currentItemChanged.connect(lambda *_: self._machine_chosen())
+        self._blades.itemDoubleClicked.connect(lambda item, _: self._map(item))
+        self._lab_map: LabMapWindow | None = None
         self._machine_detail = QtWidgets.QTextBrowser()
         self._machine_detail.setPlaceholderText(
             "Choose a machine to see what failed on it."
@@ -372,7 +375,8 @@ class DoctorPage(QtWidgets.QWidget):
         hint = QtWidgets.QLabel(
             "Failed counts tasks from the last 12 hours that failed because of the "
             "machine itself, such as running out of memory or crashing. Machines in "
-            "red failed tasks from several jobs, so retries avoid them."
+            "red failed tasks from several jobs, so retries avoid them. Double-click "
+            "a machine to see where it is on its lab's map."
         )
         hint.setWordWrap(True)
         hint.setEnabled(False)
@@ -636,6 +640,15 @@ class DoctorPage(QtWidgets.QWidget):
                 lambda found: self._lost_read(health, lost, found),
                 lambda exc: self._status.setText(str(exc)),
             )
+
+    def _map(self, item: QtWidgets.QTreeWidgetItem) -> None:
+        """Open the lab map at the double-clicked machine's desk."""
+        if self._lab_map is None:
+            self._lab_map = LabMapWindow(self)
+        self._lab_map.show_machine(item.text(0))
+        self._lab_map.show()
+        self._lab_map.raise_()
+        self._lab_map.activateWindow()
 
     def _lost_read(
         self, health: BladeHealth, lost: frozenset[str], report: _LostReport
