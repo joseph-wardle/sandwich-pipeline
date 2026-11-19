@@ -54,6 +54,20 @@ class Connection:
             f"change the service key of command {cid} of job {jid}",
         )
 
+    def nimby(self, machine: str, address: str) -> None:
+        """Take `machine` off the farm: Tractor sends it no new work."""
+        self._run(
+            lambda: self._client.nimbyBlade(machine, address),
+            f"take {machine} off the farm",
+        )
+
+    def unnimby(self, machine: str, address: str) -> None:
+        """Put `machine` back on the farm."""
+        self._run(
+            lambda: self._client.unnimbyBlade(machine, address),
+            f"put {machine} back on the farm",
+        )
+
     def _run(self, operation: Callable[[], None], doing: str) -> None:
         errors = _client_errors()
         try:

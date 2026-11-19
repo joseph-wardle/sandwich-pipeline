@@ -11,6 +11,9 @@ from the login, so they can be read or shared without it:
   failures before then no longer count, and retries stop avoiding them.
 - focus.json: machines in hyperfocus, to test them: retries go to them first,
   while they're free. The window and `doctor focus` write it.
+- nimbied.json: machines a pipeline admin took off the farm from the window,
+  so only those are ever put back: a lab machine nimbys itself while someone
+  uses it, and putting that one back would send work to a machine in use.
 - pins.json: the tasks the doctor sent to a machine in hyperfocus, so it can
   free them should the machine go before they start. Only the doctor writes
   it, so the window's writes to focus.json never race the doctor's.
@@ -81,6 +84,10 @@ class Paths:
     @property
     def focus(self) -> Path:
         return self.state / "focus.json"
+
+    @property
+    def nimbied(self) -> Path:
+        return self.state / "nimbied.json"
 
     @property
     def pins(self) -> Path:
@@ -224,3 +231,23 @@ def _write_json(paths: Paths, path: Path, data: dict[str, Any]) -> None:
     temporary.write_text(json.dumps(data, indent=1), encoding="utf-8")
     # Replaced whole, so no reader sees half of it.
     temporary.replace(path)
+
+
+def read_nimbied(paths: Paths) -> dict[str, dict[str, Any]]:
+    """The machines taken off the farm from the window, each with "when" and
+    "by"."""
+    return {
+        machine: entry
+        for machine, entry in _read_json(paths.nimbied).items()
+        if isinstance(entry, dict)
+    }
+
+
+def note_nimby(paths: Paths, machine: str, by: str, undo: bool = False) -> None:
+    """Note that `machine` was taken off the farm `by` someone, or with `undo`,
+    that it was put back."""
+    nimbied = read_nimbied(paths)
+    nimbied.pop(machine, None)
+    if not undo:
+        nimbied[machine] = {"when": time.time(), "by": by}
+    _write_json(paths, paths.nimbied, nimbied)

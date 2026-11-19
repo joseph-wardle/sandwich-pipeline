@@ -55,6 +55,15 @@ from pipe.core.render.network.attempts_panel import TriesPanel, TryRow
 
 _REFRESH_MS = 60_000
 _DATA_ROLE = QtCore.Qt.UserRole
+# What a refresh reads: the farm, the doctor's status and journal, the machines
+# in Windows, and those taken off the farm from the Machines tab.
+_Found = tuple[
+    "Checkup",
+    dict[str, Any] | None,
+    list[dict[str, Any]],
+    set[str],
+    dict[str, dict[str, Any]],
+]
 # A Problems row's (job, how it failed), and a job's several ways of failing.
 _KEY_ROLE = QtCore.Qt.UserRole + 1
 _KINDS_ROLE = QtCore.Qt.UserRole + 2
@@ -219,10 +228,18 @@ class DoctorPage(QtWidgets.QWidget):
     _production: QtWidgets.QCheckBox
 
     def __init__(
-        self, shot_codes: Sequence[str], parent: QtWidgets.QWidget | None = None
+        self,
+        shot_codes: Sequence[str],
+        admin: bool = False,
+        parent: QtWidgets.QWidget | None = None,
     ) -> None:
+        """An `admin`, a pipeline admin, may also give machines a fresh start,
+        hyperfocus on them and take them off the farm: what changes the
+        farm for everyone, which the doctor running as that admin follows."""
         super().__init__(parent)
         self._shot_codes = list(shot_codes)
+        self._admin = admin
+        self._nimbied: dict[str, dict[str, Any]] = {}
         self._user = getpass.getuser()
         self._paths = records.default_paths()
         # Reads the headless doctor's history, so blades' records outlive their tasks.
@@ -478,23 +495,24 @@ class DoctorPage(QtWidgets.QWidget):
 
     def _read_all(
         self,
-    ) -> tuple[Checkup, dict[str, Any] | None, list[dict[str, Any]], set[str]]:
-        """On a pool thread: the farm, the headless doctor's files, and which
-        machines are running Windows."""
+    ) -> _Found:
+        """On a pool thread: the farm, the headless doctor's files, which
+        machines are running Windows, and which were taken off the farm here."""
         checkup = self._doctor.check()
         return (
             checkup,
             records.read_status(self._paths),
             records.read_journal(self._paths),
             windows.running_windows([health.blade for health in checkup.blades]),
+            records.read_nimbied(self._paths),
         )
 
     def _read(
         self,
-        found: tuple[Checkup, dict[str, Any] | None, list[dict[str, Any]], set[str]],
+        found: _Found,
     ) -> None:
         self._busy = False
-        self._checkup, status, journal, self._windows = found
+        self._checkup, status, journal, self._windows, self._nimbied = found
         self._doctor_state = status
         self._show_doctor_status(status)
         self._follow_doctor_steering(status)
@@ -672,7 +690,7 @@ class DoctorPage(QtWidgets.QWidget):
                     str(rendering or ""),
                     str(health.passed or ""),
                     str(len(health.failures) or ""),
-                    "; ".join(_machine_notes(health, self._focus_until(blade.name))),
+                    "; ".join(self._notes(health)),
                     blade.gpu.split(",")[0],
                 ]
             )
@@ -744,6 +762,21 @@ class DoctorPage(QtWidgets.QWidget):
         self._lab_map.raise_()
         self._lab_map.activateWindow()
 
+    def _notes(self, health: BladeHealth) -> list[str]:
+        notes = _machine_notes(health, self._focus_until(health.blade.name))
+        taken = self._nimbied.get(health.blade.name)
+        if (
+            taken
+            and health.blade.nimby
+            and not health.blade.nimby.startswith("/local/")
+        ):
+            notes.insert(
+                0,
+                f"Taken off the farm by {taken.get('by')} at "
+                f"{_clock(float(taken.get('when', 0)))}",
+            )
+        return notes
+
     def _focus_until(self, machine: str) -> float | None:
         """When `machine`'s hyperfocus ends, or None if it's not in one."""
         return self._checkup.focused.get(machine) if self._checkup else None
@@ -754,12 +787,18 @@ class DoctorPage(QtWidgets.QWidget):
             return
         self._blades.setCurrentItem(item)
         health: BladeHealth = item.data(0, _DATA_ROLE)
-        machine = health.blade.name
         menu = QtWidgets.QMenu(self)
         menu.setToolTipsVisible(True)
         view = menu.addAction("View on Map")
         view.triggered.connect(lambda: self._map(item))
-        menu.addSeparator()
+        if self._admin:
+            menu.addSeparator()
+            self._admin_actions(menu, health)
+        menu.exec_(self._blades.viewport().mapToGlobal(position))
+
+    def _admin_actions(self, menu: QtWidgets.QMenu, health: BladeHealth) -> None:
+        """What only a pipeline admin may do to a machine."""
+        machine = health.blade.name
         fresh = menu.addAction("Fresh Start")
         fresh.setToolTip(
             "Stop counting its failures so far, as after rebooting it: it's no "
@@ -778,10 +817,31 @@ class DoctorPage(QtWidgets.QWidget):
                 f"{records.FOCUS_SECONDS // 3600} hours."
             )
             focus.triggered.connect(lambda: self._set_focus(machine))
-        menu.exec_(self._blades.viewport().mapToGlobal(position))
+        menu.addSeparator()
+        nimby = health.blade.nimby
+        if machine in self._nimbied and nimby and not nimby.startswith("/local/"):
+            back = menu.addAction("Put Back on the Farm")
+            back.setToolTip("Un-nimby it, so Tractor sends it work again")
+            back.triggered.connect(lambda: self._set_nimby(health, back_on=True))
+        elif nimby:
+            busy = menu.addAction("Put Back on the Farm")
+            busy.setEnabled(False)
+            busy.setToolTip(
+                "Someone is using it, so it took itself off the farm; it goes back "
+                "on by itself when they're done."
+                if nimby.startswith("/local/")
+                else "It was taken off the farm outside the Farm Doctor, so it's left "
+                "as it is."
+            )
+        else:
+            off = menu.addAction("Take Off the Farm (Nimby)")
+            off.setToolTip("Nimby it, so Tractor sends it no new work")
+            off.triggered.connect(lambda: self._set_nimby(health, back_on=False))
 
     def _set_focus(self, machine: str, stop: bool = False) -> None:
         """Put `machine` in hyperfocus, or with `stop`, take it out."""
+        if not self._admin:
+            return
         if not stop:
             status = self._doctor_state
             steering = bool(
@@ -841,10 +901,50 @@ class DoctorPage(QtWidgets.QWidget):
         QtCore.QSettings(*_SETTINGS).setValue(_SPAN_KEY, self._span.currentIndex())
         self._machine_chosen()
 
+    def _set_nimby(self, health: BladeHealth, back_on: bool) -> None:
+        """Take the machine off the farm, or with `back_on`, put it back: only
+        one taken off from here, as `_admin_actions` offers."""
+        if not self._admin:
+            return
+        machine, address = health.blade.name, health.blade.address
+        if not back_on:
+            answer = QtWidgets.QMessageBox.question(
+                self,
+                "Take Off the Farm",
+                f"Take {machine} off the farm?\n\nTractor nimbys it, so it gets no "
+                "new work until it's put back, from this menu.",
+            )
+            if answer != QtWidgets.QMessageBox.Yes:
+                return
+        doing = "Putting" if back_on else "Taking"
+        self._status.setText(
+            f"{doing} {machine} {'back on' if back_on else 'off'} the farm…"
+        )
+
+        def change() -> None:
+            connection = self._connect()
+            if back_on:
+                connection.unnimby(machine, address)
+            else:
+                connection.nimby(machine, address)
+            records.note_nimby(self._paths, machine, self._user, undo=back_on)
+
+        background.run(
+            change, lambda _: self._nimby_changed(machine, back_on), self._failed
+        )
+
+    def _nimby_changed(self, machine: str, back_on: bool) -> None:
+        self._status.setText(
+            f"Put {machine} back on the farm."
+            if back_on
+            else f"Took {machine} off the farm."
+        )
+        self.refresh()
+
     def _fresh_start(self) -> None:
         """Give the chosen machine a fresh start, for the doctor and this window."""
         item = self._blades.currentItem()
-        if item is None:
+        if item is None or not self._admin:
             return
         machine = item.text(0)
         answer = QtWidgets.QMessageBox.question(
