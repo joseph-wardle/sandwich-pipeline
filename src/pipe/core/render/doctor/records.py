@@ -20,6 +20,11 @@ from the login, so they can be read or shared without it:
 
 Home folders are shared by every lab computer, so the Sandwich Renderer window
 reads these wherever the doctor runs.
+
+Fresh starts and hyperfocus are asked for by anyone on the production, so they
+live in a folder the whole sandwich group may write, /job/sandwich/data/
+farm-doctor (`Paths.shared`), which the doctor reads each round: cleared.json
+and focus.json. Each notes who asked.
 """
 
 from __future__ import annotations
@@ -35,6 +40,8 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+# The production's folder for fresh starts and hyperfocus.
+_SHARED = "/job/sandwich/data/farm-doctor"
 # How many journal lines the window reads back.
 JOURNAL_LINES = 300
 # How long a fresh start is remembered: by then its machine's earlier
@@ -49,6 +56,9 @@ FOCUS_SECONDS = 4 * 3600
 class Paths:
     config: Path
     state: Path
+    # Where anyone on the production asks for fresh starts and hyperfocus;
+    # without it, the doctor's own state folder.
+    shared: Path | None = None
 
     @property
     def password(self) -> Path:
@@ -78,12 +88,17 @@ class Paths:
         return self.state / "history.jsonl"
 
     @property
+    def requests(self) -> Path:
+        """Where fresh starts and hyperfocus are asked for."""
+        return self.shared or self.state
+
+    @property
     def cleared(self) -> Path:
-        return self.state / "cleared.json"
+        return self.requests / "cleared.json"
 
     @property
     def focus(self) -> Path:
-        return self.state / "focus.json"
+        return self.requests / "focus.json"
 
     @property
     def nimbied(self) -> Path:
@@ -103,8 +118,11 @@ def default_paths() -> Paths:
     home = Path.home()
     config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
     state = Path(os.environ.get("XDG_STATE_HOME") or home / ".local" / "state")
+    shared = os.environ.get("SANDWICH_FARM_DOCTOR_SHARED") or _SHARED
     return Paths(
-        config / "sandwich" / "farm-doctor", state / "sandwich" / "farm-doctor"
+        config / "sandwich" / "farm-doctor",
+        state / "sandwich" / "farm-doctor",
+        Path(shared),
     )
 
 
@@ -147,18 +165,18 @@ def read_status(paths: Paths) -> dict[str, Any] | None:
 
 
 def read_cleared(paths: Paths) -> dict[str, dict[str, Any]]:
-    """The machines given a fresh start, each with "when" and "by"."""
-    try:
-        found = json.loads(paths.cleared.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(found, dict):
-        return {}
-    return {
-        machine: entry
-        for machine, entry in found.items()
-        if isinstance(entry, dict) and isinstance(entry.get("when"), int | float)
-    }
+    """The machines given a fresh start, each with "when" and "by": those in
+    the shared folder, and any the doctor's own folder kept from before it."""
+    found: dict[str, dict[str, Any]] = {}
+    for path in dict.fromkeys((paths.state / "cleared.json", paths.cleared)):
+        for machine, entry in _read_json(path).items():
+            if not (
+                isinstance(entry, dict) and isinstance(entry.get("when"), int | float)
+            ):
+                continue
+            if machine not in found or entry["when"] > found[machine]["when"]:
+                found[machine] = entry
+    return found
 
 
 def cleared_since(paths: Paths) -> dict[str, float]:
@@ -177,10 +195,16 @@ def clear(paths: Paths, machine: str, by: str, undo: bool = False) -> None:
     }
     if not undo:
         cleared[machine] = {"when": now, "by": by}
-    paths.state.mkdir(parents=True, exist_ok=True)
-    temporary = paths.cleared.with_suffix(".tmp")
-    temporary.write_text(json.dumps(cleared, indent=1), encoding="utf-8")
-    temporary.replace(paths.cleared)
+    _write_json(paths, paths.cleared, cleared)
+    own = paths.state / "cleared.json"
+    if own != paths.cleared and machine in _read_json(own):
+        # Kept from before the shared folder; dropped, so an undo holds.
+        try:
+            _write_json(
+                paths, own, {m: e for m, e in _read_json(own).items() if m != machine}
+            )
+        except OSError:
+            log.warning("Could not drop %s from %s", machine, own)
 
 
 def read_focus(paths: Paths) -> dict[str, dict[str, Any]]:
@@ -226,11 +250,29 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _write_json(paths: Paths, path: Path, data: dict[str, Any]) -> None:
-    paths.state.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
+    folder = path.parent
+    shared = paths.shared is not None and folder == paths.shared
+    if shared and not folder.exists():
+        folder.mkdir(parents=True)
+        _share(folder, 0o2770)
+    folder.mkdir(parents=True, exist_ok=True)
+    # Named for this process, so two people saving at once don't collide.
+    temporary = folder / f".{path.name}.{os.getpid()}.tmp"
     temporary.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    if shared:
+        _share(temporary, 0o660)
     # Replaced whole, so no reader sees half of it.
     temporary.replace(path)
+
+
+def _share(path: Path, mode: int) -> None:
+    """Let the production's group, whose folder it is in, write `path` too:
+    a new file takes its maker's own group, which may not be the production's."""
+    try:
+        os.chown(path, -1, path.parent.stat().st_gid)
+        path.chmod(mode)
+    except OSError:
+        log.warning("Could not let the production's group write %s", path)
 
 
 def read_nimbied(paths: Paths) -> dict[str, dict[str, Any]]:

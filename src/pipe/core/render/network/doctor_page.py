@@ -234,8 +234,9 @@ class DoctorPage(QtWidgets.QWidget):
     ) -> None:
         """Who may do what is Tractor's to say, with each artist's own login:
         nimbying, or retrying another's job, is refused to those without the
-        right. Fresh starts and hyperfocus go to the automatic retries, which
-        read them from the account they run as (`_runs_doctor`)."""
+        right. Fresh starts and hyperfocus, which Tractor can't check, anyone
+        may ask the automatic retries for, after a warning, through the
+        production's shared folder (`records.Paths.shared`)."""
         super().__init__(parent)
         self._shot_codes = list(shot_codes)
         self._nimbied: dict[str, dict[str, Any]] = {}
@@ -794,33 +795,33 @@ class DoctorPage(QtWidgets.QWidget):
         self._machine_actions(menu, health)
         menu.exec_(self._blades.viewport().mapToGlobal(position))
 
-    def _runs_doctor(self) -> bool:
-        """Whether this account runs the automatic retries, which read fresh
-        starts and hyperfocus from its files."""
-        status = self._doctor_state
-        return bool(status and _running(status))
+    def _renderers_only(self, title: str, question: str) -> bool:
+        """Ask `question`, warning that it's for the production's renderers:
+        anyone may, but it changes where everyone's retries go."""
+        answer = QtWidgets.QMessageBox.warning(
+            self,
+            title,
+            f"{question}\n\nDon't do this unless you're one of the production's "
+            "dedicated renderers. It changes where the automatic retries send "
+            "everyone's tasks, not just yours.",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        return answer == QtWidgets.QMessageBox.Yes
 
     def _machine_actions(self, menu: QtWidgets.QMenu, health: BladeHealth) -> None:
-        """What may be done to a machine: fresh starts and hyperfocus by whoever
-        runs the automatic retries, and nimbying by anyone Tractor allows."""
+        """What may be done to a machine: fresh starts and hyperfocus by anyone,
+        after a warning, and nimbying by anyone Tractor allows."""
         machine = health.blade.name
-        theirs = self._runs_doctor()
-        not_theirs = (
-            "The automatic retries read this from the account that runs them, "
-            "which isn't yours, so only that person can change it."
-        )
         fresh = menu.addAction("Fresh Start")
         fresh.setToolTip(
             "Stop counting its failures so far, as after rebooting it: it's no "
             "longer flagged, and retries stop avoiding it."
-            if theirs
-            else not_theirs
         )
-        fresh.setEnabled(theirs and bool(health.failures))
+        fresh.setEnabled(bool(health.failures))
         fresh.triggered.connect(self._fresh_start)
         if self._focus_until(machine):
             focus = menu.addAction("Stop Hyperfocus")
-            focus.setEnabled(theirs)
             focus.triggered.connect(lambda: self._set_focus(machine, stop=True))
         else:
             focus = menu.addAction("Hyperfocus")
@@ -829,9 +830,6 @@ class DoctorPage(QtWidgets.QWidget):
                 "machine, one at a time, for the next "
                 f"{records.FOCUS_SECONDS // 3600} hours."
             )
-            if not theirs:
-                focus.setToolTip(not_theirs)
-            focus.setEnabled(theirs)
             focus.triggered.connect(lambda: self._set_focus(machine))
         menu.addSeparator()
         nimby = health.blade.nimby
@@ -856,8 +854,6 @@ class DoctorPage(QtWidgets.QWidget):
 
     def _set_focus(self, machine: str, stop: bool = False) -> None:
         """Put `machine` in hyperfocus, or with `stop`, take it out."""
-        if not self._runs_doctor():
-            return
         if not stop:
             status = self._doctor_state
             steering = bool(
@@ -866,14 +862,14 @@ class DoctorPage(QtWidgets.QWidget):
                 and status.get("acting")
                 and status.get("steering")
             )
+            # Only the account running them can see how they run.
             caveat = (
-                ""
-                if steering
-                else "\n\nThe automatic retries aren't running with steering now, so "
+                "\n\nThe automatic retries aren't running with steering now, so "
                 "nothing is sent to it until they are."
+                if status is not None and not steering
+                else ""
             )
-            answer = QtWidgets.QMessageBox.question(
-                self,
+            if not self._renderers_only(
                 "Hyperfocus",
                 f"Hyperfocus on {machine}?\n\nWhile it's free, the automatic "
                 "retries send it one task at a time, before any other machine, and "
@@ -881,8 +877,7 @@ class DoctorPage(QtWidgets.QWidget):
                 f"by itself in {records.FOCUS_SECONDS // 3600} hours. A task sent "
                 "to it that can't start there within "
                 f"{PIN_SECONDS // 60} minutes is freed to run anywhere.{caveat}",
-            )
-            if answer != QtWidgets.QMessageBox.Yes:
+            ):
                 return
         try:
             records.focus(self._paths, machine, getpass.getuser(), stop)
@@ -959,18 +954,16 @@ class DoctorPage(QtWidgets.QWidget):
     def _fresh_start(self) -> None:
         """Give the chosen machine a fresh start, for the doctor and this window."""
         item = self._blades.currentItem()
-        if item is None or not self._runs_doctor():
+        if item is None:
             return
         machine = item.text(0)
-        answer = QtWidgets.QMessageBox.question(
-            self,
+        if not self._renderers_only(
             "Fresh Start",
             f"Give {machine} a fresh start?\n\nIts failures so far stop counting, "
             "so it's no longer flagged and retries stop avoiding it. Use this "
             "once it's fixed, as after rebooting it. If it fails tasks again, it "
             "will be flagged again.",
-        )
-        if answer != QtWidgets.QMessageBox.Yes:
+        ):
             return
         try:
             records.clear(self._paths, machine, getpass.getuser())
