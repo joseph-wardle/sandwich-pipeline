@@ -139,7 +139,7 @@ _ACTION_WORDS = {
     Action.HOLD: "Needs a fix",
 }
 # The Machines table's columns that are colored or carry tooltips.
-_OS_COLUMN, _FAILED_COLUMN = 3, 8
+_OS_COLUMN, _RENDERING_COLUMN, _FAILED_COLUMN = 3, 6, 8
 _LINUX, _WINDOWS = "Linux", "Windows"
 _SYSTEM_COLORS = {_LINUX: "#8fe0a0", _WINDOWS: "#6ea8ff"}
 _SYSTEM_TIPS = {
@@ -645,15 +645,16 @@ class DoctorPage(QtWidgets.QWidget):
             if self._in_windows.isChecked() and health.blade.name not in self._windows:
                 continue
             blade = health.blade
+            rendering = self._rendering(blade.name)
             item = widgets.SortableItem(
                 [
                     blade.name,
                     labs.lab_of(blade.name),
-                    _blade_state(health),
+                    _blade_state(health, rendering),
                     _system(health, self._windows),
                     f"{blade.free_memory_gb:.0f} GB",
                     f"{blade.free_disk_gb:.0f} GB",
-                    str(blade.running or ""),
+                    str(rendering or ""),
                     str(health.passed or ""),
                     str(len(health.failures) or ""),
                     "; ".join(_machine_notes(health)),
@@ -672,6 +673,13 @@ class DoctorPage(QtWidgets.QWidget):
                 )
             if health.failures:
                 item.setToolTip(_FAILED_COLUMN, _failure_list(health))
+            if blade.running != rendering:
+                item.setToolTip(
+                    _RENDERING_COLUMN,
+                    f"Tractor's dashboard shows {blade.running} here, but "
+                    f"{_count(rendering, 'task')} of any job is running: it still "
+                    "counts commands it lost track of.",
+                )
             item.setData(0, _DATA_ROLE, health)
             self._blades.addTopLevelItem(item)
             if blade.name == chosen:
@@ -696,7 +704,12 @@ class DoctorPage(QtWidgets.QWidget):
         cached = self._lost_reports.get(health.blade.name)
         report = cached[1] if cached and cached[0] == lost else None
         self._machine_detail.setHtml(
-            _describe_machine(health, report, health.blade.name in self._windows)
+            _describe_machine(
+                health,
+                report,
+                health.blade.name in self._windows,
+                self._rendering(health.blade.name),
+            )
         )
         if lost and report is None:
             background.run(
@@ -713,6 +726,10 @@ class DoctorPage(QtWidgets.QWidget):
         self._lab_map.show()
         self._lab_map.raise_()
         self._lab_map.activateWindow()
+
+    def _rendering(self, machine: str) -> int:
+        """How many tasks are really running on `machine`."""
+        return self._checkup.rendering.get(machine, 0) if self._checkup else 0
 
     def _span_failures(self, health: BladeHealth) -> list[Failure]:
         """The failures the machine was blamed for within the chosen span,
@@ -764,7 +781,12 @@ class DoctorPage(QtWidgets.QWidget):
         item = self._blades.currentItem()
         if item is not None and item.text(0) == health.blade.name:
             self._machine_detail.setHtml(
-                _describe_machine(health, report, health.blade.name in self._windows)
+                _describe_machine(
+                    health,
+                    report,
+                    health.blade.name in self._windows,
+                    self._rendering(health.blade.name),
+                )
             )
 
     def _fill_activity(self, journal: list[dict[str, Any]]) -> None:
@@ -1056,7 +1078,7 @@ def _system(health: BladeHealth, running_windows: set[str]) -> str:
     return "—" if _offline_for(health) is not None else _LINUX
 
 
-def _blade_state(health: BladeHealth) -> str:
+def _blade_state(health: BladeHealth, rendering: int) -> str:
     blade = health.blade
     if _offline_for(health) is not None:
         return "Offline"
@@ -1064,7 +1086,7 @@ def _blade_state(health: BladeHealth) -> str:
         return "In Use (Nimby)"
     if blade.nimby:
         return "Off the farm (Nimby)"
-    return "Rendering" if blade.running else "Available"
+    return "Rendering" if rendering else "Available"
 
 
 def _machine_notes(health: BladeHealth) -> list[str]:
@@ -1138,10 +1160,11 @@ def _save_logs(
 
 
 def _describe_machine(
-    health: BladeHealth, report: _LostReport | None, in_windows: bool
+    health: BladeHealth, report: _LostReport | None, in_windows: bool, rendering: int
 ) -> str:
     """A machine's health and what failed on it, as HTML for the detail pane.
-    `report` says what its lost tasks' logs show, None while they're read."""
+    `report` says what its lost tasks' logs show, None while they're read.
+    `rendering` is how many tasks really run on it."""
     blade = health.blade
     flagged = (
         f"<p><b style='color:{_RED}'>Flagged:</b> it failed tasks from "
@@ -1157,7 +1180,7 @@ def _describe_machine(
         f"{blade.cpus} CPUs · "
         f"{html.escape(blade.gpu.split(',')[0] or 'no GPU')}<br>"
         f"{blade.free_memory_gb:.0f} GB memory and {blade.free_disk_gb:.0f} GB disk "
-        f"free · rendering {blade.running} · last reported {reported}"
+        f"free · rendering {rendering} · last reported {reported}"
     )
     # The failures get their own section below.
     notes = "".join(
@@ -1166,7 +1189,7 @@ def _describe_machine(
         if not n.startswith("Failed ")
     )
     head = (
-        f"<h3>{html.escape(blade.name)} — {html.escape(_blade_state(health))}"
+        f"<h3>{html.escape(blade.name)} — {html.escape(_blade_state(health, rendering))}"
         f"{' · in Windows' if in_windows else ''}</h3>"
         f"{flagged}<p>{specs}</p>" + (f"<ul>{notes}</ul>" if notes else "")
     )

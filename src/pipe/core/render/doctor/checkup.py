@@ -49,6 +49,10 @@ class Checkup:
     cleared: dict[str, float] = field(default_factory=dict)
     # Every failure the history keeps, counted or not, oldest first.
     history: tuple[blades.Failure, ...] = ()
+    # How many of the examined jobs' tasks are running on each blade, as their
+    # jobs say: the engine's own count per blade keeps commands it lost track
+    # of, long after their jobs finished.
+    rendering: dict[str, int] = field(default_factory=dict)
 
     @property
     def suspects(self) -> set[str]:
@@ -134,6 +138,7 @@ class Doctor:
         )
         diagnoses: list[Diagnosis] = []
         passed: Counter[str] = Counter()
+        rendering: Counter[str] = Counter()
         problems: list[str] = []
         for job in jobs:
             if not (job.errors or job.active):
@@ -144,6 +149,9 @@ class Doctor:
                 problems.append(str(exc))
                 continue
             passed.update(t.blade for t in job_tasks if t.state == "Done" and t.blade)
+            rendering.update(
+                t.blade for t in job_tasks if t.state == "Active" and t.blade
+            )
             for task in job_tasks:
                 if task.state == ERROR:
                     diagnoses.append(
@@ -172,6 +180,7 @@ class Doctor:
             tuple(problems),
             cleared,
             tuple(kept),
+            dict(rendering),
         )
 
     def treat(

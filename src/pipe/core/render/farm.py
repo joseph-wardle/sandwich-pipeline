@@ -487,6 +487,8 @@ def _blade(data: dict[str, Any]) -> Blade:
         cpus=int(data.get("ncpu") or 0),
         gpu=str(data.get("gpulabel") or ""),
         slots=int(data.get("ns") or 0),
+        # The engine's count, which keeps commands it lost track of; the
+        # tasks of running jobs say what really runs (`Checkup.rendering`).
         running=int(data.get("numcmd") or 0),
         heartbeat=float(data["t"]) if data.get("t") else None,
         note=str(data.get("note") or ""),
