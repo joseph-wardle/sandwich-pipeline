@@ -1,8 +1,9 @@
 """The Tractor Overview: every unfinished job on the farm, from every artist.
 
 What is rendering now, what waits behind it, and in what order Tractor will
-run them. Double-clicking a job of a known shot opens it on that shot's Farm
-tab, to read its logs or retry it.
+run them. Choosing a job shows its tasks below, with the log of the task
+chosen, to read and retry, as on a shot's Farm tab; double-clicking a job of a
+known shot opens it on that shot's Farm tab.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from Qt import QtCore, QtGui, QtWidgets
 from pipe.core.render import farm
 from pipe.core.render.farm import PAUSED, RENDERING, WAITING, Job
 from pipe.core.render.network import background, widgets
+from pipe.core.render.network.job_tasks import JobTasks, shared_login
 from pipe.core.render.network.progress import PERCENT_ROLE, ProgressDelegate
 
 _REFRESH_MS = 30_000
@@ -47,6 +49,7 @@ class OverviewPage(QtWidgets.QWidget):
     open_job = QtCore.Signal(str, int)
 
     _table: QtWidgets.QTreeWidget
+    _tasks: JobTasks
     _summary: QtWidgets.QLabel
     _status: QtWidgets.QLabel
     _show: dict[str, QtWidgets.QCheckBox]
@@ -98,7 +101,22 @@ class OverviewPage(QtWidgets.QWidget):
         self._table.setAlternatingRowColors(True)
         self._table.setItemDelegateForColumn(_PROGRESS, ProgressDelegate(self._table))
         self._table.itemDoubleClicked.connect(self._opened)
+        self._table.currentItemChanged.connect(lambda *_: self._job_chosen())
         widgets.sortable(self._table)
+        self._tasks = JobTasks(shared_login())
+        self._tasks.message.connect(self._status.setText)
+        self._tasks.changed.connect(
+            lambda: QtCore.QTimer.singleShot(2000, self.refresh)
+        )
+        # R retries the chosen job's errors anywhere on this page, as on the
+        # Farm tab.
+        retry_key = _shortcut(QtGui.QKeySequence("R"), self)
+        retry_key.setContext(QtCore.Qt.WidgetWithChildrenShortcut)
+        retry_key.activated.connect(self._tasks.retry_errors_key)
+        split = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        split.addWidget(self._table)
+        split.addWidget(self._tasks)
+        split.setSizes([300, 420])
 
         header = QtWidgets.QHBoxLayout()
         header.addWidget(title)
@@ -106,7 +124,8 @@ class OverviewPage(QtWidgets.QWidget):
         header.addWidget(self._summary)
         hint = QtWidgets.QLabel(
             "In the order Tractor runs them: rendering first, then by priority, then "
-            "oldest. Double-click a job to open it on its shot's Farm tab."
+            "oldest. Choose a job to see its tasks and logs below; double-click it to "
+            "open it on its shot's Farm tab."
         )
         hint.setEnabled(False)
         layout = QtWidgets.QVBoxLayout(self)
@@ -114,7 +133,7 @@ class OverviewPage(QtWidgets.QWidget):
         layout.setSpacing(10)
         layout.addLayout(header)
         layout.addLayout(filters)
-        layout.addWidget(self._table, 1)
+        layout.addWidget(split, 1)
         layout.addWidget(hint)
 
         self._timer = QtCore.QTimer(self)
@@ -148,7 +167,10 @@ class OverviewPage(QtWidgets.QWidget):
 
     def _fill(self) -> None:
         chosen = {item.data(0, _DATA_ROLE).jid for item in self._table.selectedItems()}
+        shown = self._tasks.job
+        self._table.blockSignals(True)
         self._table.clear()
+        current = None
         for job in self._jobs:
             if not self._show[job.queue_status].isChecked():
                 continue
@@ -186,9 +208,22 @@ class OverviewPage(QtWidgets.QWidget):
                 )
             self._table.addTopLevelItem(item)
             item.setSelected(job.jid in chosen)
+            if shown is not None and job.jid == shown.jid:
+                current = item
+        if current is not None:
+            self._table.setCurrentItem(current, 0, QtCore.QItemSelectionModel.NoUpdate)
+        self._table.blockSignals(False)
+        if current is not None:
+            # The open job's tasks too, keeping the artist's place.
+            self._tasks.show_job(current.data(0, _DATA_ROLE), keep_log=True)
         for column in range(len(_COLUMNS)):
             self._table.resizeColumnToContents(column)
         self._table.setColumnWidth(_PROGRESS, 110)
+
+    def _job_chosen(self) -> None:
+        item = self._table.currentItem()
+        if item is not None:
+            self._tasks.show_job(item.data(0, _DATA_ROLE))
 
     def _opened(self, item: QtWidgets.QTreeWidgetItem, _column: int) -> None:
         job: Job = item.data(0, _DATA_ROLE)
@@ -207,3 +242,7 @@ class OverviewPage(QtWidgets.QWidget):
 def _when(job: Job) -> float:
     """When the job was sent, to sort by; unknown ones sort first."""
     return job.spooled.timestamp() if job.spooled else 0.0
+
+
+# Qt 6 moved QShortcut from QtWidgets to QtGui.
+_shortcut = getattr(QtGui, "QShortcut", None) or QtWidgets.QShortcut
