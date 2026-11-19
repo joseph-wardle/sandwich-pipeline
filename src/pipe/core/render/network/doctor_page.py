@@ -14,6 +14,8 @@ import html
 import re
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from Qt import QtCore, QtGui, QtWidgets
@@ -126,6 +128,13 @@ _ACTION_WORDS = {
     Action.WAIT: "Retry",
     Action.HOLD: "Needs a fix",
 }
+# A failed attempt's key, such as "J18230/T71/C68.3": its job and task.
+_ATTEMPT_KEY = re.compile(r"^J(\d+)/T(\d+)/")
+# Characters a log's file name shouldn't hold.
+_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+# Where the window keeps its settings, and the folder logs were last saved to.
+_SETTINGS = ("SandwichKwonDo", "RenderNetwork")
+_LOG_FOLDER_KEY = "doctor/log_folder"
 _AVOIDED = re.compile(r"!'([^']+)'")
 _MEMORY = re.compile(r"@\.mem > (\d+)")
 
@@ -148,6 +157,8 @@ class DoctorPage(QtWidgets.QWidget):
     _troubled: QtWidgets.QCheckBox
     _retry: QtWidgets.QPushButton
     _open: QtWidgets.QPushButton
+    _download: QtWidgets.QPushButton
+    _machine_download: QtWidgets.QPushButton
     _timer: QtCore.QTimer
     _checkup: Checkup | None
     _busy: bool
@@ -269,6 +280,13 @@ class DoctorPage(QtWidgets.QWidget):
         bar.addWidget(self._mine)
         bar.addWidget(self._steer)
         bar.addStretch(1)
+        self._download = widgets.button(
+            "Download Logs",
+            "download",
+            "Save the selected tasks' Tractor logs to a folder you choose",
+            clicked=self._download_problem_logs,
+        )
+        bar.addWidget(self._download)
         bar.addWidget(self._open)
         bar.addWidget(self._retry)
         split = QtWidgets.QSplitter()
@@ -317,7 +335,19 @@ class DoctorPage(QtWidgets.QWidget):
         hint.setEnabled(False)
         page = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(page)
-        layout.addWidget(self._troubled)
+        self._machine_download = widgets.button(
+            "Download Logs",
+            "download",
+            "Save the Tractor logs of the tasks that failed on this machine to a "
+            "folder you choose",
+            clicked=self._download_machine_logs,
+        )
+        self._machine_download.setEnabled(False)
+        machine_bar = QtWidgets.QHBoxLayout()
+        machine_bar.addWidget(self._troubled)
+        machine_bar.addStretch(1)
+        machine_bar.addWidget(self._machine_download)
+        layout.addLayout(machine_bar)
         layout.addWidget(split, 1)
         layout.addWidget(hint)
         return page
@@ -530,6 +560,8 @@ class DoctorPage(QtWidgets.QWidget):
 
     def _machine_chosen(self) -> None:
         item = self._blades.currentItem()
+        health: BladeHealth | None = item.data(0, _DATA_ROLE) if item else None
+        self._machine_download.setEnabled(bool(health and health.failures))
         if item is None:
             self._machine_detail.clear()
             return
@@ -646,12 +678,69 @@ class DoctorPage(QtWidgets.QWidget):
             return
         self.open_job.emit(shot, job.jid)
 
+    def _download_problem_logs(self) -> None:
+        wanted = [
+            _LogRequest(
+                p.diagnosis.job.owner,
+                p.diagnosis.job.jid,
+                p.diagnosis.task.tid,
+                p.diagnosis.task.title,
+            )
+            for problem in self._selected_problems()
+            for p in problem.plans
+        ]
+        self._download_logs(wanted)
+
+    def _download_machine_logs(self) -> None:
+        item = self._blades.currentItem()
+        if item is None:
+            return
+        health: BladeHealth = item.data(0, _DATA_ROLE)
+        wanted = []
+        for failure in health.failures:
+            if match := _ATTEMPT_KEY.match(failure.key):
+                wanted.append(
+                    _LogRequest(
+                        failure.owner, int(match[1]), int(match[2]), failure.task
+                    )
+                )
+        self._download_logs(wanted)
+
+    def _download_logs(self, wanted: list[_LogRequest]) -> None:
+        """Ask for a folder, then save each task's Tractor log there."""
+        wanted = list(dict.fromkeys(wanted))
+        if not wanted:
+            return
+        settings = QtCore.QSettings(*_SETTINGS)
+        start = str(settings.value(_LOG_FOLDER_KEY, "") or Path.home())
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, f"Save {_count(len(wanted), 'Tractor log')} to", start
+        )
+        if not folder:
+            return
+        settings.setValue(_LOG_FOLDER_KEY, folder)
+        self._status.setText(f"Downloading {_count(len(wanted), 'log')}…")
+        background.run(
+            lambda: _save_logs(Path(folder), wanted),
+            lambda found: self._logs_saved(Path(folder), *found),
+            self._failed,
+        )
+
+    def _logs_saved(self, folder: Path, saved: int, problems: list[str]) -> None:
+        text = f"Saved {_count(saved, 'log')} to {folder}."
+        if problems:
+            text += f" {len(problems)} couldn't be read: {problems[0]}"
+        self._status.setText(text)
+        # The label is narrow; the folder's full path is worth seeing.
+        self._status.setToolTip(text)
+
     def _selected_problems(self) -> list[Problem]:
         return [item.data(0, _DATA_ROLE) for item in self._problems.selectedItems()]
 
     def _enable(self) -> None:
         chosen = bool(self._problems.selectedItems())
         self._retry.setEnabled(chosen)
+        self._download.setEnabled(chosen)
         self._open.setEnabled(chosen)
 
 
@@ -788,6 +877,37 @@ def _offline_for(health: BladeHealth) -> float | None:
     heartbeat = health.blade.heartbeat
     silent = time.time() - heartbeat if heartbeat is not None else 0.0
     return silent if silent > SILENT_SECONDS else None
+
+
+@dataclass(frozen=True)
+class _LogRequest:
+    """A task whose Tractor log to download."""
+
+    owner: str
+    jid: int
+    tid: int
+    title: str
+
+
+def _save_logs(folder: Path, wanted: list[_LogRequest]) -> tuple[int, list[str]]:
+    """Write each task's Tractor log into `folder`, named by its job and task.
+    Returns how many were saved and why the rest weren't."""
+    saved, problems = 0, []
+    for request in wanted:
+        try:
+            text = farm.task_log(request.owner, request.jid, request.tid, request.title)
+        except farm.FarmError as exc:
+            problems.append(str(exc))
+            continue
+        name = _UNSAFE.sub("_", request.title).strip("_") or "task"
+        target = folder / f"J{request.jid}_T{request.tid}_{name}.log"
+        try:
+            target.write_text(text, encoding="utf-8")
+        except OSError as exc:
+            problems.append(f"Could not write {target} ({exc})")
+            continue
+        saved += 1
+    return saved, problems
 
 
 def _describe_machine(health: BladeHealth) -> str:

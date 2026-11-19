@@ -233,13 +233,19 @@ def blades() -> list[Blade]:
 
 def log(job: Job, task: Task) -> str:
     """The command log of every attempt at `task`."""
-    path = f"/tractor/cmd-logs/{job.owner}/J{job.jid}/T{task.tid}.log"
+    return task_log(job.owner, job.jid, task.tid, task.title)
+
+
+def task_log(owner: str, jid: int, tid: int, title: str = "") -> str:
+    """The command log of every attempt at task `tid` of `owner`'s job `jid`."""
+    path = f"/tractor/cmd-logs/{owner}/J{jid}/T{tid}.log"
     try:
         with _open(path) as reply:
             return reply.read().decode(errors="replace")
     except OSError as exc:
         raise FarmError(
-            f"Could not read the log of {task.title} ({exc}). It may not have run yet."
+            f"Could not read the log of {title or f'task {tid}'} ({exc}). It may "
+            "not have run yet."
         ) from exc
 
 
