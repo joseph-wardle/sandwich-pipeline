@@ -13,7 +13,7 @@ _LABS = {
         cs-1017523 cs-1017453 cs-1017448 cs-1017446 cs-1017454 cs-1017525
         cs-1017520 cs-1017518 cs-1017522 cs-1017449 cs-1017463 cs-1017452
         cs-1017461 cs-1017459 cs-1017462 cs-1017443 cs-1017533 cs-1031635
-        cs-1017524
+        cs-1017524 waternoose
     """,
     "1029 (Nintendo Lab)": """
         fox samus ness captfalcon isabelle tomnook kkslider mrresetti dedede
