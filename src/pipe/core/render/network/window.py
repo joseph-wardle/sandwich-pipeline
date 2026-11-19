@@ -155,7 +155,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
             [shot.code or "" for shot in shots], getpass.getuser()
         )
         self._overview.open_job.connect(self._open_farm_job)
-        self._doctor = DoctorPage([shot.code or "" for shot in shots], admin)
+        self._doctor = DoctorPage([shot.code or "" for shot in shots])
         self._doctor.open_job.connect(self._open_farm_job)
         self._pages = QtWidgets.QStackedWidget()
         for page in (splitter, self._overview, self._doctor):

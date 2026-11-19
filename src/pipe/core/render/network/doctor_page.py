@@ -230,15 +230,14 @@ class DoctorPage(QtWidgets.QWidget):
     def __init__(
         self,
         shot_codes: Sequence[str],
-        admin: bool = False,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
-        """An `admin`, a pipeline admin, may also give machines a fresh start,
-        hyperfocus on them and take them off the farm: what changes the
-        farm for everyone, which the doctor running as that admin follows."""
+        """Who may do what is Tractor's to say, with each artist's own login:
+        nimbying, or retrying another's job, is refused to those without the
+        right. Fresh starts and hyperfocus go to the automatic retries, which
+        read them from the account they run as (`_runs_doctor`)."""
         super().__init__(parent)
         self._shot_codes = list(shot_codes)
-        self._admin = admin
         self._nimbied: dict[str, dict[str, Any]] = {}
         self._user = getpass.getuser()
         self._paths = records.default_paths()
@@ -791,23 +790,37 @@ class DoctorPage(QtWidgets.QWidget):
         menu.setToolTipsVisible(True)
         view = menu.addAction("View on Map")
         view.triggered.connect(lambda: self._map(item))
-        if self._admin:
-            menu.addSeparator()
-            self._admin_actions(menu, health)
+        menu.addSeparator()
+        self._machine_actions(menu, health)
         menu.exec_(self._blades.viewport().mapToGlobal(position))
 
-    def _admin_actions(self, menu: QtWidgets.QMenu, health: BladeHealth) -> None:
-        """What only a pipeline admin may do to a machine."""
+    def _runs_doctor(self) -> bool:
+        """Whether this account runs the automatic retries, which read fresh
+        starts and hyperfocus from its files."""
+        status = self._doctor_state
+        return bool(status and _running(status))
+
+    def _machine_actions(self, menu: QtWidgets.QMenu, health: BladeHealth) -> None:
+        """What may be done to a machine: fresh starts and hyperfocus by whoever
+        runs the automatic retries, and nimbying by anyone Tractor allows."""
         machine = health.blade.name
+        theirs = self._runs_doctor()
+        not_theirs = (
+            "The automatic retries read this from the account that runs them, "
+            "which isn't yours, so only that person can change it."
+        )
         fresh = menu.addAction("Fresh Start")
         fresh.setToolTip(
             "Stop counting its failures so far, as after rebooting it: it's no "
             "longer flagged, and retries stop avoiding it."
+            if theirs
+            else not_theirs
         )
-        fresh.setEnabled(bool(health.failures))
+        fresh.setEnabled(theirs and bool(health.failures))
         fresh.triggered.connect(self._fresh_start)
         if self._focus_until(machine):
             focus = menu.addAction("Stop Hyperfocus")
+            focus.setEnabled(theirs)
             focus.triggered.connect(lambda: self._set_focus(machine, stop=True))
         else:
             focus = menu.addAction("Hyperfocus")
@@ -816,6 +829,9 @@ class DoctorPage(QtWidgets.QWidget):
                 "machine, one at a time, for the next "
                 f"{records.FOCUS_SECONDS // 3600} hours."
             )
+            if not theirs:
+                focus.setToolTip(not_theirs)
+            focus.setEnabled(theirs)
             focus.triggered.connect(lambda: self._set_focus(machine))
         menu.addSeparator()
         nimby = health.blade.nimby
@@ -840,7 +856,7 @@ class DoctorPage(QtWidgets.QWidget):
 
     def _set_focus(self, machine: str, stop: bool = False) -> None:
         """Put `machine` in hyperfocus, or with `stop`, take it out."""
-        if not self._admin:
+        if not self._runs_doctor():
             return
         if not stop:
             status = self._doctor_state
@@ -903,9 +919,8 @@ class DoctorPage(QtWidgets.QWidget):
 
     def _set_nimby(self, health: BladeHealth, back_on: bool) -> None:
         """Take the machine off the farm, or with `back_on`, put it back: only
-        one taken off from here, as `_admin_actions` offers."""
-        if not self._admin:
-            return
+        one taken off from here, as `_machine_actions` offers. Tractor refuses
+        it to a login without the right."""
         machine, address = health.blade.name, health.blade.address
         if not back_on:
             answer = QtWidgets.QMessageBox.question(
@@ -944,7 +959,7 @@ class DoctorPage(QtWidgets.QWidget):
     def _fresh_start(self) -> None:
         """Give the chosen machine a fresh start, for the doctor and this window."""
         item = self._blades.currentItem()
-        if item is None or not self._admin:
+        if item is None or not self._runs_doctor():
             return
         machine = item.text(0)
         answer = QtWidgets.QMessageBox.question(
@@ -1088,7 +1103,7 @@ class DoctorPage(QtWidgets.QWidget):
             return login.connect(self._paths, self._user, keyring)
         except NoLogin as exc:
             raise NoLogin(
-                "Retrying needs your Tractor login. Retry any task once on a shot's "
+                "This needs your Tractor login. Retry any task once on a shot's "
                 "Farm tab with Remember ticked, then try again here."
             ) from exc
 
