@@ -35,6 +35,7 @@ from pipe.core.render.doctor.diagnose import MAX_ATTEMPTS, Cause, Diagnosis, Rem
 from pipe.core.render.doctor.login import Connection, NoLogin
 from pipe.core.render.doctor.policy import Action, Plan
 from pipe.core.render.network import background, credentials, icons, theme, widgets
+from pipe.core.render.network.attempts_panel import TriesPanel, TryRow
 
 _REFRESH_MS = 60_000
 _DATA_ROLE = QtCore.Qt.UserRole
@@ -151,6 +152,9 @@ class DoctorPage(QtWidgets.QWidget):
     _problems: QtWidgets.QTreeWidget
     _detail: QtWidgets.QTextBrowser
     _machine_detail: QtWidgets.QTextBrowser
+    # Each side pane's failed tries, which open their logs.
+    _problem_tries: TriesPanel
+    _machine_tries: TriesPanel
     _blades: QtWidgets.QTreeWidget
     _activity: QtWidgets.QTreeWidget
     _summary: QtWidgets.QLabel
@@ -296,10 +300,15 @@ class DoctorPage(QtWidgets.QWidget):
         bar.addWidget(self._download)
         bar.addWidget(self._open)
         bar.addWidget(self._retry)
+        self._problem_tries = TriesPanel(["Ended", "Task", "Try", "Machine", "Problem"])
+        side = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        side.addWidget(self._detail)
+        side.addWidget(self._problem_tries)
+        side.setSizes([300, 460])
         split = QtWidgets.QSplitter()
         split.addWidget(self._problems)
-        split.addWidget(self._detail)
-        split.setSizes([720, 520])
+        split.addWidget(side)
+        split.setSizes([640, 640])
         page = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(page)
         layout.addLayout(bar)
@@ -329,10 +338,15 @@ class DoctorPage(QtWidgets.QWidget):
         self._machine_detail.setPlaceholderText(
             "Choose a machine to see what failed on it."
         )
+        self._machine_tries = TriesPanel(["Ended", "Job", "Task", "Problem"])
+        side = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        side.addWidget(self._machine_detail)
+        side.addWidget(self._machine_tries)
+        side.setSizes([300, 460])
         split = QtWidgets.QSplitter()
         split.addWidget(self._blades)
-        split.addWidget(self._machine_detail)
-        split.setSizes([760, 480])
+        split.addWidget(side)
+        split.setSizes([680, 600])
         hint = QtWidgets.QLabel(
             "Failed counts tasks from the last 12 hours that failed because of the "
             "machine itself, such as running out of memory or crashing. Machines in "
@@ -571,7 +585,9 @@ class DoctorPage(QtWidgets.QWidget):
         self._machine_download.setEnabled(bool(health and health.failures))
         if item is None or health is None:
             self._machine_detail.clear()
+            self._machine_tries.set_rows([])
             return
+        self._machine_tries.set_rows(_machine_tries(health))
         lost = frozenset(f.key for f in health.failures if f.cause == _LOST)
         cached = self._lost_reports.get(health.blade.name)
         report = cached[1] if cached and cached[0] == lost else None
@@ -626,6 +642,7 @@ class DoctorPage(QtWidgets.QWidget):
     def _problem_chosen(self) -> None:
         problems = self._selected_problems()
         self._detail.setHtml(_describe(problems[0]) if problems else "")
+        self._problem_tries.set_rows(_problem_tries(problems[0]) if problems else [])
         self._enable()
 
     # ---- acting --------------------------------------------------------
@@ -789,12 +806,6 @@ def _describe(problem: Problem) -> str:
     color = _ACTION_COLORS[first.action]
     why = _why(d)
     extra = "" if why == advice else f"<p>{html.escape(why)}</p>"
-    rows = "".join(
-        f"<tr><td>{f.attempt.number or ''}</td><td>{html.escape(f.attempt.blade)}</td>"
-        f"<td>{html.escape(_cause_label(f.cause.key))}</td>"
-        f"<td>{_clock(f.attempt.ended or f.attempt.started)}</td></tr>"
-        for f in reversed(d.findings[-12:])
-    )
     tasks = ", ".join(html.escape(p.diagnosis.task.title) for p in problem.plans[:30])
     if len(problem.plans) > 30:
         tasks += f" and {len(problem.plans) - 30} more"
@@ -806,10 +817,9 @@ def _describe(problem: Problem) -> str:
         f"{latest.attempt.number}, on {html.escape(latest.attempt.blade)}):</p>"
         f"<pre style='white-space: pre-wrap'>{html.escape(_evidence(d))}</pre>"
         f"<p><b>Failed this way on:</b> {html.escape(', '.join(d.same_way_blades))}</p>"
-        f"<p><b>Failed tries</b> ({len(d.findings)} of {d.attempts}), latest first:</p>"
-        "<table cellspacing='6'><tr><th>#</th><th>Machine</th><th>Problem</th>"
-        f"<th>Ended</th></tr>{rows}</table>"
         f"<p><b>{_count(len(problem.plans), 'task')}:</b> {tasks}</p>"
+        "<p>Their failed tries are listed below, latest first: click one to read "
+        "its log.</p>"
     )
 
 
@@ -1007,26 +1017,65 @@ def _describe_machine(health: BladeHealth, report: _LostReport | None) -> str:
         f"<li><code>{html.escape(line)}</code>" + (f" ×{n}" if n > 1 else "") + "</li>"
         for line, n in sorted(lines.items(), key=lambda kv: -kv[1])[:6]
     )
-    rows = "".join(
-        f"<tr><td>{_clock(f.when)}</td><td>{f.jid}</td><td>{html.escape(f.task)}</td>"
-        f"<td>{html.escape(_failure_label(f))}</td></tr>"
-        for f in reversed(health.failures[-25:])
-    )
-    more = (
-        f"<p>…and {len(health.failures) - 25} earlier.</p>"
-        if len(health.failures) > 25
-        else ""
-    )
     return head + (
         f"<p><b>Failed here in the last 12 hours</b> "
         f"({_count(len(health.failures), 'task')}): {tallied}</p>"
         f"<p><b>Jobs hit:</b></p><ul>{hit}</ul>"
         f"{_why_lost(health, report)}"
         f"<p><b>From the logs:</b></p><ul>{logged}</ul>"
-        "<p><b>Failed tasks</b>, latest first:</p><table cellspacing='6'>"
-        "<tr><th>Ended</th><th>Job</th><th>Task</th><th>Problem</th></tr>"
-        f"{rows}</table>{more}"
+        "<p>Its failed tasks are listed below, latest first: click one to read "
+        "its log.</p>"
     )
+
+
+def _problem_tries(problem: Problem) -> list[TryRow]:
+    """Every failed try of the problem's tasks, latest first."""
+    rows: list[tuple[float, TryRow]] = []
+    for plan in problem.plans:
+        d = plan.diagnosis
+        for f in d.findings:
+            rows.append(
+                (
+                    f.attempt.ended or f.attempt.started,
+                    TryRow(
+                        cells=(
+                            _clock(f.attempt.ended or f.attempt.started),
+                            d.task.title,
+                            str(f.attempt.number or ""),
+                            f.attempt.blade,
+                            _cause_label(f.cause.key),
+                        ),
+                        owner=d.job.owner,
+                        jid=d.job.jid,
+                        tid=d.task.tid,
+                        title=d.task.title,
+                        key=f.attempt.key if f.attempt.number else "",
+                        machine=f.attempt.blade,
+                    ),
+                )
+            )
+    return [row for _, row in sorted(rows, key=lambda r: r[0], reverse=True)]
+
+
+def _machine_tries(health: BladeHealth) -> list[TryRow]:
+    """The tries that failed on the machine because of it, latest first."""
+    rows = []
+    for f in reversed(health.failures):
+        match = _ATTEMPT_KEY.match(f.key)
+        if match is None:
+            continue
+        rows.append(
+            TryRow(
+                cells=(_clock(f.when), str(f.jid), f.task, _failure_label(f)),
+                owner=f.owner,
+                jid=int(match[1]),
+                tid=int(match[2]),
+                title=f.task,
+                key=f.key,
+                machine=health.blade.name,
+            )
+        )
+    return rows
 
 
 @dataclass(frozen=True)
