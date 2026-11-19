@@ -45,7 +45,7 @@ _RUN_COMMAND = "python -m pipe.core.render.doctor schedule --act --steer"
 # (what went wrong, what it means and what to do).
 _CAUSE_WORDS = {
     "disk_quota": (
-        "Folder's storage limit is full",
+        "Disk Quota Exceeded",
         "The folder it saves to has used up its storage limit (quota). Free up "
         "space there, then retry.",
     ),
@@ -72,7 +72,7 @@ _CAUSE_WORDS = {
         "machine with more free memory.",
     ),
     "lost": (
-        "Machine crashed or restarted",
+        "Machine crashed (Lost the command)",
         "The machine went down partway through, often from running out of memory. "
         "It should work on another machine.",
     ),
@@ -237,7 +237,7 @@ class DoctorPage(QtWidgets.QWidget):
         self._detail.setPlaceholderText("Choose a problem to see why its tasks failed.")
         self._mine = QtWidgets.QCheckBox("Only mine")
         self._mine.toggled.connect(lambda _: self._fill_problems())
-        self._steer = QtWidgets.QCheckBox("Avoid machines that failed them")
+        self._steer = QtWidgets.QCheckBox("Avoid failing machines")
         self._steer.setToolTip(
             "Retries skip the machines a task already failed on and the machines "
             "flagged in red, and wait for a machine with enough free memory if it ran "
@@ -280,7 +280,7 @@ class DoctorPage(QtWidgets.QWidget):
                 "Finished",
                 "Failed",
                 "Notes",
-                "Graphics card",
+                "GPU",
             ]
         )
         self._troubled = QtWidgets.QCheckBox("Only machines with problems")
@@ -302,7 +302,7 @@ class DoctorPage(QtWidgets.QWidget):
 
     def _build_activity(self) -> QtWidgets.QWidget:
         self._activity = _table(
-            ["When", "By", "Result", "Job", "Task", "Artist", "Problem", "Kept off"]
+            ["When", "By", "Result", "Job", "Task", "Artist", "Problem", "Steered to"]
         )
         hint = QtWidgets.QLabel("Every retry, newest first.")
         hint.setToolTip(f"From the Farm Doctor's journal, {self._paths.journal}")
@@ -508,7 +508,7 @@ class DoctorPage(QtWidgets.QWidget):
                     str(entry.get("task", "")),
                     str(entry.get("owner", "")),
                     _cause_label(_KEY_OF_LABEL.get(str(entry.get("cause", "")), "")),
-                    _kept_off(" ".join(str(s.get("after")) for s in services)),
+                    "; ".join(str(s.get("after")) for s in services),
                 ]
             )
             color = (
@@ -521,7 +521,9 @@ class DoctorPage(QtWidgets.QWidget):
             item.setForeground(2, QtGui.QBrush(QtGui.QColor(color)))
             item.setToolTip(2, result)
             if services:
-                item.setToolTip(7, "; ".join(str(s.get("after")) for s in services))
+                item.setToolTip(
+                    7, _kept_off(" ".join(str(s.get("after")) for s in services))
+                )
             self._activity.addTopLevelItem(item)
         for column in range(self._activity.columnCount()):
             self._activity.resizeColumnToContents(column)
@@ -717,9 +719,9 @@ def _blade_state(health: BladeHealth) -> str:
     if _offline_for(health) is not None:
         return "Offline"
     if blade.nimby.startswith("/local/"):
-        return "Someone's using it"
+        return "In Use (Nimby)"
     if blade.nimby:
-        return "Not taking farm work"
+        return "Off the farm (Nimby)"
     return "Rendering" if blade.running else "Available"
 
 
