@@ -167,7 +167,7 @@ ROOMS = (
         },
     ),
     Room(
-        "2255",
+        "2255 (Parris' Lab)",
         (),
         {
             "next to the main door": ("maleficent", "ursula"),
