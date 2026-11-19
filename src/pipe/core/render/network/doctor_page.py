@@ -34,7 +34,14 @@ from pipe.core.render.doctor.checkup import Checkup, Doctor, Problem, Settings, 
 from pipe.core.render.doctor.diagnose import MAX_ATTEMPTS, Cause, Diagnosis, Remedy
 from pipe.core.render.doctor.login import Connection, NoLogin
 from pipe.core.render.doctor.policy import Action, Plan
-from pipe.core.render.network import background, credentials, icons, theme, widgets
+from pipe.core.render.network import (
+    background,
+    credentials,
+    icons,
+    labs,
+    theme,
+    widgets,
+)
 from pipe.core.render.network.attempts_panel import TriesPanel, TryRow
 
 _REFRESH_MS = 60_000
@@ -331,7 +338,7 @@ class DoctorPage(QtWidgets.QWidget):
         self._blades = _table(
             [
                 "Machine",
-                "Group",
+                "Lab",
                 "Status",
                 "OS",
                 "Free memory",
@@ -575,7 +582,7 @@ class DoctorPage(QtWidgets.QWidget):
             item = widgets.SortableItem(
                 [
                     blade.name,
-                    blade.profile,
+                    labs.lab_of(blade.name),
                     _blade_state(health),
                     _system(health, self._windows),
                     f"{blade.free_memory_gb:.0f} GB",
@@ -1023,7 +1030,8 @@ def _describe_machine(
         f"{_ago(time.time() - blade.heartbeat)} ago" if blade.heartbeat else "never"
     )
     specs = (
-        f"{html.escape(blade.profile)} · {blade.cpus} CPUs · "
+        f"{html.escape(labs.lab_of(blade.name))} · {html.escape(blade.profile)} · "
+        f"{blade.cpus} CPUs · "
         f"{html.escape(blade.gpu.split(',')[0] or 'no GPU')}<br>"
         f"{blade.free_memory_gb:.0f} GB memory and {blade.free_disk_gb:.0f} GB disk "
         f"free · rendering {blade.running} · last reported {reported}"
