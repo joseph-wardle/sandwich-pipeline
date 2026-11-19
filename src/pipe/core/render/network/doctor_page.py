@@ -508,7 +508,7 @@ class DoctorPage(QtWidgets.QWidget):
                     str(entry.get("task", "")),
                     str(entry.get("owner", "")),
                     _cause_label(_KEY_OF_LABEL.get(str(entry.get("cause", "")), "")),
-                    "; ".join(str(s.get("after")) for s in services),
+                    _kept_off(" ".join(str(s.get("after")) for s in services)),
                 ]
             )
             color = (
@@ -521,9 +521,7 @@ class DoctorPage(QtWidgets.QWidget):
             item.setForeground(2, QtGui.QBrush(QtGui.QColor(color)))
             item.setToolTip(2, result)
             if services:
-                item.setToolTip(
-                    7, _kept_off(" ".join(str(s.get("after")) for s in services))
-                )
+                item.setToolTip(7, "; ".join(str(s.get("after")) for s in services))
             self._activity.addTopLevelItem(item)
         for column in range(self._activity.columnCount()):
             self._activity.resizeColumnToContents(column)
