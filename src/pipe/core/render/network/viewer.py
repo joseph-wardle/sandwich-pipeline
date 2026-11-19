@@ -567,9 +567,10 @@ def _readout_text(x: int, y: int, values: tuple[float, ...]) -> str:
 def _combo(tip: str) -> QtWidgets.QComboBox:
     combo = QtWidgets.QComboBox()
     combo.setToolTip(tip)
-    # A fixed width: one sized to its items would resize the tab with each shot.
+    # A width not sized to its items, which would resize the tab with each shot.
+    # Short, so the row fits a small screen; the row's stretch widens it.
     combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
-    combo.setMinimumContentsLength(10)
+    combo.setMinimumContentsLength(4)
     return combo
 
 

@@ -122,7 +122,12 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._shots_by_code = {shot.code or "": shot for shot in shots}
         self._lit_shots = lit_shots
         self.setWindowTitle(TITLE)
-        self.resize(1360, 920)
+        # As big as suits the work, but no bigger than the screen it opens on,
+        # which over ssh and XQuartz may be a laptop's.
+        screen = QtWidgets.QApplication.primaryScreen().availableGeometry()
+        self.resize(
+            min(1360, int(screen.width() * 0.95)), min(920, int(screen.height() * 0.9))
+        )
         self._form, self._result, self._run = None, None, None
         self._dirty = False
         self._form_states = {}
