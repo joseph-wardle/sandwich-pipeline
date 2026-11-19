@@ -22,7 +22,7 @@ from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.render import farm
 from pipe.core.render.doctor import login, records
-from pipe.core.render.doctor import diagnose
+from pipe.core.render.doctor import attempts, diagnose
 from pipe.core.render.doctor.blades import (
     LOW_DISK_GB,
     SILENT_SECONDS,
@@ -128,6 +128,10 @@ _ACTION_WORDS = {
     Action.WAIT: "Retry",
     Action.HOLD: "Needs a fix",
 }
+# The cause the doctor gives a task its machine lost (exit code 223).
+_LOST = "lost"
+# husk's progress stamp, "[16:02:43/0:00]": the time, then how long it has rendered.
+_HUSK_TIMER = re.compile(r"\[\d\d:\d\d:\d\d/(\d+):(\d\d)\]")
 # A failed attempt's key, such as "J18230/T71/C68.3": its job and task.
 _ATTEMPT_KEY = re.compile(r"^J(\d+)/T(\d+)/")
 # Characters a log's file name shouldn't hold.
@@ -175,6 +179,9 @@ class DoctorPage(QtWidgets.QWidget):
         # Reads the headless doctor's history, so blades' records outlive their tasks.
         self._doctor = Doctor(History(self._paths.history))
         self._checkup, self._busy, self._steer_chosen = None, False, False
+        # What the logs say about each machine's lost tasks, by machine, with
+        # the failures it was read for: read once, as it takes a log per task.
+        self._lost_reports: dict[str, tuple[frozenset[str], _LostReport]] = {}
 
         title = widgets.PageHeading(
             "stethoscope",
@@ -562,10 +569,27 @@ class DoctorPage(QtWidgets.QWidget):
         item = self._blades.currentItem()
         health: BladeHealth | None = item.data(0, _DATA_ROLE) if item else None
         self._machine_download.setEnabled(bool(health and health.failures))
-        if item is None:
+        if item is None or health is None:
             self._machine_detail.clear()
             return
-        self._machine_detail.setHtml(_describe_machine(item.data(0, _DATA_ROLE)))
+        lost = frozenset(f.key for f in health.failures if f.cause == _LOST)
+        cached = self._lost_reports.get(health.blade.name)
+        report = cached[1] if cached and cached[0] == lost else None
+        self._machine_detail.setHtml(_describe_machine(health, report))
+        if lost and report is None:
+            background.run(
+                lambda: _read_lost(health),
+                lambda found: self._lost_read(health, lost, found),
+                lambda exc: self._status.setText(str(exc)),
+            )
+
+    def _lost_read(
+        self, health: BladeHealth, lost: frozenset[str], report: _LostReport
+    ) -> None:
+        self._lost_reports[health.blade.name] = (lost, report)
+        item = self._blades.currentItem()
+        if item is not None and item.text(0) == health.blade.name:
+            self._machine_detail.setHtml(_describe_machine(health, report))
 
     def _fill_activity(self, journal: list[dict[str, Any]]) -> None:
         self._activity.clear()
@@ -910,8 +934,9 @@ def _save_logs(folder: Path, wanted: list[_LogRequest]) -> tuple[int, list[str]]
     return saved, problems
 
 
-def _describe_machine(health: BladeHealth) -> str:
-    """A machine's health and what failed on it, as HTML for the detail pane."""
+def _describe_machine(health: BladeHealth, report: _LostReport | None) -> str:
+    """A machine's health and what failed on it, as HTML for the detail pane.
+    `report` says what its lost tasks' logs show, None while they're read."""
     blade = health.blade
     flagged = (
         f"<p><b style='color:{_RED}'>Flagged:</b> it failed tasks from "
@@ -974,10 +999,140 @@ def _describe_machine(health: BladeHealth) -> str:
         f"<p><b>Failed here in the last 12 hours</b> "
         f"({_count(len(health.failures), 'task')}): {tallied}</p>"
         f"<p><b>Jobs hit:</b></p><ul>{hit}</ul>"
+        f"{_why_lost(health, report)}"
         f"<p><b>From the logs:</b></p><ul>{logged}</ul>"
         "<p><b>Failed tasks</b>, latest first:</p><table cellspacing='6'>"
         "<tr><th>Ended</th><th>Job</th><th>Task</th><th>Problem</th></tr>"
         f"{rows}</table>{more}"
+    )
+
+
+@dataclass(frozen=True)
+class _Lost:
+    """A task a machine lost, as its log shows it."""
+
+    started: float
+    # What it was doing when it was lost, in a few words.
+    doing: str
+
+
+@dataclass(frozen=True)
+class _LostReport:
+    lost: tuple[_Lost, ...]
+    # When the machine last booted, if Tractor says.
+    booted: float | None
+
+
+def _read_lost(health: BladeHealth) -> _LostReport:
+    """On a pool thread: what the logs of the machine's lost tasks show."""
+    wanted = {f.key for f in health.failures if f.cause == _LOST}
+    tasks = {
+        (f.owner, int(m[1]), int(m[2]))
+        for f in health.failures
+        if f.key in wanted and (m := _ATTEMPT_KEY.match(f.key))
+    }
+    lost = []
+    for owner, jid, tid in tasks:
+        try:
+            found = attempts.parse(farm.task_log(owner, jid, tid))
+        except farm.FarmError:
+            continue
+        lost += [_Lost(a.started, _doing(a.text)) for a in found if a.key in wanted]
+    try:
+        booted = farm.blade_booted(health.blade.name)
+    except farm.FarmError:
+        booted = None
+    return _LostReport(tuple(sorted(lost, key=lambda x: x.started)), booted)
+
+
+def _doing(text: str) -> str:
+    """What a cut-off attempt was doing, from the end of its output."""
+    lines = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("+")]
+    last = lines[-1] if lines else ""
+    if "[denoise]" in last:
+        return "denoising"
+    timers = _HUSK_TIMER.findall(text)
+    if timers:
+        minutes, seconds = timers[-1]
+        if int(minutes) == 0 and int(seconds) < 30:
+            return "just starting to render"
+        return f"rendering, {minutes}:{seconds} in"
+    if "husk" in text:
+        return "loading the scene to render"
+    if "hou." in text or "hython" in text:
+        return "cooking in Houdini"
+    return "running"
+
+
+def _why_lost(health: BladeHealth, report: _LostReport | None) -> str:
+    """Why the machine lost its tasks, as far as their logs and Tractor show."""
+    count = sum(1 for f in health.failures if f.cause == _LOST)
+    if not count:
+        return ""
+    heading = (
+        f"<p><b>Why it lost {_count(count, 'task')}:</b> exit code 223 means "
+        "Tractor's service on the machine stopped while a task was running. When the "
+        "service came back, it couldn't tell whether the task had finished, so it "
+        "marked it failed.</p>"
+    )
+    if report is None:
+        return heading + "<p><i>Reading the lost tasks' logs…</i></p>"
+    points = []
+    starts = [x.started for x in report.lost]
+    gaps = sorted(b - a for a, b in zip(starts, starts[1:]) if b > a)
+    if len(starts) >= 3 and gaps and gaps[len(gaps) // 2] < 10 * 60:
+        points.append(
+            f"It lost {len(starts)} tasks between {_clock(starts[0])} and "
+            f"{_clock(starts[-1])}, taking on a new one about every "
+            f"{max(gaps[len(gaps) // 2] / 60, 1):.0f} min. So the service kept "
+            "restarting, rather than crashing once."
+        )
+    doing: dict[str, int] = {}
+    for x in report.lost:
+        kind = "rendering" if x.doing.startswith("rendering,") else x.doing
+        doing[kind] = doing.get(kind, 0) + 1
+    if doing:
+        listed = ", ".join(
+            f"{n} {kind}" for kind, n in sorted(doing.items(), key=lambda kv: -kv[1])
+        )
+        points.append(f"When they were lost: {listed}.")
+    jobs = {f.jid for f in health.failures if f.cause == _LOST}
+    kinds = {f.task.split(" ")[0] for f in health.failures if f.cause == _LOST}
+    if len(jobs) > 1 or len(kinds) > 1:
+        points.append(
+            f"They were {' and '.join(sorted(k.lower() for k in kinds))} tasks from "
+            f"{_count(len(jobs), 'job')}, so the cause is the machine, not a scene."
+        )
+    last = max(f.when for f in health.failures if f.cause == _LOST)
+    started = health.blade.service_started
+    if report.booted and report.booted > last:
+        points.append(
+            f"The machine rebooted at {_clock(report.booted)}, after its last lost "
+            "task, and has lost none since."
+        )
+    elif started and started > last:
+        points.append(f"Tractor's service on it last restarted at {_clock(started)}.")
+    elif report.booted:
+        points.append(
+            f"It hasn't rebooted since then (last booted {_clock(report.booted)})."
+        )
+    top = max(doing, key=lambda k: doing[k]) if doing else ""
+    if top == "denoising":
+        likely = (
+            "Most likely, denoising ran the machine out of memory, and the system "
+            "stopped Tractor's service along with it."
+        )
+    else:
+        likely = (
+            "Most likely, Tractor's service on this machine kept crashing or being "
+            "stopped, often from running out of memory as a task loads. A reboot "
+            "usually clears it; if it comes back, report the machine to the lab admins."
+        )
+    items = "".join(f"<li>{html.escape(point)}</li>" for point in points)
+    return (
+        heading
+        + (f"<ul>{items}</ul>" if items else "")
+        + f"<p>{html.escape(likely)}</p>"
     )
 
 

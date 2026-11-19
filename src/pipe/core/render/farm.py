@@ -166,6 +166,9 @@ class Blade:
     heartbeat: float | None
     # Tractor's own word on why it isn't taking work, such as "no free slots (1)".
     note: str
+    # When its blade service last started, in seconds since the epoch: a
+    # service that keeps restarting loses the commands it was running.
+    service_started: float | None = None
 
 
 def shot_jobs(shot_code: str) -> list[Job]:
@@ -229,6 +232,12 @@ def commands(job: Job, task: Task) -> list[Command]:
 def blades() -> list[Blade]:
     """Every blade the engine knows, as each last reported."""
     return [_blade(data) for data in _monitor({"q": "blades"}).get("blades", [])]
+
+
+def blade_booted(name: str) -> float | None:
+    """When the blade's computer last booted, in seconds since the epoch."""
+    booted = _monitor({"q": "bdetails", "b": name}).get("boottime")
+    return float(booted) if booted else None
 
 
 def log(job: Job, task: Task) -> str:
@@ -476,4 +485,5 @@ def _blade(data: dict[str, Any]) -> Blade:
         running=int(data.get("numcmd") or 0),
         heartbeat=float(data["t"]) if data.get("t") else None,
         note=str(data.get("note") or ""),
+        service_started=float(data["t0"]) if data.get("t0") else None,
     )
