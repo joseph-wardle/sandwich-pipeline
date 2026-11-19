@@ -17,6 +17,7 @@ from __future__ import annotations
 import enum
 import math
 import re
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 
 from pipe.core.render.doctor.diagnose import OUT_OF_MEMORY, Diagnosis, Verdict
@@ -57,18 +58,28 @@ class Plan:
     avoid: tuple[str, ...] = ()
     # It ran out of memory, so wants a blade with more free.
     needs_memory: bool = False
+    # Blades given a fresh start, which earlier steering is to stop avoiding.
+    forgiven: tuple[str, ...] = ()
 
     @property
     def steers(self) -> bool:
-        return bool(self.avoid) or self.needs_memory
+        return bool(self.avoid) or self.needs_memory or bool(self.forgiven)
 
 
-def plan(diagnosis: Diagnosis, suspects: set[str], now: float, steer: bool) -> Plan:
+def plan(
+    diagnosis: Diagnosis,
+    suspects: set[str],
+    now: float,
+    steer: bool,
+    cleared: Mapping[str, float] | None = None,
+) -> Plan:
     """What to do about the errored task `diagnosis` describes.
 
     `suspects` are blades whose failures suggest work should stay off them.
-    Without `steer`, retries go to any blade, as Tractor chooses.
+    Without `steer`, retries go to any blade, as Tractor chooses. A blade in
+    `cleared` was given a fresh start then, and only its failures since count.
     """
+    cleared = cleared or {}
     job = diagnosis.job
     if diagnosis.verdict is Verdict.PERSON:
         return Plan(diagnosis, Action.HOLD, diagnosis.why)
@@ -80,14 +91,19 @@ def plan(diagnosis: Diagnosis, suspects: set[str], now: float, steer: bool) -> P
     wait = max(_WAITS[min(diagnosis.attempts, len(_WAITS)) - 1], cause.cooldown)
     avoid: tuple[str, ...] = ()
     needs_memory = False
+    forgiven: tuple[str, ...] = ()
     if steer:
-        avoid = tuple(
-            b
-            for b in (*sorted(suspects), *diagnosis.blamed_blades)
-            if _HOSTNAME.match(b)
+        blamed = (
+            f.attempt.blade
+            for f in diagnosis.findings
+            if f.cause.blames_blade
+            and (f.attempt.ended or f.attempt.started)
+            >= cleared.get(f.attempt.blade, 0.0)
         )
+        avoid = tuple(b for b in (*sorted(suspects), *blamed) if _HOSTNAME.match(b))
         avoid = tuple(dict.fromkeys(avoid))[-MAX_AVOIDED:]
         needs_memory = cause is OUT_OF_MEMORY
+        forgiven = tuple(sorted(set(cleared) - set(avoid)))
     retry_at = ended + wait
     where = _where(avoid, needs_memory, steer)
     if now < retry_at:
@@ -98,6 +114,7 @@ def plan(diagnosis: Diagnosis, suspects: set[str], now: float, steer: bool) -> P
             retry_at,
             avoid,
             needs_memory,
+            forgiven,
         )
     return Plan(
         diagnosis,
@@ -106,6 +123,7 @@ def plan(diagnosis: Diagnosis, suspects: set[str], now: float, steer: bool) -> P
         retry_at,
         avoid,
         needs_memory,
+        forgiven,
     )
 
 
@@ -117,18 +135,25 @@ def memory_needed(peak_memory_gb: float) -> int:
     return min(max(math.ceil(peak_memory_gb * _MEMORY_MARGIN), low), high)
 
 
-def steered(service: str, avoid: tuple[str, ...], memory_gb: int | None) -> str:
+def steered(
+    service: str,
+    avoid: tuple[str, ...],
+    memory_gb: int | None,
+    forgiven: Collection[str] = (),
+) -> str:
     """`service`, narrowed to keep off `avoid` and to want `memory_gb` free.
 
     What the doctor added before is kept, so a command steered twice is kept
-    off the blades of both times.
+    off the blades of both times, except the blades `forgiven` since.
     """
     base, avoided, memory = _unsteered(service)
-    blades = tuple(dict.fromkeys((*avoided, *avoid)))[-MAX_AVOIDED:]
+    kept = (b for b in avoided if b not in forgiven)
+    blades = tuple(dict.fromkeys((*kept, *avoid)))[-MAX_AVOIDED:]
     if memory_gb is not None:
         memory = max(memory or 0, memory_gb)
     if not blades and memory is None:
-        return service
+        # As it was sent: never steered, or no longer.
+        return base
     terms = [f"({base})"] if base else []
     terms += [f"!'{blade}'" for blade in blades]
     if memory is not None:

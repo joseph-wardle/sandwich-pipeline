@@ -76,6 +76,15 @@ def main() -> None:
     )
     undo.add_argument("jid", type=int, help="the job's id")
     undo.add_argument("tid", type=int, nargs="*", help="only these tasks")
+    fresh = commands.add_parser(
+        "clear",
+        help="give a machine a fresh start, as after rebooting it: its earlier "
+        "failures stop counting, and retries stop avoiding it",
+    )
+    fresh.add_argument("machine", help="the machine's name, as Tractor shows it")
+    fresh.add_argument(
+        "--undo", action="store_true", help="take back the machine's fresh start"
+    )
     args = parser.parse_args()
 
     paths = records.default_paths()
@@ -99,6 +108,15 @@ def main() -> None:
             _login(paths, args.user)
         elif args.command == "unsteer":
             _unsteer(paths, args.jid, set(args.tid))
+        elif args.command == "clear":
+            records.clear(paths, args.machine, getpass.getuser(), args.undo)
+            print(
+                f"Took back {args.machine}'s fresh start."
+                if args.undo
+                else f"Gave {args.machine} a fresh start: its earlier failures no "
+                "longer count, and retries stop avoiding it from the doctor's next "
+                "round."
+            )
         else:
             _status(paths)
     except FarmError as exc:
@@ -160,7 +178,7 @@ def _unschedule() -> None:
 
 
 def _check(paths: Paths) -> None:
-    checkup = Doctor(History(paths.history)).check()
+    checkup = Doctor(History(paths.history), paths=paths).check()
     _print_checkup(checkup, sys.stdout)
 
 
@@ -168,7 +186,7 @@ def _run(
     paths: Paths, settings: Settings, interval: int, once: bool, quiet: bool = False
 ) -> None:
     with _only_doctor(paths, quiet):
-        doctor = Doctor(History(paths.history, write=True))
+        doctor = Doctor(History(paths.history, write=True), paths=paths)
         connection: Connection | None = None
 
         def connect() -> Connection:

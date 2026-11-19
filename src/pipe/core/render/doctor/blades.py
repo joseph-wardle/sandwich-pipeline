@@ -12,7 +12,7 @@ import json
 import logging
 import time
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -149,6 +149,8 @@ class BladeHealth:
     problems: tuple[str, ...]
     # Its failures suggest work should stay off it.
     suspect: bool
+    # When it was given a fresh start, after which its failures count again.
+    cleared: float | None = None
 
     @property
     def jobs(self) -> int:
@@ -160,12 +162,19 @@ def health(
     seen: list[Failure],
     passed: Counter[str],
     now: float,
+    cleared: Mapping[str, float] | None = None,
 ) -> list[BladeHealth]:
     """Each blade's health, from its own report and the failures `seen` on it.
-    `passed` counts the tasks that passed on each blade."""
+    `passed` counts the tasks that passed on each blade. Failures from before
+    a blade's fresh start in `cleared` don't count."""
+    cleared = cleared or {}
     blamed: dict[str, list[Failure]] = {}
     for failure in sorted(seen, key=lambda f: f.when):
-        if failure.blames_blade and failure.when >= now - WINDOW_SECONDS:
+        if (
+            failure.blames_blade
+            and failure.when >= now - WINDOW_SECONDS
+            and failure.when >= cleared.get(failure.blade, 0.0)
+        ):
             blamed.setdefault(failure.blade, []).append(failure)
     found = []
     for blade in blades:
@@ -176,7 +185,12 @@ def health(
         )
         found.append(
             BladeHealth(
-                blade, on_it, passed[blade.name], _problems(blade, on_it, now), suspect
+                blade,
+                on_it,
+                passed[blade.name],
+                _problems(blade, on_it, now),
+                suspect,
+                cleared.get(blade.name),
             )
         )
     return found

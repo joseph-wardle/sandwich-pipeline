@@ -26,6 +26,7 @@ from pipe.core.render.doctor import attempts, diagnose, windows
 from pipe.core.render.doctor.blades import (
     LOW_DISK_GB,
     SILENT_SECONDS,
+    WINDOW_SECONDS,
     BladeHealth,
     Failure,
     History,
@@ -200,7 +201,7 @@ class DoctorPage(QtWidgets.QWidget):
         self._user = getpass.getuser()
         self._paths = records.default_paths()
         # Reads the headless doctor's history, so blades' records outlive their tasks.
-        self._doctor = Doctor(History(self._paths.history))
+        self._doctor = Doctor(History(self._paths.history), paths=self._paths)
         self._checkup, self._busy, self._steer_chosen = None, False, False
         self._windows = set()
         # What the logs say about each machine's lost tasks, by machine, with
@@ -390,10 +391,20 @@ class DoctorPage(QtWidgets.QWidget):
             clicked=self._download_machine_logs,
         )
         self._machine_download.setEnabled(False)
+        self._machine_clear = widgets.button(
+            "Fresh Start",
+            "refresh",
+            "Stop counting this machine's failures so far, as after rebooting it: "
+            "it's no longer flagged, and retries stop avoiding it. If it keeps "
+            "failing, it's flagged again as usual.",
+            clicked=self._fresh_start,
+        )
+        self._machine_clear.setEnabled(False)
         machine_bar = QtWidgets.QHBoxLayout()
         machine_bar.addWidget(self._troubled)
         machine_bar.addWidget(self._in_windows)
         machine_bar.addStretch(1)
+        machine_bar.addWidget(self._machine_clear)
         machine_bar.addWidget(self._machine_download)
         layout.addLayout(machine_bar)
         layout.addWidget(split, 1)
@@ -623,6 +634,7 @@ class DoctorPage(QtWidgets.QWidget):
         item = self._blades.currentItem()
         health: BladeHealth | None = item.data(0, _DATA_ROLE) if item else None
         self._machine_download.setEnabled(bool(health and health.failures))
+        self._machine_clear.setEnabled(bool(health and health.failures))
         if item is None or health is None:
             self._machine_detail.clear()
             self._machine_tries.set_rows([])
@@ -649,6 +661,33 @@ class DoctorPage(QtWidgets.QWidget):
         self._lab_map.show()
         self._lab_map.raise_()
         self._lab_map.activateWindow()
+
+    def _fresh_start(self) -> None:
+        """Give the chosen machine a fresh start, for the doctor and this window."""
+        item = self._blades.currentItem()
+        if item is None:
+            return
+        machine = item.text(0)
+        answer = QtWidgets.QMessageBox.question(
+            self,
+            "Fresh Start",
+            f"Give {machine} a fresh start?\n\nIts failures so far stop counting, "
+            "so it's no longer flagged and retries stop avoiding it. Use this "
+            "once it's fixed, as after rebooting it. If it fails tasks again, it "
+            "will be flagged again.",
+        )
+        if answer != QtWidgets.QMessageBox.Yes:
+            return
+        try:
+            records.clear(self._paths, machine, getpass.getuser())
+        except OSError as exc:
+            self._status.setText(f"Couldn't give {machine} a fresh start: {exc}")
+            return
+        self._status.setText(
+            f"Gave {machine} a fresh start. The doctor stops avoiding it from its "
+            "next round."
+        )
+        self.refresh()
 
     def _lost_read(
         self, health: BladeHealth, lost: frozenset[str], report: _LostReport
@@ -966,6 +1005,9 @@ def _machine_notes(health: BladeHealth) -> list[str]:
         notes.append(f"Offline for {_ago(offline)}")
     if health.blade.free_disk_gb < LOW_DISK_GB:
         notes.append(f"Only {health.blade.free_disk_gb:.0f} GB of disk space free")
+    if health.cleared and time.time() - health.cleared < WINDOW_SECONDS:
+        when = time.strftime("%b %d %H:%M", time.localtime(health.cleared))
+        notes.append(f"Fresh start {when}; only failures since count")
     if health.failures:
         counts: dict[str, int] = {}
         for failure in health.failures:

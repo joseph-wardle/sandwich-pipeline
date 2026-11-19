@@ -7,6 +7,8 @@ from the login, so they can be read or shared without it:
 - journal.jsonl: every retry it made, or would have made while watching only.
 - status.json: whether it is running, where, and how its last round went.
 - history.jsonl: the failed attempts it has seen, for `blades.History`.
+- cleared.json: machines given a fresh start, as after a reboot: their
+  failures before then no longer count, and retries stop avoiding them.
 
 Home folders are shared by every lab computer, so the Sandwich Renderer window
 reads these wherever the doctor runs.
@@ -18,6 +20,7 @@ import json
 import logging
 import os
 import socket
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,6 +29,9 @@ log = logging.getLogger(__name__)
 
 # How many journal lines the window reads back.
 JOURNAL_LINES = 300
+# How long a fresh start is remembered: by then its machine's earlier
+# failures have long left the doctor's history.
+_CLEARED_SECONDS = 7 * 24 * 3600
 
 
 @dataclass(frozen=True)
@@ -59,6 +65,10 @@ class Paths:
     @property
     def history(self) -> Path:
         return self.state / "history.jsonl"
+
+    @property
+    def cleared(self) -> Path:
+        return self.state / "cleared.json"
 
     @property
     def lock(self) -> Path:
@@ -111,3 +121,40 @@ def read_status(paths: Paths) -> dict[str, Any] | None:
         return json.loads(paths.status.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+def read_cleared(paths: Paths) -> dict[str, dict[str, Any]]:
+    """The machines given a fresh start, each with "when" and "by"."""
+    try:
+        found = json.loads(paths.cleared.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(found, dict):
+        return {}
+    return {
+        machine: entry
+        for machine, entry in found.items()
+        if isinstance(entry, dict) and isinstance(entry.get("when"), int | float)
+    }
+
+
+def cleared_since(paths: Paths) -> dict[str, float]:
+    """When each machine was given a fresh start."""
+    return {machine: entry["when"] for machine, entry in read_cleared(paths).items()}
+
+
+def clear(paths: Paths, machine: str, by: str, undo: bool = False) -> None:
+    """Give `machine` a fresh start, noted as given `by` someone, or with
+    `undo`, take it back."""
+    now = time.time()
+    cleared = {
+        name: entry
+        for name, entry in read_cleared(paths).items()
+        if now - entry["when"] < _CLEARED_SECONDS and name != machine
+    }
+    if not undo:
+        cleared[machine] = {"when": now, "by": by}
+    paths.state.mkdir(parents=True, exist_ok=True)
+    temporary = paths.cleared.with_suffix(".tmp")
+    temporary.write_text(json.dumps(cleared, indent=1), encoding="utf-8")
+    temporary.replace(paths.cleared)

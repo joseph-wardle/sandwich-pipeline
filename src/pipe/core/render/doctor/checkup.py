@@ -44,6 +44,8 @@ class Checkup:
     blades: tuple[BladeHealth, ...]
     # What couldn't be read, worded for a person.
     problems: tuple[str, ...]
+    # When each machine given a fresh start was given it.
+    cleared: dict[str, float] = field(default_factory=dict)
 
     @property
     def suspects(self) -> set[str]:
@@ -51,7 +53,10 @@ class Checkup:
 
     def plans(self, steer: bool) -> list[Plan]:
         suspects = self.suspects
-        return [policy.plan(d, suspects, self.when, steer) for d in self.diagnoses]
+        return [
+            policy.plan(d, suspects, self.when, steer, self.cleared)
+            for d in self.diagnoses
+        ]
 
 
 @dataclass(frozen=True)
@@ -106,6 +111,8 @@ class Doctor:
     _handled: dict[str, float] = field(default_factory=dict)
     # How the last round logged in, or why it couldn't, for the status.
     login: str = "not needed yet"
+    # Where the machines given a fresh start are noted, if anywhere.
+    paths: Paths | None = None
 
     def check(self, now: float | None = None) -> Checkup:
         """Read and diagnose the farm.
@@ -137,10 +144,17 @@ class Doctor:
         errored = {(d.job.jid, d.task.tid) for d in diagnoses}
         self._logs = {key: value for key, value in self._logs.items() if key in errored}
         self.history.add(f for d in diagnoses for f in blades.failures(d))
+        cleared = records.cleared_since(self.paths) if self.paths else {}
         health = blades.health(
-            farm.blades(), self.history.since(now - blades.WINDOW_SECONDS), passed, now
+            farm.blades(),
+            self.history.since(now - blades.WINDOW_SECONDS),
+            passed,
+            now,
+            cleared,
         )
-        return Checkup(now, jobs, tuple(diagnoses), tuple(health), tuple(problems))
+        return Checkup(
+            now, jobs, tuple(diagnoses), tuple(health), tuple(problems), cleared
+        )
 
     def treat(
         self,
@@ -259,7 +273,7 @@ def _service_changes(
         memory = (
             policy.memory_needed(command.peak_memory_gb) if plan.needs_memory else None
         )
-        after = policy.steered(command.service, plan.avoid, memory)
+        after = policy.steered(command.service, plan.avoid, memory, plan.forgiven)
         if after != command.service:
             changes.append((command.cid, command.service, after))
     return changes
