@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -38,7 +39,9 @@ class Paths:
 
     @property
     def session(self) -> Path:
-        return self.config / "tractor.session"
+        """This computer's Tractor session: the engine ties a session to the
+        computer that logged in, so each keeps its own."""
+        return self.config / f"tractor.{socket.gethostname()}.session"
 
     @property
     def refused(self) -> Path:

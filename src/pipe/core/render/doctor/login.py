@@ -1,9 +1,10 @@
 """The doctor's Tractor login: a saved session first, the password only when it must.
 
-Tractor gives each login a session id. The doctor keeps its id in a session
-file, readable only by its user, and goes on using it for as long as the
-engine accepts it, so the password is sent only when the session has ended,
-as when the engine restarts. The password then comes from a password file,
+Tractor gives each login a session id, which only the computer that logged in
+may use. The doctor keeps each computer's id in its own session file, readable
+only by its user, and goes on using it for as long as the engine accepts it,
+so the password is sent only when the session has ended, as when the engine
+restarts. The password then comes from a password file,
 also readable only by its user, which `python -m pipe.core.render.doctor login`
 writes.
 
