@@ -192,6 +192,8 @@ class DoctorPage(QtWidgets.QWidget):
     _busy: bool
     # The artist set "Steer retries" themselves, so it no longer follows the doctor.
     _steer_chosen: bool
+    _scope_chosen: bool
+    _production: QtWidgets.QCheckBox
 
     def __init__(
         self, shot_codes: Sequence[str], parent: QtWidgets.QWidget | None = None
@@ -201,8 +203,13 @@ class DoctorPage(QtWidgets.QWidget):
         self._user = getpass.getuser()
         self._paths = records.default_paths()
         # Reads the headless doctor's history, so blades' records outlive their tasks.
-        self._doctor = Doctor(History(self._paths.history), paths=self._paths)
+        # Every job, so the tab can show what a doctor looking after them all
+        # sees; "Only production jobs" narrows it.
+        self._doctor = Doctor(
+            History(self._paths.history), paths=self._paths, all_jobs=True
+        )
         self._checkup, self._busy, self._steer_chosen = None, False, False
+        self._scope_chosen = False
         self._windows = set()
         # What the logs say about each machine's lost tasks, by machine, with
         # the failures it was read for: read once, as it takes a log per task.
@@ -285,6 +292,14 @@ class DoctorPage(QtWidgets.QWidget):
         self._detail.setPlaceholderText("Choose a problem to see why its tasks failed.")
         self._mine = QtWidgets.QCheckBox("Only mine")
         self._mine.toggled.connect(lambda _: self._fill_problems())
+        self._production = QtWidgets.QCheckBox("Only production jobs")
+        self._production.setToolTip(
+            "Only the Sandwich production's jobs, not class or test jobs. Starts "
+            "the same as the automatic retries."
+        )
+        self._production.setChecked(True)
+        self._production.toggled.connect(lambda _: self._fill_problems())
+        self._production.clicked.connect(self._choose_scope)
         self._steer = QtWidgets.QCheckBox("Avoid failing machines")
         self._steer.setToolTip(
             "Retries skip the machines a task already failed on and the machines "
@@ -310,6 +325,7 @@ class DoctorPage(QtWidgets.QWidget):
 
         bar = QtWidgets.QHBoxLayout()
         bar.addWidget(self._mine)
+        bar.addWidget(self._production)
         bar.addWidget(self._steer)
         bar.addStretch(1)
         self._download = widgets.button(
@@ -451,6 +467,7 @@ class DoctorPage(QtWidgets.QWidget):
         self._checkup, status, journal, self._windows = found
         self._show_doctor_status(status)
         self._follow_doctor_steering(status)
+        self._follow_doctor_scope(status)
         self._fill_problems()
         self._fill_blades()
         self._fill_activity(journal)
@@ -517,8 +534,20 @@ class DoctorPage(QtWidgets.QWidget):
         self._steer.setChecked(bool(status.get("steering")))
         self._steer.blockSignals(False)
 
+    def _follow_doctor_scope(self, status: dict[str, Any] | None) -> None:
+        """Show the jobs the running doctor looks after, until the artist
+        chooses otherwise."""
+        if self._scope_chosen or status is None or not _running(status):
+            return
+        self._production.blockSignals(True)
+        self._production.setChecked(not status.get("all_jobs"))
+        self._production.blockSignals(False)
+
     def _choose_steering(self) -> None:
         self._steer_chosen = True
+
+    def _choose_scope(self) -> None:
+        self._scope_chosen = True
 
     # ---- filling -------------------------------------------------------
 
@@ -528,6 +557,8 @@ class DoctorPage(QtWidgets.QWidget):
         plans = self._checkup.plans(self._steer.isChecked())
         if self._mine.isChecked():
             plans = [p for p in plans if p.diagnosis.job.owner == self._user]
+        if self._production.isChecked():
+            plans = [p for p in plans if p.diagnosis.job.sandwich]
         return plans
 
     def _fill_problems(self) -> None:

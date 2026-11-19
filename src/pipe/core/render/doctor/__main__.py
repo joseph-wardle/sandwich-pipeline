@@ -48,7 +48,12 @@ def main() -> None:
         description="Diagnose Tractor's errored tasks and retry what can pass."
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("check", help="diagnose the farm once and print it")
+    check = commands.add_parser("check", help="diagnose the farm once and print it")
+    check.add_argument(
+        "--all-jobs",
+        action="store_true",
+        help="every job on the farm, not only the production's",
+    )
     run = commands.add_parser("run", help="check the farm every few minutes")
     _add_run_options(run)
     run.add_argument("--once", action="store_true", help="check once, then stop")
@@ -90,7 +95,7 @@ def main() -> None:
     paths = records.default_paths()
     try:
         if args.command == "check":
-            _check(paths)
+            _check(paths, args.all_jobs)
         elif args.command == "run":
             owners = frozenset(args.owner) if args.owner else None
             _run(
@@ -99,6 +104,7 @@ def main() -> None:
                 args.interval,
                 args.once,
                 args.if_not_running,
+                args.all_jobs,
             )
         elif args.command == "schedule":
             _schedule(paths, args)
@@ -135,6 +141,11 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
         help="keep retries off the blades that failed them",
     )
     parser.add_argument(
+        "--all-jobs",
+        action="store_true",
+        help="look after every job on the farm, not only the production's",
+    )
+    parser.add_argument(
         "--owner",
         action="append",
         help="only this artist's jobs; give it again for more",
@@ -152,6 +163,7 @@ def _schedule(paths: Paths, args: argparse.Namespace) -> None:
         )
     arguments = ["--act"] if args.act else []
     arguments += ["--steer"] if args.steer else []
+    arguments += ["--all-jobs"] if args.all_jobs else []
     for owner in args.owner or []:
         arguments += ["--owner", owner]
     arguments += ["--interval", str(args.interval)]
@@ -177,16 +189,23 @@ def _unschedule() -> None:
         print(f"Cron on {socket.gethostname()} wasn't starting the farm doctor.")
 
 
-def _check(paths: Paths) -> None:
-    checkup = Doctor(History(paths.history), paths=paths).check()
+def _check(paths: Paths, all_jobs: bool) -> None:
+    checkup = Doctor(History(paths.history), paths=paths, all_jobs=all_jobs).check()
     _print_checkup(checkup, sys.stdout)
 
 
 def _run(
-    paths: Paths, settings: Settings, interval: int, once: bool, quiet: bool = False
+    paths: Paths,
+    settings: Settings,
+    interval: int,
+    once: bool,
+    quiet: bool = False,
+    all_jobs: bool = False,
 ) -> None:
     with _only_doctor(paths, quiet):
-        doctor = Doctor(History(paths.history, write=True), paths=paths)
+        doctor = Doctor(
+            History(paths.history, write=True), paths=paths, all_jobs=all_jobs
+        )
         connection: Connection | None = None
 
         def connect() -> Connection:
@@ -198,13 +217,14 @@ def _run(
         started = time.time()
         stop = _stop_on_signal()
         log.info(
-            "The farm doctor is %s%s%s",
+            "The farm doctor is %s%s%s%s",
             "retrying for real" if settings.acting else "watching only",
             ", steering retries" if settings.steer else "",
+            ", for every job on the farm" if all_jobs else "",
             f", for {', '.join(sorted(settings.owners))}" if settings.owners else "",
         )
         while True:
-            status = _status_base(settings, started)
+            status = _status_base(settings, started) | {"all_jobs": all_jobs}
             try:
                 checkup = doctor.check()
                 entries = doctor.treat(checkup, settings, connect, paths)

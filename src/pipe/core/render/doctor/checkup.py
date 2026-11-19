@@ -1,6 +1,7 @@
 """One look at the farm, and what the doctor does about it.
 
-`Doctor.check` reads every errored task of the production's jobs, diagnoses
+`Doctor.check` reads every errored task of the production's jobs, or of
+every job on the farm, diagnoses
 each from its log, and rates every blade. It only reads, so the Sandwich
 Renderer window runs it too. `Doctor.treat` carries out the plans, as only the
 headless doctor does by itself.
@@ -113,6 +114,8 @@ class Doctor:
     login: str = "not needed yet"
     # Where the machines given a fresh start are noted, if anywhere.
     paths: Paths | None = None
+    # Every job on the farm, not only the production's.
+    all_jobs: bool = False
 
     def check(self, now: float | None = None) -> Checkup:
         """Read and diagnose the farm.
@@ -122,7 +125,11 @@ class Doctor:
         """
         now = time.time() if now is None else now
         self.history.refresh()
-        jobs = tuple(j for j in farm.all_jobs() if j.sandwich and not j.finished)
+        jobs = tuple(
+            j
+            for j in farm.all_jobs()
+            if (self.all_jobs or j.sandwich) and not j.finished
+        )
         diagnoses: list[Diagnosis] = []
         passed: Counter[str] = Counter()
         problems: list[str] = []
