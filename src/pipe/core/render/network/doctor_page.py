@@ -713,7 +713,10 @@ class DoctorPage(QtWidgets.QWidget):
             for problem in self._selected_problems()
             for p in problem.plans
         ]
-        self._download_logs(wanted)
+        jobs = sorted({request.jid for request in wanted})
+        name = f"J{jobs[0]}" if len(jobs) == 1 else f"{len(jobs)}_jobs"
+        title = ", ".join(f"job {jid}" for jid in jobs)
+        self._download_logs(wanted, name, f"Tractor logs of {title}")
 
     def _download_machine_logs(self) -> None:
         item = self._blades.currentItem()
@@ -728,34 +731,43 @@ class DoctorPage(QtWidgets.QWidget):
                         failure.owner, int(match[1]), int(match[2]), failure.task
                     )
                 )
-        self._download_logs(wanted)
+        name = health.blade.name
+        self._download_logs(
+            wanted, name, f"Tractor logs of the tasks that failed on {name}"
+        )
 
-    def _download_logs(self, wanted: list[_LogRequest]) -> None:
-        """Ask for a folder, then save each task's Tractor log there."""
+    def _download_logs(self, wanted: list[_LogRequest], name: str, title: str) -> None:
+        """Ask where to save, then write every task's Tractor log into one text
+        file, offered as `name` and today's date."""
         wanted = list(dict.fromkeys(wanted))
         if not wanted:
             return
         settings = QtCore.QSettings(*_SETTINGS)
-        start = str(settings.value(_LOG_FOLDER_KEY, "") or Path.home())
-        folder = QtWidgets.QFileDialog.getExistingDirectory(
-            self, f"Save {_count(len(wanted), 'Tractor log')} to", start
+        folder = Path(str(settings.value(_LOG_FOLDER_KEY, "") or Path.home()))
+        suggested = folder / f"{_UNSAFE.sub('_', name)}_{time.strftime('%Y-%m-%d')}.txt"
+        chosen, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            f"Save {_count(len(wanted), 'Tractor log')} as",
+            str(suggested),
+            "Text files (*.txt);;All files (*)",
         )
-        if not folder:
+        if not chosen:
             return
-        settings.setValue(_LOG_FOLDER_KEY, folder)
+        target = Path(chosen)
+        settings.setValue(_LOG_FOLDER_KEY, str(target.parent))
         self._status.setText(f"Downloading {_count(len(wanted), 'log')}…")
         background.run(
-            lambda: _save_logs(Path(folder), wanted),
-            lambda found: self._logs_saved(Path(folder), *found),
+            lambda: _save_logs(target, wanted, title),
+            lambda found: self._logs_saved(target, *found),
             self._failed,
         )
 
-    def _logs_saved(self, folder: Path, saved: int, problems: list[str]) -> None:
-        text = f"Saved {_count(saved, 'log')} to {folder}."
+    def _logs_saved(self, target: Path, saved: int, problems: list[str]) -> None:
+        text = f"Saved {_count(saved, 'log')} to {target}."
         if problems:
             text += f" {len(problems)} couldn't be read: {problems[0]}"
         self._status.setText(text)
-        # The label is narrow; the folder's full path is worth seeing.
+        # The label is narrow; the file's full path is worth seeing.
         self._status.setToolTip(text)
 
     def _selected_problems(self) -> list[Problem]:
@@ -913,9 +925,18 @@ class _LogRequest:
     title: str
 
 
-def _save_logs(folder: Path, wanted: list[_LogRequest]) -> tuple[int, list[str]]:
-    """Write each task's Tractor log into `folder`, named by its job and task.
-    Returns how many were saved and why the rest weren't."""
+def _save_logs(
+    target: Path, wanted: list[_LogRequest], title: str
+) -> tuple[int, list[str]]:
+    """Write every task's Tractor log into the one text file `target`, each
+    under a heading naming its job and task. Returns how many were saved and
+    why the rest weren't.
+
+    Raises:
+        FarmError: The file couldn't be written.
+    """
+    rule = "#" * 80
+    parts = [f"{title}\nDownloaded {time.strftime('%Y-%m-%d %H:%M')}\n"]
     saved, problems = 0, []
     for request in wanted:
         try:
@@ -923,14 +944,15 @@ def _save_logs(folder: Path, wanted: list[_LogRequest]) -> tuple[int, list[str]]
         except farm.FarmError as exc:
             problems.append(str(exc))
             continue
-        name = _UNSAFE.sub("_", request.title).strip("_") or "task"
-        target = folder / f"J{request.jid}_T{request.tid}_{name}.log"
-        try:
-            target.write_text(text, encoding="utf-8")
-        except OSError as exc:
-            problems.append(f"Could not write {target} ({exc})")
-            continue
+        parts.append(
+            f"\n{rule}\n# Job {request.jid}, task {request.tid}: {request.title} "
+            f"({request.owner})\n{rule}\n\n{text.rstrip()}\n"
+        )
         saved += 1
+    try:
+        target.write_text("".join(parts), encoding="utf-8")
+    except OSError as exc:
+        raise farm.FarmError(f"Could not write {target} ({exc}).") from exc
     return saved, problems
 
 
