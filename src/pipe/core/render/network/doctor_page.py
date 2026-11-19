@@ -171,6 +171,7 @@ class DoctorPage(QtWidgets.QWidget):
     _mine: QtWidgets.QCheckBox
     _steer: QtWidgets.QCheckBox
     _troubled: QtWidgets.QCheckBox
+    _in_windows: QtWidgets.QCheckBox
     _retry: QtWidgets.QPushButton
     _open: QtWidgets.QPushButton
     _download: QtWidgets.QPushButton
@@ -345,6 +346,8 @@ class DoctorPage(QtWidgets.QWidget):
         self._troubled = QtWidgets.QCheckBox("Only machines with problems")
         self._troubled.setChecked(False)
         self._troubled.toggled.connect(lambda _: self._fill_blades())
+        self._in_windows = QtWidgets.QCheckBox("Only machines in Windows")
+        self._in_windows.toggled.connect(lambda _: self._fill_blades())
         self._blades.currentItemChanged.connect(lambda *_: self._machine_chosen())
         self._machine_detail = QtWidgets.QTextBrowser()
         self._machine_detail.setPlaceholderText(
@@ -378,6 +381,7 @@ class DoctorPage(QtWidgets.QWidget):
         self._machine_download.setEnabled(False)
         machine_bar = QtWidgets.QHBoxLayout()
         machine_bar.addWidget(self._troubled)
+        machine_bar.addWidget(self._in_windows)
         machine_bar.addStretch(1)
         machine_bar.addWidget(self._machine_download)
         layout.addLayout(machine_bar)
@@ -564,6 +568,8 @@ class DoctorPage(QtWidgets.QWidget):
         )
         for health in rows:
             if self._troubled.isChecked() and not health.problems:
+                continue
+            if self._in_windows.isChecked() and health.blade.name not in self._windows:
                 continue
             blade = health.blade
             item = widgets.SortableItem(
