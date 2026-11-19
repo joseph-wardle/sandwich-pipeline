@@ -54,6 +54,8 @@ class DoctorPage(QtWidgets.QWidget):
     _timer: QtCore.QTimer
     _checkup: Checkup | None
     _busy: bool
+    # The artist set "Steer retries" themselves, so it no longer follows the doctor.
+    _steer_chosen: bool
 
     def __init__(
         self, shot_codes: Sequence[str], parent: QtWidgets.QWidget | None = None
@@ -64,7 +66,7 @@ class DoctorPage(QtWidgets.QWidget):
         self._paths = records.default_paths()
         # Reads the headless doctor's history, so blades' records outlive their tasks.
         self._doctor = Doctor(History(self._paths.history))
-        self._checkup, self._busy = None, False
+        self._checkup, self._busy, self._steer_chosen = None, False, False
 
         title = QtWidgets.QLabel(
             "<b>Farm Doctor</b> — why the production's tasks fail, and what retrying can fix"
@@ -142,9 +144,12 @@ class DoctorPage(QtWidgets.QWidget):
         self._steer = QtWidgets.QCheckBox("Steer retries off failing blades")
         self._steer.setToolTip(
             "Narrow each retried command's service key, so it keeps off the blades that "
-            "failed it and, if it ran out of memory, waits for a blade with more free."
+            "failed it and, if it ran out of memory, waits for a blade with more free. "
+            "It starts as the running headless doctor steers."
         )
         self._steer.toggled.connect(lambda _: self._fill_problems())
+        # Only a click, not the doctor's setting being copied, counts as a choice.
+        self._steer.clicked.connect(self._choose_steering)
         self._retry = QtWidgets.QPushButton("Retry Selected")
         self._retry.setToolTip(
             "Retry the selected problems' tasks now, as the doctor plans to"
@@ -235,6 +240,7 @@ class DoctorPage(QtWidgets.QWidget):
         self._busy = False
         self._checkup, status, journal = found
         self._show_doctor_status(status)
+        self._follow_doctor_steering(status)
         self._fill_problems()
         self._fill_blades()
         self._fill_activity(journal)
@@ -271,6 +277,18 @@ class DoctorPage(QtWidgets.QWidget):
             if status.get("error"):
                 text += f" Its last round failed: {status['error']}"
         self._doctor_status.setText(text)
+
+    def _follow_doctor_steering(self, status: dict[str, Any] | None) -> None:
+        """Steer as the running doctor does, so the tab's plans and retries
+        match its, until the artist chooses otherwise."""
+        if self._steer_chosen or status is None or not _running(status):
+            return
+        self._steer.blockSignals(True)
+        self._steer.setChecked(bool(status.get("steering")))
+        self._steer.blockSignals(False)
+
+    def _choose_steering(self) -> None:
+        self._steer_chosen = True
 
     # ---- filling -------------------------------------------------------
 
@@ -505,6 +523,12 @@ def _describe(problem: Problem) -> str:
         f"<table cellspacing='6'><tr><th>#</th><th>Blade</th><th>Cause</th><th>Ended</th></tr>{rows}</table>"
         f"<p><b>{_count(len(problem.plans), 'task')}:</b> {tasks}</p>"
     )
+
+
+def _running(status: dict[str, Any]) -> bool:
+    """The headless doctor whose `status` this is is still checking the farm."""
+    checked = float(status.get("checked") or 0)
+    return not status.get("stopped") and time.time() - checked <= _STALE_SECONDS
 
 
 def _blade_state(health: BladeHealth) -> str:

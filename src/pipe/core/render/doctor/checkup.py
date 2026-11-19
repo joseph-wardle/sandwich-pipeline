@@ -197,7 +197,18 @@ class Doctor:
         for plan in plans:
             entry = _entry(plan, settings) | {"by": by}
             try:
-                changes = _service_changes(plan)
+                commands = farm.commands(plan.diagnosis.job, plan.diagnosis.task)
+                if not any(command.state == ERROR for command in commands):
+                    # Retried since it was read, as by the other of the doctor
+                    # and the window: retrying it again would restart it.
+                    states = sorted({command.state for command in commands})
+                    entry["result"] = (
+                        f"skipped: it is {', '.join(states) or 'gone'} now, not errored"
+                    )
+                    records.write_journal(paths, entry)
+                    entries.append(entry)
+                    continue
+                changes = _service_changes(plan, commands)
                 entry["services"] = [
                     {"cid": c, "before": b, "after": a} for c, b, a in changes
                 ]
@@ -236,13 +247,15 @@ class Doctor:
         return not acting or now - when < _REFUSED_SECONDS
 
 
-def _service_changes(plan: Plan) -> list[tuple[int, str, str]]:
-    """(cid, service before, service after) for each command the retry steers."""
+def _service_changes(
+    plan: Plan, commands: list[farm.Command]
+) -> list[tuple[int, str, str]]:
+    """(cid, service before, service after) for each of the task's `commands`
+    the retry steers."""
     if not plan.steers:
         return []
-    diagnosis = plan.diagnosis
     changes = []
-    for command in farm.commands(diagnosis.job, diagnosis.task):
+    for command in commands:
         memory = (
             policy.memory_needed(command.peak_memory_gb) if plan.needs_memory else None
         )
