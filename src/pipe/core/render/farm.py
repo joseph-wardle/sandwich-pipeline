@@ -17,7 +17,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from env import Executables
@@ -413,7 +413,12 @@ def _metadata(text: str) -> dict[str, Any]:
 def _job(owner: str, data: dict[str, Any], metadata: dict[str, Any]) -> Job:
     total, active, done, errors = data.get("nTasks", [0, 0, 0, 0])
     try:
-        spooled = datetime.strptime(data.get("spooldate", ""), "%Y-%m-%d %H:%M:%S")
+        # The engine gives it in UTC; shown as it is, it reads hours ahead.
+        spooled = (
+            datetime.strptime(data.get("spooldate", ""), "%Y-%m-%d %H:%M:%S")
+            .replace(tzinfo=timezone.utc)
+            .astimezone()
+        )
     except ValueError:
         spooled = None
     return Job(
