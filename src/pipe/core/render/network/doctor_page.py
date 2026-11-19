@@ -22,7 +22,7 @@ from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.render import farm
 from pipe.core.render.doctor import login, records
-from pipe.core.render.doctor import attempts, diagnose
+from pipe.core.render.doctor import attempts, diagnose, windows
 from pipe.core.render.doctor.blades import (
     LOW_DISK_GB,
     SILENT_SECONDS,
@@ -129,6 +129,14 @@ _ACTION_WORDS = {
     Action.WAIT: "Retry",
     Action.HOLD: "Needs a fix",
 }
+# The Machines table's columns that are colored or carry tooltips.
+_OS_COLUMN, _FAILED_COLUMN = 3, 8
+_LINUX, _WINDOWS = "Linux", "Windows"
+_SYSTEM_COLORS = {_LINUX: "#8fe0a0", _WINDOWS: "#6ea8ff"}
+_SYSTEM_TIPS = {
+    _LINUX: "On Linux, so it can take farm work unless someone is using it",
+    _WINDOWS: "Running Windows, so it takes no farm work until it's back on Linux",
+}
 # The cause the doctor gives a task its machine lost (exit code 223).
 _LOST = "lost"
 # husk's progress stamp, "[16:02:43/0:00]": the time, then how long it has rendered.
@@ -169,6 +177,8 @@ class DoctorPage(QtWidgets.QWidget):
     _machine_download: QtWidgets.QPushButton
     _timer: QtCore.QTimer
     _checkup: Checkup | None
+    # The machines running Windows when the farm was last read.
+    _windows: set[str]
     _busy: bool
     # The artist set "Steer retries" themselves, so it no longer follows the doctor.
     _steer_chosen: bool
@@ -183,6 +193,7 @@ class DoctorPage(QtWidgets.QWidget):
         # Reads the headless doctor's history, so blades' records outlive their tasks.
         self._doctor = Doctor(History(self._paths.history))
         self._checkup, self._busy, self._steer_chosen = None, False, False
+        self._windows = set()
         # What the logs say about each machine's lost tasks, by machine, with
         # the failures it was read for: read once, as it takes a log per task.
         self._lost_reports: dict[str, tuple[frozenset[str], _LostReport]] = {}
@@ -321,6 +332,7 @@ class DoctorPage(QtWidgets.QWidget):
                 "Machine",
                 "Group",
                 "Status",
+                "OS",
                 "Free memory",
                 "Free disk",
                 "Rendering",
@@ -331,7 +343,7 @@ class DoctorPage(QtWidgets.QWidget):
             ]
         )
         self._troubled = QtWidgets.QCheckBox("Only machines with problems")
-        self._troubled.setChecked(True)
+        self._troubled.setChecked(False)
         self._troubled.toggled.connect(lambda _: self._fill_blades())
         self._blades.currentItemChanged.connect(lambda *_: self._machine_chosen())
         self._machine_detail = QtWidgets.QTextBrowser()
@@ -392,19 +404,25 @@ class DoctorPage(QtWidgets.QWidget):
         if self.isVisible():
             self.refresh()
 
-    def _read_all(self) -> tuple[Checkup, dict[str, Any] | None, list[dict[str, Any]]]:
-        """On a pool thread: the farm, and the headless doctor's files."""
+    def _read_all(
+        self,
+    ) -> tuple[Checkup, dict[str, Any] | None, list[dict[str, Any]], set[str]]:
+        """On a pool thread: the farm, the headless doctor's files, and which
+        machines are running Windows."""
+        checkup = self._doctor.check()
         return (
-            self._doctor.check(),
+            checkup,
             records.read_status(self._paths),
             records.read_journal(self._paths),
+            windows.running_windows([health.blade for health in checkup.blades]),
         )
 
     def _read(
-        self, found: tuple[Checkup, dict[str, Any] | None, list[dict[str, Any]]]
+        self,
+        found: tuple[Checkup, dict[str, Any] | None, list[dict[str, Any]], set[str]],
     ) -> None:
         self._busy = False
-        self._checkup, status, journal = found
+        self._checkup, status, journal, self._windows = found
         self._show_doctor_status(status)
         self._follow_doctor_steering(status)
         self._fill_problems()
@@ -553,6 +571,7 @@ class DoctorPage(QtWidgets.QWidget):
                     blade.name,
                     blade.profile,
                     _blade_state(health),
+                    _system(health, self._windows),
                     f"{blade.free_memory_gb:.0f} GB",
                     f"{blade.free_disk_gb:.0f} GB",
                     str(blade.running or ""),
@@ -565,11 +584,15 @@ class DoctorPage(QtWidgets.QWidget):
             if health.suspect:
                 for column in range(item.columnCount()):
                     item.setForeground(column, QtGui.QBrush(QtGui.QColor(_RED)))
+            system = item.text(_OS_COLUMN)
+            if color := _SYSTEM_COLORS.get(system):
+                item.setForeground(_OS_COLUMN, QtGui.QBrush(QtGui.QColor(color)))
+                item.setToolTip(_OS_COLUMN, _SYSTEM_TIPS[system])
                 item.setToolTip(
                     0, "Flagged: it failed tasks from several jobs, so retries avoid it"
                 )
             if health.failures:
-                item.setToolTip(7, _failure_list(health))
+                item.setToolTip(_FAILED_COLUMN, _failure_list(health))
             item.setData(0, _DATA_ROLE, health)
             self._blades.addTopLevelItem(item)
             if blade.name == chosen:
@@ -591,7 +614,9 @@ class DoctorPage(QtWidgets.QWidget):
         lost = frozenset(f.key for f in health.failures if f.cause == _LOST)
         cached = self._lost_reports.get(health.blade.name)
         report = cached[1] if cached and cached[0] == lost else None
-        self._machine_detail.setHtml(_describe_machine(health, report))
+        self._machine_detail.setHtml(
+            _describe_machine(health, report, health.blade.name in self._windows)
+        )
         if lost and report is None:
             background.run(
                 lambda: _read_lost(health),
@@ -605,7 +630,9 @@ class DoctorPage(QtWidgets.QWidget):
         self._lost_reports[health.blade.name] = (lost, report)
         item = self._blades.currentItem()
         if item is not None and item.text(0) == health.blade.name:
-            self._machine_detail.setHtml(_describe_machine(health, report))
+            self._machine_detail.setHtml(
+                _describe_machine(health, report, health.blade.name in self._windows)
+            )
 
     def _fill_activity(self, journal: list[dict[str, Any]]) -> None:
         self._activity.clear()
@@ -888,6 +915,13 @@ def _running(status: dict[str, Any]) -> bool:
     return not status.get("stopped") and time.time() - checked <= _STALE_SECONDS
 
 
+def _system(health: BladeHealth, running_windows: set[str]) -> str:
+    """Which system the machine is in: Windows, Linux, or unknown while offline."""
+    if health.blade.name in running_windows:
+        return _WINDOWS
+    return "—" if _offline_for(health) is not None else _LINUX
+
+
 def _blade_state(health: BladeHealth) -> str:
     blade = health.blade
     if _offline_for(health) is not None:
@@ -966,7 +1000,9 @@ def _save_logs(
     return saved, problems
 
 
-def _describe_machine(health: BladeHealth, report: _LostReport | None) -> str:
+def _describe_machine(
+    health: BladeHealth, report: _LostReport | None, in_windows: bool
+) -> str:
     """A machine's health and what failed on it, as HTML for the detail pane.
     `report` says what its lost tasks' logs show, None while they're read."""
     blade = health.blade
@@ -992,7 +1028,8 @@ def _describe_machine(health: BladeHealth, report: _LostReport | None) -> str:
         if not n.startswith("Failed ")
     )
     head = (
-        f"<h3>{html.escape(blade.name)} — {html.escape(_blade_state(health))}</h3>"
+        f"<h3>{html.escape(blade.name)} — {html.escape(_blade_state(health))}"
+        f"{' · in Windows' if in_windows else ''}</h3>"
         f"{flagged}<p>{specs}</p>" + (f"<ul>{notes}</ul>" if notes else "")
     )
     if not health.failures:
