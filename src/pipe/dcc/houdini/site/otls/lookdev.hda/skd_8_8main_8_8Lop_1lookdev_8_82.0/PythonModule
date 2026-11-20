@@ -70,9 +70,8 @@ def frame_rig(node: hou.LopNode) -> None:
             raise hou.NodeError(NO_INPUT_CAMERA)
     else:
         distance = _zoom(lookdev) * BASE_WIDTH / 2 / tan_half
-        _prepend_op(camera, UsdGeom.XformOp.TypeTranslate, Gf.Vec3d(0.0, 0.0, distance), "distance")
+        _prepend_op(camera, UsdGeom.XformOp.TypeTranslate, Gf.Vec3d(0.0, 0.0, distance * scale), "distance")
         _prepend_op(camera, UsdGeom.XformOp.TypeRotateX, -angle)
-        _prepend_op(camera, UsdGeom.XformOp.TypeScale, Gf.Vec3d(scale))
         _prepend_op(camera, UsdGeom.XformOp.TypeTranslate, Gf.Vec3d(0.0, pivot, 0.0))
 
     # The backdrop's uv is in meters at the base width; this keeps the checker
