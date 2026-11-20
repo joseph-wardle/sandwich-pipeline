@@ -47,6 +47,9 @@ class OverviewPage(QtWidgets.QWidget):
     """`open_job` carries a shot's code and a job id, to show on its Farm tab."""
 
     open_job = QtCore.Signal(str, int)
+    # The Refresh button was clicked: the window refreshes its other Tractor
+    # pages too, so all agree.
+    refresh_all = QtCore.Signal()
 
     _table: QtWidgets.QTreeWidget
     _tasks: JobTasks
@@ -76,7 +79,10 @@ class OverviewPage(QtWidgets.QWidget):
         self._status = QtWidgets.QLabel()
         self._status.setEnabled(False)
         refresh = widgets.button(
-            "Refresh", "refresh", "Ask Tractor again now", clicked=self.refresh
+            "Refresh",
+            "refresh",
+            "Ask Tractor again now, on every Tractor page",
+            clicked=self._refresh_clicked,
         )
 
         filters = QtWidgets.QHBoxLayout()
@@ -140,6 +146,10 @@ class OverviewPage(QtWidgets.QWidget):
         self._timer.setInterval(_REFRESH_MS)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
+
+    def _refresh_clicked(self) -> None:
+        self.refresh()
+        self.refresh_all.emit()
 
     def refresh(self) -> None:
         self._status.setText("Asking Tractor…")

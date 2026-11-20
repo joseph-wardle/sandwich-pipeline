@@ -195,6 +195,9 @@ class DoctorPage(QtWidgets.QWidget):
     """`open_job` carries a shot's code and a job id, to show on its Farm tab."""
 
     open_job = QtCore.Signal(str, int)
+    # The Refresh button was clicked: the window refreshes its other Tractor
+    # pages too, so all agree.
+    refresh_all = QtCore.Signal()
 
     _problems: QtWidgets.QTreeWidget
     _detail: QtWidgets.QTextBrowser
@@ -265,7 +268,10 @@ class DoctorPage(QtWidgets.QWidget):
         self._status = QtWidgets.QLabel()
         self._status.setEnabled(False)
         refresh = widgets.button(
-            "Refresh", "refresh", "Read Tractor's logs again now", clicked=self.refresh
+            "Refresh",
+            "refresh",
+            "Read Tractor's logs again now, and every Tractor page with them",
+            clicked=self._refresh_clicked,
         )
 
         header = QtWidgets.QHBoxLayout()
@@ -296,6 +302,10 @@ class DoctorPage(QtWidgets.QWidget):
         self._timer.timeout.connect(self._tick)
         self._timer.start()
         self._enable()
+
+    def _refresh_clicked(self) -> None:
+        self.refresh()
+        self.refresh_all.emit()
 
     def refresh(self) -> None:
         if self._busy:

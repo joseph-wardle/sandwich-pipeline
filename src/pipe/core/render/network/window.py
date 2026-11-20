@@ -157,6 +157,9 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._overview.open_job.connect(self._open_farm_job)
         self._doctor = DoctorPage([shot.code or "" for shot in shots])
         self._doctor.open_job.connect(self._open_farm_job)
+        # Any Tractor page's Refresh refreshes them all.
+        for page in (self._farm, self._overview, self._doctor):
+            page.refresh_all.connect(lambda asked=page: self._refresh_tractor(asked))
         self._pages = QtWidgets.QStackedWidget()
         for page in (splitter, self._overview, self._doctor):
             self._pages.addWidget(page)
@@ -645,6 +648,12 @@ class RenderNetworkWindow(QtWidgets.QWidget):
             self._on_reload()
         elif self._shown == result.shot:
             self._open(result.shot)
+
+    def _refresh_tractor(self, asked: QtWidgets.QWidget) -> None:
+        """Refresh the Tractor pages besides `asked`, which refreshed itself."""
+        for page in (self._farm, self._overview, self._doctor):
+            if page is not asked:
+                page.refresh()
 
     def _open_farm_job(self, shot: str, jid: int) -> None:
         """Show a job the Overview or the Farm Doctor chose, on its shot's Farm tab."""

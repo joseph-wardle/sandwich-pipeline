@@ -52,6 +52,9 @@ class FarmTab(QtWidgets.QWidget):
     """`view_frames` asks the Images tab for a layer, its folder or None, and a frame or None."""
 
     view_frames = QtCore.Signal(str, object, object)
+    # The Refresh button was clicked: the window refreshes its other Tractor
+    # pages too, so all agree.
+    refresh_all = QtCore.Signal()
 
     _jobs: QtWidgets.QTreeWidget
     _tasks: JobTasks
@@ -104,7 +107,10 @@ class FarmTab(QtWidgets.QWidget):
             clicked=self._archive,
         )
         refresh = widgets.button(
-            "Refresh", "refresh", "Ask Tractor again now", clicked=self.refresh
+            "Refresh",
+            "refresh",
+            "Ask Tractor again now, on every Tractor page",
+            clicked=self._refresh_clicked,
         )
         self._status = QtWidgets.QLabel()
         self._status.setEnabled(False)
@@ -168,6 +174,10 @@ class FarmTab(QtWidgets.QWidget):
         self._jobs.clear()
         self._tasks.show_job(None)
         self.refresh()
+
+    def _refresh_clicked(self) -> None:
+        self.refresh()
+        self.refresh_all.emit()
 
     def refresh(self) -> None:
         if self._shot is None:
