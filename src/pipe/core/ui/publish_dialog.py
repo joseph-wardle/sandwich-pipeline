@@ -96,13 +96,18 @@ class PublishRows(QtWidgets.QWidget):
         self._tell.setVisible(bool(target and target.downstream))
         self._sync_tell()
 
+    def hide_playblast(self) -> None:
+        """For a publish made outside Houdini, which has no viewport to playblast."""
+        self._playblast.setVisible(False)
+
     def choice(self) -> PublishChoice:
         return PublishChoice(
             # One line, as the version history and the announcement show it.
             note=" ".join(self._note.toPlainText().split()),
             announce=self._tell.isChecked(),
             final=self._final.isChecked(),
-            playblast=self._playblast.isChecked(),
+            # isHidden, not isVisible: this is read after the dialog closes.
+            playblast=not self._playblast.isHidden() and self._playblast.isChecked(),
         )
 
     def _sync_tell(self) -> None:
@@ -125,17 +130,27 @@ class PublishRows(QtWidgets.QWidget):
 
 
 def prompt_publish(
-    parent: QtWidgets.QWidget | None, target: Target
+    parent: QtWidgets.QWidget | None,
+    target: Target,
+    notice: str = "",
+    can_playblast: bool = True,
 ) -> PublishChoice | None:
-    """Open the publish dialog. None means do not publish."""
-    dialog = _PublishDialog(parent, target)
+    """Open the publish dialog. None means do not publish.
+
+    `notice` is shown above the rows, for what the artist should know first.
+    """
+    dialog = _PublishDialog(parent, target, notice)
+    if not can_playblast:
+        dialog.rows.hide_playblast()
     if not dialog.exec_():
         return None
     return dialog.rows.choice()
 
 
 class _PublishDialog(QtWidgets.QDialog, DialogButtons):
-    def __init__(self, parent: QtWidgets.QWidget | None, target: Target) -> None:
+    def __init__(
+        self, parent: QtWidgets.QWidget | None, target: Target, notice: str = ""
+    ) -> None:
         super().__init__(parent)
         self._init_buttons(True, "Publish", "Cancel")
         self.setWindowTitle("Publish")
@@ -147,6 +162,10 @@ class _PublishDialog(QtWidgets.QDialog, DialogButtons):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
+        if notice:
+            label = QtWidgets.QLabel(notice)
+            label.setWordWrap(True)
+            layout.addWidget(label)
         layout.addWidget(self.rows)
         layout.addWidget(self.buttons)
 
