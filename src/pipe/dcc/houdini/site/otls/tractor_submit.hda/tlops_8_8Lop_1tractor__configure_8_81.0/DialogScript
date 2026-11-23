@@ -131,7 +131,7 @@
         label   "Render Root"
         type    directory
         default { [ "hou.phm().default_root(hou.pwd())" python ] }
-        help    "Holds this layer's v### folders. Lighting hips render beside the shot, where Nuke looks; other hips render beside themselves."
+        help    "Holds this layer's v### folders. A shot department's hips render into the shot's render folder, where Nuke looks; other hips render into a render folder beside themselves."
         parmtag { "script_callback" "hou.phm().show_next_version(kwargs[\"node\"])" }
         parmtag { "script_callback_language" "python" }
     }

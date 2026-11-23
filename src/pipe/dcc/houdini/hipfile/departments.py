@@ -5,6 +5,12 @@ downstream tools that need to recognise department subfolders in HIP paths
 from __future__ import annotations
 
 from enum import Enum
+from pathlib import Path
+
+from pipe.core.util.paths import get_cache_path, get_production_path
+
+# The production folder holding every shot, as in `shot/<code>/<department>`.
+SHOTS_DIRNAME = "shot"
 
 
 class Department(str, Enum):
@@ -26,4 +32,26 @@ PUBLISHING_DEPARTMENTS: tuple[str, ...] = tuple(
 )
 
 
-__all__ = ["DEPARTMENT_OPTIONS", "PUBLISHING_DEPARTMENTS", "Department"]
+def shot_folder(hip: Path) -> Path | None:
+    """The production folder of the shot whose department folder is `hip`, or
+    None for any other folder. A render hip opened through its cache link counts."""
+    for root in (get_production_path(), get_cache_path()):
+        if not hip.is_relative_to(root):
+            continue
+        parts = hip.relative_to(root).parts
+        if (
+            len(parts) == 3
+            and parts[0] == SHOTS_DIRNAME
+            and parts[2] in DEPARTMENT_OPTIONS
+        ):
+            return get_production_path() / parts[0] / parts[1]
+    return None
+
+
+__all__ = [
+    "DEPARTMENT_OPTIONS",
+    "PUBLISHING_DEPARTMENTS",
+    "SHOTS_DIRNAME",
+    "Department",
+    "shot_folder",
+]
