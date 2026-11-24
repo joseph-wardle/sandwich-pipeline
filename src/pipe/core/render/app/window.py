@@ -34,10 +34,11 @@ from pipe.core.render.protocol import (
 from pipe.core.render.app.scene_graph import SceneGraphPanel
 from pipe.core.render.app import theme
 from pipe.core.render.app.shots import ShotList
+from pipe.core.render.app.versions_tab import VersionsTab
 from pipe.core.render.app.viewer import FrameViewer
 from pipe.core.render.lighters import LIGHTING_STEP
 from pipe.core.publish import Target
-from pipe.core.shotgrid import Shot, ShotGrid, Status
+from pipe.core.shotgrid import Shot, ShotGrid, Status, is_previs_shot_code
 from pipe.core.render import render_status
 from pipe.core.render.app import background
 from pipe.core.render.render_status import RenderBoard, RenderStatus
@@ -72,6 +73,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
     _overview: OverviewPage
     _pages: QtWidgets.QTabWidget
     _viewer: FrameViewer
+    _versions: VersionsTab
     _busy: QtWidgets.QWidget
     _busy_text: QtWidgets.QLabel
     _log: LogViewer
@@ -112,7 +114,10 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._shown = None
 
         self._shot_list = ShotList(
-            shots, lit_shots or set(), render, self._render_status_refusal
+            shots,
+            lit_shots or set(),
+            render,
+            lambda code: self._lighter_refusal(code, "change it"),
         )
         self._shot_list.chosen.connect(self._choose_shot)
         self._shot_list.render_status_chosen.connect(self._change_render_status)
@@ -237,11 +242,16 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         # The farm and the frames need no Houdini, so they show while it opens.
         self._farm = FarmTab()
         self._viewer = FrameViewer()
+        self._versions = VersionsTab(
+            sorted(c for c in self._lit_shots or () if not is_previs_shot_code(c))
+        )
+        self._versions.deleted.connect(self._viewer.reread)
         self._farm.view_frames.connect(self._view_frames)
         self._tabs = QtWidgets.QTabWidget()
         self._tabs.addTab(parms_page, "Parameters")
         self._tabs.addTab(self._farm, "Farm")
         self._tabs.addTab(self._viewer, "Images")
+        self._tabs.addTab(self._versions, "Versions")
         top_layout.addWidget(self._tabs, 1)
         top_layout.addWidget(self._busy)
 
@@ -272,6 +282,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._scene_graph.show_prims([])
         self._farm.set_shot(code)
         self._viewer.set_shot(code)
+        self._versions.set_shot(code, self._lighter_refusal(code, "delete its renders"))
         self._start(DESCRIBE, code, None, self._show)
 
     def _after_unsaved(
@@ -400,19 +411,19 @@ class RenderNetworkWindow(QtWidgets.QWidget):
             return "Waiting for Houdini to read the shot's lighting publishes."
         return ""
 
-    def _render_status_refusal(self, code: str) -> str:
-        """Why the artist can't change shot `code`'s Render status, or ""."""
+    def _lighter_refusal(self, code: str, action: str) -> str:
+        """Why the artist can't `action` in shot `code`, or "" when they light it or are an admin."""
         if self._admin or (self._lit_shots is not None and code in self._lit_shots):
             return ""
         if self._lit_shots is None:
             return "ShotGrid couldn't say which shots you light. Reopen the window."
-        return f"Only {code}'s lighter or a pipeline admin can change it."
+        return f"Only {code}'s lighter or a pipeline admin can {action}."
 
     def _change_render_status(self, code: str, status: object) -> None:
         current = self._shot_list.render_status(code)
         if not isinstance(status, Status) or current is None:
             return
-        if refusal := self._render_status_refusal(code):
+        if refusal := self._lighter_refusal(code, "change it"):
             _tell(self, refusal, QtWidgets.QMessageBox.Information)
             return
         self._log_line(f"Setting {code}'s {current.task} to {status.name} in ShotGrid…")

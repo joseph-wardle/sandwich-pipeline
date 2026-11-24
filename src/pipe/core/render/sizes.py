@@ -12,7 +12,7 @@ import statistics
 from dataclasses import dataclass
 from pathlib import Path
 
-from pipe.core.render import frames
+from pipe.core.render.versions import BEAUTY_PRODUCT, products
 
 # Frames either side a frame is compared with.
 NEIGHBOURS = 3
@@ -40,9 +40,9 @@ class FrameSize:
 
 def layer_sizes(version: Path) -> list[FrameSize]:
     """The size of each frame of the version's beauty product, oldest frame first."""
-    found = frames.products(version)
+    found = products(version)
     product = next(
-        (p for p in found if p.name == frames.BEAUTY_PRODUCT),
+        (p for p in found if p.name == BEAUTY_PRODUCT),
         found[0] if found else None,
     )
     if product is None:

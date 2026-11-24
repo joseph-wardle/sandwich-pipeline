@@ -49,7 +49,7 @@ class ToolLauncher:
 
     filename: str
     name: str
-    module: str  # run with `python -m`, e.g. "pipe.core.render.manager"
+    module: str  # run with `python -m`, e.g. "pipe.core.render.app"
     icon: str
     generic_name: str
 
@@ -63,13 +63,6 @@ LAUNCHERS: list[Launcher | ToolLauncher] = [
     Launcher("panini.desktop", "Panini", "houdini", "houdini.png"),
     Launcher("microwave.desktop", "Microwave", "nuke", "nuke.png"),
     Launcher("toaster.desktop", "Toaster", "blender", "blender.png"),
-    ToolLauncher(
-        "render-manager.desktop",
-        "Render Manager",
-        "pipe.core.render.manager",
-        "sandwich.png",
-        "Sandwich Kwon Do Lighting Render Cleanup",
-    ),
     ToolLauncher(
         "sandwich-renderer.desktop",
         "Sandwich Renderer",
@@ -94,8 +87,13 @@ def render(launcher: Launcher | ToolLauncher) -> str:
     )
 
 
+RETIRED = ["render-manager.desktop"]
+
+
 def _write_launchers(dest_dir: Path, verb: str) -> None:
     dest_dir.mkdir(parents=True, exist_ok=True)
+    for name in RETIRED:
+        (dest_dir / name).unlink(missing_ok=True)
     for launcher in LAUNCHERS:
         target = dest_dir / launcher.filename
         # Replace any prior file or the old symlink-based launchers.

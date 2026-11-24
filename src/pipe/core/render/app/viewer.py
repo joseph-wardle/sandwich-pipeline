@@ -15,13 +15,20 @@ import numpy as np
 from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.color import DEFAULT_VIEW
-from pipe.core.render import versions
 from pipe.core.render import frames
 from pipe.core.render.app import background
 from pipe.core.render.app.canvas import ImageCanvas
 from pipe.core.render.app.contact_sheet import THUMB_WIDTH, ContactSheet
 from pipe.core.render.app.playback import DEFAULT_FPS, Look, Player
-from pipe.core.render.frames import ChannelGroup, Product, Thumbnail
+from pipe.core.render.frames import ChannelGroup, Thumbnail
+from pipe.core.render.protocol import shot_folder
+from pipe.core.render.versions import (
+    Product,
+    RenderLayer,
+    RenderVersion,
+    products,
+    shot_renders,
+)
 
 _DATA_ROLE = QtCore.Qt.UserRole
 # Frames of float pixels kept, so scrubbing back is instant: about 25 MB each.
@@ -201,13 +208,19 @@ class FrameViewer(QtWidgets.QWidget):
     # ---- what to show --------------------------------------------------
 
     def set_shot(self, shot_code: str) -> None:
-        if shot_code == self._shot:
+        if shot_code != self._shot:
+            self._shot = shot_code
+            self.reread()
+
+    def reread(self) -> None:
+        """Read the shot's render layers from disk again, as after a delete."""
+        if self._shot is None:
             return
-        self._shot = shot_code
         self._cache.clear()
-        _refill(self._layer, [(p.name, p) for p in frames.layers(shot_code)])
+        found = shot_renders(shot_folder(self._shot)).layers
+        _refill(self._layer, [(layer.name, layer) for layer in found if layer.versions])
         if self._layer.count() == 0:
-            self._clear(f"{shot_code} has no renders yet.")
+            self._clear(f"{self._shot} has no renders yet.")
 
     def show_frames(self, layer: str, folder: Path | None, frame: int | None) -> None:
         """Show `layer`'s `folder`, or its newest version, at `frame`."""
@@ -224,13 +237,17 @@ class FrameViewer(QtWidgets.QWidget):
             self._version.setCurrentIndex(found)
 
     def _layer_changed(self, *_: object) -> None:
-        layer = self._layer.currentData()
-        found = versions(layer) if layer is not None else []
-        _refill(self._version, [(_version_label(v), v) for v in found])
+        layer: RenderLayer | None = self._layer.currentData()
+        found = layer.versions if layer is not None else []
+        _refill(self._version, [(_version_label(v), v.path) for v in found])
 
     def _version_changed(self, *_: object) -> None:
-        version = self._version.currentData()
-        found = frames.products(version) if version is not None else []
+        version: Path | None = self._version.currentData()
+        try:
+            found = products(version) if version is not None else []
+        except OSError as exc:
+            self._clear(f"Could not read {version}: {exc}")
+            return
         _refill(
             self._product,
             [(f"{p.name}  ({p.summary})" if p.summary else p.name, p) for p in found],
@@ -577,12 +594,11 @@ def _refill(combo: QtWidgets.QComboBox, items: list[tuple[str, object]]) -> None
     combo.currentIndexChanged.emit(combo.currentIndex())
 
 
-def _version_label(version: Path) -> str:
-    found = frames.products(version)
-    if any(p.rendering for p in found):
-        return f"{version.name}  (rendering)"
-    if not found:
+def _version_label(version: RenderVersion) -> str:
+    if not version.has_frames:
         return f"{version.name}  (no frames)"
+    if not version.is_complete:
+        return f"{version.name}  (rendering)"
     return version.name
 
 

@@ -1,12 +1,4 @@
-"""A shot's rendered frames, read for the window's viewer.
-
-    shot/<code>/render/<layer>/v###/<product>/####.exr    finished frames
-    shot/<code>/render/<layer>/v###/tmp/<product>/####.exr while it renders
-
-A product's EXR holds many channel groups, such as RGBA, albedo and each LPE.
-The viewer reads one group at a time, through the show's OCIO config, as Nuke
-would show it.
-"""
+"""Reading a rendered EXR one channel group at a time, through the show's OCIO config, as Nuke would show it."""
 
 from __future__ import annotations
 
@@ -19,25 +11,10 @@ import numpy as np
 import OpenEXR
 import PyOpenColorIO as ocio
 
-from pipe.core.cache import RENDER_DIRNAME
 from pipe.core.color import DEFAULT_VIEW, DISPLAY, config_path
-from pipe.core.render import COMPLETE, DENOISE_CONFIG, DENOISED, ENCODE, TMP, versions
-from pipe.core.render.protocol import shot_folder
 
 RAW_VIEW = "Raw"
-DENOISED_KIND = "denoised"
-RAW_KIND = "raw, not denoised yet"
-# The product Render Send denoises.
-BEAUTY_PRODUCT = "beauty"
-# Before Cleanup, versions kept raw frames in images/ and denoised in images_dn/.
-_LEGACY_RAW = "images"
-_LEGACY_DENOISED = ("images_dn",)
-# Folders of a version that aren't products of their own.
-_NOT_PRODUCTS = {TMP, DENOISED, ENCODE, *_LEGACY_DENOISED}
 BEAUTY = "RGBA"
-# Cryptomattes are IDs, not pictures; Nuke's Cryptomatte node reads them.
-_SKIPPED_PRODUCTS = ("crypto",)
-_FRAME = re.compile(r"(\d+)\.exr$")
 # Channel suffixes, in the order they fill red, green and blue.
 _COMPONENTS = (
     "R",
@@ -66,30 +43,6 @@ _DATA_GROUPS = re.compile(
 
 
 @dataclass(frozen=True)
-class Product:
-    name: str
-    # The best file of each frame: denoised when there is one, else raw.
-    frames: dict[int, Path]
-    # The version isn't marked complete, so its job may still be writing it.
-    rendering: bool
-    # What each frame is, for a product the job denoises: DENOISED or RAW.
-    kinds: dict[int, str]
-
-    @property
-    def summary(self) -> str:
-        """Such as "40 denoised · 28 raw"; empty for a product nothing denoises."""
-        counts = {
-            kind: list(self.kinds.values()).count(kind)
-            for kind in (DENOISED_KIND, RAW_KIND)
-        }
-        if not self.kinds:
-            return ""
-        if not counts[RAW_KIND]:
-            return "denoised"
-        return f"{counts[DENOISED_KIND]} denoised · {counts[RAW_KIND]} raw"
-
-
-@dataclass(frozen=True)
 class ChannelGroup:
     """An AOV or LPE: up to three channels shown as red, green and blue, and
     its alpha when it has one."""
@@ -101,92 +54,6 @@ class ChannelGroup:
     @property
     def is_data(self) -> bool:
         return bool(_DATA_GROUPS.match(self.name))
-
-
-def layers(shot_code: str) -> list[Path]:
-    """The shot's render layers that hold a version, by name."""
-    root = shot_folder(shot_code) / RENDER_DIRNAME
-    if not root.is_dir():
-        return []
-    return sorted(
-        folder
-        for folder in root.iterdir()
-        if folder.is_dir() and not folder.is_symlink() and versions(folder)
-    )
-
-
-def products(version: Path) -> list[Product]:
-    """The version's products with frames, each frame denoised where it has
-    been, else raw.
-
-    Denoise writes a frame aside and then moves it over the product's frame,
-    so a finished version's beauty is denoised throughout. While its job runs,
-    raw frames wait in tmp/<product>/ and denoised ones in tmp/denoised/.
-    Versions from before the move kept denoised frames in their own folder.
-    """
-    complete = (version / COMPLETE).is_file()
-    # A folder of its own holds the denoised frames, so the product's are raw.
-    separate = next(
-        (
-            version / name
-            for name in (DENOISED, *_LEGACY_DENOISED)
-            if (version / name).is_dir()
-        ),
-        None,
-    )
-    denoises = separate is not None or (version / DENOISE_CONFIG).is_file()
-    names = sorted(
-        {
-            folder.name
-            for root in (version, version / TMP)
-            if root.is_dir()
-            for folder in root.iterdir()
-            if folder.is_dir() and folder.name not in _NOT_PRODUCTS
-        }
-    )
-    # Denoise runs on the beauty alone; its product is named so by Render Send.
-    denoised_name = BEAUTY_PRODUCT if BEAUTY_PRODUCT in names else _LEGACY_RAW
-    found = []
-    for name in names:
-        if name.lower().startswith(_SKIPPED_PRODUCTS):
-            continue
-        denoised = denoises and name == denoised_name
-        frames: dict[int, Path] = {}
-        kinds: dict[int, str] = {}
-        # Least preferred first, so a better file of a frame replaces it.
-        sources = [(version / TMP / name, RAW_KIND)]
-        if separate is not None:
-            sources += [(version / name, RAW_KIND)]
-            if denoised:
-                sources += [(separate, DENOISED_KIND)]
-        else:
-            sources += [(version / name, DENOISED_KIND)]
-            if denoised:
-                sources += [(version / TMP / DENOISED, DENOISED_KIND)]
-        for folder, kind in sources:
-            for frame, path in _frames_in(folder).items():
-                frames[frame] = path
-                kinds[frame] = kind
-        if frames:
-            found.append(
-                Product(
-                    name,
-                    dict(sorted(frames.items())),
-                    rendering=not complete,
-                    kinds=dict(sorted(kinds.items())) if denoised else {},
-                )
-            )
-    return found
-
-
-def _frames_in(folder: Path) -> dict[int, Path]:
-    if not folder.is_dir():
-        return {}
-    return {
-        int(m[1]): path
-        for path in folder.glob("*.exr")
-        if (m := _FRAME.search(path.name))
-    }
 
 
 def channel_groups(exr: Path) -> list[ChannelGroup]:
