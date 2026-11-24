@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from pipe.core.render import farm
+from pipe.core import tractor
 from pipe.core.render.doctor import attempts, blades, policy, records
 from pipe.core.render.doctor.attempts import Attempt
 from pipe.core.render.doctor.blades import BladeHealth, History
@@ -25,7 +25,7 @@ from pipe.core.render.doctor.diagnose import Diagnosis, diagnose
 from pipe.core.render.doctor.login import Connection
 from pipe.core.render.doctor.policy import Action, Plan
 from pipe.core.render.doctor.records import Paths
-from pipe.core.render.farm import ERROR, FarmError, Job, Task
+from pipe.core.tractor import ERROR, FarmError, Job, Task
 
 log = logging.getLogger(__name__)
 
@@ -151,7 +151,7 @@ class Doctor:
         self.history.refresh()
         jobs = tuple(
             j
-            for j in farm.all_jobs()
+            for j in tractor.all_jobs()
             if (self.all_jobs or j.sandwich) and not j.finished
         )
         diagnoses: list[Diagnosis] = []
@@ -162,7 +162,7 @@ class Doctor:
             if not (job.errors or job.active):
                 continue
             try:
-                job_tasks = farm.tasks(job)
+                job_tasks = tractor.tasks(job)
             except FarmError as exc:
                 problems.append(str(exc))
                 continue
@@ -186,7 +186,7 @@ class Doctor:
             else {}
         )
         health = blades.health(
-            farm.blades(),
+            tractor.blades(),
             self.history.since(now - blades.WINDOW_SECONDS),
             passed,
             now,
@@ -310,7 +310,7 @@ class Doctor:
         for pin in records.read_pins(paths):
             machine = str(pin.get("machine"))
             try:
-                commands = farm.task_commands(int(pin["jid"]), int(pin["tid"]))
+                commands = tractor.task_commands(int(pin["jid"]), int(pin["tid"]))
             except (FarmError, KeyError, ValueError) as exc:
                 log.warning("Could not read the task pinned to %s: %s", machine, exc)
                 kept.append(pin)
@@ -395,7 +395,7 @@ class Doctor:
         for plan in plans:
             entry = _entry(plan, settings) | {"by": by}
             try:
-                commands = farm.commands(plan.diagnosis.job, plan.diagnosis.task)
+                commands = tractor.commands(plan.diagnosis.job, plan.diagnosis.task)
                 if not any(command.state == ERROR for command in commands):
                     # Retried since it was read, as by the other of the doctor
                     # and the window: retrying it again would restart it.
@@ -429,7 +429,7 @@ class Doctor:
         if cached is not None and cached[0] == task.finished:
             return cached[1]
         try:
-            found = attempts.parse(farm.log(job, task))
+            found = attempts.parse(tractor.log(job, task))
         except FarmError as exc:
             problems.append(str(exc))
             found = []
@@ -446,7 +446,7 @@ class Doctor:
 
 
 def _service_changes(
-    plan: Plan, commands: list[farm.Command]
+    plan: Plan, commands: list[tractor.Command]
 ) -> list[tuple[int, str, str]]:
     """(cid, service before, service after) for each of the task's `commands`
     the retry steers."""

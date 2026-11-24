@@ -14,7 +14,7 @@ Layer:
 
 Render Root:
     #id: render_root
-    Holds this layer's `v###` folders. Lighting hips render beside the shot, where Nuke looks. Other hips render beside themselves. It must be a full path.
+    Holds this layer's `v###` folders. A shot department's hips, such as lighting, FX or render, render into the shot's `render/` folder, where Nuke looks. Other hips render into a `render/` folder beside themselves. It must be a full path.
 
 Output Folder:
     #id: savetodirectory_directory

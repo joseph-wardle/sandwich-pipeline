@@ -16,7 +16,7 @@ from __future__ import annotations
 import socket
 from concurrent.futures import ThreadPoolExecutor
 
-from pipe.core.render.farm import Blade
+from pipe.core.tractor import Blade
 
 _DOMAIN = "cs.byu.edu"
 # Windows's RPC endpoint mapper, which answers whenever Windows is up.

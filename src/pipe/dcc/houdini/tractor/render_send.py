@@ -8,7 +8,6 @@ that file, and spools the job.
 from __future__ import annotations
 
 import functools
-import json
 import logging
 import re
 import traceback
@@ -21,7 +20,7 @@ import tractor.api.author as author
 from pxr import Sdf, Tf, Usd, UsdRender
 
 from pipe.core.playblast.presets import FFmpegPreset
-from pipe.core.render import farm
+from pipe.core import tractor
 from pipe.core.publish import current_version, loaded_version, pin, version_name
 from pipe.core.render import RENDER_USD
 from pipe.dcc.houdini.tractor import (
@@ -238,16 +237,12 @@ def build(submit: hou.Node, title: str, chains: list[Chain]) -> author.Job:
 
 
 def _metadata(layers: list[commands.Layer]) -> str:
-    """The shot and each layer's folder, so the Sandwich Renderer window finds
-    the job by its shot whatever its title, and shows its frames."""
-    found: dict[str, object] = {
-        "folders": {lay.name: str(lay.folder) for lay in layers}
-    }
     # A shot hip's SHOT is "shot/<code>"; other hips have none.
     shot = str(hou.contextOption("SHOT") or "")
-    if shot.startswith("shot/"):
-        found[farm.SHOT_KEY] = shot.removeprefix("shot/")
-    return json.dumps(found)
+    return tractor.render_metadata(
+        shot.removeprefix("shot/") if shot.startswith("shot/") else None,
+        {layer.name: str(layer.folder) for layer in layers},
+    )
 
 
 def layer(chain: Chain, version_of: Callable[[Path], int | None]) -> commands.Layer:

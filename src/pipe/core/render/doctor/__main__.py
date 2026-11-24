@@ -27,14 +27,14 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, TextIO
 
-from pipe.core.render import farm
+from pipe.core import tractor
 from pipe.core.render.doctor import cron, login, policy, records
 from pipe.core.render.doctor.blades import History
 from pipe.core.render.doctor.checkup import Checkup, Doctor, Settings, group
 from pipe.core.render.doctor.login import Connection
 from pipe.core.render.doctor.policy import Action
 from pipe.core.render.doctor.records import Paths
-from pipe.core.render.farm import FarmError, LoginRefused
+from pipe.core.tractor import FarmError, LoginRefused
 
 log = logging.getLogger(__name__)
 
@@ -282,15 +282,15 @@ def _login(paths: Paths, user: str) -> None:
 
 def _unsteer(paths: Paths, jid: int, tids: set[int]) -> None:
     """Undo `--steer` on a job's commands, as when a steered task never starts."""
-    job = next((j for j in farm.all_jobs() if j.jid == jid), None)
+    job = next((j for j in tractor.all_jobs() if j.jid == jid), None)
     if job is None:
         sys.exit(f"Tractor has no job {jid}, or it is archived.")
     connection = login.connect(paths)
     changed = 0
-    for task in farm.tasks(job):
+    for task in tractor.tasks(job):
         if tids and task.tid not in tids:
             continue
-        for command in farm.commands(job, task):
+        for command in tractor.commands(job, task):
             original = policy.unsteered(command.service)
             if original == command.service:
                 continue

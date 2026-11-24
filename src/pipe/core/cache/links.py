@@ -20,6 +20,8 @@ def link_to_cache(directory: Path) -> None:
     files is not something to do behind their back mid-session.
     """
     twin = get_cache_path() / directory.relative_to(get_production_path())
+    if directory.parent.resolve() == twin.parent.resolve():
+        return
     try:
         twin.mkdir(mode=0o770, parents=True, exist_ok=True)
         if directory.is_symlink():

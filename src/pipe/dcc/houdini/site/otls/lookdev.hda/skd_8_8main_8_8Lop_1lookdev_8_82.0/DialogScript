@@ -6,11 +6,12 @@
     label	"SKD Lookdev"
 
     help {
+	""
     }
 
-    inputlabel	1	"Asset"
-    inputlabel	2	"Lights"
-    inputlabel	3	"Camera"
+    inputlabel	1	Asset
+    inputlabel	2	Lights
+    inputlabel	3	Camera
 
     parm {
         name    "framing"

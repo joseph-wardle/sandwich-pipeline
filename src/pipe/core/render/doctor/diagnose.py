@@ -19,7 +19,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from pipe.core.render.doctor.attempts import Attempt
-from pipe.core.render.farm import Job, Task
+from pipe.core.tractor import Job, Task
 
 # The most attempts at one task before the doctor stops retrying it, whatever
 # the cause. With `policy`'s waits between them, this is hours of trying.
