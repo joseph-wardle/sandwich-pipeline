@@ -51,17 +51,6 @@ def current_person() -> Person | None:
     )
 
 
-# Lab logins of pipeline admins, who may do what a tool otherwise keeps to the
-# assigned artist, such as publishing another lighter's lighting. Kept here
-# rather than in people.json, so granting it is a reviewed change.
-ADMIN_LOGINS = frozenset({"pdolbin"})
-
-
-def is_admin() -> bool:
-    """Whether the current login is a pipeline admin."""
-    return _current_login().strip().lower() in ADMIN_LOGINS
-
-
 def resolve_artist_display_name() -> str:
     """The current person's name, or their login when people.json doesn't know them."""
     person = current_person()

@@ -44,10 +44,14 @@ class PublishRows(QtWidgets.QWidget):
     """The version a publish becomes, its note, who is told, and whether to playblast."""
 
     def __init__(
-        self, target: Target | None, parent: QtWidgets.QWidget | None = None
+        self,
+        target: Target | None,
+        parent: QtWidgets.QWidget | None = None,
+        can_playblast: bool = True,
     ) -> None:
         super().__init__(parent)
         self._target = target
+        self._can_playblast = can_playblast
 
         self._version = QtWidgets.QLabel()
         heading = self._version.font()
@@ -74,6 +78,7 @@ class PublishRows(QtWidgets.QWidget):
         # Remembered as it is toggled, so a dialog holding these rows has nothing
         # to call when it closes.
         self._playblast.toggled.connect(_save_playblast)
+        self._playblast.setVisible(can_playblast)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -96,18 +101,13 @@ class PublishRows(QtWidgets.QWidget):
         self._tell.setVisible(bool(target and target.downstream))
         self._sync_tell()
 
-    def hide_playblast(self) -> None:
-        """For a publish made outside Houdini, which has no viewport to playblast."""
-        self._playblast.setVisible(False)
-
     def choice(self) -> PublishChoice:
         return PublishChoice(
             # One line, as the version history and the announcement show it.
             note=" ".join(self._note.toPlainText().split()),
             announce=self._tell.isChecked(),
             final=self._final.isChecked(),
-            # isHidden, not isVisible: this is read after the dialog closes.
-            playblast=not self._playblast.isHidden() and self._playblast.isChecked(),
+            playblast=self._can_playblast and self._playblast.isChecked(),
         )
 
     def _sync_tell(self) -> None:
@@ -135,13 +135,8 @@ def prompt_publish(
     notice: str = "",
     can_playblast: bool = True,
 ) -> PublishChoice | None:
-    """Open the publish dialog. None means do not publish.
-
-    `notice` is shown above the rows, for what the artist should know first.
-    """
-    dialog = _PublishDialog(parent, target, notice)
-    if not can_playblast:
-        dialog.rows.hide_playblast()
+    """Open the publish dialog, with `notice` above its rows. None means do not publish."""
+    dialog = _PublishDialog(parent, target, notice, can_playblast)
     if not dialog.exec_():
         return None
     return dialog.rows.choice()
@@ -149,7 +144,11 @@ def prompt_publish(
 
 class _PublishDialog(QtWidgets.QDialog, DialogButtons):
     def __init__(
-        self, parent: QtWidgets.QWidget | None, target: Target, notice: str = ""
+        self,
+        parent: QtWidgets.QWidget | None,
+        target: Target,
+        notice: str,
+        can_playblast: bool,
     ) -> None:
         super().__init__(parent)
         self._init_buttons(True, "Publish", "Cancel")
@@ -157,7 +156,7 @@ class _PublishDialog(QtWidgets.QDialog, DialogButtons):
         self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
         self.setMinimumWidth(_WIDTH)
 
-        self.rows = PublishRows(target)
+        self.rows = PublishRows(target, can_playblast=can_playblast)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)

@@ -2,27 +2,30 @@
 
 from __future__ import annotations
 
+import getpass
 import logging
 
 from pipe.core.shotgrid import Shot, ShotGrid, ShotGridError, User
-from pipe.core.util.users import is_admin, resolve_artist_display_name
+from pipe.core.util.users import resolve_artist_display_name
 
 log = logging.getLogger(__name__)
 
-# The ShotGrid Step whose tasks light and render a shot.
 LIGHTING_STEP = "Lighting"
+
+ADMINS = frozenset({"joseward", "pdolbin"})
 
 
 class NotTheLighter(Exception):
     """The artist isn't assigned to light the shot, worded for them."""
 
 
-def current_user(conn: ShotGrid) -> User:
-    """The ShotGrid user of the artist who is logged in.
+def is_admin() -> bool:
+    """Whether the artist may act for any shot's lighter."""
+    return getpass.getuser().strip().lower() in ADMINS
 
-    Raises:
-        ShotGridNotFound, ShotGridAmbiguous: No one user has their name.
-    """
+
+def current_user(conn: ShotGrid) -> User:
+    """The logged-in artist's ShotGrid user."""
     return conn.get_user(name=resolve_artist_display_name())
 
 
@@ -37,15 +40,13 @@ def lit_shots(conn: ShotGrid, user: User) -> list[Shot]:
 
 
 def check_lighter(conn: ShotGrid, shot_code: str) -> None:
-    """Raises NotTheLighter unless ShotGrid assigns the logged-in artist to
-    light `shot_code`, or they are a pipeline admin (`users.ADMIN_LOGINS`)."""
+    """Raise NotTheLighter unless the artist lights `shot_code` or is an admin."""
     name = resolve_artist_display_name()
     if is_admin():
-        log.info("%s publishes %s's lighting as a pipeline admin", name, shot_code)
+        log.info("%s publishes %s's lighting as an admin", name, shot_code)
         return
     try:
-        user = current_user(conn)
-        codes = {shot.code for shot in lit_shots(conn, user)}
+        codes = {shot.code for shot in lit_shots(conn, current_user(conn))}
     except ShotGridError as exc:
         raise NotTheLighter(
             f"ShotGrid couldn't say whether {name} lights {shot_code} ({exc}), so "

@@ -14,7 +14,7 @@ import sys
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render.lighters import current_user, lit_shots
+from pipe.core.render.lighters import current_user, is_admin, lit_shots
 from pipe.core.render.app import widgets
 from pipe.core.render.app.widgets import TITLE
 from pipe.core.render.app.window import RenderNetworkWindow
@@ -23,7 +23,6 @@ from pipe.core.render.render_status import RenderBoard
 from pipe.core.shotgrid import Shot, ShotGrid, is_previs_shot_code
 from pipe.core.ui import MessageDialog
 from pipe.core.util.paths import get_repo_root
-from pipe.core.util.users import is_admin
 
 log = logging.getLogger(__name__)
 
