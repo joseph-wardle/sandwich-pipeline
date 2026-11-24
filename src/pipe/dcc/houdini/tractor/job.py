@@ -71,7 +71,7 @@ def render_job(
     title: str, priority: int, envkey: str, layers: list[Layer], metadata: str = ""
 ) -> author.Job:
     """`metadata` is JSON the Sandwich Renderer window reads to find the job's
-    shot and folders; see `pipe.core.render.farm`."""
+    shot and folders; see `pipe.core.tractor`."""
     job = author.Job(title=title, priority=priority, envkey=[envkey])
     if metadata:
         job.metadata = metadata

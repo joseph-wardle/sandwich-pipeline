@@ -12,7 +12,7 @@ import statistics
 from dataclasses import dataclass
 from pathlib import Path
 
-from pipe.core.render.network import frames
+from pipe.core.render import frames
 
 # Frames either side a frame is compared with.
 NEIGHBOURS = 3

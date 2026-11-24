@@ -22,7 +22,7 @@ import PyOpenColorIO as ocio
 from pipe.core.cache import RENDER_DIRNAME
 from pipe.core.color import DEFAULT_VIEW, DISPLAY, config_path
 from pipe.core.render import COMPLETE, DENOISE_CONFIG, DENOISED, ENCODE, TMP, versions
-from pipe.core.render.network.protocol import shot_folder
+from pipe.core.render.protocol import shot_folder
 
 RAW_VIEW = "Raw"
 DENOISED_KIND = "denoised"

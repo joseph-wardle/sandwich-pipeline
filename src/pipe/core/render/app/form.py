@@ -20,15 +20,15 @@ from typing import Any
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render.network.conditions import UNKNOWN, MenuValue, holds
-from pipe.core.render.network.marks import ChangeDot, dot_icon
-from pipe.core.render.network.scene_graph import (
+from pipe.core.render.app.conditions import UNKNOWN, MenuValue, holds
+from pipe.core.render.app.marks import ChangeDot, dot_icon
+from pipe.core.render.app.scene_graph import (
     PrimPicker,
     TypeFilter,
     is_camera,
     is_light,
 )
-from pipe.core.render.network.protocol import (
+from pipe.core.render.protocol import (
     BUTTON,
     COLLAPSIBLE,
     EXPRESSION,

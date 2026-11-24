@@ -12,10 +12,10 @@ from collections.abc import Sequence
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render import farm
-from pipe.core.render.farm import PAUSED, RENDERING, WAITING, Job
-from pipe.core.render.network import background
-from pipe.core.render.network.progress import PERCENT_ROLE, ProgressDelegate
+from pipe.core import tractor
+from pipe.core.tractor import PAUSED, RENDERING, WAITING, Job
+from pipe.core.render.app import background
+from pipe.core.render.app.progress import PERCENT_ROLE, ProgressDelegate
 
 _REFRESH_MS = 30_000
 _DATA_ROLE = QtCore.Qt.UserRole
@@ -121,7 +121,7 @@ class OverviewPage(QtWidgets.QWidget):
 
     def refresh(self) -> None:
         self._status.setText("Asking Tractor…")
-        background.run(farm.all_jobs, self._read, self._failed)
+        background.run(tractor.all_jobs, self._read, self._failed)
 
     def showEvent(self, event: QtGui.QShowEvent) -> None:  # noqa: N802 (Qt's name)
         super().showEvent(event)
@@ -132,7 +132,7 @@ class OverviewPage(QtWidgets.QWidget):
             self.refresh()
 
     def _read(self, jobs: list[Job]) -> None:
-        self._jobs = farm.queue_order([job for job in jobs if not job.finished])
+        self._jobs = tractor.queue_order([job for job in jobs if not job.finished])
         self._fill()
         rendering = [j for j in self._jobs if j.queue_status == RENDERING]
         waiting = [j for j in self._jobs if j.queue_status == WAITING]
@@ -151,7 +151,7 @@ class OverviewPage(QtWidgets.QWidget):
                 continue
             if self._mine.isChecked() and job.owner != self._user:
                 continue
-            shot = farm.shot_of(job, self._shot_codes)
+            shot = tractor.shot_of(job, self._shot_codes)
             sent = job.spooled.strftime("%b %d %H:%M") if job.spooled else ""
             item = QtWidgets.QTreeWidgetItem(
                 [
@@ -187,7 +187,7 @@ class OverviewPage(QtWidgets.QWidget):
 
     def _opened(self, item: QtWidgets.QTreeWidgetItem, _column: int) -> None:
         job: Job = item.data(0, _DATA_ROLE)
-        shot = farm.shot_of(job, self._shot_codes)
+        shot = tractor.shot_of(job, self._shot_codes)
         if shot is None:
             self._status.setText(
                 f"Job {job.jid} names no shot this window knows, so it can't be opened here."

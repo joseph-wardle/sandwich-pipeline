@@ -10,8 +10,8 @@ from collections.abc import Callable, Sequence
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render.network import status_icons
-from pipe.core.render.network.render_status import RenderBoard, RenderStatus
+from pipe.core.render.app import status_icons
+from pipe.core.render.render_status import RenderBoard, RenderStatus
 from pipe.core.shotgrid import Shot, Status
 
 _CODE_ROLE = QtCore.Qt.UserRole

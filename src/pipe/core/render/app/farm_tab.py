@@ -18,8 +18,8 @@ from pathlib import Path
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render import farm
-from pipe.core.render.farm import (
+from pipe.core import tractor
+from pipe.core.tractor import (
     ERROR,
     PAUSED,
     RENDERING,
@@ -29,16 +29,17 @@ from pipe.core.render.farm import (
     LoginRefused,
     Task,
 )
-from pipe.core.render.network import background, credentials, sizes
-from pipe.core.render.network.progress import PERCENT_ROLE, ProgressDelegate
-from pipe.core.render.network.size_graph import SizeGraphDialog
-from pipe.core.render.network.sizes import FrameSize
+from pipe.core.render import sizes
+from pipe.core.render.app import background, credentials
+from pipe.core.render.app.progress import PERCENT_ROLE, ProgressDelegate
+from pipe.core.render.app.size_graph import SizeGraphDialog
+from pipe.core.render.sizes import FrameSize
 
 _DATA_ROLE = QtCore.Qt.UserRole
 _REFRESH_MS = 30_000
 # The task table's progress and size columns.
 _PROGRESS, _SIZE = 2, 3
-_RENDER_TASK = farm.RENDER_TASK
+_RENDER_TASK = tractor.RENDER_TASK
 _RED, _GREEN, _GREY, _DIM = "#f08080", "#8fe0a0", "#a3a6ad", "#686b72"
 # A job's whole row: (text, background or None). Errored and active jobs
 # stand out; done and waiting ones step back.
@@ -217,7 +218,7 @@ class FarmTab(QtWidgets.QWidget):
         shot = self._shot
         self._status.setText("Asking Tractor…")
         background.run(
-            lambda: farm.shot_jobs(shot),
+            lambda: tractor.shot_jobs(shot),
             lambda jobs: self._jobs_read(shot, jobs),
             self._failed,
         )
@@ -366,7 +367,7 @@ class FarmTab(QtWidgets.QWidget):
             return
         self._log.setPlainText(f"Reading the log of {task.title}…")
         background.run(
-            lambda: farm.log(job, task),
+            lambda: tractor.log(job, task),
             lambda text: self._log_read(task, text),
             lambda exc: self._log.setPlainText(str(exc)),
         )
@@ -375,7 +376,7 @@ class FarmTab(QtWidgets.QWidget):
     def _log_read(self, task: Task, text: str) -> None:
         if (current := self._current_task()) is None or current.tid != task.tid:
             return
-        tries = farm.attempts(text)
+        tries = tractor.attempts(text)
         header = (
             f"{task.title}: {task.state}, {tries} attempt{'s' if tries != 1 else ''}"
         )
@@ -419,7 +420,7 @@ class FarmTab(QtWidgets.QWidget):
         self._status.setText(f"Retrying {what} of job {job.jid}…")
         user, password = login
         background.run(
-            lambda: farm.retry(job, tids, user, password),
+            lambda: tractor.retry(job, tids, user, password),
             lambda _: self._retried(job, what),
             self._login_failed,
         )
@@ -459,7 +460,7 @@ class FarmTab(QtWidgets.QWidget):
         user, password = login
         self._status.setText(f"Archiving {_count(len(jobs), 'job')}…")
         background.run(
-            lambda: farm.archive(jobs, user, password),
+            lambda: tractor.archive(jobs, user, password),
             self._archived,
             self._login_failed,
         )
@@ -641,8 +642,8 @@ def _tasks_and_sizes(
     job: Job,
 ) -> tuple[list[Task], dict[str, str], dict[str, list[FrameSize]]]:
     """The job's tasks, its layers' folders, and each layer's frame sizes."""
-    found = farm.tasks(job)
-    folders = farm.folders(job, found)
+    found = tractor.tasks(job)
+    folders = tractor.folders(job, found)
     layer_sizes = {}
     for layer, folder in folders.items():
         path = Path(folder)

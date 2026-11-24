@@ -16,11 +16,12 @@ from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.color import DEFAULT_VIEW
 from pipe.core.render import versions
-from pipe.core.render.network import background, frames
-from pipe.core.render.network.canvas import ImageCanvas
-from pipe.core.render.network.contact_sheet import THUMB_WIDTH, ContactSheet
-from pipe.core.render.network.playback import DEFAULT_FPS, Look, Player
-from pipe.core.render.network.frames import ChannelGroup, Product, Thumbnail
+from pipe.core.render import frames
+from pipe.core.render.app import background
+from pipe.core.render.app.canvas import ImageCanvas
+from pipe.core.render.app.contact_sheet import THUMB_WIDTH, ContactSheet
+from pipe.core.render.app.playback import DEFAULT_FPS, Look, Player
+from pipe.core.render.frames import ChannelGroup, Product, Thumbnail
 
 _DATA_ROLE = QtCore.Qt.UserRole
 # Frames of float pixels kept, so scrubbing back is instant: about 25 MB each.

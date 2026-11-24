@@ -13,8 +13,8 @@ from collections.abc import Sequence
 from Qt import QtCore, QtWidgets
 
 from pipe.core.publish import CURRENT
-from pipe.core.render.network.marks import ChangeDot
-from pipe.core.render.network.protocol import DepartmentChoice, DepartmentLayer
+from pipe.core.render.app.marks import ChangeDot
+from pipe.core.render.protocol import DepartmentChoice, DepartmentLayer
 
 TITLE = "Loaded Shot USD Layers"
 _PINNED_STYLE = "QComboBox { color: #e0a050; }"

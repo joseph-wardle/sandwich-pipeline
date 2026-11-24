@@ -14,13 +14,13 @@ from typing import Any
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render.network.client import WorkerRun
-from pipe.core.render.network.log_viewer import LogViewer
-from pipe.core.render.network.departments import DepartmentPanel
-from pipe.core.render.network.farm_tab import FarmTab
-from pipe.core.render.network.overview import OverviewPage
-from pipe.core.render.network.form import ParmForm
-from pipe.core.render.network.protocol import (
+from pipe.core.render.app.client import WorkerRun
+from pipe.core.render.app.log_viewer import LogViewer
+from pipe.core.render.app.departments import DepartmentPanel
+from pipe.core.render.app.farm_tab import FarmTab
+from pipe.core.render.app.overview import OverviewPage
+from pipe.core.render.app.form import ParmForm
+from pipe.core.render.protocol import (
     DESCRIBE,
     LIGHTING_HIP,
     PUBLISH_LIGHTING,
@@ -31,15 +31,16 @@ from pipe.core.render.network.protocol import (
     Edits,
     shot_folder,
 )
-from pipe.core.render.network.scene_graph import SceneGraphPanel
-from pipe.core.render.network import theme
-from pipe.core.render.network.shots import ShotList
-from pipe.core.render.network.viewer import FrameViewer
+from pipe.core.render.app.scene_graph import SceneGraphPanel
+from pipe.core.render.app import theme
+from pipe.core.render.app.shots import ShotList
+from pipe.core.render.app.viewer import FrameViewer
 from pipe.core.render.lighters import LIGHTING_STEP
 from pipe.core.publish import Target
 from pipe.core.shotgrid import Shot, ShotGrid, Status
-from pipe.core.render.network import background, render_status
-from pipe.core.render.network.render_status import RenderBoard, RenderStatus
+from pipe.core.render import render_status
+from pipe.core.render.app import background
+from pipe.core.render.render_status import RenderBoard, RenderStatus
 from pipe.core.ui import prompt_publish
 
 TITLE = "Sandwich Renderer"

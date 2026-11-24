@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render.network import theme
+from pipe.core.render.app import theme
 
 TITLE = "Log Viewer"
 _OPEN_HEIGHT = 220

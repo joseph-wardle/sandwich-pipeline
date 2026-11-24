@@ -11,7 +11,7 @@ from typing import Any
 
 import hou
 
-from pipe.core.render.network.protocol import (
+from pipe.core.render.protocol import (
     BUTTON,
     COLLAPSIBLE,
     EXPRESSION,

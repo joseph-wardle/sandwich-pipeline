@@ -9,7 +9,7 @@ from pathlib import Path
 
 from Qt import QtCore
 
-from pipe.core.render.network.protocol import (
+from pipe.core.render.protocol import (
     Failure,
     LightingChoice,
     Result,

@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterable, Sequence
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render.network.protocol import Prim
+from pipe.core.render.protocol import Prim
 
 # Houdini's bookkeeping prim, which no render layer targets.
 _HIDDEN_ROOTS = ("/HoudiniLayerInfo",)

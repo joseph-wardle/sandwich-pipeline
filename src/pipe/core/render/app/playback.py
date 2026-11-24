@@ -18,8 +18,8 @@ from typing import Any
 
 from Qt import QtCore, QtGui
 
-from pipe.core.render.network import frames
-from pipe.core.render.network.frames import ChannelGroup
+from pipe.core.render import frames
+from pipe.core.render.frames import ChannelGroup
 
 DEFAULT_FPS = 24.0
 # A decode holds every channel of its frame, about 300 MB for a beauty, so

@@ -7,8 +7,8 @@ from collections.abc import Mapping, Sequence
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render.network.canvas import event_position
-from pipe.core.render.network.sizes import FrameSize, describe, human
+from pipe.core.render.app.canvas import event_position
+from pipe.core.render.sizes import FrameSize, describe, human
 
 _LINES = ("#6ca0e0", "#7fd18b", "#c9a14a", "#b58ce0", "#5cc8c8", "#e08a5c")
 _ANOMALY = QtGui.QColor("#e05555")

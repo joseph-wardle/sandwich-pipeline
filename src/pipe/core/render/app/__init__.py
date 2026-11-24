@@ -2,7 +2,7 @@
 without opening Houdini.
 
 It shows the SKD Render Network of the shot's render hip, which reads every
-department's publish. Run it with `python -m pipe.core.render.network`; see
+department's publish. Run it with `python -m pipe.core.render.app`; see
 `__main__` for which Python. Its headless half is
 `pipe.dcc.houdini.render_network`.
 """

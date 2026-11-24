@@ -8,7 +8,7 @@ from collections.abc import Callable, Sequence
 import numpy as np
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render.network.frames import Thumbnail
+from pipe.core.render.frames import Thumbnail
 
 # How wide each picture is read and drawn.
 THUMB_WIDTH = 256

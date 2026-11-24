@@ -3,7 +3,7 @@
 Needs a Python with a Qt binding, which the pipeline venv lacks, so the
 desktop launcher runs it in mayapy:
 
-    PYTHONPATH=src /usr/autodesk/maya2026/bin/mayapy -m pipe.core.render.network [A_080]
+    PYTHONPATH=src /usr/autodesk/maya2026/bin/mayapy -m pipe.core.render.app [A_080]
 """
 
 from __future__ import annotations
@@ -15,10 +15,10 @@ import sys
 from Qt import QtGui, QtWidgets
 
 from pipe.core.render.lighters import current_user, lit_shots
-from pipe.core.render.network import splash, theme
-from pipe.core.render.network.window import TITLE, RenderNetworkWindow
-from pipe.core.render.network import render_status
-from pipe.core.render.network.render_status import RenderBoard
+from pipe.core.render.app import splash, theme
+from pipe.core.render.app.window import TITLE, RenderNetworkWindow
+from pipe.core.render import render_status
+from pipe.core.render.render_status import RenderBoard
 from pipe.core.shotgrid import Shot, ShotGrid, is_previs_shot_code
 from pipe.core.ui import MessageDialog
 from pipe.core.util.paths import get_repo_root

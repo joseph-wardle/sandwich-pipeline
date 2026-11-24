@@ -21,7 +21,7 @@ import tractor.api.author as author
 from pxr import Sdf, Tf, Usd, UsdRender
 
 from pipe.core.playblast.presets import FFmpegPreset
-from pipe.core.render import farm
+from pipe.core import tractor
 from pipe.core.publish import current_version, loaded_version, pin, version_name
 from pipe.core.render import RENDER_USD
 from pipe.dcc.houdini.tractor import (
@@ -246,7 +246,7 @@ def _metadata(layers: list[commands.Layer]) -> str:
     # A shot hip's SHOT is "shot/<code>"; other hips have none.
     shot = str(hou.contextOption("SHOT") or "")
     if shot.startswith("shot/"):
-        found[farm.SHOT_KEY] = shot.removeprefix("shot/")
+        found[tractor.SHOT_KEY] = shot.removeprefix("shot/")
     return json.dumps(found)
 
 

@@ -5,7 +5,7 @@ session's environment:
 
     python -m pipe houdini -p worker.py describe --shot A_080 --result out.json
 
-See `pipe.core.render.network.protocol` for the commands and the answer.
+See `pipe.core.render.protocol` for the commands and the answer.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import hou
 
-from pipe.core.render.network.protocol import (
+from pipe.core.render.protocol import (
     COMMANDS,
     DESCRIBE,
     LIGHTING_HIP,

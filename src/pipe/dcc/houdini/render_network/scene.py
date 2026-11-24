@@ -19,7 +19,7 @@ import hou
 from pxr import Usd, UsdGeom
 
 from pipe.core.cache import RENDER_DIRNAME, link_to_cache
-from pipe.core.render.network.protocol import (
+from pipe.core.render.protocol import (
     LIGHTING_HIP,
     LIGHTING_PUBLISH,
     RENDER_NETWORK_NAME,
