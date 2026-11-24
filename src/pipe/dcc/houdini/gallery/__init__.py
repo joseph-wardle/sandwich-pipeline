@@ -1,10 +1,8 @@
 """The Houdini Asset Gallery.
 
-The production DB holds one item per published component USD, keyed by that
-file's path, and only this package writes it: `publish` upserts the asset it
-just exported and `rebuild` regenerates the whole catalogue from the asset
-directories on disk.
-"""
+The production DB holds one item per geometry variant of each published
+component USD, or one for a component with a single variant, stored under a
+`$JOB/...` path so one item serves Linux and Windows."""
 
 from __future__ import annotations
 
@@ -30,11 +28,6 @@ def production_db_path() -> Path:
     if override:
         return Path(override)
     return get_production_path() / "asset" / DB_FILENAME
-
-
-def thumbnail_path(export_path: Path) -> Path:
-    """Where the gallery thumbnail for a published component lives on disk."""
-    return export_path.parent / THUMBNAIL_DIRNAME / f"{export_path.stem}.png"
 
 
 def db_lock(db_path: Path) -> FileLock:
@@ -64,5 +57,4 @@ __all__ = [
     "copy_db",
     "db_lock",
     "production_db_path",
-    "thumbnail_path",
 ]
