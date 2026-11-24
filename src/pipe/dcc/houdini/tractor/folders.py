@@ -16,7 +16,7 @@ import hou
 from pipe.core.cache import RENDER_DIRNAME, link_to_cache
 from pipe.core.render import next_version
 from pipe.core.util.paths import get_production_path
-from pipe.dcc.houdini.hipfile.departments import Department
+from pipe.dcc.houdini.hipfile.departments import shot_folder
 from pipe.dcc.houdini.tractor import SendRefused
 from pipe.dcc.houdini.tractor.parms import LAST_JOB, LAYER, OUTPUT, ROOT, text
 
@@ -35,14 +35,11 @@ def _holder(node: hou.Node, name: str) -> hou.Parm | None:
     return parm
 
 
-# Their renders are the shot's, so they sit beside it where Nuke's auto-read looks.
-_SHOT_RENDERING = (Department.LIGHTING, Department.RENDER)
-
-
 def default_root(node: hou.Node) -> str:
-    # Every other hip keeps its test renders to itself.
+    """`<shot>/render/<layer>` for a shot department's hip, where Nuke's
+    auto-read looks, else `$HIP/render/<layer>`, such as outside production."""
     hip = Path(hou.text.expandString("$HIP"))
-    base = hip.parent if hip.name in _SHOT_RENDERING else hip
+    base = shot_folder(hip) or hip
     return str(base / RENDER_DIRNAME / text(node, LAYER))
 
 
