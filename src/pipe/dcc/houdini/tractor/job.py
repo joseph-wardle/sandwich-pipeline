@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import tractor.api.author as author
 
+from pipe.core import tractor
 from pipe.dcc.houdini.tractor import commands
 from pipe.dcc.houdini.tractor.commands import Cache, Layer, Wedges
 
@@ -68,9 +69,11 @@ DENOISE_RETRIES = [
 
 
 def render_job(
-    title: str, priority: int, envkey: str, layers: list[Layer]
+    title: str, priority: int, envkey: str, layers: list[Layer], metadata: str = ""
 ) -> author.Job:
     job = author.Job(title=title, priority=priority, envkey=[envkey])
+    if metadata:
+        job.metadata = metadata
     for layer in layers:
         job.addChild(_layer_task(layer))
     return job
@@ -93,15 +96,13 @@ def _layer_task(layer: Layer) -> author.Task:
     return task
 
 
-def _render_title(layer: Layer, frame: int) -> str:
-    return f"Render {layer.name} {frame}"
-
-
 def _render_task(layer: Layer) -> author.Task:
     task = author.Task(title=f"Render {layer.name}")
     for frame in layer.frames:
         script = commands.render(layer, frame)
-        task.addChild(_task(_render_title(layer, frame), script, RENDER_RETRIES))
+        task.addChild(
+            _task(tractor.render_title(layer.name, frame), script, RENDER_RETRIES)
+        )
     return task
 
 
@@ -112,7 +113,9 @@ def _denoise_task(layer: Layer) -> author.Task:
         title = f"Denoise {layer.name} {frame}"
         frame_task = _task(title, script, DENOISE_RETRIES)
         for neighbour in commands.denoise_window(frame, layer.frames):
-            frame_task.addChild(author.Instance(title=_render_title(layer, neighbour)))
+            frame_task.addChild(
+                author.Instance(title=tractor.render_title(layer.name, neighbour))
+            )
         task.addChild(frame_task)
     return task
 

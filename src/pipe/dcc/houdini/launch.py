@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     import typing
 
 from pipe.core.color import ocio_env_vars
+from pipe.core import tractor
 from pipe.core.util.paths import (
     get_production_path,
     get_shared_telemetry_spool_dir,
@@ -94,7 +95,7 @@ def environment() -> dict[str, int | str | None]:
         ),
         "QT_PREFERRED_BINDING": None,
         # Explicitly set Tractor location
-        "TRACTOR_ENGINE": "tractor-engine.cs.byu.edu:443",
+        "TRACTOR_ENGINE": tractor.TRACTOR_ENGINE,
     }
 
 

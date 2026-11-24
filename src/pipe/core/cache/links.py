@@ -20,9 +20,6 @@ def link_to_cache(directory: Path) -> None:
     files is not something to do behind their back mid-session.
     """
     twin = get_cache_path() / directory.relative_to(get_production_path())
-    # Inside a folder that already links to the cache, such as a shot's
-    # `render/`, the twin is `directory` itself, and a link there would point
-    # to itself.
     if directory.parent.resolve() == twin.parent.resolve():
         return
     try:

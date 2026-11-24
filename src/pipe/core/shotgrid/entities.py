@@ -374,6 +374,18 @@ class Shot(SGEntity):
         return self.cut_in, self.cut_out
 
 
+@attrs.frozen
+class Status:
+    """One of ShotGrid's statuses, as its status menus show it."""
+
+    code: str
+    name: str
+    # "r,g,b" as ShotGrid keeps it, or None when it has no colour of its own.
+    color: tuple[int, int, int] | None
+    # Which of ShotGrid's icons it shows, such as "icon_wtg" or "icon_alert".
+    icon: str | None
+
+
 def _ref_name(ref: dict[str, Any] | None, _: Any) -> str | None:
     """The display name carried on a link-ref, e.g. a Task's Step."""
     return ref.get("name") if ref else None

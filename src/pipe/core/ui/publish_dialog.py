@@ -44,10 +44,14 @@ class PublishRows(QtWidgets.QWidget):
     """The version a publish becomes, its note, who is told, and whether to playblast."""
 
     def __init__(
-        self, target: Target | None, parent: QtWidgets.QWidget | None = None
+        self,
+        target: Target | None,
+        parent: QtWidgets.QWidget | None = None,
+        can_playblast: bool = True,
     ) -> None:
         super().__init__(parent)
         self._target = target
+        self._can_playblast = can_playblast
 
         self._version = QtWidgets.QLabel()
         heading = self._version.font()
@@ -74,6 +78,7 @@ class PublishRows(QtWidgets.QWidget):
         # Remembered as it is toggled, so a dialog holding these rows has nothing
         # to call when it closes.
         self._playblast.toggled.connect(_save_playblast)
+        self._playblast.setVisible(can_playblast)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -102,7 +107,7 @@ class PublishRows(QtWidgets.QWidget):
             note=" ".join(self._note.toPlainText().split()),
             announce=self._tell.isChecked(),
             final=self._final.isChecked(),
-            playblast=self._playblast.isChecked(),
+            playblast=self._can_playblast and self._playblast.isChecked(),
         )
 
     def _sync_tell(self) -> None:
@@ -125,28 +130,41 @@ class PublishRows(QtWidgets.QWidget):
 
 
 def prompt_publish(
-    parent: QtWidgets.QWidget | None, target: Target
+    parent: QtWidgets.QWidget | None,
+    target: Target,
+    notice: str = "",
+    can_playblast: bool = True,
 ) -> PublishChoice | None:
-    """Open the publish dialog. None means do not publish."""
-    dialog = _PublishDialog(parent, target)
+    """Open the publish dialog, with `notice` above its rows. None means do not publish."""
+    dialog = _PublishDialog(parent, target, notice, can_playblast)
     if not dialog.exec_():
         return None
     return dialog.rows.choice()
 
 
 class _PublishDialog(QtWidgets.QDialog, DialogButtons):
-    def __init__(self, parent: QtWidgets.QWidget | None, target: Target) -> None:
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget | None,
+        target: Target,
+        notice: str,
+        can_playblast: bool,
+    ) -> None:
         super().__init__(parent)
         self._init_buttons(True, "Publish", "Cancel")
         self.setWindowTitle("Publish")
         self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
         self.setMinimumWidth(_WIDTH)
 
-        self.rows = PublishRows(target)
+        self.rows = PublishRows(target, can_playblast=can_playblast)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
+        if notice:
+            label = QtWidgets.QLabel(notice)
+            label.setWordWrap(True)
+            layout.addWidget(label)
         layout.addWidget(self.rows)
         layout.addWidget(self.buttons)
 

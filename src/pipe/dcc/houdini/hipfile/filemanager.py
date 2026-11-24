@@ -31,14 +31,9 @@ class HFileManager(FileManager):
     def _link_cache_dirs(self, entity: SGEntity, entity_path: Path) -> None:
         super()._link_cache_dirs(entity, entity_path)
         shot = shot_folder(entity_path)
-        # A render hip's folder is the shot's `render/`, which the base class
-        # links to the cache, so everything in it is on the cache already.
         if shot is not None and entity_path.name == Department.RENDER.value:
             return
         link_to_cache(entity_path / SIM_DIRNAME)
-        # Tractor Configure renders a shot department's hip into the shot's
-        # `render/`, which the base class links, and every other hip into
-        # `$HIP/render`.
         if shot is None:
             link_to_cache(entity_path / RENDER_DIRNAME)
 

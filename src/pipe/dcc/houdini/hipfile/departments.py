@@ -9,7 +9,6 @@ from pathlib import Path
 
 from pipe.core.util.paths import get_cache_path, get_production_path
 
-# The production folder holding every shot, as in `shot/<code>/<department>`.
 SHOTS_DIRNAME = "shot"
 
 
@@ -33,8 +32,7 @@ PUBLISHING_DEPARTMENTS: tuple[str, ...] = tuple(
 
 
 def shot_folder(hip: Path) -> Path | None:
-    """The production folder of the shot whose department folder is `hip`, or
-    None for any other folder. A render hip opened through its cache link counts."""
+    """The production folder of the shot whose department folder is `hip`, or None"""
     for root in (get_production_path(), get_cache_path()):
         if not hip.is_relative_to(root):
             continue

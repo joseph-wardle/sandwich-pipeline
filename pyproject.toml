@@ -25,6 +25,7 @@ dependencies = [
     "jedi>=0.20.0",
     # aperture deps
     "gitpython>=3.1.45,<4",
+    "openexr>=3.3",
 ]
 
 [project.scripts]
@@ -104,6 +105,9 @@ replace-imports-with-any = [
     "substance_painter.**",
     # Ships inside Blender; the pipeline venv has no copy.
     "OpenImageIO",
+    # A compiled module without stubs; the Render Network viewer reads EXRs with it.
+    "OpenEXR",
+    "Imath",
 ]
 
 [tool.ty.environment]
