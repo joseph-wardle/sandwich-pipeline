@@ -127,9 +127,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         theme.shade(self._shot_list, theme.SHOTS)
         splitter.setSizes([200, 1080])
         # The farm as a whole, beside the shot by shot work.
-        self._overview = OverviewPage(
-            [shot.code or "" for shot in shots], getpass.getuser()
-        )
+        self._overview = OverviewPage(getpass.getuser())
         self._overview.open_job.connect(self._open_farm_job)
         self._pages = QtWidgets.QTabWidget()
         self._pages.addTab(splitter, "Shots")

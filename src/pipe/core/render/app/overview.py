@@ -8,7 +8,6 @@ tab, to read its logs or retry it.
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
 
 from Qt import QtCore, QtGui, QtWidgets
 
@@ -51,19 +50,13 @@ class OverviewPage(QtWidgets.QWidget):
     _status: QtWidgets.QLabel
     _show: dict[str, QtWidgets.QCheckBox]
     _mine: QtWidgets.QCheckBox
-    _shot_codes: list[str]
     _jobs: list[Job]
     _timer: QtCore.QTimer
     _user: str
 
-    def __init__(
-        self,
-        shot_codes: Sequence[str],
-        user: str,
-        parent: QtWidgets.QWidget | None = None,
-    ) -> None:
+    def __init__(self, user: str, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
-        self._shot_codes, self._user, self._jobs = list(shot_codes), user, []
+        self._user, self._jobs = user, []
 
         title = QtWidgets.QLabel(
             "<b>Tractor Overview</b> — every unfinished job on the farm"
@@ -151,7 +144,7 @@ class OverviewPage(QtWidgets.QWidget):
                 continue
             if self._mine.isChecked() and job.owner != self._user:
                 continue
-            shot = tractor.shot_of(job, self._shot_codes)
+            shot = job.shot
             sent = job.spooled.strftime("%b %d %H:%M") if job.spooled else ""
             item = QtWidgets.QTreeWidgetItem(
                 [
@@ -187,10 +180,10 @@ class OverviewPage(QtWidgets.QWidget):
 
     def _opened(self, item: QtWidgets.QTreeWidgetItem, _column: int) -> None:
         job: Job = item.data(0, _DATA_ROLE)
-        shot = tractor.shot_of(job, self._shot_codes)
+        shot = job.shot
         if shot is None:
             self._status.setText(
-                f"Job {job.jid} names no shot this window knows, so it can't be opened here."
+                f"Job {job.jid} names no shot, so it can't be opened here."
             )
             return
         self.open_job.emit(shot, job.jid)

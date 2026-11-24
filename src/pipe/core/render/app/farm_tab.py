@@ -39,7 +39,6 @@ _DATA_ROLE = QtCore.Qt.UserRole
 _REFRESH_MS = 30_000
 # The task table's progress and size columns.
 _PROGRESS, _SIZE = 2, 3
-_RENDER_TASK = tractor.RENDER_TASK
 _RED, _GREEN, _GREY, _DIM = "#f08080", "#8fe0a0", "#a3a6ad", "#686b72"
 # A job's whole row: (text, background or None). Errored and active jobs
 # stand out; done and waiting ones step back.
@@ -85,8 +84,6 @@ class FarmTab(QtWidgets.QWidget):
     _task_list: list[Task]
     # Each render layer's frame sizes, for the job shown.
     _sizes: dict[str, list[FrameSize]]
-    # The version folder each layer of the job shown writes, by layer.
-    _folders: dict[str, str]
     # The Tractor login for retries, kept only while the window is open.
     _login: tuple[str, str] | None
     # What the last action did, shown once with the next refreshed list.
@@ -95,7 +92,7 @@ class FarmTab(QtWidgets.QWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self._shot, self._job, self._task_list, self._login = None, None, [], None
-        self._sizes, self._folders = {}, {}
+        self._sizes = {}
         self._wanted_jid: int | None = None
         self._note = ""
 
@@ -309,12 +306,11 @@ class FarmTab(QtWidgets.QWidget):
         self,
         job: Job,
         found: list[Task],
-        folders: dict[str, str],
         layer_sizes: dict[str, list[FrameSize]],
     ) -> None:
         if self._job is None or job.jid != self._job.jid:
             return
-        self._task_list, self._folders, self._sizes = found, folders, layer_sizes
+        self._task_list, self._sizes = found, layer_sizes
         self._show_tasks()
 
     def _show_tasks(self) -> None:
@@ -347,8 +343,8 @@ class FarmTab(QtWidgets.QWidget):
             if color := _STATUS_COLORS.get(task.state):
                 item.setForeground(1, QtGui.QBrush(QtGui.QColor(color)))
             item.setData(_PROGRESS, PERCENT_ROLE, task.percent)
-            if (match := _RENDER_TASK.match(task.title)) and (
-                size := by_frame.get(match[1], {}).get(int(match[2]))
+            if (rendered := task.layer_frame) and (
+                size := by_frame.get(rendered[0], {}).get(rendered[1])
             ):
                 _show_size(item, size)
             self._tasks.addTopLevelItem(item)
@@ -532,12 +528,9 @@ class FarmTab(QtWidgets.QWidget):
         job, task = self._job, self._current_task()
         if job is None:
             return
-        folders = self._folders or job.metadata.get("folders", {})
-        match = _RENDER_TASK.match(task.title) if task is not None else None
-        if match:
-            layer, frame = match[1], int(match[2])
-        else:
-            layer, frame = next(iter(folders), ""), None
+        folders = job.folders
+        rendered = task.layer_frame if task is not None else None
+        layer, frame = rendered or (next(iter(folders), ""), None)
         if not layer:
             self._status.setText("This job's tasks don't name a render layer to show.")
             return
@@ -638,17 +631,13 @@ def _table(headers: list[str]) -> QtWidgets.QTreeWidget:
     return table
 
 
-def _tasks_and_sizes(
-    job: Job,
-) -> tuple[list[Task], dict[str, str], dict[str, list[FrameSize]]]:
-    """The job's tasks, its layers' folders, and each layer's frame sizes."""
-    found = tractor.tasks(job)
-    folders = tractor.folders(job, found)
+def _tasks_and_sizes(job: Job) -> tuple[list[Task], dict[str, list[FrameSize]]]:
+    """The job's tasks, and each render layer's frame sizes."""
     layer_sizes = {}
-    for layer, folder in folders.items():
+    for layer, folder in job.folders.items():
         path = Path(folder)
         layer_sizes[layer] = sizes.layer_sizes(path) if path.is_dir() else []
-    return found, folders, layer_sizes
+    return tractor.tasks(job), layer_sizes
 
 
 def _color_row(item: QtWidgets.QTreeWidgetItem, text: str, fill: str | None) -> None:

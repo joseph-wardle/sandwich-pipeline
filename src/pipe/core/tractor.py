@@ -1,10 +1,4 @@
-"""What Tractor says about a shot's render jobs, and retrying and archiving them.
-
-Jobs, tasks and command logs come from the engine's monitor and log endpoints,
-which need no login, so anyone can see every artist's jobs. Retrying and
-archiving go through `tractor.api.query`, which needs the Tractor login of the
-job's owner or of an administrator.
-"""
+"""Reading Tractor's jobs, which needs no login, and retrying and archiving them, which does."""
 
 from __future__ import annotations
 
@@ -25,17 +19,10 @@ from env import Executables
 TRACTOR_ENGINE = "tractor-engine.cs.byu.edu:443"
 TIMEOUT_SECONDS = 15.0
 SYSTEM_CA_BUNDLE = "/etc/pki/tls/certs/ca-bundle.crt"
-# Send writes this into each job's metadata; older jobs are matched by title.
-SHOT_KEY = "shot"
 # Each attempt at a command starts its log with a header like
 # "====[2026/11/13 15:35:57 /J18142/T3/C1.1/pdolbin@host on blade ]====".
 _ATTEMPT_HEADER = re.compile(r"^====\[\S+ \S+ /J\d+/T\d+/", re.MULTILINE)
-# Render Send names each frame's task "Render <layer> <frame>".
-RENDER_TASK = re.compile(r"^Render (\S+) (\d+)$")
-# A render command's stage, which sits in the version folder it renders into.
-_RENDER_USD = re.compile(r"(/\S+/v\d{3,})/render\.usd\b")
-# Folders found in jobs' logs, by job id; a job's folders never change.
-_LOGGED_FOLDERS: dict[int, dict[str, str]] = {}
+_RENDER_TITLE = re.compile(r"^Render (\S+) (\d+)$")
 
 STATES = {
     "B": "Blocked",
@@ -56,7 +43,7 @@ class FarmError(Exception):
 
 
 class LoginRefused(FarmError):
-    """Tractor refused the user and password given for a retry or archive."""
+    pass
 
 
 @dataclass(frozen=True)
@@ -71,8 +58,18 @@ class Job:
     done: int
     errors: int
     paused: bool
-    # Send's notes, such as {"shot": "A_080", "folders": {"beauty": "..."}}.
+    # Render Send's notes, such as {"shot": "A_080", "folders": {"beauty": "..."}}.
     metadata: dict[str, Any]
+
+    @property
+    def shot(self) -> str | None:
+        shot = self.metadata.get("shot")
+        return str(shot) if shot else None
+
+    @property
+    def folders(self) -> dict[str, str]:
+        """The version folder each render layer writes, by layer."""
+        return {str(k): str(v) for k, v in self.metadata.get("folders", {}).items()}
 
     @property
     def status(self) -> str:
@@ -92,8 +89,7 @@ class Job:
 
     @property
     def queue_status(self) -> str:
-        """Where an unfinished job is in the queue, whatever its errors:
-        RENDERING, PAUSED or WAITING."""
+        """Where an unfinished job is in the queue, whatever its errors."""
         if self.active:
             return RENDERING
         return PAUSED if self.paused else WAITING
@@ -122,15 +118,29 @@ class Task:
             return None
         return max(self.finished - self.started, 0.0)
 
+    @property
+    def layer_frame(self) -> tuple[str, int] | None:
+        """The render layer and frame of a render task."""
+        if match := _RENDER_TITLE.match(self.title):
+            return match[1], int(match[2])
+        return None
+
+
+def render_title(layer: str, frame: int) -> str:
+    return f"Render {layer} {frame}"
+
+
+def render_metadata(shot: str | None, folders: dict[str, str]) -> str:
+    """What Render Send notes on a job, read back as `Job.shot` and `Job.folders`."""
+    notes: dict[str, Any] = {"folders": folders}
+    if shot:
+        notes["shot"] = shot
+    return json.dumps(notes)
+
 
 def shot_jobs(shot_code: str) -> list[Job]:
     """Every job on the engine that renders `shot_code`, newest first."""
-    pattern = _code_pattern(shot_code)
-    found = [
-        job
-        for job in all_jobs()
-        if job.metadata.get(SHOT_KEY) == shot_code or pattern.search(job.title)
-    ]
+    found = [job for job in all_jobs() if job.shot == shot_code]
     return sorted(found, key=lambda job: -job.jid)
 
 
@@ -151,17 +161,6 @@ def queue_order(jobs: list[Job]) -> list[Job]:
         jobs,
         key=lambda job: (rank[job.queue_status], -job.priority, job.jid),
     )
-
-
-def shot_of(job: Job, shot_codes: list[str]) -> str | None:
-    """The shot a job renders: the one Send noted, else one its title names."""
-    if shot := job.metadata.get(SHOT_KEY):
-        return str(shot)
-    # Longest first, so "A_080_alt" is not taken for "A_080".
-    for code in sorted(shot_codes, key=len, reverse=True):
-        if _code_pattern(code).search(job.title):
-            return code
-    return None
 
 
 def tasks(job: Job) -> list[Task]:
@@ -187,32 +186,13 @@ def log(job: Job, task: Task) -> str:
         ) from exc
 
 
-def folders(job: Job, job_tasks: list[Task]) -> dict[str, str]:
-    """The version folder each of the job's render layers writes, by layer.
-
-    Send notes them on the job. Jobs sent before it did are read from the
-    log of each layer's first render task, which names the stage it renders.
-    """
-    if noted := job.metadata.get("folders"):
-        return {str(layer): str(folder) for layer, folder in noted.items()}
-    if job.jid in _LOGGED_FOLDERS:
-        return _LOGGED_FOLDERS[job.jid]
-    found: dict[str, str] = {}
-    first: dict[str, Task] = {}
-    for task in job_tasks:
-        if (match := RENDER_TASK.match(task.title)) and task.state != "Blocked":
-            first.setdefault(match[1], task)
-    for layer, task in first.items():
-        try:
-            text = log(job, task)
-        except FarmError:
-            continue
-        if match := _RENDER_USD.search(text):
-            found[layer] = match[1]
-    # Kept only once every layer is found, as a log may not exist yet.
-    if len(found) == len(first):
-        _LOGGED_FOLDERS[job.jid] = found
-    return found
+def is_ended(job_id: int) -> bool:
+    """Whether the job is done, deleted, or gone from the tractor."""
+    for jobs in _monitor({"q": "jtree", "jid": str(job_id)}).get("users", {}).values():
+        data = jobs[f"J{job_id}"]["data"]
+        total, _active, done, _errors = data["nTasks"]
+        return data.get("deletetime") is not None or done == total
+    return True
 
 
 def attempts(log_text: str) -> int:
@@ -220,11 +200,7 @@ def attempts(log_text: str) -> int:
 
 
 def retry(job: Job, task_ids: list[int], user: str, password: str) -> None:
-    """Run the tasks again, or every errored task of the job when `task_ids` is empty.
-
-    Raises:
-        FarmError: The login was refused, or Tractor refused the retry.
-    """
+    """Run the tasks again, or every errored task of the job when `task_ids` is empty."""
 
     def run(query: Any) -> None:
         if task_ids:
@@ -237,13 +213,7 @@ def retry(job: Job, task_ids: list[int], user: str, password: str) -> None:
 
 
 def archive(jobs: list[Job], user: str, password: str) -> list[int]:
-    """Move the jobs to Tractor's archive, stopping any that still render, and
-    return the ids archived. Tractor's dashboard can restore them.
-
-    Raises:
-        FarmError: The login was refused, or Tractor refused a job; the jobs
-            before it in `jobs` were archived.
-    """
+    """Stop and archive the jobs, returning the ids archived."""
     archived: list[int] = []
 
     def run(query: Any) -> None:
@@ -307,6 +277,7 @@ def _monitor(params: dict[str, str]) -> dict[str, Any]:
 
 
 def _open(path: str) -> Any:
+    # Houdini's Python looks for certificates on SideFX's build machine.
     cafile = SYSTEM_CA_BUNDLE if _exists(SYSTEM_CA_BUNDLE) else None
     context = ssl.create_default_context(cafile=cafile)
     url = f"https://{TRACTOR_ENGINE}{path}"
@@ -319,11 +290,6 @@ def _exists(path: str) -> bool:
             return True
     except OSError:
         return False
-
-
-def _code_pattern(shot_code: str) -> re.Pattern[str]:
-    # A_080 in "A_080 Lighting V_03", but not in "A_0805" or "XA_080".
-    return re.compile(rf"(?<![A-Za-z0-9]){re.escape(shot_code)}(?![0-9])")
 
 
 def _metadata(text: str) -> dict[str, Any]:

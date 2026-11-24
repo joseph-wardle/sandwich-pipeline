@@ -12,7 +12,8 @@ import hou
 from pipe.core.playblast import PreviewClip
 from pipe.core.playblast.viewer import ClipAction, open_viewer
 from pipe.dcc.houdini import runtime
-from pipe.dcc.houdini.tractor import engine, snapshot, wedges
+from pipe.core import tractor
+from pipe.dcc.houdini.tractor import snapshot, wedges
 
 TITLE = "Review Wedges"
 # The toggle's names for a wedge's flipbook and its render.
@@ -183,11 +184,12 @@ def _running(folders: list[Path]) -> tuple[dict[Path, int], list[Path], str]:
             unknown.append(folder)
             continue
         try:
-            if not engine.ended(job_id):
+            if not tractor.is_ended(job_id):
                 running[folder] = job_id
-        except (OSError, ValueError) as error:
+        except tractor.FarmError as error:
             # A URLError wraps what went wrong in <urlopen error ...>.
-            unreachable = str(getattr(error, "reason", error))
+            cause = error.__cause__
+            unreachable = str(getattr(cause, "reason", cause))
             unknown.append(folder)
     return running, unknown, unreachable
 
