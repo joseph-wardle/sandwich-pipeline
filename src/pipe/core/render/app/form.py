@@ -1,26 +1,12 @@
-"""The Render Network's parms as Qt widgets, drawn from the schema the worker sends.
-
-The form owns the values. Each widget writes its parm's value as the artist
-edits it, and every edit re-reads the Disable When and Hide When conditions.
-Adding or removing a multiparm instance rebuilds the form, keeping which
-folders are open and which tabs are chosen.
-
-A yellow dot marks each row, collapsed folder and tab whose parms differ from
-the values the form opened with, which are the hip's as last saved.
-
-Multiparms inside multiparms are not supported; the Render Network has none.
-"""
+"""The Render Network's parms as Qt widgets, showing what its Houdini session reports."""
 
 from __future__ import annotations
 
-import copy
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from typing import Any
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render.app.conditions import UNKNOWN, MenuValue, holds
 from pipe.core.render.app.marks import ChangeDot, dot_icon
 from pipe.core.render.app.scene_graph import (
     PrimPicker,
@@ -28,33 +14,30 @@ from pipe.core.render.app.scene_graph import (
     is_camera,
     is_light,
 )
-from pipe.core.render.protocol import (
-    BUTTON,
-    COLLAPSIBLE,
-    EXPRESSION,
-    EXPRESSION_LANGUAGE,
-    FOLDER,
-    HSCRIPT,
-    INSTANCE_TOKEN,
-    INT,
-    LABEL,
-    MENU,
-    MULTIPARM,
-    PARM,
-    SEPARATOR,
-    STRING,
-    TABS,
-    TOGGLE,
-    Prim,
-    Values,
-)
+from pipe.core.render.protocol import EXPRESSION, LANGUAGE, ParmState, Prim
 
 Entry = dict[str, Any]
 
+# Houdini's parm template and folder type names.
+FOLDER = "Folder"
+TOGGLE = "Toggle"
+MENU = "Menu"
+STRING = "String"
+INT = "Int"
+FLOAT = "Float"
+LABEL = "Label"
+SEPARATOR = "Separator"
+TABS = ("Tabs", "RadioButtons")
+COLLAPSIBLE = "Collapsible"
+MULTIPARMS = ("MultiparmBlock", "ScrollingMultiparmBlock", "TabbedMultiparmBlock")
+HSCRIPT = "Hscript"
+# Multiparm children name their instance with this, e.g. `lpename_#`.
+INSTANCE_TOKEN = "#"
+# Buttons are left out: the window has its own Send.
+_DRAWN = (TOGGLE, MENU, STRING, INT, FLOAT, LABEL, SEPARATOR)
+
 LABEL_WIDTH = 170
 NUMBER_WIDTH = 90
-# The window has its own Send button.
-_SKIPPED_TYPES = (BUTTON,)
 _BLANK_LOOK = "blank"
 _EXPRESSION_STYLE = "QLineEdit { background-color: #2d4a32; }"
 _NOTE_STYLE = "QLabel { background-color: palette(alternate-base); border-radius: 4px; padding: 8px; }"
@@ -66,71 +49,72 @@ _TYPED_PICKERS: dict[str, tuple[TypeFilter, bool]] = {
     "lightlayer_lights": (is_light, False),
 }
 
-
-@dataclass
-class _Conditional:
-    disable_when: str
-    hide_when: str
-    set_enabled: Callable[[bool], None]
-    set_visible: Callable[[bool], None]
+Show = Callable[[ParmState], None]
+SetFlag = Callable[[bool], None]
 
 
 class ParmForm(QtWidgets.QWidget):
-    """The parms of `schema`, editing a copy of `values`."""
+    """The parms of `schema`. `edited` and `instance_removed` ask Houdini for a change."""
 
-    changed = QtCore.Signal()
+    edited = QtCore.Signal(str, object)
+    instance_removed = QtCore.Signal(str, int)
 
     _schema: list[Entry]
-    _values: Values
+    _parms: dict[str, ParmState]
     _prims: Sequence[Prim]
-    # What the expressions evaluated to when Houdini last opened the hip.
-    _evaluated: Values
     # Folder and tab-bar states by name, kept across rebuilds and reloads.
     _state: dict[str, Any]
-    _menus: dict[str, list[str]]
-    # Component names such as `f1` → (tuple name, index), for conditions.
-    _components: dict[str, tuple[str, int]]
-    _conditionals: list[_Conditional]
+    _saved: dict[str, list[Any]]
+    _shows: list[tuple[str, Show]]
+    _flags: list[tuple[str, SetFlag, SetFlag]]
     _body: QtWidgets.QWidget | None
-    # The values as opened, which the change dots compare against.
-    _baseline: Values | None
     # Each dot's parm names, and how to show whether any of them changed.
-    _marks: list[tuple[set[str], Callable[[bool], None]]]
+    _marks: list[tuple[set[str], SetFlag]]
     # The names of the folders and tabs being built, innermost last.
     _scopes: list[set[str]]
 
     def __init__(
         self,
         schema: list[Entry],
-        values: Values,
+        parms: dict[str, ParmState],
         prims: Sequence[Prim],
-        evaluated: Values | None = None,
-        state: dict[str, Any] | None = None,
+        state: dict[str, Any],
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self._schema = schema
-        self._values = copy.deepcopy(values)
-        self._evaluated = evaluated or {}
-        self._prims = prims
-        self._state = state if state is not None else {}
-        self._body, self._baseline = None, None
+        self._schema, self._parms, self._prims, self._state = (
+            schema,
+            parms,
+            prims,
+            state,
+        )
+        self._saved = _values(parms)
+        self._body = None
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self._build()
-        # After building, which fills in the defaults of parms the hip lacks.
-        self._baseline = copy.deepcopy(self._values)
 
-    def values(self) -> Values:
-        return copy.deepcopy(self._values)
+    def show_parms(self, parms: dict[str, ParmState]) -> None:
+        names_changed = parms.keys() != self._parms.keys()
+        self._parms = parms
+        # A multiparm gained or lost instances.
+        if names_changed:
+            self._build()
+            return
+        for name, show in self._shows:
+            show(parms[name])
+        self._refresh()
 
-    def state(self) -> dict[str, Any]:
-        return self._state
+    def mark_saved(self) -> None:
+        self._saved = _values(self._parms)
+        self._refresh()
 
-    def value(self, name: str) -> Any:
-        """The first component of `name`, or None when the form has no such parm."""
-        found = self._values.get(name)
-        return found[0] if found else None
+    def set_prims(self, prims: Sequence[Prim]) -> None:
+        self._prims = prims
+
+    def evaluated(self, name: str) -> list[Any]:
+        state = self._parms.get(name)
+        return state.evaluated if state else []
 
     # ---- building ------------------------------------------------------
 
@@ -138,8 +122,7 @@ class ParmForm(QtWidgets.QWidget):
         if self._body is not None:
             self._body.hide()
             self._body.deleteLater()
-        self._menus, self._components, self._conditionals = {}, {}, []
-        self._marks, self._scopes = [], []
+        self._shows, self._flags, self._marks, self._scopes = [], [], [], []
         self._body = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(self._body)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -156,42 +139,39 @@ class ParmForm(QtWidgets.QWidget):
         index = 0
         while index < len(entries):
             entry = entries[index]
-            if entry["kind"] == FOLDER and entry["style"] == TABS:
-                run = _run(
-                    entries, index, lambda e: e["kind"] == FOLDER and e["style"] == TABS
-                )
+            if _is_tabs(entry):
+                run = _run(entries, index, _is_tabs)
                 layout.addWidget(self._tabs(run, instance))
                 index += len(run)
-            elif entry["kind"] == PARM:
+            elif entry["type"] != FOLDER:
                 row = _joined(entries, index)
                 index += len(row)
                 row = [
-                    e
-                    for e in row
-                    if e["name"] not in headers and e["type"] not in _SKIPPED_TYPES
+                    e for e in row if e["name"] not in headers and e["type"] in _DRAWN
                 ]
                 if row:
                     layout.addWidget(self._row(row, instance))
-            elif entry["kind"] == FOLDER:
-                layout.addWidget(self._folder(entry, instance))
+            elif entry["folder_type"] in MULTIPARMS:
+                layout.addWidget(self._multiparm(entry, instance))
                 index += 1
             else:
-                layout.addWidget(self._multiparm(entry, instance))
+                layout.addWidget(self._folder(entry, instance))
                 index += 1
 
     def _row(self, entries: list[Entry], instance: str) -> QtWidgets.QWidget:
         first = entries[0]
+        first_name = _instanced(first["name"], instance)
         if first["type"] == SEPARATOR:
             line = QtWidgets.QFrame()
             line.setFrameShape(QtWidgets.QFrame.HLine)
             line.setFrameShadow(QtWidgets.QFrame.Sunken)
-            self._watch(first, instance, line.setEnabled, line.setVisible)
+            self._flag(first_name, line.setEnabled, line.setVisible)
             return line
         if first["type"] == LABEL and len(entries) == 1:
             note = QtWidgets.QLabel(first.get("text", ""))
             note.setWordWrap(True)
             note.setStyleSheet(_NOTE_STYLE)
-            self._watch(first, instance, note.setEnabled, note.setVisible)
+            self._flag(first_name, note.setEnabled, note.setVisible)
             return note
 
         row = QtWidgets.QWidget()
@@ -221,110 +201,86 @@ class ParmForm(QtWidgets.QWidget):
             title.setText(named["label"])
             title.setToolTip(_tooltip(named, instance))
         for entry in entries:
+            name = _instanced(entry["name"], instance)
             if entry is not named and entry["type"] != TOGGLE and not entry["no_label"]:
                 inline = QtWidgets.QLabel(entry["label"])
                 layout.addWidget(inline)
-                self._watch(entry, instance, inline.setEnabled, inline.setVisible)
-            layout.addWidget(self._field(entry, instance))
+                self._flag(name, inline.setEnabled, inline.setVisible)
+            field = self._field(entry, name, _tooltip(entry, instance))
+            self._flag(name, field.setEnabled, field.setVisible)
+            layout.addWidget(field)
         layout.addStretch(1)
-        self._watch(named, instance, title.setEnabled, row.setVisible)
+        self._flag(
+            _instanced(named["name"], instance), title.setEnabled, row.setVisible
+        )
         return row
 
-    def _field(self, entry: Entry, instance: str) -> QtWidgets.QWidget:
-        name = _instanced(entry["name"], instance)
-        current = self._values.setdefault(name, copy.deepcopy(entry.get("default", [])))
-        if entry["size"] > 1:
-            for index in range(entry["size"]):
-                self._components[f"{name}{index + 1}"] = (name, index)
-
+    def _field(self, entry: Entry, name: str, tooltip: str) -> QtWidgets.QWidget:
         kind = entry["type"]
         if kind == TOGGLE:
-            field: QtWidgets.QWidget = self._toggle(entry, name, current)
-        elif kind == MENU:
-            field = self._menu(entry, name, current)
-        elif kind == STRING:
-            field = self._strings(entry, name, current)
-        elif kind == LABEL:
-            field = QtWidgets.QLabel(entry.get("text", ""))
-        else:
-            field = self._numbers(entry, name, current)
-        if not field.toolTip():
-            field.setToolTip(_tooltip(entry, instance))
-        self._watch(entry, instance, field.setEnabled, field.setVisible)
-        return field
+            box = QtWidgets.QCheckBox("" if entry["no_label"] else entry["label"])
+            box.setToolTip(tooltip)
+            box.clicked.connect(lambda on: self.edited.emit(name, [on]))
+            self._show(name, lambda state: box.setChecked(bool(state.evaluated[0])))
+            return box
+        if kind == MENU:
+            return self._menu(entry, name, tooltip)
+        if kind == LABEL:
+            return QtWidgets.QLabel(entry.get("text", ""))
+        return self._line_edits(entry, name, tooltip)
 
-    def _toggle(
-        self, entry: Entry, name: str, current: list[Any]
-    ) -> QtWidgets.QCheckBox:
-        box = QtWidgets.QCheckBox("" if entry["no_label"] else entry["label"])
-        box.setChecked(
-            bool(current[0]) if current and not isinstance(current[0], dict) else False
-        )
-        box.toggled.connect(lambda on: self._set(name, [on]))
-        return box
-
-    def _menu(self, entry: Entry, name: str, current: list[Any]) -> QtWidgets.QComboBox:
+    def _menu(self, entry: Entry, name: str, tooltip: str) -> QtWidgets.QComboBox:
         combo = QtWidgets.QComboBox()
-        tokens = [token for token, _ in entry["menu"]]
-        self._menus[name] = tokens
+        combo.setToolTip(tooltip)
         for token, label in entry["menu"]:
             combo.addItem(label, token)
-        token = current[0] if current else ""
-        if token not in tokens:
-            # A value the menu lacks, such as an expression's; kept until changed.
-            combo.addItem(str(token), token)
-        combo.setCurrentIndex(combo.findData(token))
-        combo.currentIndexChanged.connect(
-            lambda i: self._set(name, [combo.itemData(i)])
+
+        def show(state: ParmState) -> None:
+            token = state.evaluated[0]
+            if combo.findData(token) < 0:
+                # A value the menu lacks, such as an expression's.
+                combo.addItem(str(token), token)
+            combo.setCurrentIndex(combo.findData(token))
+
+        combo.activated.connect(
+            lambda index: self.edited.emit(name, [combo.itemData(index)])
         )
+        self._show(name, show)
         return combo
 
-    def _strings(
-        self, entry: Entry, name: str, current: list[Any]
-    ) -> QtWidgets.QWidget:
+    def _line_edits(self, entry: Entry, name: str, tooltip: str) -> QtWidgets.QWidget:
+        """A string or number field per component."""
         holder = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(holder)
         layout.setContentsMargins(0, 0, 0, 0)
-        picker = self._picker_for(entry)
-        edits = []
-        for index in range(entry["size"]):
-            text = _shown(current[index] if index < len(current) else "")
-            edit = _PathEdit(text) if picker is not None else QtWidgets.QLineEdit(text)
-            edit.setMinimumWidth(320)
-            edit.textEdited.connect(lambda _: self._set_strings(name, edits))
+        is_text = entry["type"] == STRING
+        picker = self._picker_for(entry) if is_text else None
+        edits: list[QtWidgets.QLineEdit] = []
+        for _ in range(entry["size"]):
+            edit = _PathEdit() if picker is not None else QtWidgets.QLineEdit()
+            if is_text:
+                edit.setMinimumWidth(320)
+            else:
+                edit.setFixedWidth(NUMBER_WIDTH)
+            edit.editingFinished.connect(lambda: self._commit(entry, name, edits))
             edits.append(edit)
-            layout.addWidget(edit, 1)
+            layout.addWidget(edit, 1 if is_text else 0)
         if picker is not None:
             only, single = picker
             button = QtWidgets.QToolButton()
             button.setText("…")
             button.setToolTip("Choose prims from the shot's stage")
-            button.clicked.connect(
-                lambda: self._pick(entry, name, edits[0], only, single)
-            )
+            button.clicked.connect(lambda: self._pick(entry, name, edits, only, single))
             layout.addWidget(button)
-        return holder
 
-    def _numbers(
-        self, entry: Entry, name: str, current: list[Any]
-    ) -> QtWidgets.QWidget:
-        holder = QtWidgets.QWidget()
-        layout = QtWidgets.QHBoxLayout(holder)
-        layout.setContentsMargins(0, 0, 0, 0)
-        for index in range(entry["size"]):
-            value = current[index] if index < len(current) else 0
-            edit = QtWidgets.QLineEdit(_shown(value))
-            edit.setFixedWidth(NUMBER_WIDTH)
-            _style_expression(edit, value)
-            if isinstance(value, dict) and name in self._evaluated:
-                edit.setToolTip(
-                    f"{_shown(value)} = {_shown(self._evaluated[name][index])}\n"
-                    "Type a number to replace the expression."
-                )
-            edit.editingFinished.connect(
-                lambda e=edit, i=index: self._finish_number(entry, name, i, e)
-            )
-            layout.addWidget(edit)
+        def show(state: ParmState) -> None:
+            for edit, value, result in zip(edits, state.value, state.evaluated):
+                # Not over what the artist is typing.
+                if not edit.isModified():
+                    edit.setText(_shown(value))
+                _style(edit, value, result, tooltip)
+
+        self._show(name, show)
         return holder
 
     def _folder(self, entry: Entry, instance: str) -> QtWidgets.QWidget:
@@ -335,36 +291,36 @@ class ParmForm(QtWidgets.QWidget):
         self._add_entries(entry["children"], body_layout, instance)
         self._scopes.pop()
 
-        if entry["style"] != COLLAPSIBLE:
-            if entry.get("look") == _BLANK_LOOK:
+        if entry["folder_type"] != COLLAPSIBLE:
+            if entry["look"] == _BLANK_LOOK:
                 body_layout.setContentsMargins(0, 0, 0, 0)
-                self._watch(entry, instance, body.setEnabled, body.setVisible)
+                self._flag(key, body.setEnabled, body.setVisible)
                 return body
             box = QtWidgets.QGroupBox(entry["label"])
             QtWidgets.QVBoxLayout(box).addWidget(body)
-            self._watch(entry, instance, body.setEnabled, box.setVisible)
+            self._flag(key, body.setEnabled, box.setVisible)
             return box
 
-        toggle_name = (
-            _instanced(entry["header_toggle"], instance)
-            if entry["header_toggle"]
-            else ""
-        )
-        on = bool(self.value(toggle_name)) if toggle_name else False
+        toggle = _instanced(entry["header_toggle"], instance)
+        on = toggle in self._parms and bool(self.evaluated(toggle)[0])
         section = _Section(entry["label"], self._state.get(key, on))
         section.expandedChanged.connect(
             lambda open_: self._state.__setitem__(key, open_)
         )
-        if toggle_name:
-            section.add_toggle(on, lambda checked: self._set(toggle_name, [checked]))
+        if toggle:
+            box = section.add_toggle()
+            box.clicked.connect(lambda checked: self.edited.emit(toggle, [checked]))
+            self._show(toggle, lambda state: box.setChecked(bool(state.evaluated[0])))
         section.set_body(body)
         # Its dot shows changes to parms hidden while it's closed.
-        self._mark(inside | {toggle_name} - {""}, section.set_changed)
-        self._watch(entry, instance, body.setEnabled, section.setVisible)
+        self._mark(inside | {toggle} - {""}, section.set_changed)
+        self._flag(key, body.setEnabled, section.setVisible)
         return section
 
     def _tabs(self, entries: list[Entry], instance: str) -> QtWidgets.QTabWidget:
-        key = "tabs:" + _instanced(entries[0]["name"], instance)
+        # Houdini holds a tab bar's state on its first folder.
+        name = _instanced(entries[0]["name"], instance)
+        key = "tabs:" + name
         tabs = QtWidgets.QTabWidget()
         tabs.setDocumentMode(True)
         for position, entry in enumerate(entries):
@@ -379,19 +335,14 @@ class ParmForm(QtWidgets.QWidget):
                     p, dot_icon() if changed else QtGui.QIcon()
                 ),
             )
-            self._watch(
-                entry,
-                instance,
-                lambda on, p=position: tabs.setTabEnabled(p, on),
-                lambda on, p=position: tabs.setTabVisible(p, on),
-            )
         tabs.setCurrentIndex(self._state.get(key, 0))
         tabs.currentChanged.connect(lambda i: self._state.__setitem__(key, i))
+        self._flag(name, tabs.setEnabled, tabs.setVisible)
         return tabs
 
     def _multiparm(self, entry: Entry, instance: str) -> QtWidgets.QWidget:
         name = _instanced(entry["name"], instance)
-        count = int(self._values.setdefault(name, [0])[0])
+        count = int(self.evaluated(name)[0])
         start = entry["start"]
 
         box = QtWidgets.QGroupBox()
@@ -411,8 +362,9 @@ class ParmForm(QtWidgets.QWidget):
             button = QtWidgets.QToolButton()
             button.setText(text)
             button.setToolTip(tip)
+            button.setEnabled(target != count)
             button.clicked.connect(
-                lambda _=False, n=target: self._resize(entry, name, n)
+                lambda _=False, n=target: self.edited.emit(name, [n])
             )
             header.addWidget(button)
         layout.addLayout(header)
@@ -432,51 +384,42 @@ class ParmForm(QtWidgets.QWidget):
             remove.setText("✕")
             remove.setToolTip(f"Remove {entry['label']} {index}")
             remove.clicked.connect(
-                lambda _=False, i=index: self._remove(entry, name, i)
+                lambda _=False, i=index: self.instance_removed.emit(name, i - start)
             )
             row.addWidget(remove, 0, QtCore.Qt.AlignTop)
             layout.addWidget(frame)
-        self._watch(entry, instance, box.setEnabled, box.setVisible)
+        self._flag(name, box.setEnabled, box.setVisible)
         return box
 
     # ---- editing -------------------------------------------------------
 
-    def _set(self, name: str, value: list[Any]) -> None:
-        self._values[name] = value
-        self._refresh()
-        self.changed.emit()
-
-    def _set_strings(self, name: str, edits: list[QtWidgets.QLineEdit]) -> None:
-        self._set(name, [edit.text() for edit in edits])
-
-    def _finish_number(
-        self, entry: Entry, name: str, index: int, edit: QtWidgets.QLineEdit
+    def _commit(
+        self, entry: Entry, name: str, edits: list[QtWidgets.QLineEdit]
     ) -> None:
-        current = self._values[name]
-        parsed = _parsed(edit.text(), entry)
-        if parsed is None:
-            edit.setText(_shown(current[index]))
-            return
-        edit.setText(_shown(parsed))
-        _style_expression(edit, parsed)
-        if parsed == current[index]:
-            return
-        updated = list(current)
-        updated[index] = parsed
-        self._set(name, updated)
+        current = self._parms[name].value
+        value = list(current)
+        for index, edit in enumerate(edits):
+            edit.setModified(False)
+            if edit.text() != _shown(current[index]):
+                value[index] = _parsed(edit.text(), entry["type"], current[index])
+        if value != current:
+            self.edited.emit(name, value)
+        else:
+            for edit, old in zip(edits, current):
+                edit.setText(_shown(old))
 
     def _pick(
         self,
         entry: Entry,
         name: str,
-        edit: QtWidgets.QLineEdit,
+        edits: list[QtWidgets.QLineEdit],
         only: TypeFilter | None,
         single: bool,
     ) -> None:
         picker = PrimPicker(
             self,
             self._prims,
-            edit.text().split(),
+            edits[0].text().split(),
             f"Choose {entry['label']}",
             only,
             single,
@@ -484,113 +427,47 @@ class ParmForm(QtWidgets.QWidget):
         if not picker.exec_():
             return
         chosen = picker.chosen()
-        edit.setText(chosen[0] if single and chosen else " ".join(chosen))
-        self._set(name, [edit.text()])
+        edits[0].setText(chosen[0] if single and chosen else " ".join(chosen))
+        self._commit(entry, name, edits)
 
-    def _resize(self, entry: Entry, name: str, count: int) -> None:
-        start, old = entry["start"], int(self._values[name][0])
-        for index in range(start + old, start + count):
-            for child in _leaves(entry["children"]):
-                self._values[_instanced(child["name"], str(index))] = copy.deepcopy(
-                    child.get("default", [])
-                )
-        for index in range(start + count, start + old):
-            self._forget(entry, index)
-        self._values[name] = [count]
-        self._rebuild()
+    def _picker_for(self, entry: Entry) -> tuple[TypeFilter | None, bool] | None:
+        for prefix, picker in _TYPED_PICKERS.items():
+            if entry["name"].startswith(prefix):
+                return picker
+        if entry["prim_path"]:
+            return None, False
+        return None
 
-    def _remove(self, entry: Entry, name: str, removed: int) -> None:
-        start, count = entry["start"], int(self._values[name][0])
-        last = start + count - 1
-        # The instances after it move up one, as Houdini renumbers them.
-        for index in range(removed, last):
-            for child in _leaves(entry["children"]):
-                after = self._values.get(_instanced(child["name"], str(index + 1)))
-                if after is not None:
-                    self._values[_instanced(child["name"], str(index))] = after
-        self._forget(entry, last)
-        self._values[name] = [count - 1]
-        self._rebuild()
+    # ---- states and change dots ----------------------------------------
 
-    def _forget(self, entry: Entry, index: int) -> None:
-        for child in _leaves(entry["children"]):
-            self._values.pop(_instanced(child["name"], str(index)), None)
+    def _show(self, name: str, show: Show) -> None:
+        if name in self._parms:
+            self._shows.append((name, show))
+            show(self._parms[name])
 
-    def _rebuild(self) -> None:
-        # Not from inside the clicked button's own signal, which _build deletes.
-        QtCore.QTimer.singleShot(0, self._build)
-        self.changed.emit()
+    def _flag(self, name: str, set_enabled: SetFlag, set_visible: SetFlag) -> None:
+        if name in self._parms:
+            self._flags.append((name, set_enabled, set_visible))
 
-    # ---- change dots ---------------------------------------------------
-
-    def _mark(self, names: set[str], set_changed: Callable[[bool], None]) -> None:
+    def _mark(self, names: set[str], set_changed: SetFlag) -> None:
         """Show `set_changed` whether any of `names` changed, and count them as
         inside every folder and tab being built."""
         for scope in self._scopes:
             scope.update(names)
         self._marks.append((names, set_changed))
 
-    def _refresh_marks(self) -> None:
-        if self._baseline is None:
-            return
-        baseline = self._baseline
+    def _refresh(self) -> None:
+        for name, set_enabled, set_visible in self._flags:
+            set_enabled(not self._parms[name].disabled)
+            set_visible(not self._parms[name].hidden)
         changed = {
             name
-            for name in self._values.keys() | baseline.keys()
-            if self._values.get(name) != baseline.get(name)
+            for name in self._parms.keys() | self._saved.keys()
+            if name not in self._parms
+            or self._parms[name].value != self._saved.get(name)
         }
         for names, set_changed in self._marks:
             set_changed(not names.isdisjoint(changed))
-
-    # ---- conditions ----------------------------------------------------
-
-    def _watch(
-        self,
-        entry: Entry,
-        instance: str,
-        set_enabled: Callable[[bool], None],
-        set_visible: Callable[[bool], None],
-    ) -> None:
-        disable_when = _instanced_all(entry.get("disable_when", ""), instance)
-        hide_when = _instanced_all(entry.get("hide_when", ""), instance)
-        if disable_when or hide_when:
-            self._conditionals.append(
-                _Conditional(disable_when, hide_when, set_enabled, set_visible)
-            )
-
-    def _refresh(self) -> None:
-        self._refresh_marks()
-        for conditional in self._conditionals:
-            if conditional.disable_when:
-                conditional.set_enabled(
-                    not holds(conditional.disable_when, self._lookup, if_unknown=False)
-                )
-            if conditional.hide_when:
-                conditional.set_visible(
-                    not holds(conditional.hide_when, self._lookup, if_unknown=True)
-                )
-
-    def _lookup(self, name: str) -> Any:
-        if name in self._components:
-            tuple_name, index = self._components[name]
-            value = self._values[tuple_name][index]
-        elif self._values.get(name):
-            value = self._values[name][0]
-        else:
-            return UNKNOWN
-        if isinstance(value, dict):
-            return UNKNOWN
-        if name in self._menus:
-            return MenuValue(value, self._menus[name])
-        return value
-
-    def _picker_for(self, entry: Entry) -> tuple[TypeFilter | None, bool] | None:
-        for prefix, picker in _TYPED_PICKERS.items():
-            if entry["name"].startswith(prefix):
-                return picker
-        if entry.get("prim_path"):
-            return None, False
-        return None
 
 
 class _PathEdit(QtWidgets.QLineEdit):
@@ -606,8 +483,8 @@ class _PathEdit(QtWidgets.QLineEdit):
         present = self.text().split()
         self.setText(" ".join(present + [p for p in dropped if p not in present]))
         event.acceptProposedAction()
-        # setText isn't an edit; the form listens for edits.
-        self.textEdited.emit(self.text())
+        self.setModified(True)
+        self.editingFinished.emit()
 
 
 class _Section(QtWidgets.QWidget):
@@ -649,12 +526,11 @@ class _Section(QtWidgets.QWidget):
         layout.addWidget(bar)
         self._set_arrow(expanded)
 
-    def add_toggle(self, on: bool, toggled: Callable[[bool], None]) -> None:
+    def add_toggle(self) -> QtWidgets.QCheckBox:
         box = QtWidgets.QCheckBox()
-        box.setChecked(on)
-        box.toggled.connect(toggled)
         # After the dot, before the title.
         self._header.insertWidget(1, box)
+        return box
 
     def set_changed(self, changed: bool) -> None:
         self._dot.set_changed(changed)
@@ -677,6 +553,10 @@ class _Section(QtWidgets.QWidget):
         )
 
 
+def _is_tabs(entry: Entry) -> bool:
+    return entry["type"] == FOLDER and entry["folder_type"] in TABS
+
+
 def _run(
     entries: list[Entry], start: int, matches: Callable[[Entry], bool]
 ) -> list[Entry]:
@@ -693,40 +573,25 @@ def _joined(entries: list[Entry], start: int) -> list[Entry]:
     row = [entries[start]]
     while row[-1].get("join_next") and start + len(row) < len(entries):
         following = entries[start + len(row)]
-        if following["kind"] != PARM:
+        if following["type"] == FOLDER:
             break
         row.append(following)
     return row
 
 
-def _leaves(entries: list[Entry]) -> list[Entry]:
-    """The value-holding parms below `entries`, through folders."""
-    found = []
-    for entry in entries:
-        if entry["kind"] == FOLDER:
-            found += _leaves(entry["children"])
-        elif entry["kind"] == MULTIPARM or entry["type"] not in (
-            LABEL,
-            BUTTON,
-            SEPARATOR,
-        ):
-            found.append(entry)
-    return found
+def _values(parms: dict[str, ParmState]) -> dict[str, list[Any]]:
+    return {name: state.value for name, state in parms.items()}
 
 
 def _instanced(name: str, instance: str) -> str:
     return name.replace(INSTANCE_TOKEN, instance, 1) if instance else name
 
 
-def _instanced_all(condition: str, instance: str) -> str:
-    return condition.replace(INSTANCE_TOKEN, instance) if instance else condition
-
-
 def _tooltip(entry: Entry, instance: str) -> str:
     name = _instanced(entry["name"], instance)
     return (
         f"{entry['help']}\n\nParameter: {name}".strip()
-        if entry.get("help")
+        if entry["help"]
         else f"Parameter: {name}"
     )
 
@@ -741,26 +606,31 @@ def _shown(value: Any) -> str:
     return str(value)
 
 
-def _parsed(text: str, entry: Entry) -> Any:
-    """`text` as the parm's number, or as an HScript expression, or None to
-    keep the old value."""
+def _parsed(text: str, kind: str, old: Any) -> Any:
+    """`text` as the parm's value: a number, else an HScript expression."""
+    if kind == STRING:
+        return text
     text = text.strip()
     if not text:
-        return None
+        return old
     try:
         number = float(text)
     except ValueError:
-        return {EXPRESSION: text, EXPRESSION_LANGUAGE: HSCRIPT}
-    if entry.get("min_strict"):
-        number = max(number, entry["min"])
-    if entry.get("max_strict"):
-        number = min(number, entry["max"])
-    return int(round(number)) if entry["type"] == INT else number
+        return {EXPRESSION: text, LANGUAGE: HSCRIPT}
+    return int(round(number)) if kind == INT else number
 
 
-def _style_expression(edit: QtWidgets.QLineEdit, value: Any) -> None:
+def _style(edit: QtWidgets.QLineEdit, value: Any, result: Any, tooltip: str) -> None:
+    """Green for an expression, which a Python one makes read-only."""
     is_expression = isinstance(value, dict)
+    is_python = is_expression and value[LANGUAGE] != HSCRIPT
     edit.setStyleSheet(_EXPRESSION_STYLE if is_expression else "")
-    if is_expression and value.get(EXPRESSION_LANGUAGE, HSCRIPT) != HSCRIPT:
-        edit.setReadOnly(True)
+    edit.setReadOnly(is_python)
+    if is_python:
         edit.setToolTip("A Python expression drives this. Change it in Houdini.")
+    elif is_expression:
+        edit.setToolTip(
+            f"{_shown(value)} = {_shown(result)}\nType a value to replace the expression."
+        )
+    else:
+        edit.setToolTip(tooltip)

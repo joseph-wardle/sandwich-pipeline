@@ -1,8 +1,4 @@
-"""The Sandwich Renderer window: choose a shot, edit its render layers, send them.
-
-Every action runs the headless Houdini worker, which opens the shot's render
-hip. Nothing in the window changes the hip until Save or Send.
-"""
+"""The Sandwich Renderer window: choose a shot, edit its render layers, send them."""
 
 from __future__ import annotations
 
@@ -14,21 +10,24 @@ from typing import Any
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render.app.client import WorkerRun
 from pipe.core.render.app.log_viewer import LogViewer
 from pipe.core.render.app.departments import DepartmentPanel
 from pipe.core.render.app.farm_tab import FarmTab
 from pipe.core.render.app.overview import OverviewPage
 from pipe.core.render.app.form import ParmForm
+from pipe.core.render.app.session import HoudiniSession
 from pipe.core.render.protocol import (
-    DESCRIBE,
     LIGHTING_HIP,
+    OPEN,
     PUBLISH_LIGHTING,
+    REMOVE_INSTANCE,
     SAVE,
     SEND,
-    LightingChoice,
-    Result,
-    Edits,
+    SET_DEPARTMENT,
+    SET_PARM,
+    Layer,
+    LightingTarget,
+    Reply,
     shot_folder,
 )
 from pipe.core.render.app.scene_graph import SceneGraphPanel
@@ -47,12 +46,18 @@ from pipe.core.ui import prompt_publish
 TITLE = "Sandwich Renderer"
 # How far the shot's title and render hip sit in from the edge, in pixels.
 _TITLE_INSET = 12
+# Requests the artist waits for. Parm edits answer too fast to need it.
 _BUSY_WORDS = {
-    DESCRIBE: "Opening {shot} in Houdini…",
+    OPEN: "Opening {shot} in Houdini…",
+    SET_DEPARTMENT: "Loading {shot}'s department layers…",
     SAVE: "Saving {shot}'s render hip…",
     SEND: "Saving {shot} and sending it to Tractor…",
     PUBLISH_LIGHTING: "Publishing {shot}'s lighting hip…",
 }
+CANCELLED = (
+    "Cancelled. Nothing was saved or sent unless the log says so. Reload to open "
+    "the shot again."
+)
 _FRAME_RANGES = {
     "off": "the hip's current frame only",
     "stage": "the frame range the stage says",
@@ -81,9 +86,11 @@ class RenderNetworkWindow(QtWidgets.QWidget):
     _save: QtWidgets.QPushButton
     _send: QtWidgets.QPushButton
 
+    _houdini: HoudiniSession | None
     _form: ParmForm | None
-    _result: Result | None
-    _run: WorkerRun | None
+    _layers: list[Layer]
+    _lighting_target: LightingTarget | None
+    _working: bool
     _dirty: bool
     # Which folders were open, by shot, so a reload keeps the artist's place.
     _form_states: dict[str, dict[str, Any]]
@@ -108,8 +115,8 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._lit_shots = lit_shots
         self.setWindowTitle(TITLE)
         self.resize(1280, 900)
-        self._form, self._result, self._run = None, None, None
-        self._dirty = False
+        self._houdini, self._form, self._lighting_target = None, None, None
+        self._layers, self._working, self._dirty = [], False, False
         self._form_states = {}
         self._shown = None
 
@@ -175,7 +182,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         # Publish Lighting sits under the lighting layer it publishes.
         self._departments = DepartmentPanel(self._publish)
         self._departments.hide()
-        self._departments.changed.connect(self._edited)
+        self._departments.changed.connect(self._set_department)
         stage_side = QtWidgets.QWidget()
         theme.shade(stage_side, theme.STAGE)
         stage_layout = QtWidgets.QVBoxLayout(stage_side)
@@ -191,8 +198,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
 
         self._reload = QtWidgets.QPushButton("Reload")
         self._reload.setToolTip(
-            "Open the render hip in Houdini again and reread its parms, layers and "
-            "stage, dropping unsaved edits"
+            "Open the render hip from disk again, dropping unsaved edits"
         )
         self._reload.clicked.connect(self._on_reload)
         self._save = QtWidgets.QPushButton("Save")
@@ -275,27 +281,35 @@ class RenderNetworkWindow(QtWidgets.QWidget):
 
     def _open(self, code: str) -> None:
         self._shown = code
-        self._forget_form()
         self._heading.setText(code)
-        self._hip.setText("")
-        self._notes.hide()
-        self._scene_graph.show_prims([])
         self._farm.set_shot(code)
         self._viewer.set_shot(code)
         self._versions.set_shot(code, self._lighter_refusal(code, "delete its renders"))
-        self._start(DESCRIBE, code, None, self._show)
+        self._open_houdini(code)
+
+    def _open_houdini(self, code: str) -> None:
+        self._close_houdini()
+        self._forget_form()
+        self._departments.hide()
+        self._hip.setText("")
+        self._notes.hide()
+        self._scene_graph.show_prims([])
+        self._houdini = HoudiniSession(code, self)
+        self._houdini.output.connect(self._log_line)
+        self._houdini.stopped.connect(self._houdini_stopped)
+        self._request(OPEN, then=self._opened, failed=self._not_opened)
 
     def _after_unsaved(
         self, proceed: Callable[[], None], stay: Callable[[], None]
     ) -> None:
         """Run `proceed` once unsaved edits are saved or dropped, else `stay`."""
-        if not self._dirty or self._result is None:
+        if not self._dirty or self._form is None:
             proceed()
             return
         box = QtWidgets.QMessageBox(self)
         box.setWindowTitle(TITLE)
         box.setIcon(QtWidgets.QMessageBox.Question)
-        box.setText(f"Save your changes to {self._result.shot} first?")
+        box.setText(f"Save your changes to {self._shown} first?")
         box.setStandardButtons(
             QtWidgets.QMessageBox.Save
             | QtWidgets.QMessageBox.Discard
@@ -308,42 +322,49 @@ class RenderNetworkWindow(QtWidgets.QWidget):
             self._dirty = False
             proceed()
         else:
-            shot = self._result.shot
 
-            def saved(result: Result) -> None:
-                self._show(result)
-                if result.failure is None:
-                    proceed()
-                else:
-                    stay()
+            def saved(reply: Reply) -> None:
+                self._saved(reply)
+                proceed()
 
-            self._start(SAVE, shot, self._values(), saved)
+            self._request(SAVE, then=saved, failed=stay)
 
     # ---- actions -------------------------------------------------------
 
     def _on_reload(self) -> None:
-        if self._result is not None:
-            shot = self._result.shot
-            self._after_unsaved(
-                lambda: self._start(DESCRIBE, shot, None, self._show), lambda: None
-            )
+        if (code := self._shown) is not None and not self._working:
+            self._after_unsaved(lambda: self._reopen(code), lambda: None)
+
+    def _reopen(self, code: str) -> None:
+        if self._houdini is None:
+            self._open_houdini(code)
+        else:
+            self._request(OPEN, then=self._opened, failed=self._not_opened)
 
     def _on_save(self) -> None:
-        if self._result is not None and self._run is None:
-            self._start(SAVE, self._result.shot, self._values(), self._saved)
+        if self._form is not None and not self._working:
+            self._request(SAVE, then=self._saved)
 
     def _on_send(self) -> None:
-        if self._result is None or self._form is None or self._run is not None:
-            return
-        if self._confirm_send():
-            self._start(SEND, self._result.shot, self._values(), self._sent)
+        if self._form is not None and not self._working and self._confirm_send():
+            self._request(SEND, then=self._sent)
+
+    def _set_parm(self, name: str, value: object) -> None:
+        self._edited()
+        self._request(SET_PARM, {"name": name, "value": value})
+
+    def _remove_instance(self, name: str, position: int) -> None:
+        self._edited()
+        self._request(REMOVE_INSTANCE, {"name": name, "position": position})
+
+    def _set_department(self, row: str, enabled: bool, version: str) -> None:
+        self._edited()
+        self._request(
+            SET_DEPARTMENT, {"row": row, "enabled": enabled, "version": version}
+        )
 
     def _confirm_send(self) -> bool:
-        assert self._result is not None and self._form is not None
-        form = self._form
-        chosen = [
-            layer.name for layer in self._result.layers if form.value(layer.toggle)
-        ]
+        chosen = [layer.name for layer in self._layers if self._value(layer.toggle)]
         if not chosen:
             _tell(
                 self,
@@ -354,33 +375,32 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         lines = [
             f"Layers: {', '.join(chosen)}",
             f"Frames: {self._describe_frames()}",
-            f"Priority: {form.value('priority')}",
+            f"Priority: {self._value('priority')}",
         ]
         answer = QtWidgets.QMessageBox.question(
             self,
             TITLE,
-            f"Send {self._result.shot} to Tractor?\n\n"
+            f"Send {self._shown} to Tractor?\n\n"
             + "\n".join(lines)
             + "\n\nThe render hip is saved with these settings first.",
         )
         return answer == QtWidgets.QMessageBox.Yes
 
     def _describe_frames(self) -> str:
-        assert self._form is not None and self._result is not None
-        mode = self._form.value("framerange")
+        mode = str(self._value("framerange"))
         if mode in _FRAME_RANGES:
             return _FRAME_RANGES[mode]
-        frames = self._form.values().get("f", [])
-        evaluated = self._result.evaluated.get("f", [])
-        shown = [
-            evaluated[i] if isinstance(v, dict) and i < len(evaluated) else v
-            for i, v in enumerate(frames)
-        ]
-        if len(shown) < 3 or any(isinstance(v, dict) for v in shown):
+        frames = self._form.evaluated("f") if self._form else []
+        if len(frames) != 3:
             return "as set on the hip"
-        start, end, step = (int(v) for v in shown)
+        start, end, step = (int(v) for v in frames)
         by = f" every {step}" if step != 1 else ""
         return f"{start}–{end}{by}"
+
+    def _value(self, name: str) -> object:
+        """What the parm's first component evaluates to in Houdini, else None."""
+        evaluated = self._form.evaluated(name) if self._form else []
+        return evaluated[0] if evaluated else None
 
     def _enable_publish(self, busy: bool) -> None:
         refusal = self._publish_refusal()
@@ -407,7 +427,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
                 f"Only {shot}'s lighter can publish its lighting: ShotGrid assigns "
                 f"its {LIGHTING_STEP} task to someone else."
             )
-        if self._result is None or self._result.lighting_target is None:
+        if self._lighting_target is None:
             return "Waiting for Houdini to read the shot's lighting publishes."
         return ""
 
@@ -449,7 +469,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
 
     def _on_publish(self) -> None:
         code = self._shown
-        if code is None or self._run is not None or code not in self._shots_by_code:
+        if code is None or self._working or code not in self._shots_by_code:
             return
         hip = shot_folder(code) / LIGHTING_HIP
         if not hip.is_file():
@@ -464,8 +484,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
             f"Publishes {hip} as it was last saved, {saved}. Changes not saved in an "
             "open Houdini session are left out, so save there first."
         )
-        known = self._result.lighting_target if self._result else None
-        if known is None:
+        if (known := self._lighting_target) is None:
             return
         target = Target(
             entity=self._shots_by_code[code],
@@ -480,35 +499,27 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         choice = prompt_publish(self, target, notice, can_playblast=False)
         if choice is None:
             return
-        self._start(
-            PUBLISH_LIGHTING,
-            code,
-            None,
-            self._published_lighting,
-            LightingChoice(
-                note=choice.note, announce=choice.announce, final=choice.final
+        # Houdini opens the render hip again after, which drops unsaved edits.
+        self._after_unsaved(
+            lambda: self._request(
+                PUBLISH_LIGHTING,
+                {
+                    "note": choice.note,
+                    "announce": choice.announce,
+                    "final": choice.final,
+                },
+                then=self._published_lighting,
             ),
+            lambda: None,
         )
 
-    def _published_lighting(self, result: Result) -> None:
-        if result.failure is not None:
-            _tell(
-                self,
-                result.failure.message,
-                QtWidgets.QMessageBox.Critical,
-                result.failure.details,
-            )
-            return
+    def _published_lighting(self, reply: Reply) -> None:
+        self._opened(reply)
         _tell(
             self,
-            "\n".join(result.published) or "Published.",
+            "\n".join(reply.published or []) or "Published.",
             QtWidgets.QMessageBox.Information,
         )
-        # The render hip reads lighting's publish, so read it again.
-        if self._result is not None and self._result.shot == result.shot:
-            self._on_reload()
-        elif self._shown == result.shot:
-            self._open(result.shot)
 
     def _open_farm_job(self, shot: str, jid: int) -> None:
         """Show a job the Overview chose, on its shot's Farm tab."""
@@ -528,15 +539,14 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         )
         self._tabs.setCurrentWidget(self._viewer)
 
-    def _saved(self, result: Result) -> None:
-        self._show(result)
-        if result.failure is None:
-            self._log_line(f"Saved {result.hip}")
+    def _saved(self, reply: Reply) -> None:
+        self._mark_saved()
+        self._log_line(f"Saved {reply.hip}")
 
-    def _sent(self, result: Result) -> None:
-        self._show(result)
-        sent = result.sent
-        if result.failure is not None or sent is None:
+    def _sent(self, reply: Reply) -> None:
+        self._mark_saved()
+        sent = reply.sent
+        if sent is None:
             return
         folders = "\n".join(sent.folders)
         if sent.job_id is None:
@@ -556,80 +566,116 @@ class RenderNetworkWindow(QtWidgets.QWidget):
             QtWidgets.QMessageBox.Information,
         )
 
-    # ---- running the worker --------------------------------------------
+    # ---- talking to Houdini --------------------------------------------
 
-    def _start(
+    def _request(
         self,
         command: str,
-        shot: str,
-        edits: Edits | None,
-        then: Callable[[Result], None],
-        choice: LightingChoice | None = None,
+        args: dict[str, object] | None = None,
+        then: Callable[[Reply], None] | None = None,
+        failed: Callable[[], None] | None = None,
     ) -> None:
-        if self._run is not None:
-            return
-        self._log_line(f"— {command} {shot} —")
-        run = WorkerRun(command, shot, edits, self, choice)
-        run.output.connect(self._log_line)
-        run.finished.connect(lambda result: self._finished(result, then))
-        self._run = run
-        self._set_busy(_BUSY_WORDS[command].format(shot=shot))
-        run.start()
+        """Ask Houdini to do `command`, then show what it changed and call `then`,
+        or `failed` when it refused."""
+        assert self._houdini is not None
+        busy = command in _BUSY_WORDS
+        if busy:
+            self._log_line(f"— {command} {self._shown} —")
+            self._set_busy(_BUSY_WORDS[command].format(shot=self._shown))
 
-    def _finished(self, result: Result, then: Callable[[Result], None]) -> None:
-        self._run = None
-        self._set_busy(None)
-        then(result)
-
-    def _cancel(self) -> None:
-        if self._run is not None:
-            self._run.cancel()
-
-    def _show(self, result: Result) -> None:
-        if result.failure is not None:
-            _tell(
-                self,
-                result.failure.message,
-                QtWidgets.QMessageBox.Critical,
-                result.failure.details,
-            )
-            self._log.expand()
-            if self._result is None or self._result.shot != result.shot:
-                self._show_empty(
-                    f"Could not open {result.shot}. See the Log Viewer below."
+        def answered(reply: Reply) -> None:
+            if reply.failure is None:
+                self._show_reply(reply)
+            if busy:
+                self._set_busy(None)
+            if reply.failure is not None:
+                _tell(
+                    self,
+                    reply.failure.message,
+                    QtWidgets.QMessageBox.Critical,
+                    reply.failure.details,
                 )
-            return
+                self._log.expand()
+                if failed is not None:
+                    failed()
+            elif then is not None:
+                then(reply)
 
+        self._houdini.request(command, answered, **(args or {}))
+
+    def _show_reply(self, reply: Reply) -> None:
+        if reply.hip is not None:
+            self._hip.setText(_hip_text(reply))
+        if reply.notes is not None:
+            self._notes.setText("\n\n".join(reply.notes))
+            self._notes.setVisible(bool(reply.notes))
+        if reply.schema is not None:
+            self._show_form(reply)
+        elif reply.parms is not None and self._form is not None:
+            self._form.show_parms(reply.parms)
+        if reply.prims is not None:
+            self._scene_graph.show_prims(reply.prims)
+            if self._form is not None:
+                self._form.set_prims(reply.prims)
+        if reply.departments is not None:
+            self._departments.show_departments(reply.departments)
+        if reply.layers is not None:
+            self._layers = reply.layers
+
+    def _show_form(self, reply: Reply) -> None:
+        assert reply.schema is not None and self._shown is not None
         self._forget_form()
-        self._result = result
-        self._dirty = False
-        self._heading.setText(result.shot)
-        self._hip.setText(_hip_text(result))
-        self._notes.setText("\n\n".join(result.notes))
-        self._notes.setVisible(bool(result.notes))
-
         # The form keeps its open folders in this dict, so a reload reopens them.
         self._form = ParmForm(
-            result.schema,
-            result.values,
-            result.prims,
-            result.evaluated,
-            self._form_states.setdefault(result.shot, {}),
+            reply.schema,
+            reply.parms or {},
+            reply.prims or [],
+            self._form_states.setdefault(self._shown, {}),
         )
-        self._form.changed.connect(self._edited)
+        self._form.edited.connect(self._set_parm)
+        self._form.instance_removed.connect(self._remove_instance)
         self._scroll.setWidget(self._form)
-        self._scene_graph.show_prims(result.prims)
-        self._departments.show_departments(result.departments)
-        self._set_busy(None)
+
+    def _opened(self, reply: Reply) -> None:
+        self._lighting_target = reply.lighting_target
+        self._mark_saved()
+        self._enable_publish(self._working)
+
+    def _not_opened(self) -> None:
+        self._close_houdini()
+        self._show_empty(
+            f"Could not open {self._shown}. See the Log Viewer below, then Reload "
+            "to try again."
+        )
+
+    def _houdini_stopped(self, message: str, details: str) -> None:
+        self._close_houdini()
+        self._show_empty(f"{self._shown}: Houdini stopped. Reload to open it again.")
+        _tell(self, message, QtWidgets.QMessageBox.Critical, details)
+        self._log.expand()
+
+    def _cancel(self) -> None:
+        if self._working:
+            self._close_houdini()
+            self._show_empty(f"{self._shown}: {CANCELLED}")
+
+    def _close_houdini(self) -> None:
+        if self._houdini is not None:
+            self._houdini.stop()
+            self._houdini.deleteLater()
+            self._houdini = None
+        self._working = False
 
     def _edited(self) -> None:
         self._dirty = True
-        if self._result is not None:
-            self._heading.setText(f"{self._result.shot}  •  unsaved")
+        self._heading.setText(f"{self._shown}  •  unsaved")
 
-    def _values(self) -> Edits:
-        assert self._form is not None
-        return Edits(self._form.values(), self._departments.choices())
+    def _mark_saved(self) -> None:
+        self._dirty = False
+        self._heading.setText(self._shown or "")
+        if self._form is not None:
+            self._form.mark_saved()
+        self._departments.mark_saved()
 
     def _forget_form(self) -> None:
         if self._form is not None:
@@ -638,8 +684,10 @@ class RenderNetworkWindow(QtWidgets.QWidget):
             self._form = None
 
     def _show_empty(self, message: str = "Choose a shot on the left.") -> None:
-        self._result = None
         self._forget_form()
+        self._dirty = False
+        self._lighting_target = None
+        self._layers = []
         self._heading.setText(message)
         self._hip.setText("")
         self._notes.hide()
@@ -648,12 +696,12 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._set_busy(None)
 
     def _set_busy(self, text: str | None) -> None:
-        busy = text is not None
+        busy = self._working = text is not None
         self._busy.setVisible(busy)
         self._busy_text.setText(text or "")
-        ready = not busy and self._result is not None
-        for button in (self._reload, self._save, self._send):
-            button.setEnabled(ready)
+        self._reload.setEnabled(not busy and self._shown is not None)
+        for button in (self._save, self._send):
+            button.setEnabled(not busy and self._form is not None)
         self._enable_publish(busy)
         self._shot_list.setEnabled(not busy)
         if self._form is not None:
@@ -664,14 +712,15 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._log.append(line)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802 (Qt's name)
-        if self._run is not None:
+        if self._working:
             answer = QtWidgets.QMessageBox.question(
                 self, TITLE, "Houdini is still working. Stop it and close?"
             )
             if answer != QtWidgets.QMessageBox.Yes:
                 event.ignore()
                 return
-            self._run.cancel()
+            self._close_houdini()
+            self._forget_form()
         # Saving first finishes later, and closes the window then.
         answered = {"now": True, "close": False}
 
@@ -684,20 +733,21 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._after_unsaved(close, lambda: None)
         answered["now"] = False
         if answered["close"]:
+            self._close_houdini()
             event.accept()
         else:
             event.ignore()
 
 
-def _hip_text(result: Result) -> str:
-    if result.hip_existed:
-        return f"Render hip: {result.hip}"
+def _hip_text(reply: Reply) -> str:
+    if reply.hip_existed:
+        return f"Render hip: {reply.hip}"
     seeded = (
-        f" Its settings were copied from {result.seeded_from}."
-        if result.seeded_from
+        f" Its settings were copied from {reply.seeded_from}."
+        if reply.seeded_from
         else ""
     )
-    return f"Render hip: {result.hip} — not saved yet; Save or Send creates it.{seeded}"
+    return f"Render hip: {reply.hip} — not saved yet; Save or Send creates it.{seeded}"
 
 
 def _tell(

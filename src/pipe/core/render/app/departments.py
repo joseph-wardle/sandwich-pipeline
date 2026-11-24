@@ -14,7 +14,7 @@ from Qt import QtCore, QtWidgets
 
 from pipe.core.publish import CURRENT
 from pipe.core.render.app.marks import ChangeDot
-from pipe.core.render.protocol import DepartmentChoice, DepartmentLayer
+from pipe.core.render.protocol import DepartmentLayer
 
 TITLE = "Loaded Shot USD Layers"
 _PINNED_STYLE = "QComboBox { color: #e0a050; }"
@@ -23,18 +23,15 @@ _LIGHTING = "light"
 
 
 class DepartmentPanel(QtWidgets.QGroupBox):
-    """`changed` fires on every edit; `choices()` is what Save and Send set.
+    """`changed` asks Houdini to set a row: (row, enabled, version)."""
 
-    `lighting_tools`, such as the Publish Lighting button, sit under the
-    lighting row, or at the foot of the panel when there is none.
-    """
+    changed = QtCore.Signal(str, bool, str)
 
-    changed = QtCore.Signal()
-
-    _rows: dict[str, tuple[QtWidgets.QCheckBox, QtWidgets.QComboBox, ChangeDot]]
-    _loaded: dict[str, DepartmentChoice]
+    # Each row's (enabled, version), as shown and as last saved.
+    _shown: dict[str, tuple[bool, str]]
+    _saved: dict[str, tuple[bool, str]]
+    _dots: dict[str, ChangeDot]
     _grid: QtWidgets.QGridLayout
-    _hint: QtWidgets.QLabel
     _empty: QtWidgets.QLabel
     _tools: QtWidgets.QWidget | None
 
@@ -48,19 +45,16 @@ class DepartmentPanel(QtWidgets.QGroupBox):
             "The publishes the render hip loads. Untick one to render without it, "
             "or pick an older version to pin it."
         )
-        self._rows, self._loaded, self._tools = {}, {}, lighting_tools
+        self._shown, self._saved, self._dots = {}, {}, {}
+        self._tools = lighting_tools
         self._grid = QtWidgets.QGridLayout()
         self._grid.setColumnStretch(2, 1)
-        self._hint = QtWidgets.QLabel("Save to see the stage with these layers.")
-        self._hint.setEnabled(False)
-        self._hint.hide()
         self._empty = QtWidgets.QLabel("The render hip loads no department layers.")
         self._empty.setEnabled(False)
         self._empty.hide()
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self._empty)
         layout.addLayout(self._grid)
-        layout.addWidget(self._hint)
 
     def show_departments(self, departments: Sequence[DepartmentLayer]) -> None:
         while self._grid.count():
@@ -69,8 +63,7 @@ class DepartmentPanel(QtWidgets.QGroupBox):
             # The lighting tools belong to the window, and move to the new rows.
             if widget is not None and widget is not self._tools:
                 widget.deleteLater()
-        self._rows, self._loaded = {}, {}
-        self._hint.hide()
+        self._shown, self._dots = {}, {}
         row = 0
         lighting_row: int | None = None
         for department in departments:
@@ -89,17 +82,21 @@ class DepartmentPanel(QtWidgets.QGroupBox):
             versions.setCurrentIndex(found)
             versions.setEnabled(department.enabled)
             _style_pin(versions)
-            box.toggled.connect(lambda on, v=versions: self._edited(v, on))
-            versions.currentIndexChanged.connect(
-                lambda _, v=versions: self._edited(v, v.isEnabled())
+            box.clicked.connect(
+                lambda on, r=department.row, v=versions: self.changed.emit(
+                    r, on, str(v.currentData())
+                )
+            )
+            versions.activated.connect(
+                lambda index, r=department.row, v=versions: self.changed.emit(
+                    r, True, str(v.itemData(index))
+                )
             )
             self._grid.addWidget(dot, row, 0)
             self._grid.addWidget(box, row, 1)
             self._grid.addWidget(versions, row, 2)
-            self._rows[department.row] = (box, versions, dot)
-            self._loaded[department.row] = DepartmentChoice(
-                enabled=department.enabled, version=department.version
-            )
+            self._shown[department.row] = (department.enabled, department.version)
+            self._dots[department.row] = dot
             row += 1
             if lighting_row is None and _LIGHTING in department.label.lower():
                 lighting_row = row
@@ -110,23 +107,16 @@ class DepartmentPanel(QtWidgets.QGroupBox):
             self._grid.addWidget(self._tools, at, 1, 1, 2)
             self._tools.show()
         self._empty.setVisible(not departments)
+        self._refresh_dots()
         self.show()
 
-    def choices(self) -> dict[str, DepartmentChoice]:
-        return {
-            row: DepartmentChoice(
-                enabled=box.isChecked(), version=str(versions.currentData())
-            )
-            for row, (box, versions, _) in self._rows.items()
-        }
+    def mark_saved(self) -> None:
+        self._saved = dict(self._shown)
+        self._refresh_dots()
 
-    def _edited(self, versions: QtWidgets.QComboBox, on: bool) -> None:
-        versions.setEnabled(on)
-        _style_pin(versions)
-        self._hint.show()
-        for row, choice in self.choices().items():
-            self._rows[row][2].set_changed(choice != self._loaded[row])
-        self.changed.emit()
+    def _refresh_dots(self) -> None:
+        for row, dot in self._dots.items():
+            dot.set_changed(self._shown[row] != self._saved.get(row, self._shown[row]))
 
 
 def _style_pin(versions: QtWidgets.QComboBox) -> None:
