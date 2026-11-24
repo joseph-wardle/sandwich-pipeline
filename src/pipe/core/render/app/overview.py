@@ -14,7 +14,7 @@ from Qt import QtCore, QtGui, QtWidgets
 from pipe.core import tractor
 from pipe.core.tractor import PAUSED, RENDERING, WAITING, Job
 from pipe.core.render.app import background
-from pipe.core.render.app.progress import PERCENT_ROLE, ProgressDelegate
+from pipe.core.render.app.widgets import PERCENT_ROLE, ProgressDelegate
 
 _REFRESH_MS = 30_000
 _DATA_ROLE = QtCore.Qt.UserRole

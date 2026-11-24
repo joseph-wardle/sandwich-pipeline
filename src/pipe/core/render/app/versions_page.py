@@ -1,4 +1,4 @@
-"""The Versions tab: a shot's render layers and their versions, and deleting the ones comp doesn't read."""
+"""The Versions tab"""
 
 from __future__ import annotations
 
@@ -25,11 +25,9 @@ from pipe.core.util.paths import get_repo_root
 _DATA_ROLE = QtCore.Qt.UserRole
 _VERSION_COLUMN, _FRAMES_COLUMN, _MODIFIED_COLUMN = range(3)
 _DELETE_STEP = "Deleting renders"
-# A failure dialog that lists hundreds of paths is not read; the log has them all.
 _MAX_LISTED_FAILURES = 8
 _IN_COMP_ICON = get_repo_root() / "resources/icon/nuke.png"
 _ICON_SIZE = 16
-# Every shot's code in a confirmation is a wall of text nobody reads.
 _MAX_LISTED_SHOTS = 6
 
 
@@ -46,7 +44,6 @@ class VersionsTab(QtWidgets.QWidget):
     _shot: str | None
     # Why the artist may not delete the shot's renders, or "".
     _refusal: str
-    # None until the shot's disk is read, which waits until the tab is shown.
     _renders: ShotRenders | None
 
     def __init__(

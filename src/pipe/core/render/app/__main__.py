@@ -12,11 +12,12 @@ import argparse
 import logging
 import sys
 
-from Qt import QtGui, QtWidgets
+from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.render.lighters import current_user, lit_shots
-from pipe.core.render.app import splash, theme
-from pipe.core.render.app.window import TITLE, RenderNetworkWindow
+from pipe.core.render.app import widgets
+from pipe.core.render.app.widgets import TITLE
+from pipe.core.render.app.window import RenderNetworkWindow
 from pipe.core.render import render_status
 from pipe.core.render.render_status import RenderBoard
 from pipe.core.shotgrid import Shot, ShotGrid, is_previs_shot_code
@@ -27,6 +28,11 @@ from pipe.core.util.users import is_admin
 log = logging.getLogger(__name__)
 
 ICON = get_repo_root() / "resources/icon/sandwich_renderer.png"
+_SPLASH = get_repo_root() / "resources/splash/sandwich_renderer_splash.png"
+# On screen, in logical pixels; the artwork is drawn from its full size.
+_SPLASH_SIZE = 520
+_SPLASH_TEXT = QtGui.QColor("#ffffff")
+_SPLASH_SHADOW = QtGui.QColor(0, 0, 0, 200)
 
 
 def main() -> None:
@@ -45,8 +51,8 @@ def main() -> None:
     app.setApplicationName(TITLE)
     app.setDesktopFileName("sandwich-renderer")
     app.setWindowIcon(QtGui.QIcon(str(ICON)))
-    theme.apply(app)
-    shown = splash.show()
+    widgets.apply_theme(app)
+    shown = _show_splash()
 
     def say(message: str) -> None:
         if shown is not None:
@@ -120,6 +126,63 @@ def _load_render_statuses() -> RenderBoard:
     except Exception:
         log.exception("Could not read the shots' Render statuses")
         return RenderBoard()
+
+
+class _Splash(QtWidgets.QSplashScreen):
+    """Floats over the desktop while the window reads ShotGrid.
+
+    Without a compositor, as over some SSH X11 forwarding, its transparent
+    parts show black.
+    """
+
+    _message: str
+
+    def __init__(self, pixmap: QtGui.QPixmap) -> None:
+        super().__init__(pixmap, QtCore.Qt.WindowStaysOnTopHint)
+        self._message = ""
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
+        self.setWindowFlag(QtCore.Qt.FramelessWindowHint)
+
+    def say(self, message: str) -> None:
+        self._message = message
+        self.repaint()
+        QtWidgets.QApplication.processEvents()
+
+    def drawContents(self, painter: QtGui.QPainter) -> None:  # noqa: N802 (Qt's name)
+        if not self._message:
+            return
+        font = painter.font()
+        font.setPointSize(11)
+        font.setBold(True)
+        painter.setFont(font)
+        # Under the title, in the artwork's empty band at the bottom.
+        area = self.rect().adjusted(0, 0, 0, -18)
+        flags = int(QtCore.Qt.AlignHCenter | QtCore.Qt.AlignBottom)
+        painter.setPen(_SPLASH_SHADOW)
+        painter.drawText(area.translated(1, 1), flags, self._message)
+        painter.setPen(_SPLASH_TEXT)
+        painter.drawText(area, flags, self._message)
+
+
+def _show_splash() -> _Splash | None:
+    """Show the splash, or None when its image is missing."""
+    source = QtGui.QPixmap(str(_SPLASH))
+    if source.isNull():
+        return None
+    screen = QtWidgets.QApplication.primaryScreen()
+    ratio = screen.devicePixelRatio() if screen is not None else 1.0
+    pixmap = source.scaled(
+        int(_SPLASH_SIZE * ratio),
+        int(_SPLASH_SIZE * ratio),
+        QtCore.Qt.KeepAspectRatio,
+        QtCore.Qt.SmoothTransformation,
+    )
+    # Sharp on high-density screens.
+    pixmap.setDevicePixelRatio(ratio)
+    splash = _Splash(pixmap)
+    splash.show()
+    splash.say("Starting…")
+    return splash
 
 
 if __name__ == "__main__":

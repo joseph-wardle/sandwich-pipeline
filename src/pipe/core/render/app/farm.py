@@ -1,17 +1,7 @@
-"""The Farm tab: every Tractor job for the shot, its tasks and their logs, and
-retrying what errored.
-
-Each render task shows the size of the EXR it wrote, flagged when it is far
-from the frames around it, and Size Graph draws them across the shot.
-
-The farm already reruns a render frame by itself when it crashes, runs out of
-memory or misses a license (`job.RENDER_RETRIES`); what errors past that is
-listed here to read and retry by hand.
-"""
+"""The Farm tab"""
 
 from __future__ import annotations
 
-import getpass
 import re
 import time
 from pathlib import Path
@@ -30,18 +20,16 @@ from pipe.core.tractor import (
     Task,
 )
 from pipe.core.render import sizes
-from pipe.core.render.app import background, credentials
-from pipe.core.render.app.progress import PERCENT_ROLE, ProgressDelegate
+from pipe.core.render.app import background, login
+from pipe.core.render.app.login import LoginDialog
+from pipe.core.render.app.widgets import PERCENT_ROLE, ProgressDelegate
 from pipe.core.render.app.size_graph import SizeGraphDialog
 from pipe.core.render.sizes import FrameSize
 
 _DATA_ROLE = QtCore.Qt.UserRole
 _REFRESH_MS = 30_000
-# The task table's progress and size columns.
 _PROGRESS, _SIZE = 2, 3
 _RED, _GREEN, _GREY, _DIM = "#f08080", "#8fe0a0", "#a3a6ad", "#686b72"
-# A job's whole row: (text, background or None). Errored and active jobs
-# stand out; done and waiting ones step back.
 _JOB_ROWS: dict[str, tuple[str, str | None]] = {
     ERROR: (_RED, "#40252a"),
     RENDERING: (_GREEN, "#1f3a28"),
@@ -49,7 +37,6 @@ _JOB_ROWS: dict[str, tuple[str, str | None]] = {
     WAITING: (_GREY, None),
     "Done": (_DIM, None),
 }
-# A task's state, in the jobs' colors.
 _STATUS_COLORS = {
     ERROR: _RED,
     "Active": _GREEN,
@@ -82,11 +69,8 @@ class FarmTab(QtWidgets.QWidget):
     _shot: str | None
     _job: Job | None
     _task_list: list[Task]
-    # Each render layer's frame sizes, for the job shown.
     _sizes: dict[str, list[FrameSize]]
-    # The Tractor login for retries, kept only while the window is open.
     _login: tuple[str, str] | None
-    # What the last action did, shown once with the next refreshed list.
     _note: str
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
@@ -405,8 +389,8 @@ class FarmTab(QtWidgets.QWidget):
         tids = [t.tid for t in self._selected_tasks()] if selected else []
         if selected and not tids:
             return
-        login = self._current_login([job.owner], "Retrying")
-        if login is None:
+        credentials = self._current_login([job.owner], "Retrying")
+        if credentials is None:
             return
         what = (
             f"{len(tids)} task{'s' if len(tids) != 1 else ''}"
@@ -414,7 +398,7 @@ class FarmTab(QtWidgets.QWidget):
             else "every errored task"
         )
         self._status.setText(f"Retrying {what} of job {job.jid}…")
-        user, password = login
+        user, password = credentials
         background.run(
             lambda: tractor.retry(job, tids, user, password),
             lambda _: self._retried(job, what),
@@ -440,7 +424,7 @@ class FarmTab(QtWidgets.QWidget):
             # Ask again next time rather than repeat a wrong password, which
             # also drops a remembered one, such as after a password change.
             self._login = None
-            credentials.forget()
+            login.forget()
             self._show_login()
         self._failed(exc)
         QtCore.QTimer.singleShot(1000, self.refresh)
@@ -450,10 +434,10 @@ class FarmTab(QtWidgets.QWidget):
         if not jobs or not self._confirm_archive(jobs):
             return
         owners = sorted({job.owner for job in jobs})
-        login = self._current_login(owners, "Archiving")
-        if login is None:
+        credentials = self._current_login(owners, "Archiving")
+        if credentials is None:
             return
-        user, password = login
+        user, password = credentials
         self._status.setText(f"Archiving {_count(len(jobs), 'job')}…")
         background.run(
             lambda: tractor.archive(jobs, user, password),
@@ -498,29 +482,29 @@ class FarmTab(QtWidgets.QWidget):
         """The login to use: this session's, else the remembered one, else asked for."""
         if self._login is None:
             # Read only when needed: the keyring may ask to be unlocked.
-            self._login = credentials.load()
+            self._login = login.load()
         return self._login or self._ask_login(owners, doing)
 
     def _ask_login(self, owners: list[str], doing: str) -> tuple[str, str] | None:
-        dialog = _LoginDialog(self, owners, doing)
+        dialog = LoginDialog(self, owners, doing)
         if not dialog.exec_():
             return None
         self._login = dialog.login()
-        if dialog.remember() and not credentials.save(*self._login):
+        if dialog.remember() and not login.save(*self._login):
             self._note = "No keyring on this computer, so the login lasts until the window closes"
         self._show_login()
         return self._login
 
     def _forget_login(self) -> None:
         self._login = None
-        credentials.forget()
+        login.forget()
         self._show_login()
         self._status.setText(
             "Forgot the Tractor login. Retry or Archive will ask for it."
         )
 
     def _show_login(self) -> None:
-        user = self._login[0] if self._login else credentials.remembered_user()
+        user = self._login[0] if self._login else login.remembered_user()
         self._forget.setVisible(bool(user))
         self._forget.setToolTip(f"Forget the Tractor login of {user}" if user else "")
 
@@ -570,52 +554,6 @@ class FarmTab(QtWidgets.QWidget):
         self._status.setText(
             str(exc) if isinstance(exc, FarmError) else f"Tractor: {exc}"
         )
-
-
-class _LoginDialog(QtWidgets.QDialog):
-    """Asks for the Tractor login that retrying and archiving need."""
-
-    def __init__(
-        self, parent: QtWidgets.QWidget, owners: list[str], doing: str
-    ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Tractor Login")
-        self._user = QtWidgets.QLineEdit(
-            credentials.remembered_user() or getpass.getuser()
-        )
-        self._remember = QtWidgets.QCheckBox("Remember for this user")
-        self._remember.setChecked(True)
-        self._remember.setToolTip(
-            "Keep the password in your desktop keyring, encrypted and unlocked by "
-            "your login. Forget Login on the Farm tab removes it."
-        )
-        self._password = QtWidgets.QLineEdit()
-        self._password.setEchoMode(QtWidgets.QLineEdit.Password)
-        note = QtWidgets.QLabel(
-            f"{doing} needs the Tractor login of the jobs' owner ({', '.join(owners)}) "
-            "or of a Tractor administrator."
-        )
-        note.setWordWrap(True)
-        form = QtWidgets.QFormLayout()
-        form.addRow("User", self._user)
-        form.addRow("Password", self._password)
-        form.addRow("", self._remember)
-        buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.addWidget(note)
-        layout.addLayout(form)
-        layout.addWidget(buttons)
-        self._password.setFocus()
-
-    def login(self) -> tuple[str, str]:
-        return self._user.text().strip(), self._password.text()
-
-    def remember(self) -> bool:
-        return self._remember.isChecked()
 
 
 # Qt 6 moved QShortcut from QtWidgets to QtGui.

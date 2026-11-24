@@ -7,12 +7,13 @@ icon names it, and right-clicking the shot changes it.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from functools import cache
 
-from Qt import QtCore, QtGui, QtWidgets
+from Qt import QtCore, QtGui, QtSvg, QtWidgets
 
-from pipe.core.render.app import status_icons
 from pipe.core.render.render_status import RenderBoard, RenderStatus
 from pipe.core.shotgrid import Shot, Status
+from pipe.core.util.paths import get_repo_root
 
 _CODE_ROLE = QtCore.Qt.UserRole
 # The Render task's status as ShotGrid names it, for the tooltip and the filter.
@@ -21,6 +22,31 @@ _NO_TASK = "No Render task in ShotGrid"
 # Which sequences the artist left open, kept between sessions.
 _SETTINGS = ("SandwichKwonDo", "RenderNetwork")
 _EXPANDED_KEY = "shots/expanded_sequences"
+
+_ICON_SIZE = 16
+_ICONS = get_repo_root() / "resources" / "icon" / "shotgrid"
+_TINTED = "currentColor"
+_NO_STATUS = "no_status"
+_ICON_SCALE = 2
+_NO_STATUS_GREY = "#9a9da4"
+_DEFAULTS = {
+    "icon_wtg": _NO_STATUS_GREY,
+    "icon_rdy": "#c77ddb",
+    "icon_ip": "#5cb85c",
+    "icon_rev": "#5bc0de",
+    "icon_apr": "#3fae49",
+    "icon_cmpt": "#4a90d9",
+    "icon_fin": "#8a8d93",
+    "icon_hld": "#f0a030",
+    "icon_alert": "#e8c43a",
+    "icon_delete": "#d9534f",
+    "icon_voice_command": "#d9534f",
+    "icon_award": "#f0c43c",
+    "icon_martini_glass": "#7fd18b",
+    "icon_omt": "#8a8d93",
+    "icon_restrict": "#8a8d93",
+}
+_MIN_LIGHTNESS = 120
 
 
 def sequence_of(shot: Shot) -> str:
@@ -72,7 +98,7 @@ class ShotList(QtWidgets.QWidget):
 
         self._tree = _ShotTree()
         self._tree.setHeaderHidden(True)
-        self._tree.setIconSize(QtCore.QSize(status_icons.SIZE, status_icons.SIZE))
+        self._tree.setIconSize(QtCore.QSize(_ICON_SIZE, _ICON_SIZE))
         self._tree.setUniformRowHeights(True)
         self._tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._menu)
@@ -139,7 +165,7 @@ class ShotList(QtWidgets.QWidget):
     def _show_status(
         self, item: QtWidgets.QTreeWidgetItem, render: RenderStatus | None
     ) -> None:
-        item.setIcon(0, status_icons.icon(render.status if render else None))
+        item.setIcon(0, _status_icon(render.status if render else None))
         item.setData(
             0, _STATUS_ROLE, f"{render.task}: {render.name}" if render else _NO_TASK
         )
@@ -162,7 +188,7 @@ class ShotList(QtWidgets.QWidget):
             menu.addAction(refusal).setEnabled(False)
         menu.addSeparator()
         for status in self._choices:
-            action = menu.addAction(status_icons.icon(status), status.name)
+            action = menu.addAction(_status_icon(status), status.name)
             action.setCheckable(True)
             action.setChecked(render is not None and status.code == render.code)
             action.setEnabled(not refusal)
@@ -257,3 +283,51 @@ def _as_list(value: object) -> list[str]:
     if isinstance(value, str):
         return [value]
     return [str(v) for v in value]  # ty: ignore[not-iterable]
+
+
+def _status_icon(status: Status | None) -> QtGui.QIcon:
+    if status is None:
+        return _drawn_icon(_NO_STATUS, _NO_STATUS_GREY, "")
+    color = (
+        "#{:02x}{:02x}{:02x}".format(*status.color)
+        if status.color
+        else _DEFAULTS.get(status.icon or "", _NO_STATUS_GREY)
+    )
+    return _drawn_icon(status.icon or "", color, status.name[:1])
+
+
+@cache
+def _drawn_icon(name: str, color: str, letter: str) -> QtGui.QIcon:
+    shade = QtGui.QColor(color)
+    if shade.lightness() < _MIN_LIGHTNESS:
+        shade = QtGui.QColor.fromHsl(
+            shade.hslHue(), shade.hslSaturation(), _MIN_LIGHTNESS
+        )
+    pixmap = QtGui.QPixmap(_ICON_SIZE * _ICON_SCALE, _ICON_SIZE * _ICON_SCALE)
+    pixmap.fill(QtCore.Qt.transparent)
+    painter = QtGui.QPainter(pixmap)
+    painter.setRenderHint(QtGui.QPainter.Antialiasing)
+    svg = _ICONS / f"{name}.svg"
+    if name and svg.is_file():
+        tinted = svg.read_text().replace(_TINTED, shade.name())
+        QtSvg.QSvgRenderer(QtCore.QByteArray(tinted.encode())).render(painter)
+    else:
+        _letter(painter, shade, letter)
+    painter.end()
+    pixmap.setDevicePixelRatio(_ICON_SCALE)
+    return QtGui.QIcon(pixmap)
+
+
+def _letter(painter: QtGui.QPainter, color: QtGui.QColor, letter: str) -> None:
+    """A disc with the status's first letter, for an icon there's no SVG of."""
+    painter.scale(_ICON_SCALE, _ICON_SCALE)
+    box = QtCore.QRectF(1.5, 1.5, 13, 13)
+    painter.setPen(QtCore.Qt.NoPen)
+    painter.setBrush(color)
+    painter.drawEllipse(box)
+    font = QtGui.QFont()
+    font.setPixelSize(10)
+    font.setBold(True)
+    painter.setFont(font)
+    painter.setPen(QtGui.QColor("#ffffff" if color.lightness() < 160 else "#1c1d20"))
+    painter.drawText(box, QtCore.Qt.AlignCenter, letter.upper())

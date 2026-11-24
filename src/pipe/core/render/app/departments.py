@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from Qt import QtCore, QtWidgets
 
 from pipe.core.publish import CURRENT
-from pipe.core.render.app.marks import ChangeDot
+from pipe.core.render.app.widgets import ChangeDot
 from pipe.core.render.protocol import DepartmentLayer
 
 TITLE = "Loaded Shot USD Layers"

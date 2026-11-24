@@ -7,7 +7,7 @@ from typing import Any
 
 from Qt import QtCore, QtGui, QtWidgets
 
-from pipe.core.render.app.marks import ChangeDot, dot_icon
+from pipe.core.render.app.widgets import ChangeDot, dot_icon
 from pipe.core.render.app.scene_graph import (
     PrimPicker,
     TypeFilter,

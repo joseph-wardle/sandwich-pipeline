@@ -1,9 +1,4 @@
-"""The Images tab: a shot's rendered frames, one AOV or LPE at a time, through
-the show's OCIO display transform (OpenDRT by default), without Nuke.
-
-Contact Sheet shows every AOV and LPE of the frame at once instead, with a red
-X on any that rendered nothing or broke.
-"""
+"""The Images tab"""
 
 from __future__ import annotations
 
@@ -31,9 +26,7 @@ from pipe.core.render.versions import (
 )
 
 _DATA_ROLE = QtCore.Qt.UserRole
-# Frames of float pixels kept, so scrubbing back is instant: about 25 MB each.
 _CACHED_FRAMES = 8
-# Wait for the slider to settle before reading a 100+ MB frame.
 _SCRUB_DELAY_MS = 120
 
 log = logging.getLogger(__name__)
@@ -62,13 +55,10 @@ class FrameViewer(QtWidgets.QWidget):
     _shot: str | None
     _frames: list[int]
     _cache: OrderedDict[tuple[Path, str], np.ndarray]
-    # What the image shows, in scene linear, for the pixel readout.
     _pixels: np.ndarray | None
     _wanted: tuple[Path, str] | None
     _scrub: QtCore.QTimer
-    # The frame to show once the version loads, when another tab asked for one.
     _pending_frame: int | None
-    # The contact sheet's frame and its thumbnails, in scene linear.
     _thumbs: tuple[Path, list[Thumbnail]] | None
     _wanted_sheet: Path | None
 
