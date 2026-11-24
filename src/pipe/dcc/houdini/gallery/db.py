@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from collections.abc import Mapping
 from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any, Generator, cast
@@ -11,6 +12,7 @@ from typing import Any, Generator, cast
 import hou
 
 from . import db_lock
+from .items import GalleryItem, ItemKey, item_key
 
 
 class Transaction:
@@ -19,29 +21,28 @@ class Transaction:
     def __init__(self, source: hou.AssetGalleryDataSource) -> None:
         self._source = source
 
-    def files(self) -> dict[str, Path]:
-        """Item id to the file it points at, for every visible item."""
+    def keys(self) -> dict[str, ItemKey]:
+        """Item id to the asset and variant it lists, for every visible item."""
+        source = self._source
         return {
-            item_id: Path(self._source.filePath(item_id)) for item_id in self._ids()
+            item_id: item_key(source.filePath(item_id), source.blindData(item_id))
+            for item_id in self._ids()
         }
 
-    def upsert(self, *, label: str, file_path: Path, thumbnail: bytes | None) -> str:
-        """Make the DB hold exactly one item for `file_path` and return its id.
-
-        An existing item keeps its id (and its thumbnail when none is given);
-        extra items for the same file are dropped.
-        """
+    def upsert(self, item: GalleryItem, thumbnail: bytes | None) -> str:
+        """Make the DB hold exactly one entry for `item` and return its id."""
         source = self._source
-        existing = [
-            item_id for item_id, file in self.files().items() if file == file_path
-        ]
+        existing = [item_id for item_id, key in self.keys().items() if key == item.key]
         if not existing:
             item_id = source.addItem(
-                label, file_path=str(file_path), thumbnail=thumbnail or b""
+                item.label,
+                file_path=item.file_path,
+                thumbnail=thumbnail or b"",
+                blind_data=item.blind_data,
             )
             if not item_id:
                 raise RuntimeError(
-                    f"Asset Gallery refused to add {label} ({file_path})"
+                    f"Asset Gallery refused to add {item.label} ({item.file_path})"
                 )
             source.setOwnsFile(item_id, False)
             return item_id
@@ -49,23 +50,31 @@ class Transaction:
         item_id, *duplicates = existing
         if duplicates:
             source.markItemsForDeletion(tuple(duplicates))
-        source.setLabel(item_id, label)
+        source.setLabel(item_id, item.label)
+        source.setFilePath(item_id, item.file_path)
+        # The stub declares a str; the API takes bytes.
+        cast(Any, source).setBlindData(item_id, item.blind_data)
         source.setModificationDate(item_id, int(time.time()))
         if thumbnail:
             # The stub declares a str; the API takes PNG bytes.
             cast(Any, source).setThumbnail(item_id, thumbnail)
         return item_id
 
-    def prune(self, keep_files: set[Path]) -> list[tuple[str, Path]]:
-        """Drop every item whose file is not in `keep_files`; return what went."""
-        stale = {
-            item_id: file
-            for item_id, file in self.files().items()
-            if file not in keep_files
-        }
+    def prune(
+        self, keep: set[ItemKey], *, within: set[str] | None = None
+    ) -> list[tuple[str, str]]:
+        """Drop every entry not in `keep`; return the label and file of each."""
+        stale = [
+            item_id
+            for item_id, key in self.keys().items()
+            if key not in keep and (within is None or key[0] in within)
+        ]
         if stale:
             self._source.markItemsForDeletion(tuple(stale))
-        return [(self._source.label(item_id), file) for item_id, file in stale.items()]
+        return [
+            (self._source.label(item_id), self._source.filePath(item_id))
+            for item_id in stale
+        ]
 
     def _ids(self) -> list[str]:
         # Missing from the hou stubs.
@@ -87,19 +96,23 @@ def transaction(db_path: Path) -> Generator[Transaction]:
             _purge_and_checkpoint(db_path)
 
 
-def upsert_item(
-    db_path: Path, *, label: str, file_path: Path, thumbnail: bytes | None
-) -> str:
+def sync_asset(
+    db_path: Path, thumbnails: Mapping[GalleryItem, bytes | None]
+) -> list[str]:
+    """Make the DB list exactly these items for their asset; return their ids."""
     with transaction(db_path) as tx:
-        return tx.upsert(label=label, file_path=file_path, thumbnail=thumbnail)
+        ids = [tx.upsert(item, thumbnail) for item, thumbnail in thumbnails.items()]
+        keys = {item.key for item in thumbnails}
+        tx.prune(keys, within={key[0] for key in keys})
+        return ids
 
 
-def files(db_path: Path) -> dict[str, Path]:
-    """What `Transaction.files` would return, without opening a write."""
+def keys(db_path: Path) -> dict[str, ItemKey]:
+    """What `Transaction.keys` would return, without opening a write."""
     if not db_path.is_file():
         return {}
     with db_lock(db_path):
-        return Transaction(hou.AssetGalleryDataSource(str(db_path))).files()
+        return Transaction(hou.AssetGalleryDataSource(str(db_path))).keys()
 
 
 def _purge_and_checkpoint(db_path: Path) -> None:
@@ -123,4 +136,4 @@ def _purge_and_checkpoint(db_path: Path) -> None:
         connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
 
-__all__ = ["Transaction", "files", "transaction", "upsert_item"]
+__all__ = ["Transaction", "keys", "sync_asset", "transaction"]

@@ -19,7 +19,8 @@ from pipe.core.versioning import (
     stream_key_for,
 )
 
-from . import copy_db, db, production_db_path, thumbnail, thumbnail_path
+from . import copy_db, db, production_db_path, thumbnail
+from .items import GalleryItem, items_for
 
 log = logging.getLogger(__name__)
 
@@ -59,34 +60,36 @@ def rebuild(*, only: set[str], force: bool, dry_run: bool) -> None:
     db_path = production_db_path()
     assets = inventory(get_production_path() / "asset")
     selected = [asset for asset in assets if not only or asset.label in only]
-    keep = {asset.export_path for asset in assets}
-    log.info("%d published assets, %d selected", len(assets), len(selected))
+    items = [
+        item for asset in selected for item in items_for(asset.label, asset.export_path)
+    ]
+    keep = {item.key for item in items}
+    # `--only` leaves every other asset's entries alone.
+    within = {item.key[0] for item in items} if only else None
+    log.info(
+        "%d published assets, %d selected, %d gallery items",
+        len(assets),
+        len(selected),
+        len(items),
+    )
     if dry_run:
-        for asset in selected:
-            verb = "render" if _thumbnail_is_stale(asset, force=force) else "keep"
-            log.info("would upsert %s (%s thumbnail)", asset.label, verb)
-        if not only:
-            for file in db.files(db_path).values():
-                if file not in keep:
-                    log.info("would drop %s", file)
+        for item in items:
+            verb = "render" if _thumbnail_is_stale(item, force=force) else "keep"
+            log.info("would upsert %s (%s thumbnail)", item.label, verb)
+        for key in db.keys(db_path).values():
+            if key not in keep and (within is None or key[0] in within):
+                log.info("would drop %s %s", *key)
         return
 
-    thumbnails = {
-        asset.export_path: _thumbnail(asset, force=force) for asset in selected
-    }
+    thumbnails = _thumbnails(items, force=force)
 
     if db_path.is_file():
         copy_db(db_path, db_path.with_suffix(".db.bak"))
     with db.transaction(db_path) as tx:
-        for asset in selected:
-            tx.upsert(
-                label=asset.label,
-                file_path=asset.export_path,
-                thumbnail=thumbnails[asset.export_path],
-            )
-        if not only:
-            for label, file in tx.prune(keep):
-                log.info("dropped %s -> %s", label, file)
+        for item in items:
+            tx.upsert(item, thumbnails[item])
+        for label, file in tx.prune(keep, within=within):
+            log.info("dropped %s -> %s", label, file)
     log.info("Asset Gallery rebuilt: %s", db_path)
 
 
@@ -100,26 +103,33 @@ def _published_filename(manifest_path: Path) -> str:
     return f"{manifest_path.parent.name}.usd"
 
 
-def _thumbnail_is_stale(asset: PublishedAsset, *, force: bool) -> bool:
-    target = thumbnail_path(asset.export_path)
+def _thumbnail_is_stale(item: GalleryItem, *, force: bool) -> bool:
+    target = item.thumbnail_path
     return (
         force
         or not target.is_file()
-        or target.stat().st_mtime < asset.export_path.stat().st_mtime
+        or target.stat().st_mtime < item.export_path.stat().st_mtime
     )
 
 
-def _thumbnail(asset: PublishedAsset, *, force: bool) -> bytes | None:
-    target = thumbnail_path(asset.export_path)
-    if not _thumbnail_is_stale(asset, force=force):
-        return target.read_bytes()
-    try:
-        data = thumbnail.render(asset.export_path, target)
-    except thumbnail.ThumbnailRenderError as exc:
-        log.warning("No thumbnail for %s: %s", asset.label, exc)
-        return None
-    log.info("rendered %s", target)
-    return data
+def _thumbnails(
+    items: list[GalleryItem], *, force: bool
+) -> dict[GalleryItem, bytes | None]:
+    """Each item's thumbnail, rendering only those older than their publish."""
+    stale = [item for item in items if _thumbnail_is_stale(item, force=force)]
+    rendered = thumbnail.render_all(stale)
+    thumbnails: dict[GalleryItem, bytes | None] = {}
+    for item in items:
+        result = rendered.get(item)
+        if result is None:
+            thumbnails[item] = item.thumbnail_path.read_bytes()
+        elif isinstance(result, thumbnail.ThumbnailRenderError):
+            log.warning("No thumbnail for %s: %s", item.label, result)
+            thumbnails[item] = None
+        else:
+            log.info("rendered %s", item.thumbnail_path)
+            thumbnails[item] = result
+    return thumbnails
 
 
 def main(argv: list[str] | None = None) -> int:
