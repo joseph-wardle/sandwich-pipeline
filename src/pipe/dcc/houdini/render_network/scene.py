@@ -1,4 +1,4 @@
-"""A shot's render hip, opened in a headless Houdini for the Render Network window.
+"""A shot's render hip, open in Ranch's headless Houdini.
 
 The render hip reads every department's publish, lighting's among them, and
 holds the shot's one Render Network. Its Render Network renders what lighting
@@ -13,22 +13,17 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import hou
 from pxr import Usd, UsdGeom
 
 from pipe.core.cache import RENDER_DIRNAME, link_to_cache
-from pipe.core.render.network.protocol import (
+from pipe.core.render.protocol import (
     LIGHTING_HIP,
-    LIGHTING_PUBLISH,
-    RENDER_NETWORK_NAME,
-    RENDER_NETWORK_TYPE,
-    DepartmentChoice,
     DepartmentLayer,
     Layer,
     Prim,
-    Values,
     shot_folder,
 )
 from pipe.core.sets import current_layer_path
@@ -38,10 +33,12 @@ from pipe.dcc.houdini.hipfile.departments import Department
 from pipe.dcc.houdini.hipfile.shot import build_department_chain, set_frame_range
 from pipe.dcc.houdini.hipfile.shot_sets import SETS_NODE_NAME, sync_sets
 from pipe.dcc.houdini.publish import load_layers
-from pipe.dcc.houdini.render_network import schema
 from pipe.dcc.houdini.util import nodetypes
 from pipe.dcc.houdini.tractor import parms, render_send
 
+RENDER_NETWORK_TYPE = "SKD::render_network::1.0"
+RENDER_NETWORK_NAME = "render_network"
+LIGHTING_PUBLISH = "lighting/publish/lighting.usd"
 # Inside the Render Network; its inputs are the layers in LAYER_TOGGLES order.
 SUBMIT = "tractor_submit1"
 STAGE = "/stage"
@@ -64,6 +61,8 @@ class RenderScene:
     network: hou.LopNode
     # Whether the hip was on disk before it was opened.
     existed: bool
+    # The hip's modified time when it was opened, else None.
+    modified: float | None
     # The lighting hip whose Render Network values a new one copied, else "".
     seeded_from: str = ""
     # What the artist should know, such as sets that were added.
@@ -79,7 +78,7 @@ def open_scene(shot: Shot, hip: Path) -> RenderScene:
         if (network := _find_network()) is not None:
             _place_between_nulls(network)
             notes = _prepare(shot)
-            return RenderScene(hip, network, existed, notes=notes)
+            return RenderScene(hip, network, existed, _modified(hip), notes=notes)
 
     # A new Render Network starts from the one the lighter set up, if any,
     # which is read before this hip's own nodes replace the lighting hip's.
@@ -97,11 +96,19 @@ def open_scene(shot: Shot, hip: Path) -> RenderScene:
     notes = _prepare(shot)
     network = _create_network(anchor)
     if seed:
-        schema.apply_values(network, schema.describe(network), seed)
-    return RenderScene(hip, network, existed, seeded_from, notes)
+        # Houdini 20 added it, after the stubs.
+        network.setParmsFromData(seed)  # ty: ignore[unresolved-attribute]
+    return RenderScene(hip, network, existed, _modified(hip), seeded_from, notes)
 
 
 def save(scene: RenderScene) -> None:
+    """Save the hip, unless it changed on disk after it was opened."""
+    if _modified(scene.hip) != scene.modified:
+        raise SceneRefused(
+            f"{scene.hip} changed on disk after the window opened it, perhaps "
+            "saved from Houdini. Nothing was saved, so that change is kept. "
+            "Reload to see it, then make your edits again."
+        )
     folder = scene.hip.parent
     # A shot's render folder is a link into the cache, where its renders go.
     if folder.name == RENDER_DIRNAME and folder.is_relative_to(get_production_path()):
@@ -109,6 +116,7 @@ def save(scene: RenderScene) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     hou.hipFile.save(str(scene.hip))
     scene.existed = True
+    scene.modified = _modified(scene.hip)
 
 
 def layers(network: hou.LopNode) -> list[Layer]:
@@ -195,27 +203,23 @@ def departments(network: hou.LopNode) -> list[DepartmentLayer]:
     return found
 
 
-def apply_departments(choices: dict[str, DepartmentChoice]) -> None:
-    """Turn the load layers node's rows on or off and pin their versions."""
+def set_department(row: str, enabled: bool, version: str) -> None:
+    """Turn a load layers row on or off, and pin it to `version` or CURRENT."""
     node = load_layers_node()
     if node is None:
-        if choices:
-            raise SceneRefused(
-                "The render hip has no load layers node, so its department layers "
-                f"can't be changed. Open {hou.hipFile.path()} in Houdini and add one."
-            )
-        return
-    rows = set(load_layers.rows(node))
-    for row, choice in choices.items():
-        if row not in rows:
-            raise SceneRefused(f"The load layers node has no {row} row.")
-        # rows() found each row by these parms, so both are there.
-        node.setParms(
-            {
-                load_layers.ENABLE.format(row): int(choice.enabled),
-                load_layers.VERSION.format(row): choice.version,
-            }
+        raise SceneRefused(
+            "The render hip has no load layers node, so its department layers "
+            f"can't be changed. Open {hou.hipFile.path()} in Houdini and add one."
         )
+    if row not in load_layers.rows(node):
+        raise SceneRefused(f"The load layers node has no {row} row.")
+    # rows() found each row by these parms, so both are there.
+    node.setParms(
+        {
+            load_layers.ENABLE.format(row): int(enabled),
+            load_layers.VERSION.format(row): version,
+        }
+    )
     # As the node's own menus do, so a pin shows in the network.
     load_layers.show_pins(node)
 
@@ -351,8 +355,8 @@ def _place_between_nulls(network: hou.LopNode) -> None:
     log.info("Moved %s between %s and %s", network.path(), BEGIN, END)
 
 
-def _lighting_seed(shot: Shot) -> tuple[Values | None, str]:
-    """The values of the lighting hip's Render Network, and that hip, if it has one."""
+def _lighting_seed(shot: Shot) -> tuple[dict[str, Any] | None, str]:
+    """The parms of the lighting hip's Render Network, and that hip, if it has one."""
     hip = shot_folder(shot.code or "") / LIGHTING_HIP
     if not hip.exists():
         return None, ""
@@ -364,8 +368,8 @@ def _lighting_seed(shot: Shot) -> tuple[Values | None, str]:
         if not candidates:
             return None, ""
         source = candidates[0]
-        values: Values = schema.read_values(source, schema.describe(source))
-        return values, f"{hip} ({source.name()})"
+        data = source.parmsAsData()  # ty: ignore[unresolved-attribute]
+        return data, f"{hip} ({source.name()})"
     # A lighting hip that won't load only costs the artist a fresh start.
     except Exception:
         log.warning("Could not read the Render Network of %s", hip, exc_info=True)
@@ -387,3 +391,7 @@ def submit(network: hou.LopNode) -> hou.Node:
 def _null(name: str) -> hou.LopNode | None:
     node = hou.node(f"{STAGE}/{name}")
     return node if isinstance(node, hou.LopNode) else None
+
+
+def _modified(hip: Path) -> float | None:
+    return hip.stat().st_mtime if hip.exists() else None

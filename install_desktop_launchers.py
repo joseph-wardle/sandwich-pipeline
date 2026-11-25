@@ -49,7 +49,7 @@ class ToolLauncher:
 
     filename: str
     name: str
-    module: str  # run with `python -m`, e.g. "pipe.core.render.network"
+    module: str  # run with `python -m`, e.g. "pipe.core.render.app"
     icon: str
     generic_name: str
 
@@ -66,15 +66,11 @@ LAUNCHERS: list[Launcher | ToolLauncher] = [
     ToolLauncher(
         "ranch.desktop",
         "Ranch",
-        "pipe.core.render.network",
+        "pipe.core.render.app",
         "ranch.png",
         "Sandwich Kwon Do Render Layers, Tractor Sends and Render Cleanup",
     ),
 ]
-# Launchers this once installed, removed so menus keep no dead or doubled
-# entry: the Render Manager is a tab of Ranch now, and Ranch was the Sandwich
-# Renderer.
-RETIRED = ("render-manager.desktop", "sandwich-renderer.desktop")
 
 
 def render(launcher: Launcher | ToolLauncher) -> str:
@@ -91,8 +87,16 @@ def render(launcher: Launcher | ToolLauncher) -> str:
     )
 
 
+# Launchers this once installed, removed so menus keep no dead or doubled
+# entry: the Render Manager is a tab of Ranch now, and Ranch was the Sandwich
+# Renderer.
+RETIRED = ["render-manager.desktop", "sandwich-renderer.desktop"]
+
+
 def _write_launchers(dest_dir: Path, verb: str) -> None:
     dest_dir.mkdir(parents=True, exist_ok=True)
+    for name in RETIRED:
+        (dest_dir / name).unlink(missing_ok=True)
     for launcher in LAUNCHERS:
         target = dest_dir / launcher.filename
         # Replace any prior file or the old symlink-based launchers.
@@ -100,11 +104,6 @@ def _write_launchers(dest_dir: Path, verb: str) -> None:
             target.unlink()
         target.write_text(render(launcher), encoding="utf-8")
         print(f"{verb} {target}")
-    for filename in RETIRED:
-        retired = dest_dir / filename
-        if retired.is_symlink() or retired.exists():
-            retired.unlink()
-            print(f"Removed {retired}")
 
 
 def install() -> None:

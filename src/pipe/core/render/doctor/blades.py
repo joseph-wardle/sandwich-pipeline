@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from pipe.core.render.doctor.diagnose import Diagnosis
-from pipe.core.render.farm import Blade
+from pipe.core.tractor import Blade
 
 # How far back a blade's failures count against it.
 WINDOW_SECONDS = 12 * 3600

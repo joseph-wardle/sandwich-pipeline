@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 from pipe.core.render.doctor.records import Paths
-from pipe.core.render.farm import FarmError
+from pipe.core.tractor import FarmError
 
 # Ends the doctor's crontab line, so it can be found and replaced.
 _MARK = "# sandwich farm doctor"

@@ -1,53 +1,58 @@
-"""The Render Network window's headless Houdini: one command, one JSON answer.
+"""Ranch's Houdini: a shot's render hip, open until the window closes it.
 
 The window runs it through the pipeline launcher, so it has every Houdini
 session's environment:
 
-    python -m pipe houdini -p worker.py describe --shot A_080 --result out.json
+    python -m pipe houdini -p worker.py --shot A_080 --socket /tmp/ranch_…
 
-See `pipe.core.render.network.protocol` for the commands and the answer.
+See `pipe.core.render.protocol` for the requests and replies.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import socket
 import sys
 import traceback
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import hou
 
-from pipe.core.render.network.protocol import (
-    COMMANDS,
-    DESCRIBE,
-    LIGHTING_HIP,
-    LightingTarget,
-    PUBLISH_LIGHTING,
-    SEND,
-    Edits,
-    render_hip,
-    shot_folder,
-    Failure,
-    LightingChoice,
-    Result,
-    Sent,
-)
 from pipe.core.publish import Refused
 from pipe.core.render.lighters import NotTheLighter, check_lighter
+from pipe.core.render.protocol import (
+    COMMAND,
+    LIGHTING_HIP,
+    OPEN,
+    PUBLISH_LIGHTING,
+    REMOVE_INSTANCE,
+    SAVE,
+    SEND,
+    SET_DEPARTMENT,
+    SET_PARM,
+    Failure,
+    LightingTarget,
+    Reply,
+    Sent,
+    render_hip,
+    shot_folder,
+)
 from pipe.core.shot import shot_target
 from pipe.core.shotgrid import Shot, ShotGrid, ShotGridError
 from pipe.core.ui.publish_dialog import PublishChoice
-from pipe.dcc.houdini.publish import version
+from pipe.dcc.houdini.publish.version import hip_target, publish_hip
 from pipe.dcc.houdini.render_network import scene, schema
 from pipe.dcc.houdini.tractor import SendRefused, render_send
 from pipe.dcc.houdini.tractor.send import BUILD_FAILED
 
-# The department folder and publish of a shot's lighting.
 LIGHTING = "lighting"
 UNEXPECTED = (
-    "Something unexpected went wrong in the headless Houdini, so nothing was "
-    "saved or sent. Send the details below to a TD."
+    "Something unexpected went wrong in Houdini, so that wasn't done. Send the "
+    "details below to a TD."
 )
 
 log = logging.getLogger(__name__)
@@ -57,14 +62,129 @@ class WorkerRefused(Exception):
     """Why the worker did nothing, worded for the artist."""
 
 
+class Worker:
+    """The requests the window sends, each done to the open render hip."""
+
+    _shot_code: str
+    _hip: Path
+    _conn: ShotGrid | None
+    _shot: Shot | None
+    _scene: scene.RenderScene | None
+
+    def __init__(self, shot_code: str, hip: Path) -> None:
+        self._shot_code, self._hip = shot_code, hip
+        self._conn, self._shot, self._scene = None, None, None
+
+    def open(self) -> Reply:
+        """Load the render hip from disk, dropping any unsaved edits."""
+        self._conn = self._conn or _connect()
+        self._shot = _shot(self._conn, self._shot_code)
+        self._scene = scene.open_scene(self._shot, self._hip)
+        network = self._scene.network
+        return Reply(
+            hip=str(self._scene.hip),
+            hip_existed=self._scene.existed,
+            seeded_from=self._scene.seeded_from,
+            notes=self._scene.notes,
+            schema=schema.describe(network),
+            parms=schema.states(network),
+            prims=scene.prims(network),
+            layers=scene.layers(network),
+            departments=scene.departments(network),
+            lighting_target=_lighting_target(self._shot),
+        )
+
+    def set_parm(self, name: str, value: list[Any]) -> Reply:
+        network = self._opened().network
+        schema.set_parm(network, name, value)
+        return Reply(parms=schema.states(network))
+
+    def remove_instance(self, name: str, position: int) -> Reply:
+        network = self._opened().network
+        schema.remove_instance(network, name, position)
+        return Reply(parms=schema.states(network))
+
+    def set_department(self, row: str, enabled: bool, version: str) -> Reply:
+        network = self._opened().network
+        scene.set_department(row, enabled, version)
+        return Reply(departments=scene.departments(network), prims=scene.prims(network))
+
+    def save(self) -> Reply:
+        opened = self._opened()
+        scene.save(opened)
+        return Reply(hip=str(opened.hip), hip_existed=True)
+
+    def send(self) -> Reply:
+        opened = self._opened()
+        scene.check_departments()
+        scene.save(opened)
+        sent = _send(opened.network)
+        # Send wrote each layer's Last Job and next Output Folder.
+        scene.save(opened)
+        return Reply(
+            hip=str(opened.hip),
+            hip_existed=True,
+            parms=schema.states(opened.network),
+            layers=scene.layers(opened.network),
+            sent=sent,
+        )
+
+    def publish_lighting(self, note: str, announce: bool, final: bool) -> Reply:
+        """Publish the shot's lighting hip, as last saved, as its next lighting
+        version, the way its publish node's button does. Only its lighter may."""
+        conn = self._conn = self._conn or _connect()
+        check_lighter(conn, self._shot_code)
+        lighting = shot_folder(self._shot_code) / LIGHTING_HIP
+        if not lighting.is_file():
+            raise WorkerRefused(
+                f"{self._shot_code} has no lighting hip at {lighting}, so there is "
+                "nothing to publish. Open the shot's lighting in Houdini first."
+            )
+        try:
+            scene.load(lighting)
+            target = hip_target(conn, lighting)
+            choice = PublishChoice(
+                note=note, announce=announce, final=final, playblast=False
+            )
+            published = publish_hip(conn, target, lighting, choice)
+        finally:
+            # The render hip reads lighting's publish, so it opens again either way.
+            reply = self.open()
+        reply.published = published or []
+        return reply
+
+    def _opened(self) -> scene.RenderScene:
+        if self._scene is None:
+            raise WorkerRefused("The render hip isn't open. Reload the shot.")
+        return self._scene
+
+
 def main(argv: list[str]) -> None:
     args = _parse(argv)
-    result = Result(shot=args.shot)
+    worker = Worker(args.shot, args.hip or render_hip(args.shot))
+    commands: dict[str, Callable[..., Reply]] = {
+        OPEN: worker.open,
+        SET_PARM: worker.set_parm,
+        REMOVE_INSTANCE: worker.remove_instance,
+        SET_DEPARTMENT: worker.set_department,
+        SAVE: worker.save,
+        SEND: worker.send,
+        PUBLISH_LIGHTING: worker.publish_lighting,
+    }
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.connect(args.socket)
+        stream = connection.makefile("rw", encoding="utf-8")
+        # Ends when the window closes the socket.
+        for line in stream:
+            request = json.loads(line)
+            name = request.pop(COMMAND)
+            stream.write(_answer(name, commands[name], request).to_line())
+            stream.flush()
+
+
+def _answer(name: str, command: Callable[..., Reply], args: dict[str, Any]) -> Reply:
     try:
-        if args.command == PUBLISH_LIGHTING:
-            publish_lighting(args.shot, args.choice, args.hip, result)
-        else:
-            run(args.command, args.shot, args.values, args.hip, result)
+        return command(**args)
     except (
         WorkerRefused,
         scene.SceneRefused,
@@ -72,85 +192,12 @@ def main(argv: list[str]) -> None:
         Refused,
         NotTheLighter,
     ) as refusal:
-        result.failure = Failure(str(refusal))
+        return Reply(failure=Failure(str(refusal)))
     except render_send.BuildFailed as failure:
-        result.failure = Failure(BUILD_FAILED, failure.details)
+        return Reply(failure=Failure(BUILD_FAILED, failure.details))
     except Exception:
-        log.exception("The Render Network worker failed: %s", argv)
-        result.failure = Failure(UNEXPECTED, traceback.format_exc())
-    result.write(args.result)
-
-
-def run(
-    command: str, shot_code: str, values: Path | None, hip: Path | None, result: Result
-) -> None:
-    """Open the shot's render hip, and save and send it as `command` asks,
-    filling in `result` as each step finishes."""
-    shot = _shot(_connect(), shot_code)
-    opened = scene.open_scene(shot, hip or render_hip(shot_code))
-    network = opened.network
-    result.hip = str(opened.hip)
-    result.hip_existed = opened.existed
-    result.seeded_from = opened.seeded_from
-    result.notes = opened.notes
-    interface = schema.describe(network)
-
-    if command != DESCRIBE:
-        if values is None:
-            raise WorkerRefused("The window sent no values to save.")
-        edits = Edits.read(values)
-        scene.apply_departments(edits.departments)
-        schema.apply_values(network, interface, edits.values)
-        scene.save(opened)
-    if command == SEND:
-        scene.check_departments()
-        result.sent = _send(network)
-        # Send wrote each layer's Last Job and next Output Folder.
-        scene.save(opened)
-
-    result.schema = interface
-    result.values = schema.read_values(network, interface)
-    result.evaluated = schema.evaluate_expressions(network, interface)
-    result.layers = scene.layers(network)
-    result.departments = scene.departments(network)
-    result.prims = scene.prims(network)
-    result.lighting_target = _lighting_target(shot)
-
-
-def publish_lighting(
-    shot_code: str, choice_path: Path | None, hip: Path | None, result: Result
-) -> None:
-    """Publish the shot's lighting hip, as last saved, as its next lighting
-    version, the way its publish node's button does. Only its lighter may."""
-    if choice_path is None:
-        raise WorkerRefused(
-            "The window sent no publish note, so nothing was published."
-        )
-    conn = _connect()
-    check_lighter(conn, shot_code)
-    lighting = (hip or shot_folder(shot_code) / LIGHTING_HIP).resolve()
-    if not lighting.is_file():
-        raise WorkerRefused(
-            f"{shot_code} has no lighting hip at {lighting}, so there is nothing "
-            "to publish. Open the shot's lighting in Houdini first."
-        )
-    scene.load(lighting)
-    target = version.hip_target(conn, lighting)
-    choice = LightingChoice.read(choice_path)
-    lines = version.publish_hip(
-        conn,
-        target,
-        lighting,
-        PublishChoice(
-            note=choice.note,
-            announce=choice.announce,
-            final=choice.final,
-            playblast=False,
-        ),
-    )
-    # A shot's publish never asks anything, so it never backs out.
-    result.published = lines or []
-    result.hip = str(lighting)
+        log.exception("Houdini failed to %s with %s", name, args)
+        return Reply(failure=Failure(UNEXPECTED, traceback.format_exc()))
 
 
 def _lighting_target(shot: Shot) -> LightingTarget | None:
@@ -209,17 +256,10 @@ def _shot(conn: ShotGrid, code: str) -> Shot:
 
 def _parse(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=COMMANDS)
     parser.add_argument("--shot", required=True, help="the shot's code, e.g. A_080")
-    parser.add_argument("--result", required=True, type=Path)
-    parser.add_argument("--values", type=Path, help="values to save, for save and send")
+    parser.add_argument("--socket", required=True, help="the window's local socket")
     parser.add_argument(
-        "--choice", type=Path, help="the publish dialog's choices, for publish-lighting"
-    )
-    parser.add_argument(
-        "--hip",
-        type=Path,
-        help="use this hip instead of the shot's render hip, or its lighting hip",
+        "--hip", type=Path, help="open this hip instead of the shot's render hip"
     )
     return parser.parse_args(argv)
 

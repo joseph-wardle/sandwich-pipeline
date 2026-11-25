@@ -22,9 +22,9 @@ import stat
 from collections.abc import Callable
 from typing import Any
 
-from pipe.core.render import farm
+from pipe.core import tractor
 from pipe.core.render.doctor.records import Paths
-from pipe.core.render.farm import TRACTOR_ENGINE, FarmError, LoginRefused
+from pipe.core.tractor import TRACTOR_ENGINE, FarmError, LoginRefused
 
 log = logging.getLogger(__name__)
 
@@ -173,7 +173,7 @@ def forget_session(paths: Paths) -> None:
 
 
 def _client(paths: Paths, user: str) -> Any:
-    farm.use_tractor_api()
+    tractor.use_tractor_api()
     import tractor.base.EngineClient as engine_client
 
     host, _, port = TRACTOR_ENGINE.partition(":")
@@ -189,7 +189,7 @@ def _client(paths: Paths, user: str) -> Any:
 
 
 def _client_errors() -> Any:
-    farm.use_tractor_api()
+    tractor.use_tractor_api()
     import tractor.base.EngineClient as engine_client
 
     return engine_client
