@@ -1,4 +1,4 @@
-"""Small pieces the Sandwich Renderer's pages share: buttons with icons, page
+"""Small pieces Ranch's pages share: buttons with icons, page
 headings, banners and status chips, so every page reads the same way."""
 
 from __future__ import annotations

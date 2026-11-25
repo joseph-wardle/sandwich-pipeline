@@ -9,7 +9,7 @@ failures are retried with longer and longer waits, those of a bad blade on
 another blade, and those that fail the same way everywhere, such as a full
 disk quota or a node that won't cook, are left for a person, with the reason.
 
-The Sandwich Renderer window shows all of this on its Farm Doctor tab. The
+The Ranch window shows all of this on its Farm Doctor tab. The
 headless doctor (`__main__`) runs the same checks every few minutes and, when
 told to act, retries for real with its own Tractor login (`login`). It only
 touches the production's jobs.

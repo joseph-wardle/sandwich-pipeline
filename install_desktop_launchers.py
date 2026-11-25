@@ -49,7 +49,7 @@ class ToolLauncher:
 
     filename: str
     name: str
-    module: str  # run with `python -m`, e.g. "pipe.core.render.manager"
+    module: str  # run with `python -m`, e.g. "pipe.core.render.network"
     icon: str
     generic_name: str
 
@@ -64,20 +64,17 @@ LAUNCHERS: list[Launcher | ToolLauncher] = [
     Launcher("microwave.desktop", "Microwave", "nuke", "nuke.png"),
     Launcher("toaster.desktop", "Toaster", "blender", "blender.png"),
     ToolLauncher(
-        "render-manager.desktop",
-        "Render Manager",
-        "pipe.core.render.manager",
-        "sandwich.png",
-        "Sandwich Kwon Do Lighting Render Cleanup",
-    ),
-    ToolLauncher(
-        "sandwich-renderer.desktop",
-        "Sandwich Renderer",
+        "ranch.desktop",
+        "Ranch",
         "pipe.core.render.network",
-        "sandwich_renderer.png",
-        "Sandwich Kwon Do Render Layers and Tractor Sends",
+        "ranch.png",
+        "Sandwich Kwon Do Render Layers, Tractor Sends and Render Cleanup",
     ),
 ]
+# Launchers this once installed, removed so menus keep no dead or doubled
+# entry: the Render Manager is a tab of Ranch now, and Ranch was the Sandwich
+# Renderer.
+RETIRED = ("render-manager.desktop", "sandwich-renderer.desktop")
 
 
 def render(launcher: Launcher | ToolLauncher) -> str:
@@ -103,6 +100,11 @@ def _write_launchers(dest_dir: Path, verb: str) -> None:
             target.unlink()
         target.write_text(render(launcher), encoding="utf-8")
         print(f"{verb} {target}")
+    for filename in RETIRED:
+        retired = dest_dir / filename
+        if retired.is_symlink() or retired.exists():
+            retired.unlink()
+            print(f"Removed {retired}")
 
 
 def install() -> None:

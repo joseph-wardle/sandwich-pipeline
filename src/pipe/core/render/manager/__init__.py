@@ -1,4 +1,5 @@
 """Render Manager: a lighter deletes old render versions of their shots.
 
-Run it with `python -m pipe.core.render.manager`; see `__main__` for which Python.
+`disk` finds a shot's renders and deletes them. Ranch shows it on its Render
+Manager tab, `pipe.core.render.network.manager_page`.
 """

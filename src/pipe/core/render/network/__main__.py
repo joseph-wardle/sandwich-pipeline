@@ -1,4 +1,4 @@
-"""Open the Sandwich Renderer window, optionally on one shot.
+"""Open the Ranch window, optionally on one shot.
 
 Needs a Python with a Qt binding, which the pipeline venv lacks, so the
 desktop launcher runs it in mayapy:
@@ -26,7 +26,7 @@ from pipe.core.util.users import is_admin
 
 log = logging.getLogger(__name__)
 
-ICON = get_repo_root() / "resources/icon/sandwich_renderer.png"
+ICON = get_repo_root() / "resources/icon/ranch.png"
 
 
 def main() -> None:
@@ -43,7 +43,7 @@ def main() -> None:
     app = QtWidgets.QApplication(sys.argv)
     # The taskbar matches the window to its desktop launcher by these.
     app.setApplicationName(TITLE)
-    app.setDesktopFileName("sandwich-renderer")
+    app.setDesktopFileName("ranch")
     app.setWindowIcon(QtGui.QIcon(str(ICON)))
     theme.apply(app)
     shown = splash.show()
@@ -97,14 +97,15 @@ def _load_shots() -> list[Shot]:
     return sorted(shots, key=lambda shot: shot.code or "")
 
 
-def _load_lit_shots() -> set[str] | None:
-    """The codes of the shots the artist lights, or None when ShotGrid can't say."""
+def _load_lit_shots() -> list[Shot] | None:
+    """The shots the artist lights, or None when ShotGrid can't say."""
     from env_sg import DB_Config
 
     try:
         conn = ShotGrid.connect(DB_Config)
-        return {shot.code or "" for shot in lit_shots(conn, current_user(conn))}
-    # Only Publish Lighting needs it, so the window opens without it.
+        return lit_shots(conn, current_user(conn))
+    # Only Publish Lighting and the Render Manager need it, so the window
+    # opens without it.
     except Exception:
         log.exception("Could not read which shots this artist lights")
         return None

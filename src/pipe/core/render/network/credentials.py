@@ -17,9 +17,10 @@ import subprocess
 from Qt import QtCore
 
 SECRET_TOOL = "secret-tool"
-# Attributes the keyring entry is found by.
+# Attributes the keyring entry is found by. Older than the name Ranch: renaming
+# it would lose every artist's remembered login.
 _SERVICE = ("service", "sandwich-render-network-tractor")
-_LABEL = "Tractor login (Sandwich Renderer)"
+_LABEL = "Tractor login (Ranch)"
 _SETTINGS = ("SandwichKwonDo", "RenderNetwork")
 _USER_KEY = "tractor/user"
 # The keyring may ask the artist to unlock it first, so allow time for that.

@@ -1,4 +1,4 @@
-"""The Sandwich Renderer window: choose a shot, edit its render layers, send them.
+"""The Ranch window: choose a shot, edit its render layers, send them.
 
 Every action runs the headless Houdini worker, which opens the shot's render
 hip. Nothing in the window changes the hip until Save or Send.
@@ -19,6 +19,7 @@ from pipe.core.render.network.log_viewer import LogViewer
 from pipe.core.render.network.departments import DepartmentPanel
 from pipe.core.render.network.doctor_page import DoctorPage
 from pipe.core.render.network.farm_tab import FarmTab
+from pipe.core.render.network.manager_page import ManagerPage
 from pipe.core.render.network.overview import OverviewPage
 from pipe.core.render.network.form import ParmForm
 from pipe.core.render.network.protocol import (
@@ -38,14 +39,14 @@ from pipe.core.render.network.shots import ShotList
 from pipe.core.render.network.viewer import FrameViewer
 from pipe.core.render.lighters import LIGHTING_STEP
 from pipe.core.publish import Target
-from pipe.core.shotgrid import Shot, ShotGrid, Status
+from pipe.core.shotgrid import Shot, ShotGrid, Status, is_previs_shot_code
 from pipe.core.render.network import background, render_status
 from pipe.core.render.network.render_status import RenderBoard, RenderStatus
 from pipe.core.ui import prompt_publish
 from pipe.core.util.paths import get_repo_root
 
-TITLE = "Sandwich Renderer"
-_LOGO = get_repo_root() / "resources/icon/sandwich_renderer.png"
+TITLE = "Ranch"
+_LOGO = get_repo_root() / "resources/icon/ranch.png"
 # How far the shot's title and render hip sit in from the edge, in pixels.
 _TITLE_INSET = 16
 # The window's pages, in the header's order: their icon and name.
@@ -53,6 +54,7 @@ _PAGES = (
     ("clapperboard", "Shots", "Edit a shot's render layers and send them"),
     ("activity", "Tractor Overview", "Every unfinished job on the farm"),
     ("stethoscope", "Farm Doctor", "Why tasks failed, and which a retry will fix"),
+    ("hard-drive", "Render Manager", "Delete old renders of the shots you light"),
 )
 _BUSY_WORDS = {
     DESCRIBE: "Opening {shot} in Houdini…",
@@ -86,6 +88,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
     _farm: FarmTab
     _overview: OverviewPage
     _doctor: DoctorPage
+    _manager: ManagerPage
     _pages: QtWidgets.QStackedWidget
     _nav: QtWidgets.QButtonGroup
     _viewer: FrameViewer
@@ -109,18 +112,21 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self,
         shots: Sequence[Shot],
         open_shot: str | None = None,
-        lit_shots: set[str] | None = None,
+        lit_shots: Sequence[Shot] | None = None,
         admin: bool = False,
         render: RenderBoard | None = None,
     ) -> None:
-        """`lit_shots` are the codes the artist is assigned to light, which they
-        may publish lighting for; None when ShotGrid couldn't say. An `admin`
-        may publish any shot's lighting. `render` is each shot's Render
-        task status, shown beside it; the same artists may change it."""
+        """`lit_shots` are the shots the artist is assigned to light, which they
+        may publish lighting for and clean up the renders of; None when
+        ShotGrid couldn't say. An `admin` may publish any shot's lighting.
+        `render` is each shot's Render task status, shown beside it; the same
+        artists may change it."""
         super().__init__()
         self._admin = admin
         self._shots_by_code = {shot.code or "": shot for shot in shots}
-        self._lit_shots = lit_shots
+        self._lit_shots = (
+            None if lit_shots is None else {shot.code or "" for shot in lit_shots}
+        )
         self.setWindowTitle(TITLE)
         # As big as suits the work, but no bigger than the screen it opens on,
         # which over ssh and XQuartz may be a laptop's.
@@ -135,7 +141,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._banners = []
 
         self._shot_list = ShotList(
-            shots, lit_shots or set(), render, self._render_status_refusal
+            shots, self._lit_shots or set(), render, self._render_status_refusal
         )
         self._shot_list.chosen.connect(self._choose_shot)
         self._shot_list.render_status_chosen.connect(self._change_render_status)
@@ -157,11 +163,18 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._overview.open_job.connect(self._open_farm_job)
         self._doctor = DoctorPage([shot.code or "" for shot in shots])
         self._doctor.open_job.connect(self._open_farm_job)
+        # Every shot the artist lights but previs, even one out of the picture,
+        # which the shot list leaves out but whose renders are still on disk.
+        self._manager = ManagerPage(
+            None
+            if lit_shots is None
+            else [shot for shot in lit_shots if not is_previs_shot_code(shot.code)]
+        )
         # Any Tractor page's Refresh refreshes them all.
         for page in (self._farm, self._overview, self._doctor):
             page.refresh_all.connect(lambda asked=page: self._refresh_tractor(asked))
         self._pages = QtWidgets.QStackedWidget()
-        for page in (splitter, self._overview, self._doctor):
+        for page in (splitter, self._overview, self._doctor, self._manager):
             self._pages.addWidget(page)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

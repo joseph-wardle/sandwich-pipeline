@@ -1,4 +1,4 @@
-"""The Sandwich Renderer window's dark theme.
+"""The Ranch window's dark theme.
 
 Each panel sits on its own shade, so the eye finds the shot list, the parms,
 the stage and the log without reading their titles. Panels opt in with an

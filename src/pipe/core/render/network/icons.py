@@ -1,4 +1,4 @@
-"""Line icons for the Sandwich Renderer's buttons, tabs and banners.
+"""Line icons for Ranch's buttons, tabs and banners.
 
 Each is a 24 × 24 SVG drawn with `currentColor`, in the style of Lucide
 (lucide.dev, ISC licence), tinted here to the theme's colours. `get` gives a
@@ -54,6 +54,9 @@ _SHAPES = {
     '<path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>',
     "grid": '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/>'
     '<rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
+    "hard-drive": '<line x1="22" x2="2" y1="12" y2="12"/>'
+    '<path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>'
+    '<line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/>',
     "history": '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>'
     '<path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
     "image": '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/>'
@@ -83,6 +86,9 @@ _SHAPES = {
     '<path d="M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1"/>'
     '<path d="M8 15a6 6 0 0 0 12 0v-3"/><circle cx="20" cy="10" r="2"/>',
     "terminal": '<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
+    "trash": '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>'
+    '<path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>'
+    '<line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
     "tree": '<path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/>'
     '<path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/>',
     "upload": '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'
@@ -135,9 +141,7 @@ def get(name: str, color: str = theme.TEXT, size: int = 16) -> QtGui.QIcon:
 @cache
 def file(name: str, color: str) -> str:
     """The path of `name` tinted `color`, as a style sheet's `url()` wants it."""
-    folder = (
-        Path(tempfile.gettempdir()) / f"sandwich-renderer-icons-{getpass.getuser()}"
-    )
+    folder = Path(tempfile.gettempdir()) / f"ranch-icons-{getpass.getuser()}"
     folder.mkdir(exist_ok=True)
     path = folder / f"{name}-{color.lstrip('#')}.svg"
     data = svg(name, color, stroke=2.6)

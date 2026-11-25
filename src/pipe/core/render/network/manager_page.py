@@ -1,4 +1,11 @@
-"""Three panes: the lighter's shots, a shot's render layers, a layer's versions."""
+"""The Render Manager tab: a lighter deletes old render versions of the shots
+they light, to free room on the render drive.
+
+Three panes: the shots, a shot's render layers, a layer's versions. Which
+versions the comp reads, and which every cleanup keeps, is for
+`pipe.core.render.manager.disk` to say. Nothing is read from the disk until the
+tab is first shown.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +14,7 @@ from functools import cache
 
 from Qt import QtCore, QtGui, QtWidgets
 
+from pipe.core.render.lighters import LIGHTING_STEP
 from pipe.core.render.manager.disk import (
     DeleteFailure,
     DeleteSkipped,
@@ -18,10 +26,12 @@ from pipe.core.render.manager.disk import (
     find_renders,
     render_root,
 )
+from pipe.core.render.network import theme, widgets
 from pipe.core.shotgrid import Shot
 from pipe.core.ui import MessageDialog, MessageDialogCustomButtons, progress_scope
 from pipe.core.util.paths import get_repo_root
 
+TITLE = "Render Manager"
 _DATA_ROLE = QtCore.Qt.UserRole
 _VERSION_COLUMN, _FRAMES_COLUMN, _MODIFIED_COLUMN = range(3)
 _DELETE_STEP = "Deleting renders"
@@ -33,86 +43,90 @@ _ICON_SIZE = 16
 _MAX_LISTED_SHOTS = 6
 
 
-class RenderManagerWindow(QtWidgets.QWidget):
-    _shot_list: QtWidgets.QListWidget
-    _layer_list: QtWidgets.QListWidget
+class ManagerPage(QtWidgets.QWidget):
+    _shot_list: QtWidgets.QTreeWidget
+    _layer_list: QtWidgets.QTreeWidget
     _version_tree: QtWidgets.QTreeWidget
+    _notice: widgets.Banner
     _remove_button: QtWidgets.QPushButton
     _clean_button: QtWidgets.QPushButton
     _clean_all_button: QtWidgets.QPushButton
     _status: QtWidgets.QLabel
     _renders: ShotRenders | None
+    # The first shot is read when the tab is first shown, not at startup.
+    _shown_once: bool
 
-    def __init__(self, shots: Sequence[Shot], user_name: str) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        shots: Sequence[Shot] | None,
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        """`shots` are those ShotGrid assigns the artist to light, or None when
+        it couldn't say."""
+        super().__init__(parent)
         self._renders = None
-        self.setWindowTitle(f"Render Manager — {user_name}")
-        self.resize(1000, 560)
+        self._shown_once = False
 
-        self._shot_list = QtWidgets.QListWidget()
+        title = widgets.PageHeading(
+            "hard-drive", TITLE, "Delete old render versions of the shots you light"
+        )
+        refresh = widgets.button(
+            "Refresh",
+            "refresh",
+            "Read the chosen shot's renders from the disk again",
+            clicked=self._refresh,
+        )
+        self._notice = widgets.Banner()
+        self._notice.hide()
+
+        self._shot_list = _pane(["Shot"])
         # Several shots at once, for Delete All Unused.
         self._shot_list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
-        for shot in shots:
-            item = QtWidgets.QListWidgetItem(shot.code or "")
-            item.setData(_DATA_ROLE, shot)
-            self._shot_list.addItem(item)
+        for shot in shots or []:
+            item = QtWidgets.QTreeWidgetItem([shot.code or ""])
+            item.setData(0, _DATA_ROLE, shot)
+            self._shot_list.addTopLevelItem(item)
 
-        self._layer_list = QtWidgets.QListWidget()
-
-        self._version_tree = QtWidgets.QTreeWidget()
-        self._version_tree.setHeaderLabels(["Version", "Frames", "Modified"])
-        self._version_tree.setRootIsDecorated(False)
+        self._layer_list = _pane(["Render Layer", "Versions"])
+        self._layer_list.setColumnWidth(0, 160)
+        self._version_tree = _pane(["Version", "Frames", "Modified"])
         self._version_tree.setIconSize(QtCore.QSize(_ICON_SIZE, _ICON_SIZE))
 
-        self._remove_button = QtWidgets.QPushButton("Remove All Selected")
-        self._remove_button.setToolTip(
-            "Delete the checked versions of this render layer."
+        self._remove_button = widgets.button(
+            "Remove All Selected",
+            "trash",
+            "Delete the checked versions of this render layer.",
+            theme.DANGER,
+            self._remove_checked,
         )
-        self._clean_button = QtWidgets.QPushButton("Delete All Unused")
-        self._clean_button.setToolTip(
+        self._clean_button = widgets.button(
+            "Delete All Unused",
+            "trash",
             "In every selected shot, delete the versions its comp script does not "
-            "read. Each layer's latest version, and FINAL layers, are kept."
+            "read. Each layer's latest version, and FINAL layers, are kept.",
+            theme.DANGER,
+            lambda: self._delete_all_unused(self._selected_shots()),
         )
-        self._clean_all_button = QtWidgets.QPushButton("Delete All Unused (All Shots)")
-        self._clean_all_button.setToolTip(
-            "Delete All Unused for every shot in the list, selected or not."
+        self._clean_all_button = widgets.button(
+            "Delete All Unused (All Shots)",
+            "trash",
+            "Delete All Unused for every shot in the list, selected or not.",
+            theme.DANGER,
+            lambda: self._delete_all_unused(self._all_shots()),
         )
         self._clean_all_button.setEnabled(bool(shots))
         self._status = QtWidgets.QLabel()
+        self._status.setStyleSheet(f"QLabel {{ color: {theme.DIM_TEXT}; }}")
 
-        self._build_layout()
-
-        self._shot_list.currentItemChanged.connect(self._show_layers)
-        self._shot_list.itemSelectionChanged.connect(self._refresh_buttons)
-        self._layer_list.currentItemChanged.connect(self._show_versions)
-        self._version_tree.itemChanged.connect(self._refresh_buttons)
-        self._remove_button.clicked.connect(self._remove_checked)
-        self._clean_button.clicked.connect(
-            lambda: self._delete_all_unused(self._selected_shots())
-        )
-        self._clean_all_button.clicked.connect(
-            lambda: self._delete_all_unused(self._all_shots())
-        )
-
-        if self._shot_list.count():
-            self._shot_list.setCurrentRow(0)
-        self._refresh_buttons()
-
-    def _build_layout(self) -> None:
+        header = QtWidgets.QHBoxLayout()
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(refresh)
         splitter = QtWidgets.QSplitter()
-        for title, widget in (
-            ("Shots", self._shot_list),
-            ("Render Layers", self._layer_list),
-            ("Versions", self._version_tree),
-        ):
-            pane = QtWidgets.QWidget()
-            pane_layout = QtWidgets.QVBoxLayout(pane)
-            pane_layout.setContentsMargins(0, 0, 0, 0)
-            pane_layout.addWidget(QtWidgets.QLabel(f"<b>{title}</b>"))
-            pane_layout.addWidget(widget)
+        for pane in (self._shot_list, self._layer_list, self._version_tree):
             splitter.addWidget(pane)
-        splitter.setSizes([200, 300, 500])
-
+        splitter.setSizes([180, 320, 560])
+        splitter.setStretchFactor(2, 1)
         buttons = QtWidgets.QHBoxLayout()
         buttons.addWidget(self._status, stretch=1)
         buttons.addWidget(self._clean_all_button)
@@ -120,47 +134,92 @@ class RenderManagerWindow(QtWidgets.QWidget):
         buttons.addWidget(self._remove_button)
 
         layout = QtWidgets.QVBoxLayout(self)
-        layout.addWidget(splitter, stretch=1)
+        layout.setContentsMargins(16, 14, 16, 10)
+        layout.setSpacing(10)
+        layout.addLayout(header)
+        layout.addWidget(self._notice)
+        layout.addWidget(splitter, 1)
         layout.addLayout(buttons)
+
+        self._shot_list.currentItemChanged.connect(self._show_layers)
+        self._shot_list.itemSelectionChanged.connect(self._refresh_buttons)
+        self._layer_list.currentItemChanged.connect(self._show_versions)
+        self._version_tree.itemChanged.connect(self._refresh_buttons)
+
+        if shots is None:
+            self._set_notice(
+                "ShotGrid couldn't say which shots you light, so none are listed. "
+                "Reopen Ranch to try again.",
+                widgets.WARNING,
+            )
+        elif not shots:
+            self._set_notice(
+                f"ShotGrid has no {LIGHTING_STEP} tasks assigned to you, so there "
+                "are no shots to manage renders for."
+            )
+        self._refresh_buttons()
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:  # noqa: N802 (Qt's name)
+        super().showEvent(event)
+        if not self._shown_once:
+            self._shown_once = True
+            # Once shown, so the tab draws before the disk is read.
+            QtCore.QTimer.singleShot(0, self._choose_first_shot)
+
+    def _choose_first_shot(self) -> None:
+        first = self._shot_list.topLevelItem(0)
+        if first is not None and self._shot_list.currentItem() is None:
+            self._shot_list.setCurrentItem(first)
 
     # ---- panes -------------------------------------------------------------
 
     def _current_shot(self) -> Shot | None:
         item = self._shot_list.currentItem()
-        return item.data(_DATA_ROLE) if item else None
+        return item.data(0, _DATA_ROLE) if item else None
+
+    def _current_layer(self) -> RenderLayer | None:
+        item = self._layer_list.currentItem()
+        return item.data(0, _DATA_ROLE) if item else None
+
+    def _refresh(self) -> None:
+        layer = self._current_layer()
+        self._show_layers(keep_layer=layer.name if layer else None)
 
     def _show_layers(self, *_: object, keep_layer: str | None = None) -> None:
         """Reads the disk. Selects `keep_layer` again if it still has versions."""
         self._layer_list.clear()
+        self._status.setText("")
         shot = self._current_shot()
         self._renders = find_renders(shot) if shot else None
         if shot is None or self._renders is None:
             return
-        self._status.setText(
-            ""
-            if self._renders.comp_read
-            else f"No comp script at {self._renders.comp_script}, so no version "
-            "shows as used; only the latest, newest complete, and newest with "
-            "frames are kept."
-        )
+        if self._renders.comp_read:
+            self._notice.hide()
+        else:
+            self._set_notice(
+                f"No comp script at {self._renders.comp_script}, so no version "
+                "shows as used; only the latest, newest complete, and newest with "
+                "frames are kept.",
+                widgets.WARNING,
+            )
         layers = self._renders.layers
         if not layers:
             _add_placeholder(self._layer_list, f"No renders in {render_root(shot)}")
             return
         for layer in layers:
-            self._layer_list.addItem(_layer_item(layer))
+            self._layer_list.addTopLevelItem(_layer_item(layer))
         # FINAL rows cannot be selected, so the first row may not be selectable.
         selectable = [layer.name for layer in layers if not layer.is_final]
         if selectable:
             name = keep_layer if keep_layer in selectable else selectable[0]
-            self._layer_list.setCurrentRow([layer.name for layer in layers].index(name))
+            index = [layer.name for layer in layers].index(name)
+            self._layer_list.setCurrentItem(self._layer_list.topLevelItem(index))
 
     def _show_versions(self, *_: object) -> None:
         # Filling the tree emits itemChanged once per checkbox.
         self._version_tree.blockSignals(True)
         self._version_tree.clear()
-        item = self._layer_list.currentItem()
-        layer: RenderLayer | None = item.data(_DATA_ROLE) if item else None
+        layer = self._current_layer()
         script = self._renders.comp_script.name if self._renders else ""
         for version in layer.versions if layer else []:
             self._version_tree.addTopLevelItem(_version_item(version, script))
@@ -182,25 +241,29 @@ class RenderManagerWindow(QtWidgets.QWidget):
 
     def _all_shots(self) -> list[Shot]:
         return [
-            self._shot_list.item(row).data(_DATA_ROLE)
-            for row in range(self._shot_list.count())
+            self._shot_list.topLevelItem(row).data(0, _DATA_ROLE)
+            for row in range(self._shot_list.topLevelItemCount())
         ]
 
     def _selected_shots(self) -> list[Shot]:
-        return [item.data(_DATA_ROLE) for item in self._shot_list.selectedItems()]
+        return [item.data(0, _DATA_ROLE) for item in self._shot_list.selectedItems()]
 
     def _refresh_buttons(self) -> None:
         self._remove_button.setEnabled(bool(self._checked_versions()))
         self._clean_button.setEnabled(bool(self._selected_shots()))
 
+    def _set_notice(self, text: str, kind: str = widgets.INFO) -> None:
+        self._notice.set_kind(kind)
+        self._notice.setText(text)
+        self._notice.show()
+
     # ---- actions -----------------------------------------------------------
 
     def _remove_checked(self) -> None:
         checked = self._checked_versions()
-        if not checked:
+        layer = self._current_layer()
+        if not checked or layer is None:
             return
-        layer_item = self._layer_list.currentItem()
-        layer: RenderLayer = layer_item.data(_DATA_ROLE)
         names = ", ".join(version.name for version in checked)
         message = (
             f"Delete {_plural(len(checked), 'version')} of {layer.name}?\n\n{names}"
@@ -246,9 +309,7 @@ class RenderManagerWindow(QtWidgets.QWidget):
             )
         if not doomed:
             MessageDialog(
-                self,
-                f"Nothing to delete in {shot_codes}.\n\n{kept}",
-                "Render Manager",
+                self, f"Nothing to delete in {shot_codes}.\n\n{kept}", TITLE
             ).exec_()
             return
         touched = sum(1 for layer in layers if layer.unused_versions)
@@ -289,9 +350,7 @@ class RenderManagerWindow(QtWidgets.QWidget):
                 elif isinstance(outcome, DeleteSkipped):
                     skipped.append(outcome)
 
-        layer_item = self._layer_list.currentItem()
-        layer: RenderLayer | None = layer_item.data(_DATA_ROLE) if layer_item else None
-        self._show_layers(keep_layer=layer.name if layer else None)
+        self._refresh()
 
         deleted = len(ordered) - len(failures) - len(skipped)
         status = f"Deleted {_plural(deleted, 'version')}."
@@ -319,6 +378,18 @@ class RenderManagerWindow(QtWidgets.QWidget):
         MessageDialog(self, "\n\n".join(sections), "Delete Renders").exec_()
 
 
+def _pane(headers: list[str]) -> QtWidgets.QTreeWidget:
+    """A list with column headers, which name the pane."""
+    table = QtWidgets.QTreeWidget()
+    table.setHeaderLabels(headers)
+    table.setRootIsDecorated(False)
+    table.setAlternatingRowColors(True)
+    # Rows added before the list is styled are sized without the theme's
+    # padding, as the shots are, when the tab is built.
+    table.ensurePolished()
+    return table
+
+
 def _listed_outcomes(outcomes: Sequence[DeleteFailure | DeleteSkipped]) -> str:
     listed = "\n".join(
         f"{outcome.path}: {outcome.reason}"
@@ -328,16 +399,19 @@ def _listed_outcomes(outcomes: Sequence[DeleteFailure | DeleteSkipped]) -> str:
     return f"{listed}\n…and {more} more." if more > 0 else listed
 
 
-def _layer_item(layer: RenderLayer) -> QtWidgets.QListWidgetItem:
+def _layer_item(layer: RenderLayer) -> QtWidgets.QTreeWidgetItem:
     count = _plural(len(layer.versions), "version")
     if not layer.is_final:
-        item = QtWidgets.QListWidgetItem(f"{layer.name}  ({count})")
-        item.setData(_DATA_ROLE, layer)
+        item = QtWidgets.QTreeWidgetItem([layer.name, count])
+        item.setData(0, _DATA_ROLE, layer)
         return item
-    item = QtWidgets.QListWidgetItem(f"{layer.name}  ({count}, protected)")
+    item = QtWidgets.QTreeWidgetItem([layer.name, f"{count}, protected"])
     # Grayed out and unselectable, so none of its versions can be checked.
     item.setFlags(QtCore.Qt.NoItemFlags)
-    item.setToolTip("FINAL layers are delivered frames, and are never deleted.")
+    for column in range(2):
+        item.setToolTip(
+            column, "FINAL layers are delivered frames, and are never deleted."
+        )
     return item
 
 
@@ -382,10 +456,11 @@ def _blank_icon() -> QtGui.QIcon:
     return QtGui.QIcon(pixmap)
 
 
-def _add_placeholder(widget: QtWidgets.QListWidget, text: str) -> None:
-    item = QtWidgets.QListWidgetItem(text)
+def _add_placeholder(widget: QtWidgets.QTreeWidget, text: str) -> None:
+    item = QtWidgets.QTreeWidgetItem([text])
     item.setFlags(QtCore.Qt.NoItemFlags)
-    widget.addItem(item)
+    widget.addTopLevelItem(item)
+    item.setFirstColumnSpanned(True)
 
 
 def _listed(codes: list[str]) -> str:
