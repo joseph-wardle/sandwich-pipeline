@@ -27,9 +27,6 @@ from pipe.core.assembly.pieces import mark_published_assembly
 from pipe.core.asset import asset_owner_from_metadata
 from pipe.core.asset.paths import AssetPaths
 from pipe.core.ui.progress import progress_scope
-from pipe.dcc.houdini.gallery import SESSION_DB_ENV, production_db_path, thumbnail_path
-from pipe.dcc.houdini.gallery import db as gallery_db
-from pipe.dcc.houdini.gallery import thumbnail as gallery_thumbnail
 from pipe.core.versioning import (
     DCC_HOUDINI,
     VERSION_MANIFEST_FILENAME,
@@ -39,6 +36,10 @@ from pipe.core.versioning import (
     record_publish,
     stream_key_for,
 )
+from pipe.dcc.houdini.gallery import SESSION_DB_ENV, production_db_path
+from pipe.dcc.houdini.gallery import db as gallery_db
+from pipe.dcc.houdini.gallery import items as gallery_items
+from pipe.dcc.houdini.gallery import thumbnail as gallery_thumbnail
 
 from . import hooks as publish_hooks
 from . import nodelayouts
@@ -76,6 +77,9 @@ class ThumbnailSummary(TypedDict):
     captured: bool
     thumbnail_file: str
     thumbnail_bytes: int
+
+
+GalleryThumbnails = dict[gallery_items.GalleryItem, bytes | None]
 
 
 class GallerySummary(TypedDict):
@@ -221,7 +225,7 @@ def publish_component(
                 mark_published_assembly(context.export_path)
 
             progress.begin_step("Rendering thumbnail")
-            thumbnail, thumbnail_bytes = _render_thumbnail(
+            thumbnail, thumbnails = _render_thumbnail(
                 context=context, options=opts, result=result
             )
             result["thumbnail"] = thumbnail
@@ -231,7 +235,7 @@ def publish_component(
                 context=context,
                 options=opts,
                 result=result,
-                thumbnail_bytes=thumbnail_bytes,
+                thumbnails=thumbnails,
             )
             result["gallery"] = gallery
 
@@ -690,27 +694,29 @@ def _render_thumbnail(
     context: _PublishContext,
     options: PublishOptions,
     result: PublishResult,
-) -> tuple[ThumbnailSummary, bytes | None]:
+) -> tuple[ThumbnailSummary, GalleryThumbnails]:
     summary = _default_thumbnail_summary()
+    label = options.gallery_label or context.asset_name
+    items = gallery_items.items_for(label, context.export_path)
     if not options.render_thumbnail:
-        return summary, None
+        return summary, dict.fromkeys(items)
 
-    target = thumbnail_path(context.export_path)
-    summary["thumbnail_file"] = str(target)
-    try:
-        data = gallery_thumbnail.render(context.export_path, target)
-    except gallery_thumbnail.ThumbnailRenderError as exc:
-        _warn(
-            result,
-            "ThumbnailRenderFailed",
-            f"Could not render a gallery thumbnail for {context.asset_name}; "
-            f"the gallery keeps the previous one. {exc}",
-        )
-        return summary, None
-
-    summary["captured"] = True
-    summary["thumbnail_bytes"] = len(data)
-    return summary, data
+    summary["thumbnail_file"] = str(items[0].thumbnail_path)
+    thumbnails: GalleryThumbnails = {}
+    for item, rendered in gallery_thumbnail.render_all(items).items():
+        if isinstance(rendered, gallery_thumbnail.ThumbnailRenderError):
+            _warn(
+                result,
+                "ThumbnailRenderFailed",
+                f"Could not render a gallery thumbnail for {item.label}; "
+                f"the gallery keeps the previous one. {rendered}",
+            )
+            thumbnails[item] = None
+            continue
+        thumbnails[item] = rendered
+        summary["captured"] = True
+        summary["thumbnail_bytes"] += len(rendered)
+    return summary, thumbnails
 
 
 def _sync_gallery(
@@ -718,7 +724,7 @@ def _sync_gallery(
     context: _PublishContext,
     options: PublishOptions,
     result: PublishResult,
-    thumbnail_bytes: bytes | None,
+    thumbnails: GalleryThumbnails,
 ) -> GallerySummary:
     summary = _default_gallery_summary()
     if not options.update_gallery:
@@ -728,12 +734,7 @@ def _sync_gallery(
     db_path = options.gallery_db_path or production_db_path()
     summary["db_path"] = str(db_path)
     try:
-        summary["item_id"] = gallery_db.upsert_item(
-            db_path,
-            label=label,
-            file_path=context.export_path,
-            thumbnail=thumbnail_bytes,
-        )
+        summary["item_id"] = " ".join(gallery_db.sync_asset(db_path, thumbnails))
     except Exception as exc:
         summary["status"] = "failed"
         _gallery_issue(
@@ -750,18 +751,12 @@ def _sync_gallery(
 
     summary["status"] = "success"
     if options.gallery_db_path is None:
-        _refresh_session_gallery(
-            context, result, label=label, thumbnail_bytes=thumbnail_bytes
-        )
+        _refresh_session_gallery(result, label=label, thumbnails=thumbnails)
     return summary
 
 
 def _refresh_session_gallery(
-    context: _PublishContext,
-    result: PublishResult,
-    *,
-    label: str,
-    thumbnail_bytes: bytes | None,
+    result: PublishResult, *, label: str, thumbnails: GalleryThumbnails
 ) -> None:
     """Upsert into the private copy this session has open and make the panel
     re-read it, so the artist sees the item without relaunching."""
@@ -769,12 +764,7 @@ def _refresh_session_gallery(
     if not session or Path(session) == production_db_path():
         return
     try:
-        gallery_db.upsert_item(
-            Path(session),
-            label=label,
-            file_path=context.export_path,
-            thumbnail=thumbnail_bytes,
-        )
+        gallery_db.sync_asset(Path(session), thumbnails)
         if hou.isUIAvailable():
             hou.ui.reloadSharedLayoutDataSource()
     except Exception as exc:
