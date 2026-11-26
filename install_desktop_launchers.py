@@ -64,10 +64,10 @@ LAUNCHERS: list[Launcher | ToolLauncher] = [
     Launcher("microwave.desktop", "Microwave", "nuke", "nuke.png"),
     Launcher("toaster.desktop", "Toaster", "blender", "blender.png"),
     ToolLauncher(
-        "ranch.desktop",
-        "Ranch",
+        "rancher.desktop",
+        "Rancher",
         "pipe.core.render.app",
-        "ranch.png",
+        "rancher.png",
         "Sandwich Kwon Do Render Layers, Tractor Sends and Render Cleanup",
     ),
 ]
@@ -88,9 +88,9 @@ def render(launcher: Launcher | ToolLauncher) -> str:
 
 
 # Launchers this once installed, removed so menus keep no dead or doubled
-# entry: the Render Manager is a tab of Ranch now, and Ranch was the Sandwich
-# Renderer.
-RETIRED = ["render-manager.desktop", "sandwich-renderer.desktop"]
+# entry: the Render Manager is a tab of Rancher now, and Rancher was Ranch and,
+# before that, the Sandwich Renderer.
+RETIRED = ["render-manager.desktop", "sandwich-renderer.desktop", "ranch.desktop"]
 
 
 def _write_launchers(dest_dir: Path, verb: str) -> None:

@@ -1,4 +1,4 @@
-"""Small widgets Ranch's pages share: buttons with icons, page
+"""Small widgets Rancher's pages share: buttons with icons, page
 headings, banners, status chips, sortable tables and the Log Viewer."""
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.render.app import icons, theme
 
-TITLE = "Ranch"
+TITLE = "Rancher"
 
 ICON_SIZE = QtCore.QSize(16, 16)
 # A cell's value to sort by, when its text doesn't sort right, such as a date

@@ -11,7 +11,7 @@ from Qt import QtCore, QtWidgets
 
 SECRET_TOOL = "secret-tool"
 _SERVICE = ("service", "sandwich-render-network-tractor")
-_LABEL = "Tractor login (Ranch)"
+_LABEL = "Tractor login (Rancher)"
 _SETTINGS = ("SandwichKwonDo", "RenderNetwork")
 _USER_KEY = "tractor/user"
 _TIMEOUT_SECONDS = 60

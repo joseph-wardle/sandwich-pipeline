@@ -1,4 +1,4 @@
-"""A shot's render hip, open in Ranch's headless Houdini.
+"""A shot's render hip, open in Rancher's headless Houdini.
 
 The render hip reads every department's publish, lighting's among them, and
 holds the shot's one Render Network. Its Render Network renders what lighting

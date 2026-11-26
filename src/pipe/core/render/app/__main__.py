@@ -1,4 +1,4 @@
-"""Open the Ranch window, optionally on one shot.
+"""Open the Rancher window, optionally on one shot.
 
 Needs a Python with a Qt binding, which the pipeline venv lacks, so the
 desktop launcher runs it in mayapy:
@@ -26,8 +26,8 @@ from pipe.core.util.paths import get_repo_root
 
 log = logging.getLogger(__name__)
 
-ICON = get_repo_root() / "resources/icon/ranch.png"
-_SPLASH = get_repo_root() / "resources/splash/ranch_splash.png"
+ICON = get_repo_root() / "resources/icon/rancher.png"
+_SPLASH = get_repo_root() / "resources/splash/rancher_splash.png"
 # The artwork's height on screen, in logical pixels; it is drawn from its full size.
 _SPLASH_HEIGHT = 520
 # Below the artwork: the band the message's pill sits in, and how wide the
@@ -53,7 +53,7 @@ def main() -> None:
     app = QtWidgets.QApplication(sys.argv)
     # The taskbar matches the window to its desktop launcher by these.
     app.setApplicationName(TITLE)
-    app.setDesktopFileName("ranch")
+    app.setDesktopFileName("rancher")
     app.setWindowIcon(QtGui.QIcon(str(ICON)))
     theme.apply(app)
     shown = _show_splash()

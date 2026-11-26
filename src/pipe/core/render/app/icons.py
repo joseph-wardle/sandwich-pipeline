@@ -1,4 +1,4 @@
-"""Line icons for Ranch's buttons, tabs and banners.
+"""Line icons for Rancher's buttons, tabs and banners.
 
 Each is a 24 × 24 SVG drawn with `currentColor`, in the style of Lucide
 (lucide.dev, ISC licence), tinted here to the theme's colours. `get` gives a
@@ -135,7 +135,7 @@ def get(name: str, color: str = theme.TEXT, size: int = 16) -> QtGui.QIcon:
 @cache
 def file(name: str, color: str) -> str:
     """The path of `name` tinted `color`, as a style sheet's `url()` wants it."""
-    folder = Path(tempfile.gettempdir()) / f"ranch-icons-{getpass.getuser()}"
+    folder = Path(tempfile.gettempdir()) / f"rancher-icons-{getpass.getuser()}"
     folder.mkdir(exist_ok=True)
     path = folder / f"{name}-{color.lstrip('#')}.svg"
     data = svg(name, color, stroke=2.6)

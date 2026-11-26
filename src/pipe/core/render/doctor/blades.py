@@ -3,7 +3,7 @@
 A task's log only holds its attempts until the task passes, and the doctor
 stops reading a log once its task passes. `History` keeps the failures it has
 seen, so a blade's record outlives the tasks that failed on it. The headless
-doctor keeps them in a file, which the Ranch window reads too.
+doctor keeps them in a file, which the Rancher window reads too.
 """
 
 from __future__ import annotations

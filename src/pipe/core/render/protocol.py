@@ -1,4 +1,4 @@
-"""What the Ranch window and its Houdini session say to each other.
+"""What the Rancher window and its Houdini session say to each other.
 
 The window runs in mayapy, which has Qt but no `hou`, and keeps the shot's
 render hip open in a hython. Each request is one JSON line over a local

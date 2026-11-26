@@ -1,9 +1,9 @@
-"""Ranch's Houdini: a shot's render hip, open until the window closes it.
+"""Rancher's Houdini: a shot's render hip, open until the window closes it.
 
 The window runs it through the pipeline launcher, so it has every Houdini
 session's environment:
 
-    python -m pipe houdini -p worker.py --shot A_080 --socket /tmp/ranch_…
+    python -m pipe houdini -p worker.py --shot A_080 --socket /tmp/rancher_…
 
 See `pipe.core.render.protocol` for the requests and replies.
 """

@@ -18,7 +18,7 @@ from the login, so they can be read or shared without it:
   free them should the machine go before they start. Only the doctor writes
   it, so the window's writes to focus.json never race the doctor's.
 
-Home folders are shared by every lab computer, so the Ranch window
+Home folders are shared by every lab computer, so the Rancher window
 reads these wherever the doctor runs.
 
 Fresh starts and hyperfocus are asked for by anyone on the production, so they

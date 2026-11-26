@@ -1,4 +1,4 @@
-"""The Ranch window: choose a shot, edit its render layers, send them."""
+"""The Rancher window: choose a shot, edit its render layers, send them."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from pipe.core.shotgrid import Shot, ShotGrid, Status, is_previs_shot_code
 from pipe.core.ui import prompt_publish
 from pipe.core.util.paths import get_repo_root
 
-_LOGO = get_repo_root() / "resources/icon/ranch.png"
+_LOGO = get_repo_root() / "resources/icon/rancher.png"
 # The window's pages, in the header's order: their icon, name and tooltip.
 _PAGES = (
     ("clapperboard", "Shots", "Edit a shot's render layers and send them"),

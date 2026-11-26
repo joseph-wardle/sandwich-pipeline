@@ -117,7 +117,7 @@ def send(submit: hou.Node, inputs: list[hou.Node] | None = None) -> None:
 def send_job(submit: hou.Node, inputs: list[hou.Node] | None = None) -> Sent:
     """Send `inputs`, by default every chain wired into `submit`, as one job.
 
-    Shows nothing, so the Ranch window's headless Houdini sends with
+    Shows nothing, so the Rancher window's headless Houdini sends with
     it too.
 
     Raises:
