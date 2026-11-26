@@ -41,7 +41,7 @@ from pipe.core.render.doctor.checkup import (
 from pipe.core.render.doctor.diagnose import MAX_ATTEMPTS, Cause, Diagnosis, Remedy
 from pipe.core.render.doctor.login import Connection, NoLogin
 from pipe.core.render.doctor.policy import Action, Plan
-from pipe.core.render.app import background, icons, labs, theme, widgets
+from pipe.core.render.app import background, icons, job_status, labs, theme, widgets
 from pipe.core.render.app.job_menu import JobMenu
 from pipe.core.render.app.login import load as remembered_login
 from pipe.core.render.app.login import shared_login
@@ -62,6 +62,8 @@ _Found = tuple[
 # A Problems row's (job, how it failed), and a job's several ways of failing.
 _KEY_ROLE = QtCore.Qt.UserRole + 1
 _KINDS_ROLE = QtCore.Qt.UserRole + 2
+# Problems table columns that rows fill in after building them.
+_STATUS, _PROBLEM, _NEXT = 2, 5, 6
 _RED, _AMBER, _GREEN, _GREY = "#f08080", "#e0b060", "#8fe0a0", "#a3a6ad"
 _ACTION_COLORS = {Action.HOLD: _RED, Action.WAIT: _GREY, Action.RETRY: _GREEN}
 # Automatic retries that haven't checked in this long have likely stopped.
@@ -323,6 +325,7 @@ class DoctorPage(QtWidgets.QWidget):
             [
                 "Job",
                 "Shot",
+                "Status",
                 "Artist",
                 "Tasks",
                 "Problem",
@@ -627,7 +630,8 @@ class DoctorPage(QtWidgets.QWidget):
                 )
                 item = self._problem_row(merged, kinds[0].job.title)
                 item.setText(
-                    4, f"{item.text(4)} + {_count(len(kinds) - 1, 'more problem')}"
+                    _PROBLEM,
+                    f"{item.text(_PROBLEM)} + {_count(len(kinds) - 1, 'more problem')}",
                 )
                 item.setData(0, _KINDS_ROLE, kinds)
                 for kind in kinds:
@@ -1023,6 +1027,7 @@ class DoctorPage(QtWidgets.QWidget):
             [
                 f"{job.jid}  {title}" if title else "",
                 (job.shot or "—") if title else "",
+                "",
                 job.owner if title else "",
                 str(len(problem.plans)),
                 _cause_label(d.latest.cause.key),
@@ -1034,8 +1039,13 @@ class DoctorPage(QtWidgets.QWidget):
         item.setData(0, _DATA_ROLE, problem)
         kind = f"{d.latest.cause.key}/{first.action.name}"
         item.setData(0, _KEY_ROLE, (job.jid, "" if title else kind))
-        item.setForeground(5, QtGui.QBrush(QtGui.QColor(_ACTION_COLORS[first.action])))
-        item.setToolTip(4, _why(d))
+        if title:
+            # The job's, so once on its row and not on each way it failed.
+            job_status.show(item, _STATUS, job)
+        item.setForeground(
+            _NEXT, QtGui.QBrush(QtGui.QColor(_ACTION_COLORS[first.action]))
+        )
+        item.setToolTip(_PROBLEM, _why(d))
         return item
 
     def _problem_chosen(self) -> None:

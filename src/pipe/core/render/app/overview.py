@@ -14,7 +14,7 @@ from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core import tractor
 from pipe.core.tractor import PAUSED, RENDERING, WAITING, Job
-from pipe.core.render.app import background, widgets
+from pipe.core.render.app import background, job_status, widgets
 from pipe.core.render.app.job_menu import JobMenu
 from pipe.core.render.app.job_tasks import JobTasks
 from pipe.core.render.app.login import shared_login
@@ -36,11 +36,6 @@ _COLUMNS = (
     "Sent",
 )
 _STATUS, _SHOT, _PROGRESS, _ERRORS, _SENT = 1, 2, 6, 9, 10
-_COLORS = {
-    RENDERING: "#6ca0e0",
-    WAITING: "#c9c9c9",
-    PAUSED: "#c9a14a",
-}
 _ERROR_COLOR = "#e06c6c"
 
 
@@ -177,7 +172,7 @@ class OverviewPage(QtWidgets.QWidget):
         waiting = [j for j in self._jobs if j.queue_status == WAITING]
         frames = sum(j.active for j in rendering)
         self._summary.setText(
-            f"<span style='color:{_COLORS[RENDERING]}'>{len(rendering)} rendering</span>"
+            f"<span style='color:{job_status.COLORS[RENDERING]}'>{len(rendering)} rendering</span>"
             f" ({frames} frames) · {len(waiting)} waiting"
         )
         # What a right-click did, shown once with the list that reflects it.
@@ -202,7 +197,7 @@ class OverviewPage(QtWidgets.QWidget):
             item = widgets.SortableItem(
                 [
                     str(job.jid),
-                    job.queue_status,
+                    "",
                     shot or "—",
                     job.title,
                     job.owner,
@@ -218,9 +213,8 @@ class OverviewPage(QtWidgets.QWidget):
             item.setData(_PROGRESS, PERCENT_ROLE, job.percent)
             item.setData(_PROGRESS, widgets.SORT_ROLE, job.percent)
             item.setData(_SENT, widgets.SORT_ROLE, _when(job))
-            item.setForeground(
-                _STATUS, QtGui.QBrush(QtGui.QColor(_COLORS[job.queue_status]))
-            )
+            # Its errors too, which the queue order leaves out.
+            job_status.show(item, _STATUS, job)
             if job.errors:
                 item.setForeground(_ERRORS, QtGui.QBrush(QtGui.QColor(_ERROR_COLOR)))
             if shot is None:
