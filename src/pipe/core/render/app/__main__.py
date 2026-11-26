@@ -28,8 +28,9 @@ log = logging.getLogger(__name__)
 
 ICON = get_repo_root() / "resources/icon/rancher.png"
 _SPLASH = get_repo_root() / "resources/splash/rancher_splash.png"
-# The artwork's height on screen, in logical pixels; it is drawn from its full size.
-_SPLASH_HEIGHT = 520
+# The artwork's height on screen, in logical pixels, short of the screen's
+# usable height with the band below; it is drawn from its full size.
+_SPLASH_HEIGHT = 1040
 # Below the artwork: the band the message's pill sits in, and how wide the
 # splash is at least, so a long message fits beside the narrow bottle.
 _SPLASH_BAND = 40
@@ -182,9 +183,11 @@ def _show_splash() -> _Splash | None:
         return None
     screen = QtWidgets.QApplication.primaryScreen()
     ratio = screen.devicePixelRatio() if screen is not None else 1.0
-    art = source.scaledToHeight(
-        int(_SPLASH_HEIGHT * ratio), QtCore.Qt.SmoothTransformation
-    )
+    height = _SPLASH_HEIGHT
+    if screen is not None:
+        # So the band below the artwork stays on screen, above any taskbar.
+        height = min(height, screen.availableGeometry().height() - _SPLASH_BAND)
+    art = source.scaledToHeight(int(height * ratio), QtCore.Qt.SmoothTransformation)
     # The artwork on top, centred, with the message's band beneath it.
     pixmap = QtGui.QPixmap(
         max(art.width(), int(_SPLASH_MIN_WIDTH * ratio)),
