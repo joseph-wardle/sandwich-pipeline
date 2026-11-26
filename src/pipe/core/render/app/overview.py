@@ -15,6 +15,7 @@ from Qt import QtCore, QtGui, QtWidgets
 from pipe.core import tractor
 from pipe.core.tractor import PAUSED, RENDERING, WAITING, Job
 from pipe.core.render.app import background, widgets
+from pipe.core.render.app.job_menu import JobMenu
 from pipe.core.render.app.job_tasks import JobTasks
 from pipe.core.render.app.login import shared_login
 from pipe.core.render.app.widgets import PERCENT_ROLE, ProgressDelegate
@@ -60,10 +61,13 @@ class OverviewPage(QtWidgets.QWidget):
     _jobs: list[Job]
     _timer: QtCore.QTimer
     _user: str
+    _menu: JobMenu
+    # What a right-click last did, shown once with the next refreshed list.
+    _note: str
 
     def __init__(self, user: str, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
-        self._user, self._jobs = user, []
+        self._user, self._jobs, self._note = user, [], ""
 
         title = widgets.PageHeading(
             "activity", "Tractor Overview", "Every unfinished job on the farm"
@@ -100,10 +104,18 @@ class OverviewPage(QtWidgets.QWidget):
         self._table.setUniformRowHeights(True)
         self._table.setAlternatingRowColors(True)
         self._table.setItemDelegateForColumn(_PROGRESS, ProgressDelegate(self._table))
+        self._table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self._table.itemDoubleClicked.connect(self._opened)
         self._table.currentItemChanged.connect(lambda *_: self._job_chosen())
         widgets.sortable(self._table)
         self._tasks = JobTasks(shared_login())
+        # Pause, Change Priority and Archive, on a right-click.
+        self._menu = JobMenu(self, shared_login())
+        self._menu.attach(
+            self._table, lambda items: [item.data(0, _DATA_ROLE) for item in items]
+        )
+        self._menu.message.connect(self._status.setText)
+        self._menu.changed.connect(self._acted)
         self._tasks.message.connect(self._status.setText)
         self._tasks.changed.connect(
             lambda: QtCore.QTimer.singleShot(2000, self.refresh)
@@ -125,7 +137,8 @@ class OverviewPage(QtWidgets.QWidget):
         hint = QtWidgets.QLabel(
             "In the order Tractor runs them: rendering first, then by priority, then "
             "oldest. Choose a job to see its tasks and logs below; double-click it to "
-            "open it on its shot's Farm tab."
+            "open it on its shot's Farm tab; right-click it to pause, reprioritize or "
+            "archive it."
         )
         hint.setEnabled(False)
         layout = QtWidgets.QVBoxLayout(self)
@@ -167,7 +180,11 @@ class OverviewPage(QtWidgets.QWidget):
             f"<span style='color:{_COLORS[RENDERING]}'>{len(rendering)} rendering</span>"
             f" ({frames} frames) · {len(waiting)} waiting"
         )
-        self._status.setText(f"updated {time.strftime('%H:%M:%S')}")
+        # What a right-click did, shown once with the list that reflects it.
+        note, self._note = self._note, ""
+        self._status.setText(
+            (f"{note} · " if note else "") + f"updated {time.strftime('%H:%M:%S')}"
+        )
 
     def _fill(self) -> None:
         chosen = {item.data(0, _DATA_ROLE).jid for item in self._table.selectedItems()}
@@ -238,6 +255,10 @@ class OverviewPage(QtWidgets.QWidget):
             )
             return
         self.open_job.emit(shot, job.jid)
+
+    def _acted(self, note: str) -> None:
+        self._note = note
+        self.refresh()
 
     def _failed(self, exc: Exception) -> None:
         self._status.setText(str(exc))

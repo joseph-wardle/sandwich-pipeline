@@ -42,7 +42,9 @@ from pipe.core.render.doctor.diagnose import MAX_ATTEMPTS, Cause, Diagnosis, Rem
 from pipe.core.render.doctor.login import Connection, NoLogin
 from pipe.core.render.doctor.policy import Action, Plan
 from pipe.core.render.app import background, icons, labs, theme, widgets
+from pipe.core.render.app.job_menu import JobMenu
 from pipe.core.render.app.login import load as remembered_login
+from pipe.core.render.app.login import shared_login
 from pipe.core.render.app.lab_map import LabMapWindow
 from pipe.core.render.app.attempts_panel import TriesPanel, TryRow
 
@@ -220,6 +222,9 @@ class DoctorPage(QtWidgets.QWidget):
     _doctor_state: dict[str, Any] | None
     _scope_chosen: bool
     _production: QtWidgets.QCheckBox
+    _job_menu: JobMenu
+    # What a right-click last did, shown once with the next refreshed list.
+    _note: str
 
     def __init__(
         self,
@@ -241,6 +246,7 @@ class DoctorPage(QtWidgets.QWidget):
             History(self._paths.history), paths=self._paths, all_jobs=True
         )
         self._checkup, self._busy = None, False
+        self._note = ""
         self._scope_chosen = False
         self._doctor_state = None
         self._windows = set()
@@ -330,6 +336,15 @@ class DoctorPage(QtWidgets.QWidget):
         self._problems.setRootIsDecorated(True)
         self._problems.itemSelectionChanged.connect(self._problem_chosen)
         self._problems.itemDoubleClicked.connect(lambda *_: self._open_job())
+        # Pause, Change Priority and Archive the chosen problems' jobs, on a
+        # right-click, as on the Overview.
+        self._job_menu = JobMenu(self, shared_login())
+        self._job_menu.attach(
+            self._problems,
+            lambda items: [item.data(0, _DATA_ROLE).job for item in items],
+        )
+        self._job_menu.message.connect(self._status.setText)
+        self._job_menu.changed.connect(self._job_acted)
         self._detail = QtWidgets.QTextBrowser()
         self._detail.setPlaceholderText("Choose a problem to see why its tasks failed.")
         self._mine = QtWidgets.QCheckBox("Only mine")
@@ -511,8 +526,11 @@ class DoctorPage(QtWidgets.QWidget):
         self._fill_blades()
         self._fill_activity(journal)
         unreadable = len(self._checkup.problems)
+        # What a right-click did, shown once with the list that reflects it.
+        note, self._note = self._note, ""
         self._status.setText(
-            f"updated {time.strftime('%H:%M:%S')}"
+            (f"{note} · " if note else "")
+            + f"updated {time.strftime('%H:%M:%S')}"
             + (f" · {unreadable} logs unreadable" if unreadable else "")
         )
 
@@ -1089,6 +1107,10 @@ class DoctorPage(QtWidgets.QWidget):
             + "\n\nRetry them anyway?",
         )
         return answer == QtWidgets.QMessageBox.Yes
+
+    def _job_acted(self, note: str) -> None:
+        self._note = note
+        self.refresh()
 
     def _open_job(self) -> None:
         problems = self._selected_problems()

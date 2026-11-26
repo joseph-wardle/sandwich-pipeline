@@ -289,24 +289,60 @@ def retry(job: Job, task_ids: list[int], user: str, password: str) -> None:
 
 def archive(jobs: list[Job], user: str, password: str) -> list[int]:
     """Stop and archive the jobs, returning the ids archived."""
-    archived: list[int] = []
+    # Tractor names archiving a job "delete"; "undelete" restores it.
+    return _each(jobs, user, password, "archive", "archived", lambda q, s: q.delete(s))
+
+
+def pause(jobs: list[Job], user: str, password: str, paused: bool = True) -> list[int]:
+    """Pause the jobs, or resume them when `paused` is False, returning their ids.
+
+    A paused job starts no new tasks; tasks already rendering finish."""
+    if paused:
+        return _each(jobs, user, password, "pause", "paused", lambda q, s: q.pause(s))
+    return _each(jobs, user, password, "resume", "resumed", lambda q, s: q.unpause(s))
+
+
+def set_priority(
+    jobs: list[Job], priority: float, user: str, password: str
+) -> list[int]:
+    """Give the jobs `priority`, returning their ids. Higher runs sooner."""
+    return _each(
+        jobs,
+        user,
+        password,
+        "change the priority of",
+        "changed",
+        lambda q, s: q.chpri(s, priority=priority),
+    )
+
+
+def _each(
+    jobs: list[Job],
+    user: str,
+    password: str,
+    verb: str,
+    done_word: str,
+    act: Callable[[Any, str], None],
+) -> list[int]:
+    """`act` on each job in turn, as `user`, returning the ids acted on. If
+    Tractor stops partway, the error says which jobs were already done."""
+    acted: list[int] = []
 
     def run(query: Any) -> None:
         for job in jobs:
-            # Tractor names archiving a job "delete"; "undelete" restores it.
-            query.delete(f"jid={job.jid}")
-            archived.append(job.jid)
+            act(query, f"jid={job.jid}")
+            acted.append(job.jid)
 
     ids = ", ".join(str(job.jid) for job in jobs)
     try:
-        _as(user, password, f"archive job {ids}", run)
+        _as(user, password, f"{verb} job {ids}", run)
     except FarmError as exc:
-        if archived and not isinstance(exc, LoginRefused):
-            done = ", ".join(map(str, archived))
-            these = f"Job {done} was" if len(archived) == 1 else f"Jobs {done} were"
-            raise FarmError(f"{exc}. {these} archived before it stopped.") from exc
+        if acted and not isinstance(exc, LoginRefused):
+            done = ", ".join(map(str, acted))
+            these = f"Job {done} was" if len(acted) == 1 else f"Jobs {done} were"
+            raise FarmError(f"{exc}. {these} {done_word} before it stopped.") from exc
         raise
-    return archived
+    return acted
 
 
 def _as(user: str, password: str, action: str, run: Callable[[Any], None]) -> None:

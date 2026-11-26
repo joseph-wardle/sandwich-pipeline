@@ -15,9 +15,9 @@ from pipe.core.tractor import (
     WAITING,
     FarmError,
     Job,
-    LoginRefused,
 )
 from pipe.core.render.app import background, theme, widgets
+from pipe.core.render.app.job_menu import JobMenu
 from pipe.core.render.app.job_tasks import DIM, GREY, GREEN, RED, JobTasks
 from pipe.core.render.app.login import shared_login
 from pipe.core.render.app.size_graph import SizeGraphDialog
@@ -49,7 +49,7 @@ class FarmTab(QtWidgets.QWidget):
     _jobs: QtWidgets.QTreeWidget
     _tasks: JobTasks
     _status: QtWidgets.QLabel
-    _archive_button: QtWidgets.QPushButton
+    _menu: JobMenu
     _forget: QtWidgets.QPushButton
     _view: QtWidgets.QPushButton
     _graph: QtWidgets.QPushButton
@@ -89,13 +89,13 @@ class FarmTab(QtWidgets.QWidget):
             theme.QUIET,
             self._forget_login,
         )
-        self._archive_button = widgets.button(
-            "Archive",
-            "archive",
-            "Move the selected jobs to Tractor's archive. Ctrl- or Shift-click to "
-            "choose several.",
-            clicked=self._archive,
+        # Pause, Change Priority and Archive, on a right-click.
+        self._menu = JobMenu(self, self._login)
+        self._menu.attach(
+            self._jobs, lambda items: [item.data(0, _DATA_ROLE) for item in items]
         )
+        self._menu.message.connect(self._said)
+        self._menu.changed.connect(self._acted)
         refresh = widgets.button(
             "Refresh",
             "refresh",
@@ -130,7 +130,6 @@ class FarmTab(QtWidgets.QWidget):
         top.addStretch(1)
         top.addWidget(self._status)
         top.addWidget(self._forget)
-        top.addWidget(self._archive_button)
         top.addWidget(refresh)
         split = QtWidgets.QSplitter(QtCore.Qt.Vertical)
         split.addWidget(self._jobs)
@@ -193,7 +192,7 @@ class FarmTab(QtWidgets.QWidget):
         shown = self._tasks.job
         chosen = self._wanted_jid or (shown.jid if shown else None)
         wanted, self._wanted_jid = self._wanted_jid, None
-        # Kept across refreshes, so jobs being chosen to archive stay chosen.
+        # Kept across refreshes, so jobs being chosen for a right-click stay chosen.
         selected = {job.jid for job in self._selected_jobs()}
         self._jobs.blockSignals(True)
         self._jobs.clear()
@@ -227,7 +226,7 @@ class FarmTab(QtWidgets.QWidget):
             self._jobs.scrollToItem(current)
             selected = {wanted}
         elif current is not None:
-            # Only the row shown below; selecting it would add it to an archive.
+            # Only the row shown below; selecting it would add it to a right-click.
             self._jobs.setCurrentItem(current, 0, QtCore.QItemSelectionModel.NoUpdate)
         for index in range(self._jobs.topLevelItemCount()):
             item = self._jobs.topLevelItem(index)
@@ -266,63 +265,19 @@ class FarmTab(QtWidgets.QWidget):
 
     # ---- actions -------------------------------------------------------
 
-    def _login_failed(self, exc: Exception) -> None:
-        if isinstance(exc, LoginRefused):
-            self._login.refused()
-        self._failed(exc)
-        QtCore.QTimer.singleShot(1000, self.refresh)
-
-    def _archive(self) -> None:
-        jobs = self._selected_jobs()
-        if not jobs or not self._confirm_archive(jobs):
-            return
-        owners = sorted({job.owner for job in jobs})
-        login = self._login.current(self, owners, "Archiving")
-        if login is None:
-            return
-        user, password = login
-        self._status.setText(f"Archiving {_count(len(jobs), 'job')}…")
-        background.run(
-            lambda: tractor.archive(jobs, user, password),
-            self._archived,
-            self._login_failed,
-        )
-
-    def _confirm_archive(self, jobs: list[Job]) -> bool:
-        listed = "\n".join(
-            f"  {job.jid}  {job.title}  ({job.owner})" for job in jobs[:12]
-        )
-        if len(jobs) > 12:
-            listed += f"\n  …and {len(jobs) - 12} more"
-        unfinished = [job for job in jobs if job.done < job.total]
-        warning = (
-            f"\n\n{_count(len(unfinished), 'of them is', 'of them are')} not finished: "
-            "archiving stops it, and Tractor kills any frames it is rendering."
-            if unfinished
-            else ""
-        )
-        answer = QtWidgets.QMessageBox.question(
-            self,
-            "Archive Jobs",
-            f"Archive {_count(len(jobs), 'job')} from Tractor?\n\n{listed}{warning}\n\n"
-            "Archived jobs leave this list. Their frames stay on disk, and Tractor's "
-            "dashboard can restore them from its archive.",
-        )
-        return answer == QtWidgets.QMessageBox.Yes
-
-    def _archived(self, archived: list[int]) -> None:
+    def _acted(self, note: str) -> None:
         # Shown with the refreshed list, which would otherwise replace it at once.
-        self._note = (
-            f"Archived {_count(len(archived), 'job')}: {', '.join(map(str, archived))}"
-        )
-        if self._tasks.job is not None and self._tasks.job.jid in archived:
+        self._note = note
+        shown = self._tasks.job
+        if shown is not None and note.startswith("Archived"):
+            # Tractor no longer lists it; refresh() finds out which went.
             self._tasks.show_job(None)
         self.refresh()
 
     def _forget_login(self) -> None:
         self._login.forget()
         self._status.setText(
-            "Forgot the Tractor login. Retry or Archive will ask for it."
+            "Forgot the Tractor login. Retrying or a right-click action will ask for it."
         )
 
     def _show_login(self) -> None:
@@ -361,7 +316,6 @@ class FarmTab(QtWidgets.QWidget):
         has_job = self._tasks.job is not None
         self._view.setEnabled(has_job)
         self._graph.setEnabled(has_job and any(self._tasks.sizes.values()))
-        self._archive_button.setEnabled(bool(self._jobs.selectedItems()))
 
     def _failed(self, exc: Exception) -> None:
         self._status.setText(
@@ -388,8 +342,3 @@ def _color_row(item: QtWidgets.QTreeWidgetItem, text: str, fill: str | None) -> 
         item.setForeground(column, QtGui.QBrush(QtGui.QColor(text)))
         if fill is not None:
             item.setBackground(column, QtGui.QBrush(QtGui.QColor(fill)))
-
-
-def _count(n: int, one: str, many: str | None = None) -> str:
-    """'1 job', '3 jobs'; or with `many`, '1 of them is', '2 of them are'."""
-    return f"{n} {one if n == 1 else many or one + 's'}"
