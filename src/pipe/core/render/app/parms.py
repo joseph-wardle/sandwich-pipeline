@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from Qt import QtCore, QtWidgets
 
-from pipe.core.render.app import widgets
+from pipe.core.render.app import theme, widgets
 from pipe.core.render.app.departments import DepartmentPanel
 from pipe.core.render.app.form import ParmForm
 from pipe.core.render.app.scene_graph import SceneGraphPanel
@@ -17,6 +17,7 @@ from pipe.core.render.protocol import (
     OPEN,
     PUBLISH_LIGHTING,
     REMOVE_INSTANCE,
+    REVERT,
     SAVE,
     SEND,
     SET_DEPARTMENT,
@@ -27,7 +28,7 @@ from pipe.core.render.protocol import (
 )
 from pipe.core.ui.publish_dialog import PublishChoice
 
-_TITLE_INSET = 12
+_TITLE_INSET = 16
 _BUSY_WORDS = {
     OPEN: "Opening {shot} in Houdini…",
     SET_DEPARTMENT: "Loading {shot}'s department layers…",
@@ -43,11 +44,14 @@ _FRAME_RANGES = {
     "off": "the hip's current frame only",
     "stage": "the frame range the stage says",
 }
-_NOTE_STYLE = "QLabel { background-color: #4a3f1c; color: #f3e4b0; border-radius: 4px; padding: 6px; }"
+# Notes that start with these words say what the window did for the artist,
+# rather than warn them.
+_INFO_NOTES = ("Added ",)
 
 
 class ParmsTab(QtWidgets.QWidget):
-    """The window places `header` above its tabs and `busy_bar` below them.
+    """The window places `header` above its tabs and `busy_bar` below them, and
+    gives `status_pill` to sit beside the shot's name.
 
     `changed` fires when busy, the shown shot or its lighting target change;
     `sent` once Tractor has a job.
@@ -59,8 +63,13 @@ class ParmsTab(QtWidgets.QWidget):
     header: QtWidgets.QWidget
     busy_bar: QtWidgets.QWidget
     _heading: QtWidgets.QLabel
+    _status_pill: QtWidgets.QWidget
+    _unsaved: widgets.Chip
+    _hip_icon: QtWidgets.QLabel
     _hip: QtWidgets.QLabel
-    _notes: QtWidgets.QLabel
+    _notes: QtWidgets.QWidget
+    _notes_layout: QtWidgets.QVBoxLayout
+    _banners: list[widgets.Banner]
     _busy_text: QtWidgets.QLabel
     _scroll: QtWidgets.QScrollArea
     _scene_graph: SceneGraphPanel
@@ -79,39 +88,64 @@ class ParmsTab(QtWidgets.QWidget):
     _form_states: dict[str, dict[str, Any]]
     shown: str | None
 
-    def __init__(self, log: LogViewer, lighting_tools: QtWidgets.QWidget) -> None:
+    def __init__(
+        self,
+        log: LogViewer,
+        lighting_tools: QtWidgets.QWidget,
+        status_pill: QtWidgets.QWidget,
+    ) -> None:
         super().__init__()
         self._log = log
+        self._status_pill = status_pill
+        self._banners = []
         self._houdini, self._form, self.lighting_target = None, None, None
         self._layers, self.working, self._dirty = [], False, False
         self._form_states, self.shown = {}, None
 
         self._heading = QtWidgets.QLabel()
-        self._heading.setStyleSheet("font-size: 18pt; font-weight: bold;")
-        self._heading.setContentsMargins(_TITLE_INSET, 6, 0, 2)
+        self._heading.setStyleSheet("QLabel { font-size: 20pt; font-weight: 700; }")
+        self._unsaved = widgets.Chip("Unsaved changes", theme.WARNING)
+        self._unsaved.setToolTip("Save (Ctrl+S) or Send keeps them in the render hip")
+        self._unsaved.hide()
+        self._hip_icon = widgets.icon_label("file", theme.DIM_TEXT, 14)
         self._hip = QtWidgets.QLabel()
         self._hip.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         self._hip.setWordWrap(True)
+        self._hip.setStyleSheet(f"QLabel {{ color: {theme.DIM_TEXT}; }}")
+        self._notes = QtWidgets.QWidget()
+        self._notes_layout = QtWidgets.QVBoxLayout(self._notes)
+        self._notes_layout.setContentsMargins(_TITLE_INSET, 2, _TITLE_INSET, 2)
+        self._notes_layout.setSpacing(6)
         # Off the window's edge, so the shot reads as a title over the panels.
-        self._hip.setContentsMargins(_TITLE_INSET, 0, 0, 0)
-        self._notes = QtWidgets.QLabel()
-        self._notes.setWordWrap(True)
-        self._notes.setStyleSheet(_NOTE_STYLE)
+        title_row = QtWidgets.QHBoxLayout()
+        title_row.setContentsMargins(_TITLE_INSET, 10, _TITLE_INSET, 0)
+        title_row.setSpacing(12)
+        title_row.addWidget(self._heading)
+        title_row.addWidget(status_pill, 0, QtCore.Qt.AlignVCenter)
+        title_row.addWidget(self._unsaved, 0, QtCore.Qt.AlignVCenter)
+        title_row.addStretch(1)
+        hip_row = QtWidgets.QHBoxLayout()
+        hip_row.setContentsMargins(_TITLE_INSET, 0, _TITLE_INSET, 6)
+        hip_row.setSpacing(6)
+        hip_row.addWidget(self._hip_icon, 0, QtCore.Qt.AlignTop)
+        hip_row.addWidget(self._hip, 1)
         self.header = QtWidgets.QWidget()
         header_layout = QtWidgets.QVBoxLayout(self.header)
         header_layout.setContentsMargins(0, 0, 0, 0)
-        for label in (self._heading, self._hip, self._notes):
-            header_layout.addWidget(label)
+        header_layout.setSpacing(4)
+        header_layout.addLayout(title_row)
+        header_layout.addLayout(hip_row)
+        header_layout.addWidget(self._notes)
 
         self._scroll = QtWidgets.QScrollArea()
-        self._scroll.setObjectName(widgets.PARMS)
+        self._scroll.setObjectName(theme.PARMS)
         self._scroll.setWidgetResizable(True)
         self._scene_graph = SceneGraphPanel()
         self._departments = DepartmentPanel(lighting_tools)
         self._departments.hide()
         self._departments.changed.connect(self._set_department)
         stage_side = QtWidgets.QWidget()
-        widgets.shade(stage_side, widgets.STAGE)
+        theme.shade(stage_side, theme.STAGE)
         stage_layout = QtWidgets.QVBoxLayout(stage_side)
         stage_layout.setContentsMargins(0, 0, 0, 0)
         stage_layout.addWidget(self._departments)
@@ -123,22 +157,30 @@ class ParmsTab(QtWidgets.QWidget):
         parms_and_stage.setStretchFactor(1, 2)
         parms_and_stage.setSizes([640, 420])
 
-        self._reload = QtWidgets.QPushButton("Reload")
-        self._reload.setToolTip(
-            "Open the render hip from disk again, dropping unsaved edits"
+        self._reload = widgets.button(
+            "Reload",
+            "refresh",
+            "Open the render hip from disk again, dropping unsaved edits",
+            theme.QUIET,
+            self.reload,
         )
-        self._reload.clicked.connect(self.reload)
-        self._save = QtWidgets.QPushButton("Save")
-        self._save.setToolTip("Save these settings into the shot's render hip (Ctrl+S)")
-        self._save.clicked.connect(self.save)
-        self._send = QtWidgets.QPushButton("Send To Tractor")
-        self._send.setToolTip("Save, then render every layer that is on")
-        self._send.setStyleSheet(
-            "QPushButton { font-weight: bold; padding: 6px 18px; }"
+        self._save = widgets.button(
+            "Save",
+            "save",
+            "Save these settings into the shot's render hip (Ctrl+S)",
+            clicked=self.save,
         )
-        self._send.clicked.connect(self._on_send)
-        buttons = QtWidgets.QHBoxLayout()
-        buttons.setContentsMargins(6, 6, 6, 6)
+        self._send = widgets.button(
+            "Send to Tractor",
+            "send",
+            "Save, then render every layer that is on",
+            theme.PRIMARY,
+            self._on_send,
+        )
+        actions = QtWidgets.QWidget()
+        theme.shade(actions, theme.HEADER)
+        buttons = QtWidgets.QHBoxLayout(actions)
+        buttons.setContentsMargins(10, 8, 10, 8)
         buttons.addWidget(self._reload)
         buttons.addWidget(self._save)
         buttons.addStretch(1)
@@ -147,20 +189,27 @@ class ParmsTab(QtWidgets.QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(parms_and_stage, 1)
-        layout.addLayout(buttons)
+        layout.addWidget(actions)
 
         self._busy_text = QtWidgets.QLabel()
+        self._busy_text.setStyleSheet("QLabel { font-weight: 600; }")
         bar = QtWidgets.QProgressBar()
         bar.setRange(0, 0)
-        bar.setMaximumWidth(160)
-        cancel = QtWidgets.QPushButton("Cancel")
-        cancel.clicked.connect(self._cancel)
-        self.busy_bar = QtWidgets.QWidget()
-        busy_layout = QtWidgets.QHBoxLayout(self.busy_bar)
-        busy_layout.setContentsMargins(_TITLE_INSET, 0, 0, 0)
+        bar.setTextVisible(False)
+        bar.setFixedWidth(140)
+        cancel = widgets.button("Cancel", "x", "Stop Houdini", clicked=self._cancel)
+        card = QtWidgets.QFrame()
+        card.setObjectName(theme.CARD)
+        busy_layout = QtWidgets.QHBoxLayout(card)
+        busy_layout.setContentsMargins(12, 6, 8, 6)
+        busy_layout.setSpacing(12)
         busy_layout.addWidget(bar)
         busy_layout.addWidget(self._busy_text, 1)
         busy_layout.addWidget(cancel)
+        self.busy_bar = QtWidgets.QWidget()
+        busy_row = QtWidgets.QHBoxLayout(self.busy_bar)
+        busy_row.setContentsMargins(8, 0, 8, 6)
+        busy_row.addWidget(card)
 
         self._show_empty()
 
@@ -171,8 +220,9 @@ class ParmsTab(QtWidgets.QWidget):
         self._close_houdini()
         self._forget_form()
         self._departments.hide()
-        self._hip.setText("")
-        self._notes.hide()
+        self._unsaved.hide()
+        self._set_hip("")
+        self._set_notes([])
         self._scene_graph.show_prims([])
         self._houdini = HoudiniSession(code, self)
         self._houdini.output.connect(self._log.append)
@@ -254,6 +304,10 @@ class ParmsTab(QtWidgets.QWidget):
     def _remove_instance(self, name: str, position: int) -> None:
         self._edited()
         self._request(REMOVE_INSTANCE, {"name": name, "position": position})
+
+    def _revert(self, names: list[str]) -> None:
+        self._edited()
+        self._request(REVERT, {"names": names})
 
     def _set_department(self, row: str, enabled: bool, version: str) -> None:
         self._edited()
@@ -372,10 +426,9 @@ class ParmsTab(QtWidgets.QWidget):
 
     def _show_reply(self, reply: Reply) -> None:
         if reply.hip is not None:
-            self._hip.setText(_hip_text(reply))
+            self._set_hip(_hip_text(reply))
         if reply.notes is not None:
-            self._notes.setText("\n\n".join(reply.notes))
-            self._notes.setVisible(bool(reply.notes))
+            self._set_notes(reply.notes)
         if reply.schema is not None:
             self._show_form(reply)
         elif reply.parms is not None and self._form is not None:
@@ -401,6 +454,7 @@ class ParmsTab(QtWidgets.QWidget):
         )
         self._form.edited.connect(self._set_parm)
         self._form.instance_removed.connect(self._remove_instance)
+        self._form.reverted.connect(self._revert)
         self._scroll.setWidget(self._form)
 
     def _opened(self, reply: Reply) -> None:
@@ -435,11 +489,11 @@ class ParmsTab(QtWidgets.QWidget):
 
     def _edited(self) -> None:
         self._dirty = True
-        self._heading.setText(f"{self.shown}  •  unsaved")
+        self._unsaved.show()
 
     def _mark_saved(self) -> None:
         self._dirty = False
-        self._heading.setText(self.shown or "")
+        self._unsaved.hide()
         if self._form is not None:
             self._form.mark_saved()
         self._departments.mark_saved()
@@ -456,11 +510,31 @@ class ParmsTab(QtWidgets.QWidget):
         self.lighting_target = None
         self._layers = []
         self._heading.setText(message)
-        self._hip.setText("")
-        self._notes.hide()
+        self._status_pill.hide()
+        self._unsaved.hide()
+        self._set_hip("")
+        self._set_notes([])
         self._scene_graph.show_prims([])
         self._departments.hide()
         self._set_busy(None)
+
+    def _set_hip(self, text: str) -> None:
+        self._hip.setText(text)
+        self._hip.setVisible(bool(text))
+        self._hip_icon.setVisible(bool(text))
+
+    def _set_notes(self, notes: Sequence[str]) -> None:
+        """Show each of Houdini's notes as its own banner."""
+        for banner in self._banners:
+            # Out of the layout now; deleted once the event loop is free.
+            banner.hide()
+            banner.deleteLater()
+        self._banners = []
+        for note in notes:
+            kind = widgets.INFO if note.startswith(_INFO_NOTES) else widgets.WARNING
+            self._banners.append(widgets.Banner(note, kind))
+            self._notes_layout.addWidget(self._banners[-1])
+        self._notes.setVisible(bool(notes))
 
     def _set_busy(self, text: str | None) -> None:
         busy = self.working = text is not None

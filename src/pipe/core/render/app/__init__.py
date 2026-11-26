@@ -1,4 +1,4 @@
-"""The Sandwich Renderer window: edit a shot's render layers and send them to Tractor
+"""The Rancher window: edit a shot's render layers and send them to Tractor
 without opening Houdini.
 
 It shows the SKD Render Network of the shot's render hip, which reads every

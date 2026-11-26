@@ -104,7 +104,7 @@ def publish_hip(
 ) -> list[str] | None:
     """Write the loaded hip's publish node and publish it as `target`'s next
     version, keeping `hip_path` as its scene. Shows no dialog for a shot, so
-    the Sandwich Renderer window's headless Houdini publishes lighting with it.
+    the Rancher window's headless Houdini publishes lighting with it.
 
     The hip on disk is the scene kept with the version, so the caller saves
     it first if it has changed. Returns what the result box says, or None if

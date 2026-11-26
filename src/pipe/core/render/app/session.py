@@ -66,7 +66,7 @@ class HoudiniSession(QtCore.QObject):
 
         self._server = QtNetwork.QLocalServer(self)
         self._server.newConnection.connect(self._connect)
-        if not self._server.listen(f"sandwich_renderer_{uuid.uuid4().hex}"):
+        if not self._server.listen(f"rancher_{uuid.uuid4().hex}"):
             # Later, so the window has connected to `stopped`.
             QtCore.QTimer.singleShot(0, self._not_listening)
             return

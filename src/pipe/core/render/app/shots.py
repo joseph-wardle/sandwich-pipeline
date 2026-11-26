@@ -11,6 +11,7 @@ from functools import cache
 
 from Qt import QtCore, QtGui, QtSvg, QtWidgets
 
+from pipe.core.render.app import icons, theme
 from pipe.core.render.render_status import RenderBoard, RenderStatus
 from pipe.core.shotgrid import Shot, Status
 from pipe.core.util.paths import get_repo_root
@@ -94,6 +95,9 @@ class ShotList(QtWidgets.QWidget):
         self._filter = QtWidgets.QLineEdit()
         self._filter.setPlaceholderText("Filter shots or statuses")
         self._filter.setClearButtonEnabled(True)
+        self._filter.addAction(
+            icons.get("search", theme.DIM_TEXT), QtWidgets.QLineEdit.LeadingPosition
+        )
         self._filter.textChanged.connect(self._apply_filter)
 
         self._tree = _ShotTree()
@@ -165,7 +169,7 @@ class ShotList(QtWidgets.QWidget):
     def _show_status(
         self, item: QtWidgets.QTreeWidgetItem, render: RenderStatus | None
     ) -> None:
-        item.setIcon(0, _status_icon(render.status if render else None))
+        item.setIcon(0, status_icon(render.status if render else None))
         item.setData(
             0, _STATUS_ROLE, f"{render.task}: {render.name}" if render else _NO_TASK
         )
@@ -175,6 +179,14 @@ class ShotList(QtWidgets.QWidget):
         code = item.data(0, _CODE_ROLE) if item is not None else None
         if not code:
             return
+        menu = self.status_menu(code)
+        if menu is not None:
+            menu.exec_(self._tree.viewport().mapToGlobal(position))
+
+    def status_menu(self, code: str) -> QtWidgets.QMenu | None:
+        """A menu to change shot `code`'s Render status, or None for no such shot."""
+        if code not in self._shots:
+            return None
         menu = QtWidgets.QMenu(self)
         render = self._render.get(code)
         title = menu.addAction(
@@ -188,12 +200,12 @@ class ShotList(QtWidgets.QWidget):
             menu.addAction(refusal).setEnabled(False)
         menu.addSeparator()
         for status in self._choices:
-            action = menu.addAction(_status_icon(status), status.name)
+            action = menu.addAction(status_icon(status), status.name)
             action.setCheckable(True)
             action.setChecked(render is not None and status.code == render.code)
             action.setEnabled(not refusal)
             action.triggered.connect(lambda _=False, s=status: self._chose(code, s))
-        menu.exec_(self._tree.viewport().mapToGlobal(position))
+        return menu
 
     def _chose(self, code: str, status: Status) -> None:
         render = self._render.get(code)
@@ -285,7 +297,7 @@ def _as_list(value: object) -> list[str]:
     return [str(v) for v in value]  # ty: ignore[not-iterable]
 
 
-def _status_icon(status: Status | None) -> QtGui.QIcon:
+def status_icon(status: Status | None) -> QtGui.QIcon:
     if status is None:
         return _drawn_icon(_NO_STATUS, _NO_STATUS_GREY, "")
     color = (

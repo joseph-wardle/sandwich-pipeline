@@ -9,6 +9,7 @@ from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.cache import RENDER_DIRNAME
 from pipe.core.render.protocol import shot_folder
+from pipe.core.render.sizes import human
 from pipe.core.render.versions import (
     DeleteFailure,
     DeleteSkipped,
@@ -17,6 +18,7 @@ from pipe.core.render.versions import (
     ShotRenders,
     delete_version,
     deletion_order,
+    folder_size,
     shot_renders,
 )
 from pipe.core.ui import MessageDialog, MessageDialogCustomButtons, progress_scope
@@ -61,7 +63,7 @@ class VersionsTab(QtWidgets.QWidget):
         self._version_tree.setIconSize(QtCore.QSize(_ICON_SIZE, _ICON_SIZE))
 
         self._remove_button = QtWidgets.QPushButton("Remove All Selected")
-        self._clean_button = QtWidgets.QPushButton("Delete All Unused")
+        self._clean_button = QtWidgets.QPushButton("Delete All Unused (This Shot)")
         self._clean_mine_button = QtWidgets.QPushButton(
             "Delete All Unused (All My Shots)"
         )
@@ -196,7 +198,8 @@ class VersionsTab(QtWidgets.QWidget):
             return
         names = ", ".join(version.name for version in checked)
         message = (
-            f"Delete {_plural(len(checked), 'version')} of {layer.name}?\n\n{names}"
+            f"Delete {_plural(len(checked), 'version')} of {layer.name}, "
+            f"freeing {self._size_of(checked)}?\n\n{names}"
         )
         if kept := [
             f"{version.name} ({', '.join(version.kept_reasons)})"
@@ -249,9 +252,19 @@ class VersionsTab(QtWidgets.QWidget):
         touched = sum(1 for layer in layers if layer.unused_versions)
         if self._confirm(
             f"Delete {_plural(len(doomed), 'unused version')} across "
-            f"{_plural(touched, 'render layer')} in {listed}?\n\n{kept}"
+            f"{_plural(touched, 'render layer')} in {listed}, freeing "
+            f"{self._size_of(doomed)}?\n\n{kept}"
         ):
             self._delete(doomed)
+
+    def _size_of(self, doomed: list[RenderVersion]) -> str:
+        """How much the versions' files hold, such as "48.2 GB". Reading every
+        frame's size takes a moment over the network, so the cursor says so."""
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        try:
+            return human(sum(folder_size(version.path) for version in doomed))
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
 
     def _confirm(self, message: str) -> bool:
         return bool(

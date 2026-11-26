@@ -1,9 +1,9 @@
-"""The Sandwich Renderer's Houdini: a shot's render hip, open until the window closes it.
+"""Rancher's Houdini: a shot's render hip, open until the window closes it.
 
 The window runs it through the pipeline launcher, so it has every Houdini
 session's environment:
 
-    python -m pipe houdini -p worker.py --shot A_080 --socket /tmp/sandwich_renderer_…
+    python -m pipe houdini -p worker.py --shot A_080 --socket /tmp/rancher_…
 
 See `pipe.core.render.protocol` for the requests and replies.
 """
@@ -30,6 +30,7 @@ from pipe.core.render.protocol import (
     OPEN,
     PUBLISH_LIGHTING,
     REMOVE_INSTANCE,
+    REVERT,
     SAVE,
     SEND,
     SET_DEPARTMENT,
@@ -104,6 +105,11 @@ class Worker:
         schema.remove_instance(network, name, position)
         return Reply(parms=schema.states(network))
 
+    def revert(self, names: list[str]) -> Reply:
+        network = self._opened().network
+        schema.revert(network, names)
+        return Reply(parms=schema.states(network))
+
     def set_department(self, row: str, enabled: bool, version: str) -> Reply:
         network = self._opened().network
         scene.set_department(row, enabled, version)
@@ -166,6 +172,7 @@ def main(argv: list[str]) -> None:
         OPEN: worker.open,
         SET_PARM: worker.set_parm,
         REMOVE_INSTANCE: worker.remove_instance,
+        REVERT: worker.revert,
         SET_DEPARTMENT: worker.set_department,
         SAVE: worker.save,
         SEND: worker.send,

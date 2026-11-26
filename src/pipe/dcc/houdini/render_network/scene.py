@@ -1,11 +1,11 @@
-"""A shot's render hip, open in the Sandwich Renderer's headless Houdini.
+"""A shot's render hip, open in Rancher's headless Houdini.
 
 The render hip reads every department's publish, lighting's among them, and
 holds the shot's one Render Network. Its Render Network renders what lighting
 last published, never a lighter's unpublished edits.
 
     shot/<code>/render/render.hipnc
-        sets → load layers → layer break → BEGIN_RENDER → END_RENDER → render_network
+        sets → load layers → layer break → BEGIN_RENDER → render_network → END_RENDER
 """
 
 from __future__ import annotations
@@ -42,6 +42,9 @@ LIGHTING_PUBLISH = "lighting/publish/lighting.usd"
 # Inside the Render Network; its inputs are the layers in LAYER_TOGGLES order.
 SUBMIT = "tractor_submit1"
 STAGE = "/stage"
+# The render hip's department nulls, between which its Render Network sits.
+BEGIN = "BEGIN_RENDER"
+END = "END_RENDER"
 # Enough for any shot's scene graph, without sending the window a whole crowd.
 MAX_PRIMS = 50_000
 
@@ -73,6 +76,7 @@ def open_scene(shot: Shot, hip: Path) -> RenderScene:
     if existed:
         load(hip)
         if (network := _find_network()) is not None:
+            _place_between_nulls(network)
             notes = _prepare(shot)
             return RenderScene(hip, network, existed, _modified(hip), notes=notes)
 
@@ -87,7 +91,8 @@ def open_scene(shot: Shot, hip: Path) -> RenderScene:
         # $HIP, and so each layer's Render Root, comes from where it will be saved.
         hou.hipFile.setName(str(hip))
         hou.setContextOption("SHOT", shot.shot_path)
-        anchor = build_department_chain(_stage(), Department.RENDER.value)
+        build_department_chain(_stage(), Department.RENDER.value)
+        anchor = None
     notes = _prepare(shot)
     network = _create_network(anchor)
     if seed:
@@ -307,15 +312,47 @@ def _find_network() -> hou.LopNode | None:
 
 
 def _create_network(anchor: hou.Node | None) -> hou.LopNode:
+    """A new Render Network between BEGIN_RENDER and END_RENDER, or below
+    `anchor` in a hip without them."""
     network = cast(
         hou.LopNode,
         _stage().createNode(RENDER_NETWORK_TYPE, RENDER_NETWORK_NAME),
     )
+    begin, end = _null(BEGIN), _null(END)
+    if begin is not None and end is not None:
+        network.setInput(0, end.input(0) or begin)
+        end.setInput(0, network)
+        network.setPosition(end.position())
+        end.move((0, -1.5))
+        end.setDisplayFlag(True)
+        return network
     if anchor is not None:
         network.setInput(0, anchor)
     network.moveToGoodPosition()
     network.setDisplayFlag(True)
     return network
+
+
+def _place_between_nulls(network: hou.LopNode) -> None:
+    """Move a Render Network that hangs below BEGIN_RENDER or END_RENDER to
+    between them, as older render hips have it. Other wiring is the artist's."""
+    begin, end = _null(BEGIN), _null(END)
+    if begin is None or end is None or end.input(0) == network:
+        return
+    # hou hands out a new object per lookup, so nodes compare with ==.
+    upstream = end.input(0)
+    if network.input(0) == end:
+        # BEGIN_RENDER → END_RENDER → render_network
+        if network in end.outputs() and len(end.outputs()) > 1:
+            return
+        network.setInput(0, upstream)
+    elif network.input(0) != upstream:
+        return
+    # BEGIN_RENDER → render_network → END_RENDER
+    end.setInput(0, network)
+    if network.isDisplayFlagSet():
+        end.setDisplayFlag(True)
+    log.info("Moved %s between %s and %s", network.path(), BEGIN, END)
 
 
 def _lighting_seed(shot: Shot) -> tuple[dict[str, Any] | None, str]:
@@ -349,6 +386,11 @@ def submit(network: hou.LopNode) -> hou.Node:
             "Update the SKD Render Network asset, or ask a TD."
         )
     return submit
+
+
+def _null(name: str) -> hou.LopNode | None:
+    node = hou.node(f"{STAGE}/{name}")
+    return node if isinstance(node, hou.LopNode) else None
 
 
 def _modified(hip: Path) -> float | None:

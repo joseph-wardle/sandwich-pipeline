@@ -7,6 +7,7 @@ from typing import Any
 
 from Qt import QtCore, QtGui, QtWidgets
 
+from pipe.core.render.app import icons, theme
 from pipe.core.render.app.widgets import ChangeDot, dot_icon
 from pipe.core.render.app.scene_graph import (
     PrimPicker,
@@ -54,10 +55,18 @@ SetFlag = Callable[[bool], None]
 
 
 class ParmForm(QtWidgets.QWidget):
-    """The parms of `schema`. `edited` and `instance_removed` ask Houdini for a change."""
+    """The parms of `schema`. `edited`, `instance_removed` and `reverted` ask
+    Houdini for a change.
+
+    Right-clicking a row reverts its parms to their defaults; a section's
+    header, a tab's page or a multiparm, everything in it; and anywhere, the
+    whole form, after asking.
+    """
 
     edited = QtCore.Signal(str, object)
     instance_removed = QtCore.Signal(str, int)
+    # Parm tuple names to put back to their defaults.
+    reverted = QtCore.Signal(list)
 
     _schema: list[Entry]
     _parms: dict[str, ParmState]
@@ -128,6 +137,8 @@ class ParmForm(QtWidgets.QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         self._add_entries(self._schema, layout, "")
         layout.addStretch(1)
+        # Anywhere no row, section or tab answers a right-click itself.
+        self._revert_menu(self._body, set(), "")
         self.layout().addWidget(self._body)
         self._refresh()
 
@@ -213,6 +224,15 @@ class ParmForm(QtWidgets.QWidget):
         self._flag(
             _instanced(named["name"], instance), title.setEnabled, row.setVisible
         )
+        names = {
+            _instanced(e["name"], instance)
+            for e in entries
+            if e["type"] not in (LABEL, SEPARATOR)
+        }
+        label = named["label"] or entries[0]["label"]
+        self._revert_menu(row, names, label)
+        for edit in row.findChildren(QtWidgets.QLineEdit):
+            self._revert_menu(edit, names, label, edit)
         return row
 
     def _field(self, entry: Entry, name: str, tooltip: str) -> QtWidgets.QWidget:
@@ -298,6 +318,7 @@ class ParmForm(QtWidgets.QWidget):
                 return body
             box = QtWidgets.QGroupBox(entry["label"])
             QtWidgets.QVBoxLayout(box).addWidget(body)
+            self._revert_menu(box, set(inside), entry["label"], ask=True)
             self._flag(key, body.setEnabled, box.setVisible)
             return box
 
@@ -312,6 +333,9 @@ class ParmForm(QtWidgets.QWidget):
             box.clicked.connect(lambda checked: self.edited.emit(toggle, [checked]))
             self._show(toggle, lambda state: box.setChecked(bool(state.evaluated[0])))
         section.set_body(body)
+        self._revert_menu(
+            section.bar, inside | {toggle} - {""}, entry["label"], ask=True
+        )
         # Its dot shows changes to parms hidden while it's closed.
         self._mark(inside | {toggle} - {""}, section.set_changed)
         self._flag(key, body.setEnabled, section.setVisible)
@@ -329,6 +353,7 @@ class ParmForm(QtWidgets.QWidget):
             self._add_entries(entry["children"], QtWidgets.QVBoxLayout(page), instance)
             self._scopes.pop()
             tabs.addTab(page, entry["label"])
+            self._revert_menu(page, set(inside), entry["label"], ask=True)
             self._mark(
                 inside,
                 lambda changed, p=position: tabs.setTabIcon(
@@ -389,7 +414,73 @@ class ParmForm(QtWidgets.QWidget):
             row.addWidget(remove, 0, QtCore.Qt.AlignTop)
             layout.addWidget(frame)
         self._flag(name, box.setEnabled, box.setVisible)
+        # Its default count, which removes the instances added.
+        self._revert_menu(box, {name}, entry["label"], ask=True)
         return box
+
+    # ---- reverting -----------------------------------------------------
+
+    def _revert_menu(
+        self,
+        widget: QtWidgets.QWidget,
+        names: set[str],
+        label: str,
+        edit: QtWidgets.QLineEdit | None = None,
+        ask: bool = False,
+    ) -> None:
+        """Right-clicking `widget` offers to revert `names`, called `label`,
+        asking first when `ask`, and the whole form, always asking; a text
+        field keeps its own cut, copy and paste above."""
+
+        def show(position: QtCore.QPoint) -> None:
+            menu = edit.createStandardContextMenu() if edit else QtWidgets.QMenu(self)
+            if edit is not None:
+                menu.addSeparator()
+            menu.setToolTipsVisible(True)
+            these = sorted(n for n in names if n in self._parms)
+            if these:
+                plural = "s" if ask else ""
+                action = menu.addAction(
+                    icons.get("retry"),
+                    f"Revert {label or 'Parameter'} to Default{plural}"
+                    + ("…" if ask else ""),
+                )
+                action.setToolTip(
+                    "Put these parameters back to the Render Network's defaults. "
+                    "Nothing is saved until you Save or Send."
+                )
+                action.triggered.connect(lambda: self._revert(these, label, ask))
+            every = menu.addAction(
+                icons.get("retry"), "Revert All Parameters to Defaults…"
+            )
+            every.triggered.connect(
+                lambda: self._revert(sorted(self._drawn()), "", True)
+            )
+            menu.exec_(widget.mapToGlobal(position))
+            menu.deleteLater()
+
+        widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        widget.customContextMenuRequested.connect(show)
+
+    def _revert(self, names: list[str], label: str, ask: bool) -> None:
+        # A row is one click to put back; a section or the form asks first.
+        if ask:
+            what = f"every parameter in {label}" if label else "every parameter"
+            answer = QtWidgets.QMessageBox.question(
+                self,
+                "Revert to Defaults",
+                f"Put {what} ({len(names)}) back to the Render Network's defaults?\n\n"
+                "Nothing is saved until you Save or Send, and Reload drops the change.",
+            )
+            if answer != QtWidgets.QMessageBox.Yes:
+                return
+        self.reverted.emit(names)
+
+    def _drawn(self) -> set[str]:
+        """Every parm the form shows, header toggles and multiparm counts included."""
+        return {
+            name for names, _ in self._marks for name in names if name in self._parms
+        }
 
     # ---- editing -------------------------------------------------------
 
@@ -492,6 +583,8 @@ class _Section(QtWidgets.QWidget):
 
     expandedChanged = QtCore.Signal(bool)
 
+    # The header, which a right-click on reverts the section.
+    bar: QtWidgets.QFrame
     _arrow: QtWidgets.QToolButton
     _header: QtWidgets.QHBoxLayout
     _body: QtWidgets.QWidget | None
@@ -504,10 +597,11 @@ class _Section(QtWidgets.QWidget):
         layout.setContentsMargins(0, 2, 0, 2)
         layout.setSpacing(0)
 
-        bar = QtWidgets.QFrame()
+        self.bar = bar = QtWidgets.QFrame()
         bar.setObjectName("sectionBar")
         bar.setStyleSheet(
-            "#sectionBar { background-color: palette(button); border-radius: 3px; }"
+            "#sectionBar { background-color: #2c2e34; border: 1px solid #34363d;"
+            " border-radius: 6px; }"
         )
         self._header = QtWidgets.QHBoxLayout(bar)
         self._header.setContentsMargins(4, 2, 4, 2)
@@ -517,7 +611,11 @@ class _Section(QtWidgets.QWidget):
         self._arrow.setAutoRaise(True)
         self._arrow.setCheckable(True)
         self._arrow.setChecked(expanded)
-        self._arrow.setStyleSheet("QToolButton { font-weight: bold; border: none; }")
+        self._arrow.setStyleSheet(
+            "QToolButton { font-weight: 600; border: none; background: transparent;"
+            " padding: 3px 4px; }"
+        )
+        self._arrow.setCursor(QtCore.Qt.PointingHandCursor)
         self._arrow.toggled.connect(self._expand)
         self._dot = ChangeDot()
         self._header.addWidget(self._dot)
@@ -548,8 +646,8 @@ class _Section(QtWidgets.QWidget):
         self.expandedChanged.emit(expanded)
 
     def _set_arrow(self, expanded: bool) -> None:
-        self._arrow.setArrowType(
-            QtCore.Qt.DownArrow if expanded else QtCore.Qt.RightArrow
+        self._arrow.setIcon(
+            icons.get("chevron-down" if expanded else "chevron-right", theme.DIM_TEXT)
         )
 
 

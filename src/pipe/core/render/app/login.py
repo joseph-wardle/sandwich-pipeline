@@ -11,7 +11,7 @@ from Qt import QtCore, QtWidgets
 
 SECRET_TOOL = "secret-tool"
 _SERVICE = ("service", "sandwich-render-network-tractor")
-_LABEL = "Tractor login (Sandwich Renderer)"
+_LABEL = "Tractor login (Rancher)"
 _SETTINGS = ("SandwichKwonDo", "RenderNetwork")
 _USER_KEY = "tractor/user"
 _TIMEOUT_SECONDS = 60
@@ -95,6 +95,67 @@ class LoginDialog(QtWidgets.QDialog):
 
     def remember(self) -> bool:
         return self._remember.isChecked()
+
+
+class TractorLogin(QtCore.QObject):
+    """The Tractor login for retrying and archiving, kept while the window is
+    open. `changed` follows a login given, forgotten or refused; `note` says
+    something the artist should know about it."""
+
+    changed = QtCore.Signal()
+    note = QtCore.Signal(str)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._login: tuple[str, str] | None = None
+
+    def current(
+        self, parent: QtWidgets.QWidget, owners: list[str], doing: str
+    ) -> tuple[str, str] | None:
+        """The login to use: this session's, else the remembered one, else asked
+        for; None if the artist cancels."""
+        if self._login is None:
+            # Read only when needed: the keyring may ask to be unlocked.
+            self._login = load()
+        return self._login or self._ask(parent, owners, doing)
+
+    def user(self) -> str | None:
+        return self._login[0] if self._login else remembered_user()
+
+    def forget(self) -> None:
+        self._login = None
+        forget()
+        self.changed.emit()
+
+    def refused(self) -> None:
+        """Ask again next time rather than repeat a wrong password, which also
+        drops a remembered one, such as after a password change."""
+        self.forget()
+
+    def _ask(
+        self, parent: QtWidgets.QWidget, owners: list[str], doing: str
+    ) -> tuple[str, str] | None:
+        dialog = LoginDialog(parent, owners, doing)
+        if not dialog.exec_():
+            return None
+        self._login = dialog.login()
+        if dialog.remember() and not save(*self._login):
+            self.note.emit(
+                "No keyring on this computer, so the login lasts until the window closes"
+            )
+        self.changed.emit()
+        return self._login
+
+
+_SHARED: TractorLogin | None = None
+
+
+def shared_login() -> TractorLogin:
+    """The window's one Tractor login, shared by every tab that needs it."""
+    global _SHARED
+    if _SHARED is None:
+        _SHARED = TractorLogin()
+    return _SHARED
 
 
 def _secret_tool(*args: str, stdin: str | None = None) -> str | None:

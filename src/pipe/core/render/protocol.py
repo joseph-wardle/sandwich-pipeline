@@ -1,4 +1,4 @@
-"""What the Sandwich Renderer window and its Houdini session say to each other.
+"""What the Rancher window and its Houdini session say to each other.
 
 The window runs in mayapy, which has Qt but no `hou`, and keeps the shot's
 render hip open in a hython. Each request is one JSON line over a local
@@ -21,6 +21,7 @@ COMMAND = "command"
 OPEN = "open"
 SET_PARM = "set_parm"
 REMOVE_INSTANCE = "remove_instance"
+REVERT = "revert"
 SET_DEPARTMENT = "set_department"
 SAVE = "save"
 SEND = "send"

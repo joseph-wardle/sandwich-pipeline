@@ -1,4 +1,4 @@
-"""The Sandwich Renderer window: choose a shot, edit its render layers, send them."""
+"""The Rancher window: choose a shot, edit its render layers, send them."""
 
 from __future__ import annotations
 
@@ -11,12 +11,13 @@ from Qt import QtCore, QtGui, QtWidgets
 
 from pipe.core.publish import Target
 from pipe.core.render import render_status
-from pipe.core.render.app import background, widgets
+from pipe.core.render.app import background, icons, theme, widgets
+from pipe.core.render.app.doctor_page import DoctorPage
 from pipe.core.render.app.farm import FarmTab
 from pipe.core.render.app.images import FrameViewer
 from pipe.core.render.app.overview import OverviewPage
 from pipe.core.render.app.parms import ParmsTab
-from pipe.core.render.app.shots import ShotList
+from pipe.core.render.app.shots import ShotList, status_icon
 from pipe.core.render.app.versions_page import VersionsTab
 from pipe.core.render.app.widgets import TITLE, LogViewer, tell
 from pipe.core.render.lighters import LIGHTING_STEP
@@ -24,16 +25,28 @@ from pipe.core.render.protocol import LIGHTING_HIP, shot_folder
 from pipe.core.render.render_status import RenderBoard, RenderStatus
 from pipe.core.shotgrid import Shot, ShotGrid, Status, is_previs_shot_code
 from pipe.core.ui import prompt_publish
+from pipe.core.util.paths import get_repo_root
+
+_LOGO = get_repo_root() / "resources/icon/rancher.png"
+# The window's pages, in the header's order: their icon, name and tooltip.
+_PAGES = (
+    ("clapperboard", "Shots", "Edit a shot's render layers and send them"),
+    ("activity", "Tractor Overview", "Every unfinished job on the farm"),
+    ("stethoscope", "Farm Doctor", "Why tasks failed, and which a retry will fix"),
+)
 
 
 class RenderNetworkWindow(QtWidgets.QWidget):
     _shot_list: ShotList
     _parms: ParmsTab
     _publish: QtWidgets.QPushButton
+    _status_pill: QtWidgets.QToolButton
     _tabs: QtWidgets.QTabWidget
     _farm: FarmTab
     _overview: OverviewPage
-    _pages: QtWidgets.QTabWidget
+    _doctor: DoctorPage
+    _pages: QtWidgets.QStackedWidget
+    _nav: QtWidgets.QButtonGroup
     _viewer: FrameViewer
     _versions: VersionsTab
     _log: LogViewer
@@ -55,7 +68,12 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._shots_by_code = {shot.code or "": shot for shot in shots}
         self._lit_shots = lit_shots
         self.setWindowTitle(TITLE)
-        self.resize(1280, 900)
+        # As big as suits the work, but no bigger than the screen it opens on,
+        # which over ssh and XQuartz may be a laptop's.
+        screen = QtWidgets.QApplication.primaryScreen().availableGeometry()
+        self.resize(
+            min(1360, int(screen.width() * 0.95)), min(920, int(screen.height() * 0.9))
+        )
 
         self._shot_list = ShotList(
             shots,
@@ -73,16 +91,25 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setCollapsible(0, False)
-        widgets.shade(self._shot_list, widgets.SHOTS)
-        splitter.setSizes([200, 1080])
+        theme.shade(self._shot_list, theme.SHOTS)
+        self._shot_list.setMinimumWidth(190)
+        splitter.setSizes([210, 1150])
         # The farm as a whole, beside the shot by shot work.
         self._overview = OverviewPage(getpass.getuser())
         self._overview.open_job.connect(self._open_farm_job)
-        self._pages = QtWidgets.QTabWidget()
-        self._pages.addTab(splitter, "Shots")
-        self._pages.addTab(self._overview, "Tractor Overview")
+        self._doctor = DoctorPage()
+        self._doctor.open_job.connect(self._open_farm_job)
+        # Any Tractor page's Refresh refreshes them all.
+        for page in (self._farm, self._overview, self._doctor):
+            page.refresh_all.connect(lambda asked=page: self._refresh_tractor(asked))
+        self._pages = QtWidgets.QStackedWidget()
+        for page in (splitter, self._overview, self._doctor):
+            self._pages.addWidget(page)
         layout = QtWidgets.QVBoxLayout(self)
-        layout.addWidget(self._pages)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._build_header(admin))
+        layout.addWidget(self._pages, 1)
 
         # Qt 6 moved QShortcut from QtWidgets to QtGui.
         shortcut = getattr(QtGui, "QShortcut", None) or QtWidgets.QShortcut
@@ -93,12 +120,90 @@ class RenderNetworkWindow(QtWidgets.QWidget):
             self._shot_list.select(open_shot)
             self._choose_shot(open_shot)
 
+    def _build_header(self, admin: bool) -> QtWidgets.QWidget:
+        """The bar across the top: the app's name, its pages, and who's using it."""
+        bar = QtWidgets.QWidget()
+        theme.shade(bar, theme.HEADER)
+        logo = QtWidgets.QLabel()
+        image = QtGui.QPixmap(str(_LOGO))
+        if not image.isNull():
+            ratio = self.devicePixelRatioF()
+            image = image.scaled(
+                int(28 * ratio),
+                int(28 * ratio),
+                QtCore.Qt.KeepAspectRatio,
+                QtCore.Qt.SmoothTransformation,
+            )
+            image.setDevicePixelRatio(ratio)
+            logo.setPixmap(image)
+        name = QtWidgets.QLabel(TITLE)
+        name.setStyleSheet("QLabel { font-size: 12pt; font-weight: 700; }")
+
+        nav = QtWidgets.QHBoxLayout()
+        nav.setSpacing(4)
+        self._nav = QtWidgets.QButtonGroup(self)
+        self._nav.setExclusive(True)
+        for index, (icon, label, tip) in enumerate(_PAGES):
+            page = QtWidgets.QToolButton()
+            page.setText(widgets.GAP + label)
+            page.setIcon(icons.get(icon))
+            page.setIconSize(widgets.ICON_SIZE)
+            page.setToolTip(tip)
+            page.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            page.setCheckable(True)
+            page.setChecked(index == 0)
+            page.setProperty("nav", True)
+            page.setCursor(QtCore.Qt.PointingHandCursor)
+            self._nav.addButton(page, index)
+            nav.addWidget(page)
+        self._nav.idClicked.connect(self._go)
+
+        user = getpass.getuser()
+        who = widgets.Chip(
+            f"{user} · admin" if admin else user,
+            theme.ACCENT if admin else theme.DIM_TEXT,
+        )
+        who.setToolTip(
+            "You are a pipeline admin, so you may publish any shot's lighting"
+            if admin
+            else "Signed in as you; you may publish lighting for the shots you light"
+        )
+
+        layout = QtWidgets.QHBoxLayout(bar)
+        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setSpacing(10)
+        layout.addWidget(logo)
+        layout.addWidget(name)
+        layout.addSpacing(18)
+        layout.addLayout(nav)
+        layout.addStretch(1)
+        layout.addWidget(who)
+        return bar
+
+    def _go(self, index: int) -> None:
+        """Show the header's page `index`."""
+        self._pages.setCurrentIndex(index)
+        page = self._nav.button(index)
+        if page is not None and not page.isChecked():
+            page.setChecked(True)
+
     def _build_main(self) -> QtWidgets.QWidget:
         self._log = LogViewer()
-        self._publish = QtWidgets.QPushButton("Publish Lighting")
-        self._publish.clicked.connect(self._on_publish)
+        self._publish = widgets.button(
+            "Publish Lighting", "upload", clicked=self._on_publish
+        )
+        self._status_pill = QtWidgets.QToolButton()
+        self._status_pill.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+        self._status_pill.setCursor(QtCore.Qt.PointingHandCursor)
+        self._status_pill.setStyleSheet(
+            "QToolButton { border: 1px solid #454851; border-radius: 11px;"
+            " padding: 2px 10px 2px 6px; background-color: #26282d; }"
+            "QToolButton:hover { border-color: #6aa1ff; }"
+        )
+        self._status_pill.clicked.connect(self._status_menu)
+        self._status_pill.hide()
         # Publish Lighting sits under the lighting layer it publishes.
-        self._parms = ParmsTab(self._log, self._publish)
+        self._parms = ParmsTab(self._log, self._publish, self._status_pill)
         self._parms.changed.connect(self._refresh)
         # The farm and the frames need no Houdini, so they show while it opens.
         self._farm = FarmTab()
@@ -110,14 +215,17 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         self._versions.deleted.connect(self._viewer.reread)
         self._farm.view_frames.connect(self._view_frames)
         self._tabs = QtWidgets.QTabWidget()
-        self._tabs.addTab(self._parms, "Parameters")
-        self._tabs.addTab(self._farm, "Farm")
-        self._tabs.addTab(self._viewer, "Images")
-        self._tabs.addTab(self._versions, "Versions")
+        self._tabs.setIconSize(widgets.ICON_SIZE)
+        self._tabs.addTab(self._parms, icons.get("sliders"), "Parameters")
+        self._tabs.addTab(self._farm, icons.get("server"), "Farm")
+        self._tabs.addTab(self._viewer, icons.get("image"), "Images")
+        self._tabs.addTab(self._versions, icons.get("history"), "Versions")
+        self._tabs.setDocumentMode(True)
 
         top = QtWidgets.QWidget()
         top_layout = QtWidgets.QVBoxLayout(top)
         top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(4)
         top_layout.addWidget(self._parms.header)
         top_layout.addWidget(self._tabs, 1)
         top_layout.addWidget(self._parms.busy_bar)
@@ -139,6 +247,7 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         )
 
     def _open(self, code: str) -> None:
+        self._show_status_pill(code)
         self._farm.set_shot(code)
         self._viewer.set_shot(code)
         self._versions.set_shot(code, self._lighter_refusal(code, "delete its renders"))
@@ -188,6 +297,8 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         current = self._shot_list.render_status(code)
         if not isinstance(status, Status) or current is None:
             return
+        if status.code == current.code:
+            return
         if refusal := self._lighter_refusal(code, "change it"):
             tell(self, refusal, QtWidgets.QMessageBox.Information)
             return
@@ -202,6 +313,8 @@ class RenderNetworkWindow(QtWidgets.QWidget):
 
         def changed(render: RenderStatus) -> None:
             self._shot_list.set_render_status(code, render)
+            if code == self._parms.shown:
+                self._show_status_pill(code)
             self._log.append(
                 f"{code}'s {render.task} is now {render.name} in ShotGrid."
             )
@@ -250,9 +363,40 @@ class RenderNetworkWindow(QtWidgets.QWidget):
         if choice is not None:
             self._parms.publish_lighting(choice)
 
+    def _show_status_pill(self, code: str) -> None:
+        """Show shot `code`'s Render status beside its name; clicking changes it."""
+        render = self._shot_list.render_status(code)
+        self._status_pill.setIcon(status_icon(render.status if render else None))
+        self._status_pill.setText(
+            widgets.GAP + (render.name if render is not None else "No Render task")
+        )
+        task = render.task if render is not None else "Render"
+        refusal = self._lighter_refusal(code, "change it")
+        self._status_pill.setToolTip(
+            f"{code}'s {task} status in ShotGrid."
+            + (f" {refusal}" if refusal else " Click to change it.")
+        )
+        self._status_pill.setVisible(True)
+
+    def _status_menu(self) -> None:
+        code = self._parms.shown
+        menu = self._shot_list.status_menu(code) if code is not None else None
+        if menu is not None:
+            menu.exec_(
+                self._status_pill.mapToGlobal(
+                    QtCore.QPoint(0, self._status_pill.height() + 2)
+                )
+            )
+
+    def _refresh_tractor(self, asked: QtWidgets.QWidget) -> None:
+        """Refresh the Tractor pages besides `asked`, which refreshed itself."""
+        for page in (self._farm, self._overview, self._doctor):
+            if page is not asked:
+                page.refresh()
+
     def _open_farm_job(self, shot: str, jid: int) -> None:
-        """Show a job the Overview chose, on its shot's Farm tab."""
-        self._pages.setCurrentIndex(0)
+        """Show a job the Overview or the Farm Doctor chose, on its shot's Farm tab."""
+        self._go(0)
         self._shot_list.select(shot)
         self._choose_shot(shot)
         # The artist may have kept unsaved edits to the shot that was open.
