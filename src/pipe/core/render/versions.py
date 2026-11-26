@@ -17,6 +17,7 @@ shot/<code>/
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -284,6 +285,19 @@ def delete_version(version: RenderVersion) -> DeleteFailure | DeleteSkipped | No
         return DeleteFailure(version.path, exc.strerror or str(exc))
     log.info("Deleted render version %s", version.path)
     return None
+
+
+def folder_size(folder: Path) -> int:
+    """The bytes the files under `folder` hold, not following links, and
+    counting what can't be read as nothing."""
+    total = 0
+    for root, _dirs, files in os.walk(folder, onerror=lambda _exc: None):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(root, name)).st_size
+            except OSError:
+                continue
+    return total
 
 
 def _numbered(layer: Path) -> list[tuple[int, Path]]:
