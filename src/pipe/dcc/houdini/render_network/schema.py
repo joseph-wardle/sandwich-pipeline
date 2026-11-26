@@ -55,6 +55,21 @@ def set_parm(node: hou.Node, name: str, value: list[Any]) -> None:
         parm.set(int(component) if isinstance(component, bool) else component)
 
 
+def revert(node: hou.Node, names: Sequence[str]) -> None:
+    """Put the parm tuples `names` back to their defaults, default expressions
+    included, as Houdini's own Revert to Defaults does. A multiparm's count
+    goes last, as its instances' parms go with it; names gone by then are skipped."""
+    counts = [n for n in names if _is_multiparm(node, n)]
+    for name in [n for n in names if n not in counts] + counts:
+        if (parm_tuple := node.parmTuple(name)) is not None:
+            parm_tuple.revertToDefaults()
+
+
+def _is_multiparm(node: hou.Node, name: str) -> bool:
+    parm = node.parm(name)
+    return parm is not None and parm.isMultiParmParent()
+
+
 def remove_instance(node: hou.Node, name: str, position: int) -> None:
     """Remove the multiparm's instance at `position`, counting from 0."""
     if (parm := node.parm(name)) is None:

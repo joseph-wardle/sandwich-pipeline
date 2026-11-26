@@ -17,6 +17,7 @@ from pipe.core.render.protocol import (
     OPEN,
     PUBLISH_LIGHTING,
     REMOVE_INSTANCE,
+    REVERT,
     SAVE,
     SEND,
     SET_DEPARTMENT,
@@ -304,6 +305,10 @@ class ParmsTab(QtWidgets.QWidget):
         self._edited()
         self._request(REMOVE_INSTANCE, {"name": name, "position": position})
 
+    def _revert(self, names: list[str]) -> None:
+        self._edited()
+        self._request(REVERT, {"names": names})
+
     def _set_department(self, row: str, enabled: bool, version: str) -> None:
         self._edited()
         self._request(
@@ -449,6 +454,7 @@ class ParmsTab(QtWidgets.QWidget):
         )
         self._form.edited.connect(self._set_parm)
         self._form.instance_removed.connect(self._remove_instance)
+        self._form.reverted.connect(self._revert)
         self._scroll.setWidget(self._form)
 
     def _opened(self, reply: Reply) -> None:
